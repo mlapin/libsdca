@@ -3,7 +3,7 @@
 #include <mex.h> 
 #include "matrix.h"
 
-#include "projector.hh"
+#include "projector.hpp"
 
 void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
   if ( nrhs != 2) {

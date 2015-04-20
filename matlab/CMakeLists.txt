@@ -10,5 +10,5 @@ macro(ADD_MEX MEX_NAME)
 endmacro(ADD_MEX)
 
 # Projection onto the k-simplex
-ADD_MEX(projksimplex project_onto_k_simplex.cc
+ADD_MEX(projtopksimplex project_onto_k_simplex.cpp
   $<TARGET_OBJECTS:${LIB_PROJECTIONS}>)

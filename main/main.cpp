@@ -4,7 +4,7 @@
 #include <random>
 #include <vector>
 
-#include "projector.hh"
+#include "projector.hpp"
 
 template <typename T = double>
 void display_vector(const std::vector<T> &v) {

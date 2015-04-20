@@ -1,7 +1,7 @@
 #include <cmath>
 #include <vector>
 
-#include "projector.hh"
+#include "projector.hpp"
 
 namespace sdca {
 
