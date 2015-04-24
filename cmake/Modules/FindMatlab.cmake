@@ -12,22 +12,22 @@ IF( "${MATLAB_ROOT}" STREQUAL "" )
     MESSAGE(WARNING "MATLAB_ROOT variable not set." )
 ELSE("${MATLAB_ROOT}" STREQUAL "" )
 
-        FIND_PATH(MATLAB_INCLUDE_DIR mex.h
-                  ${MATLAB_ROOT}/extern/include)
+  FIND_PATH(MATLAB_INCLUDE_DIR mex.h
+            ${MATLAB_ROOT}/extern/include)
 
-        INCLUDE_DIRECTORIES(${MATLAB_INCLUDE_DIR})
+  INCLUDE_DIRECTORIES(${MATLAB_INCLUDE_DIR})
 
-        FIND_LIBRARY( MATLAB_MEX_LIBRARY
-                      NAMES libmex mex
-                      PATHS ${MATLAB_ROOT}/bin ${MATLAB_ROOT}/extern/lib
-                      PATH_SUFFIXES glnxa64 glnx86 win64/microsoft win32/microsoft)
+  FIND_LIBRARY( MATLAB_MEX_LIBRARY
+                NAMES libmex mex
+                PATHS ${MATLAB_ROOT}/bin ${MATLAB_ROOT}/extern/lib
+                PATH_SUFFIXES glnxa64 glnx86 win64/microsoft win32/microsoft)
 
-        FIND_LIBRARY( MATLAB_MX_LIBRARY
-                      NAMES libmx mx
-                      PATHS ${MATLAB_ROOT}/bin ${MATLAB_ROOT}/extern/lib
-                      PATH_SUFFIXES glnxa64 glnx86 win64/microsoft win32/microsoft)
+  FIND_LIBRARY( MATLAB_MX_LIBRARY
+                NAMES libmx mx
+                PATHS ${MATLAB_ROOT}/bin ${MATLAB_ROOT}/extern/lib
+                PATH_SUFFIXES glnxa64 glnx86 win64/microsoft win32/microsoft)
 
-    MESSAGE (STATUS "MATLAB_ROOT=${MATLAB_ROOT}")
+  MESSAGE (STATUS "MATLAB_ROOT=${MATLAB_ROOT}")
 
 ENDIF("${MATLAB_ROOT}" STREQUAL "" )
 
