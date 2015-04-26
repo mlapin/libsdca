@@ -1,9 +1,10 @@
 # Projections lib
 add_library(${LIB_PROJECTIONS} OBJECT
-  projector.cpp
   projector.hpp
-  topkprojector.cpp
-  topkprojector.hpp
+  projector.cpp
+  knapsackprojector.hpp
+  knapsackprojector.cpp
+  topkconeprojector.hpp
   topkconeprojector.cpp
-  topkconeprojector.hpp)
+  )
 add_definitions(-fPIC)

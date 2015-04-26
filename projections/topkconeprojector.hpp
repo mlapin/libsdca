@@ -1,29 +1,26 @@
-#ifndef SDCA_TOPKCONEPROJECTOR_HH
-#define SDCA_TOPKCONEPROJECTOR_HH
+#ifndef SDCA_TOPKCONEPROJECTOR_HPP
+#define SDCA_TOPKCONEPROJECTOR_HPP
 
 #include <vector>
 
-#include "topkprojector.hpp"
+#include "projector.hpp"
 
 namespace sdca {
 
 template <typename RealType = double>
-class TopKConeProjector : public TopKProjector<RealType> {
+class TopKConeProjector : public Projector<RealType> {
 
 public:
   TopKConeProjector(std::size_t k) : k_(k), kk_(k) {}
 
-  void Project(RealType *x, const std::size_t m,
-    const std::size_t n = 1);
-
-protected:
   void ComputeThresholds(std::vector<RealType> x,
-    RealType &t, RealType &hi);
+    RealType &t, RealType &lo, RealType &hi);
 
+private:
   std::size_t k_;
   RealType kk_;
 };
 
 }
 
-#endif // SDCA_TOPKCONEPROJECTOR_HH
+#endif // SDCA_TOPKCONEPROJECTOR_HPP

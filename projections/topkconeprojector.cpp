@@ -8,20 +8,8 @@
 namespace sdca {
 
 template <typename RealType>
-void TopKConeProjector<RealType>::Project(RealType *x, const std::size_t m,
-    const std::size_t n) {
-  RealType t, hi;
-  std::vector<RealType> aux(m);
-  for (std::size_t i = 0; i < n; ++i) {
-    std::copy(x + m*i, x + m*(i+1), &aux[0]);
-    ComputeThresholds(aux, t, hi);
-    TopKProjector<RealType>::Clamp(x + m*i, m, t, hi);
-  }
-}
-
-template <typename RealType>
 void TopKConeProjector<RealType>::ComputeThresholds(std::vector<RealType> x,
-    RealType &t, RealType &hi) {
+    RealType &t, RealType &lo, RealType &hi) {
   // Partially sort x around the kth element
   std::nth_element(x.begin(), x.begin() + k_ - 1, x.end(),
     std::greater<RealType>());
@@ -30,8 +18,7 @@ void TopKConeProjector<RealType>::ComputeThresholds(std::vector<RealType> x,
     static_cast<RealType>(0));
 
   // Case 1: U empty, M empty, proj = 0
-  t = 0;
-  hi = 0;
+  t = lo = hi = 0;
   if (sum_k_largest <= 0) {
     return;
   }
@@ -40,7 +27,7 @@ void TopKConeProjector<RealType>::ComputeThresholds(std::vector<RealType> x,
   RealType sum_pos = 0;
   RealType max_elem = -std::numeric_limits<RealType>::infinity();
   RealType kp1_elem = -std::numeric_limits<RealType>::infinity();
-  typename std::vector<RealType>::iterator it = x.begin();
+  auto it = x.begin();
   for (; it != x.begin() + k_; ++it) {
     if (*it > 0) sum_pos += *it;
     if (*it > max_elem) max_elem = *it;

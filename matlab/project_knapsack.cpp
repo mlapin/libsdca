@@ -5,15 +5,15 @@
 #include <mex.h>
 #include "matrix.h"
 
-#include "topkconeprojector.hpp"
+#include "knapsackprojector.hpp"
 
 void printUsage() {
-  mexPrintf("Usage: projtopkcone(X); (k = 1)\n"
-            "       [X_proj] = projtopkcone(X,k);\n");
+  mexPrintf("Usage: projknapsack(X); (lo = 0, hi = 1, rhs = 1)\n"
+            "       [X_proj] = projknapsack(X,lo,hi,rhs);\n");
 }
 
 void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
-  if (nrhs < 1 || nrhs > 2) {
+  if (nrhs < 1 || nrhs > 4) {
     printUsage();
     mexErrMsgIdAndTxt("LIBSDCA:inputmismatch",
       "Wrong number of input arguments.");
@@ -25,17 +25,19 @@ void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
       "Wrong number of output arguments.");
   }
 
-  std::size_t k = 1;
+  double lo = 0, hi = 1, rhs = 1;
   if (nrhs >= 2) {
-    k = static_cast<std::size_t>(mxGetScalar(prhs[1]));
+    lo = mxGetScalar(prhs[1]);
+  }
+  if (nrhs >= 3) {
+    hi = mxGetScalar(prhs[2]);
+  }
+  if (nrhs >= 4) {
+    rhs = mxGetScalar(prhs[3]);
   }
 
   std::size_t m = static_cast<std::size_t>(mxGetM(prhs[0]));
   std::size_t n = static_cast<std::size_t>(mxGetN(prhs[0]));
-  if (k < 1 || k > m) {
-    mexErrMsgIdAndTxt("LIBSDCA:project:kbounds",
-      "Argument k is out of bounds (must be in [1,size(X,1)]).");
-  }
 
   mxArray *mxX;
   if (nlhs == 0) {
@@ -46,10 +48,13 @@ void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
   }
 
   if (mxIsDouble(mxX)) {
-    sdca::TopKConeProjector<double> proj(k);
+    sdca::KnapsackProjector<double> proj(lo, hi, rhs);
     proj.Project(static_cast<double*>(mxGetData(mxX)), m, n);
   } else if (mxIsSingle(mxX)) {
-    sdca::TopKConeProjector<float> proj(k);
+    sdca::KnapsackProjector<float> proj(
+      static_cast<float>(lo),
+      static_cast<float>(hi),
+      static_cast<float>(rhs));
     proj.Project(static_cast<float*>(mxGetData(mxX)), m, n);
   }
 }

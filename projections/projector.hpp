@@ -1,34 +1,30 @@
-#ifndef PROJECTOR_HH
-#define PROJECTOR_HH
+#ifndef SDCA_PROJECTOR_HPP
+#define SDCA_PROJECTOR_HPP
 
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 namespace sdca {
 
 template <typename RealType = double>
 class Projector {
+
 public:
-  const RealType kObjectiveChangeEpsilon = 1e-9;
-  const std::size_t kMaxNumIterations = 10000;
+  void Project(RealType *x, const std::size_t n);
+  void Project(RealType *x, const std::size_t n,
+    const std::size_t num_col = 1);
 
-  Projector();
+  void Clamp(RealType *first, RealType *last,
+    const RealType t,
+    const RealType lo = -std::numeric_limits<RealType>::infinity(),
+    const RealType hi = +std::numeric_limits<RealType>::infinity());
 
-  void VectorToKSimplex(const std::size_t k, const std::size_t n, RealType *x);
-  void MatrixToKSimplex(const std::size_t k, const std::size_t n,
-    const std::size_t m, RealType *x);
-
-  const RealType ObjectiveValue() { return obj_val_; }
-  const RealType ObjectiveValueOld()  { return obj_old_; }
-  const std::size_t Iteration() { return iter_; }
-
-private:
-  RealType obj_val_;
-  RealType obj_old_;
-  std::size_t iter_;
+  virtual void ComputeThresholds(std::vector<RealType> x,
+    RealType &t, RealType &lo, RealType &hi) = 0;
 
 };
 
 }
 
-#endif // PROJECTOR_HH
+#endif // SDCA_PROJECTOR_HPP
