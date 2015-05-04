@@ -5,7 +5,9 @@
 namespace sdca {
 
 template <typename RealType>
-void Projector<RealType>::Project(RealType *x, const std::size_t n) {
+void Projector<RealType>::Project(
+    RealType *x,
+    const std::size_t n) {
   RealType t, lo, hi;
   std::vector<RealType> aux(x, x + n);
   ComputeThresholds(aux, t, lo, hi);
@@ -13,7 +15,9 @@ void Projector<RealType>::Project(RealType *x, const std::size_t n) {
 }
 
 template <typename RealType>
-void Projector<RealType>::Project(RealType *x, const std::size_t n,
+void Projector<RealType>::Project(
+    RealType *x,
+    const std::size_t n,
     const std::size_t num_col) {
   RealType t, lo, hi, *last = x + n, *end = x + n*num_col;
   std::vector<RealType> aux(n);
@@ -26,8 +30,12 @@ void Projector<RealType>::Project(RealType *x, const std::size_t n,
 }
 
 template <typename RealType>
-void Projector<RealType>::Clamp(RealType *first, RealType *last,
-    const RealType t, const RealType lo, const RealType hi) {
+void Projector<RealType>::Clamp(
+    RealType *first,
+    RealType *last,
+    const RealType t,
+    const RealType lo,
+    const RealType hi) {
   if (hi <= lo) {
     std::fill(first, last, lo);
   } else if (hi == std::numeric_limits<RealType>::infinity()) {

@@ -8,12 +8,17 @@
 namespace sdca {
 
 template <typename RealType>
-void TopKConeProjector<RealType>::ComputeThresholds(std::vector<RealType> x,
-    RealType &t, RealType &lo, RealType &hi) {
+void TopKConeProjector<RealType>::ComputeThresholds(
+    std::vector<RealType> x,
+    RealType &t,
+    RealType &lo,
+    RealType &hi) {
+
   // Partially sort x around the kth element
   std::nth_element(x.begin(), x.begin() + k_ - 1, x.end(),
     std::greater<RealType>());
 
+  // Sum k largest elements
   RealType sum_k_largest = std::accumulate(x.begin(), x.begin() + k_,
     static_cast<RealType>(0));
 
@@ -23,7 +28,7 @@ void TopKConeProjector<RealType>::ComputeThresholds(std::vector<RealType> x,
     return;
   }
 
-  // Sum all positive, compute the 1st and the (k+1)st elements
+  // Sum all positive, find the 1st (max) and the (k+1)st elements
   RealType sum_pos = 0;
   RealType max_elem = -std::numeric_limits<RealType>::infinity();
   RealType kp1_elem = -std::numeric_limits<RealType>::infinity();
@@ -39,7 +44,6 @@ void TopKConeProjector<RealType>::ComputeThresholds(std::vector<RealType> x,
 
   // Case 2: U empty, M not empty, proj = max(0,x)
   if (sum_pos >= kk_ * max_elem) {
-    t = 0;
     hi = std::numeric_limits<RealType>::infinity();
     return;
   }
@@ -51,46 +55,43 @@ void TopKConeProjector<RealType>::ComputeThresholds(std::vector<RealType> x,
     return;
   }
 
+  // Sort x for the fall back case
   std::sort(x.begin(), x.end(), std::greater<RealType>());
 
   // Case 4: U not empty, M not empty, exhaustive search
-  RealType su = 0;
-  typedef typename std::vector<RealType>::size_type VectorSize;
-  for (VectorSize u = 1; u < k_; ++u) {
-    su += x[u-1]; // sum over U
-    RealType uu = static_cast<RealType>(u);
-    RealType ku = kk_ - uu;
-    RealType kusu = ku * su; // (k-u) * sum_U x_i
-    RealType sm = 0;
-    RealType D = ku * ku;
+  RealType sum_u = 0, u = 0, k_minus_u = kk_;
+  for (auto min_u = x.begin(); min_u != x.begin() + k_ - 1; ++min_u) {
+    sum_u += *min_u;
+    ++u;
+    --k_minus_u;
 
-    for (VectorSize m = 1; m < x.size() - u; ++m) {
-      sm += x[m+u-1]; // sum over M
-      D += uu; // (k-u)^2 + m*u
-      RealType pkD = kusu - uu*sm; // (p/k)*D
-      if (0 <= D*x[m+u-1] + pkD && D*x[m+u] + pkD <= 0) {
-        RealType skD = ku*sm + static_cast<RealType>(m)*su; // (s/k)*D
-        if (0 <= D*x[u-1] + pkD - skD && D*x[u] + pkD - skD <= 0) {
-          t = pkD / D;
-          hi = skD / D;
-          return;
+    RealType sum_m = 0, m_sum_u = 0, D = k_minus_u * k_minus_u;
+    RealType u_minus_k_sum_u = -k_minus_u * sum_u;
+    auto min_m = min_u + 1;
+    RealType max_m = *min_m;
+    for (; min_m != x.end(); ++min_m) {
+      sum_m += *min_m;
+      m_sum_u += sum_u;
+      D += u; // D = (k-u)^2 + m*u
+
+      RealType tD = u * sum_m + u_minus_k_sum_u;
+      RealType hiD = k_minus_u * sum_m + m_sum_u;
+      RealType s_minus_p_D = hiD + tD;
+      auto max_l = min_m + 1;
+      if ( (max_l == x.end()) || (*max_l * D <= tD) ) {
+        if (max_m * D <= s_minus_p_D) {
+          if ( (s_minus_p_D <= *min_u * D) && (tD <= *min_m * D) ) {
+            t = -tD / D;
+            hi = hiD / D;
+            return;
+          }
+        } else {
+          break; // stop early since s/k - p/k will decrease from now on
         }
       }
     }
-
-    // L empty (u + m = x.size)
-    sm += x[x.size()-1];
-    D += uu;
-    RealType pkD = kusu - uu*sm;
-    if (0 <= D*x[x.size()-1] + pkD) {
-      RealType skD = ku*sm + static_cast<RealType>(x.size()-u)*su;
-      if (0 <= D*x[u-1] + pkD - skD && D*x[u] + pkD - skD <= 0) {
-        t = pkD / D;
-        hi = skD / D;
-        return;
-      }
-    }
   }
+
 }
 
 template class TopKConeProjector<float>;
