@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -31,39 +32,27 @@ void TopKSimplexProjector<RealType>::ComputeThresholds(
       break;
     case TopKConeCase::SomeUpperSomeMiddle:
       knap_.ComputeThresholdsAndMidBoundary(x, t, lo, hi, first, last);
-      cone_.FallBackCase(x, t, lo, hi);
+      if (CheckNeedFallback(x, t, first)) {
+        cone_.FallBackCase(x, t, lo, hi);
+      }
       break;
   }
 
 }
 
 template <typename RealType>
-bool TopKSimplexProjector<RealType>::CheckKnapsackSolution(
+bool TopKSimplexProjector<RealType>::CheckNeedFallback(
     const std::vector<RealType> x,
-    const typename std::vector<RealType>::iterator first,
-    const typename std::vector<RealType>::iterator last) {
+    const RealType t,
+    const typename std::vector<RealType>::iterator first) {
 
   RealType u = static_cast<RealType>(std::distance(x.begin(), first));
   RealType sum_u = std::accumulate(x.begin(), first, static_cast<RealType>(0));
+  RealType k = cone_.kk();
+  assert(u <= k);
 
-  RealType m = static_cast<RealType>(std::distance(first, last));
-  RealType sum_m = std::accumulate(first, last, static_cast<RealType>(0));
-
-  RealType k_minus_u = cone_.kk() - u;
-  RealType D = k_minus_u * k_minus_u + u * m;
-
-  RealType tD = u * sum_m - k_minus_u * sum_u;
-  RealType hiD = k_minus_u * sum_m + m * sum_u;
-  RealType s_minus_p_D = hiD + tD;
-
-  bool u_empty = first == x.begin();
-  bool m_empty = first == last;
-  bool l_empty = last == x.end();
-
-  bool t_lo = l_empty || (*last * D <= tD);
-  bool t_hi = l_empty || (*last * D <= tD);
-
-  return false;
+  // Check if the corresponding lambda is negative
+  return k * ( sum_u + (u - k) * t) < u;
 }
 
 template class TopKSimplexProjector<float>;

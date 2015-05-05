@@ -25,10 +25,10 @@ public:
       RealType &hi
     );
 
-  bool CheckKnapsackSolution(
+  bool CheckNeedFallback(
       const std::vector<RealType> x,
-      const typename std::vector<RealType>::iterator first,
-      const typename std::vector<RealType>::iterator last
+      const RealType t,
+      const typename std::vector<RealType>::iterator first
     );
 
   TopKConeProjector<RealType> cone() const { return cone_; }
