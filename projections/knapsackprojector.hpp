@@ -31,8 +31,8 @@ public:
       RealType &t,
       RealType &lo,
       RealType &hi,
-      typename std::vector<RealType>::iterator &first,
-      typename std::vector<RealType>::iterator &last
+      typename std::vector<RealType>::const_iterator &first,
+      typename std::vector<RealType>::const_iterator &last
     );
 
   RealType lo() const { return lo_; }
