@@ -68,7 +68,7 @@ void TopKConeProjector<RealType>::ComputeThresholds(
     RealType sum_m = 0, m_sum_u = 0, D = k_minus_u * k_minus_u;
     RealType u_minus_k_sum_u = -k_minus_u * sum_u;
     auto min_m = min_u + 1;
-    RealType max_m = *min_m;
+    auto max_m = min_m;
     for (; min_m != x.end(); ++min_m) {
       sum_m += *min_m;
       m_sum_u += sum_u;
@@ -79,7 +79,7 @@ void TopKConeProjector<RealType>::ComputeThresholds(
       RealType s_minus_p_D = hiD + tD;
       auto max_l = min_m + 1;
       if ( (max_l == x.end()) || (*max_l * D <= tD) ) {
-        if (max_m * D <= s_minus_p_D) {
+        if (*max_m * D <= s_minus_p_D) {
           if ( (s_minus_p_D <= *min_u * D) && (tD <= *min_m * D) ) {
             t = -tD / D;
             hi = hiD / D;
