@@ -10,18 +10,39 @@ class KnapsackProjector : public Projector<RealType> {
 
 public:
   KnapsackProjector(
-      RealType lo = 0,
-      RealType hi = 1,
-      RealType rhs = 1) :
-    lo_(lo),
-    hi_(hi),
-    rhs_(rhs) {}
+      const RealType lo = 0,
+      const RealType hi = 1,
+      const RealType rhs = 1
+    ) :
+      lo_(lo),
+      hi_(hi),
+      rhs_(rhs)
+    {}
 
   void ComputeThresholds(
       std::vector<RealType> x,
       RealType &t,
       RealType &lo,
-      RealType &hi);
+      RealType &hi
+    );
+
+  void ComputeThresholdsAndMidBoundary(
+      std::vector<RealType> x,
+      RealType &t,
+      RealType &lo,
+      RealType &hi,
+      typename std::vector<RealType>::iterator &first,
+      typename std::vector<RealType>::iterator &last
+    );
+
+  RealType lo() const { return lo_; }
+  void lo(const RealType lo) { lo_ = lo; }
+
+  RealType hi() const { return hi_; }
+  void hi(const RealType hi) { hi_ = hi; }
+
+  RealType rhs() const { return rhs_; }
+  void rhs(const RealType rhs) { rhs_ = rhs; }
 
 private:
   RealType lo_;

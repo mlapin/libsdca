@@ -6,5 +6,7 @@ add_library(${LIB_PROJECTIONS} OBJECT
   knapsackprojector.cpp
   topkconeprojector.hpp
   topkconeprojector.cpp
+  topksimplexprojector.hpp
+  topksimplexprojector.cpp
   )
 add_definitions(-fPIC)

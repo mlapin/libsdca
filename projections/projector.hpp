@@ -12,24 +12,28 @@ class Projector {
 public:
   void Project(
       RealType *x,
-      const std::size_t n);
+      const std::size_t n
+    );
   void Project(
       RealType *x,
       const std::size_t n,
-      const std::size_t num_col = 1);
+      const std::size_t num_col = 1
+    );
 
   void Clamp(
       RealType *first,
       RealType *last,
       const RealType t,
       const RealType lo = -std::numeric_limits<RealType>::infinity(),
-      const RealType hi = +std::numeric_limits<RealType>::infinity());
+      const RealType hi = +std::numeric_limits<RealType>::infinity()
+    );
 
   virtual void ComputeThresholds(
       std::vector<RealType> x,
       RealType &t,
       RealType &lo,
-      RealType &hi) = 0;
+      RealType &hi
+    ) = 0;
 
 };
 

@@ -12,6 +12,19 @@ void KnapsackProjector<RealType>::ComputeThresholds(
     RealType &t,
     RealType &lo,
     RealType &hi) {
+
+  typename std::vector<RealType>::iterator first, last;
+  ComputeThresholdsAndMidBoundary(x, t, lo, hi, first, last);
+}
+
+template <typename RealType>
+void KnapsackProjector<RealType>::ComputeThresholdsAndMidBoundary(
+    std::vector<RealType> x,
+    RealType &t,
+    RealType &lo,
+    RealType &hi,
+    typename std::vector<RealType>::iterator &first,
+    typename std::vector<RealType>::iterator &last) {
   /*
    * Based on the Algorithm 3.1 in
    * Kiwiel, K. C. "Variable fixing algorithms for the continuous
@@ -20,8 +33,8 @@ void KnapsackProjector<RealType>::ComputeThresholds(
    */
 
   // Initialization (note: t here is -t in Algorithm 3.1)
-  auto first = x.begin();
-  auto last = x.end();
+  first = x.begin();
+  last = x.end();
   assert(std::distance(first, last));
   t = (rhs_ - std::accumulate(first, last, static_cast<RealType>(0))) /
     static_cast<RealType>(std::distance(first, last));
@@ -31,24 +44,24 @@ void KnapsackProjector<RealType>::ComputeThresholds(
   for (std::size_t i = 0; i < x.size(); ++i) {
     // Feasibility check
     RealType tt = lo_ - t;
-    auto lo = std::partition(first, last, [tt](const RealType &a){
+    auto lo_it = std::partition(first, last, [tt](const RealType &a){
       return a > tt; });
-    RealType infeas_lo = static_cast<RealType>(std::distance(lo, last)) * tt
-      - std::accumulate(lo, last, static_cast<RealType>(0));
+    RealType infeas_lo = static_cast<RealType>(std::distance(lo_it, last)) * tt
+      - std::accumulate(lo_it, last, static_cast<RealType>(0));
 
     tt = hi_ - t;
-    auto hi = std::partition(first, lo, [tt](const RealType &a){
+    auto hi_it = std::partition(first, lo_it, [tt](const RealType &a){
       return a > tt; });
-    RealType infeas_hi = std::accumulate(first, hi, static_cast<RealType>(0))
-      - static_cast<RealType>(std::distance(first, hi)) * tt;
+    RealType infeas_hi = std::accumulate(first, hi_it, static_cast<RealType>(0))
+      - static_cast<RealType>(std::distance(first, hi_it)) * tt;
 
     // Variable fixing (using the incremental multiplier formula (23))
     if (infeas_lo > infeas_hi) {
-      last = lo;
+      last = lo_it;
       assert(std::distance(first, last));
       t -= infeas_lo / static_cast<RealType>(std::distance(first, last));
     } else if (infeas_lo < infeas_hi) {
-      first = hi;
+      first = hi_it;
       assert(std::distance(first, last));
       t += infeas_hi / static_cast<RealType>(std::distance(first, last));
     } else {
