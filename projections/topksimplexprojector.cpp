@@ -44,7 +44,7 @@ template <typename RealType>
 bool TopKSimplexProjector<RealType>::CheckNeedFallback(
     const std::vector<RealType> x,
     const RealType t,
-    const typename std::vector<RealType>::iterator first) {
+    typename std::vector<RealType>::iterator &first) {
 
   RealType u = static_cast<RealType>(std::distance(x.begin(), first));
   RealType sum_u = std::accumulate(x.begin(), first, static_cast<RealType>(0));
