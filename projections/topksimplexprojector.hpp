@@ -28,7 +28,7 @@ public:
   bool CheckNeedFallback(
       const std::vector<RealType> x,
       const RealType t,
-      const typename std::vector<RealType>::const_iterator first
+      typename std::vector<RealType>::iterator &first
     );
 
   TopKConeProjector<RealType> cone() const { return cone_; }

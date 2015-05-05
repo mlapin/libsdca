@@ -13,7 +13,7 @@ void KnapsackProjector<RealType>::ComputeThresholds(
     RealType &lo,
     RealType &hi) {
 
-  typename std::vector<RealType>::const_iterator first, last;
+  typename std::vector<RealType>::iterator first, last;
   ComputeThresholdsAndMidBoundary(x, t, lo, hi, first, last);
 }
 
@@ -23,8 +23,8 @@ void KnapsackProjector<RealType>::ComputeThresholdsAndMidBoundary(
     RealType &t,
     RealType &lo,
     RealType &hi,
-    typename std::vector<RealType>::const_iterator &first,
-    typename std::vector<RealType>::const_iterator &last) {
+    typename std::vector<RealType>::iterator &first,
+    typename std::vector<RealType>::iterator &last) {
   /*
    * Based on the Algorithm 3.1 in
    * Kiwiel, K. C. "Variable fixing algorithms for the continuous
@@ -33,8 +33,8 @@ void KnapsackProjector<RealType>::ComputeThresholdsAndMidBoundary(
    */
 
   // Initialization (note: t here is -t in Algorithm 3.1)
-  first = x.cbegin();
-  last = x.cend();
+  first = x.begin();
+  last = x.end();
   assert(std::distance(first, last));
   t = (rhs_ - std::accumulate(first, last, static_cast<RealType>(0))) /
     static_cast<RealType>(std::distance(first, last));
