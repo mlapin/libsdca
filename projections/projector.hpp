@@ -1,7 +1,6 @@
 #ifndef SDCA_PROJECTOR_HPP
 #define SDCA_PROJECTOR_HPP
 
-#include <cstddef>
 #include <limits>
 #include <vector>
 

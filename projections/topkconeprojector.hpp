@@ -1,8 +1,6 @@
 #ifndef SDCA_TOPKCONEPROJECTOR_HPP
 #define SDCA_TOPKCONEPROJECTOR_HPP
 
-#include <vector>
-
 #include "projector.hpp"
 
 namespace sdca {

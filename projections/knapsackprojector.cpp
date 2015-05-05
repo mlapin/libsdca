@@ -7,8 +7,11 @@
 namespace sdca {
 
 template <typename RealType>
-void KnapsackProjector<RealType>::ComputeThresholds(std::vector<RealType> x,
-    RealType &t, RealType &lo, RealType &hi) {
+void KnapsackProjector<RealType>::ComputeThresholds(
+    std::vector<RealType> x,
+    RealType &t,
+    RealType &lo,
+    RealType &hi) {
   /*
    * Based on the Algorithm 3.1 in
    * Kiwiel, K. C. "Variable fixing algorithms for the continuous
