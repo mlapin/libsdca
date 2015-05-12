@@ -14,8 +14,8 @@ using TopKConeProjector<RealType>::projection_const_;
 
 public:
   BiasedTopKConeProjector(
-      const std::size_t k,
-      const RealType rho
+      const std::size_t k = 1,
+      const RealType rho = 0
     ) :
       TopKConeProjector<RealType>::TopKConeProjector(k),
       rho_(rho)

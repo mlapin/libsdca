@@ -11,7 +11,7 @@ class TopKSimplexProjector : public Projector<RealType> {
 
 public:
   TopKSimplexProjector(
-      const std::size_t k,
+      const std::size_t k = 1,
       const RealType rhs = 1
     ) :
       top_k_cone_(k),

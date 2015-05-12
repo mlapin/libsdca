@@ -10,7 +10,7 @@ class TopKConeProjector : public Projector<RealType> {
 
 public:
   TopKConeProjector(
-      const std::size_t k
+      const std::size_t k = 1
     ) :
       k_(k),
       kk_(static_cast<RealType>(k)),
