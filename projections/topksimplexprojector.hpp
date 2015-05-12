@@ -14,30 +14,30 @@ public:
       const std::size_t k,
       const RealType rhs = 1
     ) :
-      cone_(k),
-      knap_(0, rhs/static_cast<RealType>(k), rhs)
-    {}
+      top_k_cone_(k),
+      knapsack_(0, rhs/static_cast<RealType>(k), rhs)
+  {}
 
   void ComputeThresholds(
-      std::vector<RealType> x,
+      std::vector<RealType> &x,
       RealType &t,
       RealType &lo,
       RealType &hi
+    ) override;
+
+  bool CheckOnTopKCone(
+      std::vector<RealType> &x,
+      RealType &t,
+      typename std::vector<RealType>::iterator &first
     );
 
-  bool CheckNeedFallback(
-      const std::vector<RealType> x,
-      const RealType t,
-      const typename std::vector<RealType>::const_iterator first
-    );
+  TopKConeProjector<RealType> get_top_k_cone() const { return top_k_cone_; }
 
-  TopKConeProjector<RealType> cone() const { return cone_; }
-
-  KnapsackProjector<RealType> knap() const { return knap_; }
+  KnapsackProjector<RealType> get_knapsack() const { return knapsack_; }
 
 private:
-  TopKConeProjector<RealType> cone_;
-  KnapsackProjector<RealType> knap_;
+  TopKConeProjector<RealType> top_k_cone_;
+  KnapsackProjector<RealType> knapsack_;
 };
 
 }

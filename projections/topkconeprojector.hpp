@@ -5,13 +5,6 @@
 
 namespace sdca {
 
-enum class TopKConeCase {
-  NoneUpperNoneMiddle,
-  NoneUpperSomeMiddle,
-  SomeUpperNoneMiddle,
-  SomeUpperSomeMiddle
-};
-
 template <typename RealType = double>
 class TopKConeProjector : public Projector<RealType> {
 
@@ -20,40 +13,45 @@ public:
       const std::size_t k
     ) :
       k_(k),
-      kk_(k)
-    {}
+      kk_(static_cast<RealType>(k)),
+      projection_const_(static_cast<RealType>(1) / kk_)
+  {}
 
   void ComputeThresholds(
-      std::vector<RealType> x,
+      std::vector<RealType> &x,
+      RealType &t,
+      RealType &lo,
+      RealType &hi
+    ) override;
+
+  Projection CheckSpecialCases(
+      std::vector<RealType> &x,
       RealType &t,
       RealType &lo,
       RealType &hi
     );
 
-  TopKConeCase CheckSpecialCases(
-      std::vector<RealType> x,
-      RealType &t,
-      RealType &lo,
-      RealType &hi,
-      RealType &sum_k_largest,
-      RealType &sum_positive
-    );
-
-  void FallBackCase(
-      std::vector<RealType> x,
+  virtual void ComputeGeneralCase(
+      std::vector<RealType> &x,
       RealType &t,
       RealType &lo,
       RealType &hi
     );
 
-  std::size_t k() const { return k_; }
-  void k(const std::size_t k) { k_ = k; kk_ = k; }
+  std::size_t get_k() const { return k_; }
+  virtual void set_k(const std::size_t k) {
+    k_ = k;
+    kk_ = static_cast<RealType>(k);
+    projection_const_ = static_cast<RealType>(1) / kk_;
+  }
 
-  RealType kk() const { return kk_; }
+  RealType get_k_real() const { return kk_; }
 
-private:
+protected:
   std::size_t k_;
   RealType kk_;
+  RealType projection_const_;
+
 };
 
 }

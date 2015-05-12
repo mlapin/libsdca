@@ -9,123 +9,133 @@ namespace sdca {
 
 template <typename RealType>
 void TopKConeProjector<RealType>::ComputeThresholds(
-    std::vector<RealType> x,
+    std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
     RealType &hi) {
 
-  RealType sum_k, sum_pos;
-  switch (CheckSpecialCases(x, t, lo, hi, sum_k, sum_pos)) {
-    case TopKConeCase::NoneUpperNoneMiddle: // projection is 0
+  switch (CheckSpecialCases(x, t, lo, hi)) {
+    case Projection::Zero:
+    case Projection::Constant:
       break;
-    case TopKConeCase::NoneUpperSomeMiddle: // proj = max(0,x)
-      break;
-    case TopKConeCase::SomeUpperNoneMiddle: // proj = 1/k sum_k_largest
-      break;
-    case TopKConeCase::SomeUpperSomeMiddle:
-      FallBackCase(x, t, lo, hi);
+    case Projection::General:
+      ComputeGeneralCase(x, t, lo, hi);
       break;
   }
 
 }
 
 template <typename RealType>
-TopKConeCase TopKConeProjector<RealType>::CheckSpecialCases(
-    std::vector<RealType> x,
+Projection TopKConeProjector<RealType>::CheckSpecialCases(
+    std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
-    RealType &hi,
-    RealType &sum_k_largest,
-    RealType &sum_positive) {
+    RealType &hi) {
 
   // Partially sort x around the kth element
   std::nth_element(x.begin(), x.begin() + k_ - 1, x.end(),
     std::greater<RealType>());
 
   // Sum k largest elements
-  sum_k_largest = std::accumulate(x.begin(), x.begin() + k_,
+  RealType sum_k_largest = std::accumulate(x.begin(), x.begin() + k_,
     static_cast<RealType>(0));
 
   // Case 1: U empty, M empty, proj = 0
   t = lo = hi = 0;
   if (sum_k_largest <= 0) {
-    return TopKConeCase::NoneUpperNoneMiddle;
+    return Projection::Zero;
   }
 
-  // Sum all positive, find the 1st (max) and the (k+1)st elements
-  sum_positive = 0;
-  RealType max_elem = -std::numeric_limits<RealType>::infinity();
-  RealType kp1_elem = -std::numeric_limits<RealType>::infinity();
-  auto it = x.begin();
-  for (; it != x.begin() + k_; ++it) {
-    if (*it > 0) sum_positive += *it;
-    if (*it > max_elem) max_elem = *it;
-  }
-  for (; it != x.end(); ++it) {
-    if (*it > 0) sum_positive += *it;
-    if (*it > kp1_elem) kp1_elem = *it;
+  // Case 2: U not empty, M empty, proj = const * sum_k_largest for k largest
+  hi = projection_const_ * sum_k_largest;
+  t = x[k_-1] - hi;
+  if ((k_ == x.size()) || (t >= *std::max_element(x.begin() + k_, x.end()))) {
+    return Projection::Constant;
   }
 
-  // Case 2: U empty, M not empty, proj = max(0,x)
-  if (sum_positive >= kk_ * max_elem) {
-    hi = std::numeric_limits<RealType>::infinity();
-    return TopKConeCase::NoneUpperSomeMiddle;
-  }
-
-  // Case 3: U not empty, M empty, proj = 1/k sum_k_largest for k largest
-  if (sum_k_largest <= kk_ * (x[k_-1] - kp1_elem)) {
-    hi = sum_k_largest / kk_;
-    t = hi - x[k_-1];
-    return TopKConeCase::SomeUpperNoneMiddle;
-  }
-
-  // Case 4: U not empty, M not empty, no closed-form solution
-  return TopKConeCase::SomeUpperSomeMiddle;
+  // Case 3: U undefined, M not empty, no closed-form solution
+  return Projection::General;
 }
 
 template <typename RealType>
-void TopKConeProjector<RealType>::FallBackCase(
-    std::vector<RealType> x,
+void TopKConeProjector<RealType>::ComputeGeneralCase(
+    std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
     RealType &hi) {
 
-  // Sort x for a more efficient search
+  // Lower bound is always zero
+  lo = 0;
+
+  // Sort x to search efficiently
   std::sort(x.begin(), x.end(), std::greater<RealType>());
 
-  // Case 4: U not empty, M not empty, exhaustive search
-  RealType sum_u = 0, u = 0, k_minus_u = kk_;
-  for (auto min_u = x.begin(); min_u != x.begin() + k_ - 1; ++min_u) {
-    sum_u += *min_u;
-    ++u;
-    --k_minus_u;
+  RealType min_U = std::numeric_limits<RealType>::infinity();
+  RealType sum_u = 0, u = 0, k_minus_u = kk_, k_minus_u_sum_u = 0;
 
-    RealType sum_m = 0, m_sum_u = 0, D = k_minus_u * k_minus_u;
-    RealType u_minus_k_sum_u = -k_minus_u * sum_u;
-    auto min_m = min_u + 1;
-    auto max_m = min_m;
-    for (; min_m != x.end(); ++min_m) {
-      sum_m += *min_m;
-      m_sum_u += sum_u;
-      D += u; // D = (k-u)^2 + m*u
+  // U is empty in the beginning (m_begin = x.begin)
+  for (auto m_begin = x.begin(); m_begin != x.begin() + k_; ++m_begin) {
 
-      RealType tD = u * sum_m + u_minus_k_sum_u;
-      RealType hiD = k_minus_u * sum_m + m_sum_u;
-      RealType s_minus_p_D = hiD + tD;
-      auto max_l = min_m + 1;
-      if ( (max_l == x.end()) || (*max_l * D <= tD) ) {
-        if (*max_m * D <= s_minus_p_D) {
-          if ( (s_minus_p_D <= *min_u * D) && (tD <= *min_m * D) ) {
-            t = -tD / D;
-            hi = hiD / D;
-            lo = 0;
+    RealType min_M = *m_begin;
+    RealType sum_m = min_M, m_sum_u = sum_u, D = k_minus_u * k_minus_u + u;
+
+    // Start with (m_begin + 1) so that M is not empty
+    auto l_begin = m_begin + 1;
+    for (; l_begin != x.end(); ++l_begin) {
+      // Set the thresholds for the current U and M as follows:
+      //    s/k = [(k-u)*sum_m + m*sum_u] / D
+      //   -p/k = [u*sum_m - (k-u)*sum_u] / D
+      //      D = (k - u)^2 + u*m
+      // where u = |U|, m = |M|.
+      // Then, check that the thresholds are consistent with the partitioning:
+      //  (1)  - p/k        >= max_L = l_begin
+      //  (2)  - p/k        <= min_M = l_begin - 1
+      //  (3)    s/k - p/k  >= max_M = m_begin
+      //  (4)    s/k - p/k  <= min_U = m_begin - 1 or +Inf
+
+      RealType pkD = u * sum_m - k_minus_u_sum_u;
+      if (pkD >= *l_begin * D) {
+        RealType skD = k_minus_u * sum_m + m_sum_u;
+        RealType tt = pkD + skD;
+        if (tt >= *m_begin * D) {
+          if ((pkD <= min_M * D) && (tt <= min_U * D)) {
+            t = pkD / D;
+            hi = skD / D;
             return;
           }
         } else {
-          break; // stop early since s/k - p/k will decrease from now on
+          // (1) holds, but (3) does not => exit the inner loop
+          break;
+        }
+      }
+
+      // Increment the set M
+      min_M = *l_begin;
+      sum_m += min_M;
+      m_sum_u += sum_u;
+      D += u;
+    }
+
+    // L is emtpy
+    if (l_begin == x.end()) {
+      RealType pkD = u * sum_m - k_minus_u_sum_u;
+      if (pkD <= min_M * D) {
+        RealType skD = k_minus_u * sum_m + m_sum_u;
+        RealType tt = pkD + skD;
+        if ((tt >= *m_begin * D) && (tt <= min_U * D)) {
+          t = pkD / D;
+          hi = skD / D;
+          return;
         }
       }
     }
+
+    // Increment the set U
+    min_U = *m_begin;
+    sum_u += min_U;
+    ++u;
+    --k_minus_u;
+    k_minus_u_sum_u = k_minus_u * sum_u;
   }
 
 }

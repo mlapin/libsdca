@@ -6,6 +6,13 @@
 
 namespace sdca {
 
+enum class Projection {
+  Zero,
+  Constant,
+  General
+};
+
+
 template <typename RealType = double>
 class Projector {
 
@@ -29,7 +36,7 @@ public:
     );
 
   virtual void ComputeThresholds(
-      std::vector<RealType> x,
+      std::vector<RealType> &x,
       RealType &t,
       RealType &lo,
       RealType &hi

@@ -17,32 +17,32 @@ public:
       lo_(lo),
       hi_(hi),
       rhs_(rhs)
-    {}
+  {}
 
   void ComputeThresholds(
-      std::vector<RealType> x,
+      std::vector<RealType> &x,
       RealType &t,
-      RealType &lo,
-      RealType &hi
-    );
+      RealType &get_lo,
+      RealType &get_hi
+    ) override;
 
-  void ComputeThresholdsAndMidBoundary(
-      std::vector<RealType> x,
+  void PartitionAndComputeThresholds(
+      std::vector<RealType> &x,
       RealType &t,
-      RealType &lo,
-      RealType &hi,
+      RealType &get_lo,
+      RealType &get_hi,
       typename std::vector<RealType>::iterator &first,
       typename std::vector<RealType>::iterator &last
     );
 
-  RealType lo() const { return lo_; }
-  void lo(const RealType lo) { lo_ = lo; }
+  RealType get_lo() const { return lo_; }
+  void set_lo(const RealType lo) { lo_ = lo; }
 
-  RealType hi() const { return hi_; }
-  void hi(const RealType hi) { hi_ = hi; }
+  RealType get_hi() const { return hi_; }
+  void set_hi(const RealType hi) { hi_ = hi; }
 
-  RealType rhs() const { return rhs_; }
-  void rhs(const RealType rhs) { rhs_ = rhs; }
+  RealType get_rhs() const { return rhs_; }
+  void set_rhs(const RealType rhs) { rhs_ = rhs; }
 
 private:
   RealType lo_;

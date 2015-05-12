@@ -40,15 +40,15 @@ void Projector<RealType>::Clamp(
     std::fill(first, last, lo);
   } else if (hi == std::numeric_limits<RealType>::infinity()) {
     for (; first != last; ++first) {
-      *first = std::max(lo, *first + t);
+      *first = std::max(lo, *first - t);
     }
   } else if (lo == -std::numeric_limits<RealType>::infinity()) {
     for (; first != last; ++first) {
-      *first = std::min(*first + t, hi);
+      *first = std::min(*first - t, hi);
     }
   } else {
     for (; first != last; ++first) {
-      *first = std::min(std::max(lo, *first + t), hi);
+      *first = std::min(std::max(lo, *first - t), hi);
     }
   }
 }

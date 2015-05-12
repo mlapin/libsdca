@@ -14,3 +14,5 @@ ADD_MEX(projknapsack project_knapsack.cpp
   $<TARGET_OBJECTS:${LIB_PROJECTIONS}>)
 ADD_MEX(projtopkcone project_topkcone.cpp
   $<TARGET_OBJECTS:${LIB_PROJECTIONS}>)
+ADD_MEX(projtopksimplex project_topksimplex.cpp
+  $<TARGET_OBJECTS:${LIB_PROJECTIONS}>)
