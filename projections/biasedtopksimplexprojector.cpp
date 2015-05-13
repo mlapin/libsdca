@@ -4,12 +4,12 @@
 #include <utility>
 #include <vector>
 
-#include "topksimplexprojector.hpp"
+#include "biasedtopksimplexprojector.hpp"
 
 namespace sdca {
 
 template <typename RealType>
-void TopKSimplexProjector<RealType>::ComputeThresholds(
+void BiasedTopKSimplexProjector<RealType>::ComputeThresholds(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
@@ -35,7 +35,7 @@ void TopKSimplexProjector<RealType>::ComputeThresholds(
 }
 
 template <typename RealType>
-bool TopKSimplexProjector<RealType>::CheckProjectOntoCone(
+bool BiasedTopKSimplexProjector<RealType>::CheckProjectOntoCone(
     std::vector<RealType> &x,
     RealType &t,
     typename std::vector<RealType>::iterator &m_begin) {
@@ -47,13 +47,14 @@ bool TopKSimplexProjector<RealType>::CheckProjectOntoCone(
     RealType sum_k_largest = std::accumulate(x.begin(), m_begin,
       static_cast<RealType>(0));
     RealType k = cone_.get_k_real();
-    return k * ( sum_k_largest + (k - u) * t) < u;
+    RealType rho = cone_.get_rho();
+    return k * ( sum_k_largest + (k - u) * t) < u + rho * k * k;
   } else {
-    return t < static_cast<RealType>(0);
+    return t < cone_.get_rho();
   }
 }
 
-template class TopKSimplexProjector<float>;
-template class TopKSimplexProjector<double>;
+template class BiasedTopKSimplexProjector<float>;
+template class BiasedTopKSimplexProjector<double>;
 
 }

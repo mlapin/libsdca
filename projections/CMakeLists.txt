@@ -10,5 +10,7 @@ add_library(${LIB_PROJECTIONS} OBJECT
   topksimplexprojector.cpp
   biasedtopkconeprojector.hpp
   biasedtopkconeprojector.cpp
+  biasedtopksimplexprojector.hpp
+  biasedtopksimplexprojector.cpp
   )
 add_definitions(-fPIC)

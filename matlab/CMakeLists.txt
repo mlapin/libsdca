@@ -18,3 +18,5 @@ ADD_MEX(projtopkconebiased project_topkcone_biased.cpp
   $<TARGET_OBJECTS:${LIB_PROJECTIONS}>)
 ADD_MEX(projtopksimplex project_topksimplex.cpp
   $<TARGET_OBJECTS:${LIB_PROJECTIONS}>)
+ADD_MEX(projtopksimplexbiased project_topksimplex_biased.cpp
+  $<TARGET_OBJECTS:${LIB_PROJECTIONS}>)
