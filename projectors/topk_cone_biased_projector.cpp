@@ -4,12 +4,12 @@
 #include <utility>
 #include <vector>
 
-#include "biasedtopkconeprojector.hpp"
+#include "topk_cone_biased_projector.hpp"
 
 namespace sdca {
 
 template <typename RealType>
-void BiasedTopKConeProjector<RealType>::ComputeGeneralCase(
+void TopKConeBiasedProjector<RealType>::ComputeGeneralCase(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
@@ -111,7 +111,7 @@ void BiasedTopKConeProjector<RealType>::ComputeGeneralCase(
 
 }
 
-template class BiasedTopKConeProjector<float>;
-template class BiasedTopKConeProjector<double>;
+template class TopKConeBiasedProjector<float>;
+template class TopKConeBiasedProjector<double>;
 
 }

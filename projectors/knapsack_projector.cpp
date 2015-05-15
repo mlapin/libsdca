@@ -2,7 +2,7 @@
 #include <cassert>
 #include <vector>
 
-#include "knapsackprojector.hpp"
+#include "knapsack_projector.hpp"
 
 namespace sdca {
 

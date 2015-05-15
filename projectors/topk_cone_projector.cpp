@@ -3,7 +3,7 @@
 #include <utility>
 #include <vector>
 
-#include "topkconeprojector.hpp"
+#include "topk_cone_projector.hpp"
 
 namespace sdca {
 

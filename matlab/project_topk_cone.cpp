@@ -5,7 +5,7 @@
 #include <mex.h>
 #include "matrix.h"
 
-#include "topkconeprojector.hpp"
+#include "topk_cone_projector.hpp"
 
 void printUsage() {
   mexPrintf("Usage: projtopkcone(X); (k = 1)\n"

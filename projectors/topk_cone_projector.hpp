@@ -1,5 +1,5 @@
-#ifndef SDCA_TOPKCONEPROJECTOR_HPP
-#define SDCA_TOPKCONEPROJECTOR_HPP
+#ifndef SDCA_TOPK_CONE_PROJECTOR_HPP
+#define SDCA_TOPK_CONE_PROJECTOR_HPP
 
 #include "projector.hpp"
 
@@ -56,4 +56,4 @@ protected:
 
 }
 
-#endif // SDCA_TOPKCONEPROJECTOR_HPP
+#endif // SDCA_TOPK_CONE_PROJECTOR_HPP

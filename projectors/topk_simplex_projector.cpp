@@ -4,7 +4,7 @@
 #include <utility>
 #include <vector>
 
-#include "topksimplexprojector.hpp"
+#include "topk_simplex_projector.hpp"
 
 namespace sdca {
 

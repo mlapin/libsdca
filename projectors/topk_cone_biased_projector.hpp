@@ -1,19 +1,19 @@
-#ifndef SDCA_BIASEDTOPKCONEPROJECTOR_HPP
-#define SDCA_BIASEDTOPKCONEPROJECTOR_HPP
+#ifndef SDCA_BIASED_TOPKCONEPROJECTOR_HPP
+#define SDCA_BIASED_TOPKCONEPROJECTOR_HPP
 
-#include "topkconeprojector.hpp"
+#include "topk_cone_projector.hpp"
 
 namespace sdca {
 
 template <typename RealType = double>
-class BiasedTopKConeProjector : public TopKConeProjector<RealType> {
+class TopKConeBiasedProjector : public TopKConeProjector<RealType> {
 
 using TopKConeProjector<RealType>::k_;
 using TopKConeProjector<RealType>::kk_;
 using TopKConeProjector<RealType>::projection_const_;
 
 public:
-  BiasedTopKConeProjector(
+  TopKConeBiasedProjector(
       const std::size_t k = 1,
       const RealType rho = 0
     ) :
@@ -56,4 +56,4 @@ private:
 
 }
 
-#endif // SDCA_BIASEDTOPKCONEPROJECTOR_HPP
+#endif // SDCA_BIASED_TOPKCONEPROJECTOR_HPP

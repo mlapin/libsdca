@@ -4,12 +4,12 @@
 #include <utility>
 #include <vector>
 
-#include "biasedtopksimplexprojector.hpp"
+#include "topk_simplex_biased_projector.hpp"
 
 namespace sdca {
 
 template <typename RealType>
-void BiasedTopKSimplexProjector<RealType>::ComputeThresholds(
+void TopKSimplexBiasedProjector<RealType>::ComputeThresholds(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
@@ -35,7 +35,7 @@ void BiasedTopKSimplexProjector<RealType>::ComputeThresholds(
 }
 
 template <typename RealType>
-bool BiasedTopKSimplexProjector<RealType>::CheckProjectOntoCone(
+bool TopKSimplexBiasedProjector<RealType>::CheckProjectOntoCone(
     std::vector<RealType> &x,
     RealType &t,
     typename std::vector<RealType>::iterator &m_begin) {
@@ -54,7 +54,7 @@ bool BiasedTopKSimplexProjector<RealType>::CheckProjectOntoCone(
   }
 }
 
-template class BiasedTopKSimplexProjector<float>;
-template class BiasedTopKSimplexProjector<double>;
+template class TopKSimplexBiasedProjector<float>;
+template class TopKSimplexBiasedProjector<double>;
 
 }

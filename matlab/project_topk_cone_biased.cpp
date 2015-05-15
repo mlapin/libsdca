@@ -5,7 +5,7 @@
 #include <mex.h>
 #include "matrix.h"
 
-#include "biasedtopkconeprojector.hpp"
+#include "topk_cone_biased_projector.hpp"
 
 void printUsage() {
   mexPrintf("Usage: projtopkconebiased(X); (k = 1, rho = 0)\n"
@@ -51,10 +51,10 @@ void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
   }
 
   if (mxIsDouble(mxX)) {
-    sdca::BiasedTopKConeProjector<double> proj(k, rho);
+    sdca::TopKConeBiasedProjector<double> proj(k, rho);
     proj.Project(static_cast<double*>(mxGetData(mxX)), m, n);
   } else if (mxIsSingle(mxX)) {
-    sdca::BiasedTopKConeProjector<float> proj(k, static_cast<float>(rho));
+    sdca::TopKConeBiasedProjector<float> proj(k, static_cast<float>(rho));
     proj.Project(static_cast<float*>(mxGetData(mxX)), m, n);
   }
 }

@@ -5,7 +5,7 @@
 #include <mex.h>
 #include "matrix.h"
 
-#include "knapsackprojector.hpp"
+#include "knapsack_projector.hpp"
 
 void printUsage() {
   mexPrintf("Usage: projknapsack(X); (lo = 0, hi = 1, rhs = 1)\n"

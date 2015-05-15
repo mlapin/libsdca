@@ -1,21 +1,20 @@
-#ifndef SDCA_BIASEDTOPKSIMPLEXPROJECTOR_HPP
-#define SDCA_BIASEDTOPKSIMPLEXPROJECTOR_HPP
+#ifndef SDCA_TOPK_SIMPLEX_PROJECTOR_HPP
+#define SDCA_TOPK_SIMPLEX_PROJECTOR_HPP
 
-#include "knapsackprojector.hpp"
-#include "biasedtopkconeprojector.hpp"
+#include "knapsack_projector.hpp"
+#include "topk_cone_projector.hpp"
 
 namespace sdca {
 
 template <typename RealType = double>
-class BiasedTopKSimplexProjector : public Projector<RealType> {
+class TopKSimplexProjector : public Projector<RealType> {
 
 public:
-  BiasedTopKSimplexProjector(
+  TopKSimplexProjector(
       const std::size_t k = 1,
-      const RealType rho = 1,
       const RealType rhs = 1
     ) :
-      cone_(k, rho),
+      cone_(k),
       knapsack_(0, rhs/static_cast<RealType>(k), rhs)
   {}
 
@@ -32,15 +31,15 @@ public:
       typename std::vector<RealType>::iterator &m_begin
     );
 
-  BiasedTopKConeProjector<RealType> get_cone() const { return cone_; }
+  TopKConeProjector<RealType> get_cone() const { return cone_; }
 
   KnapsackProjector<RealType> get_knapsack() const { return knapsack_; }
 
 private:
-  BiasedTopKConeProjector<RealType> cone_;
+  TopKConeProjector<RealType> cone_;
   KnapsackProjector<RealType> knapsack_;
 };
 
 }
 
-#endif // SDCA_BIASEDTOPKSIMPLEXPROJECTOR_HPP
+#endif // SDCA_TOPK_SIMPLEX_PROJECTOR_HPP

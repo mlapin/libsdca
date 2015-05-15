@@ -5,7 +5,7 @@
 #include <mex.h>
 #include "matrix.h"
 
-#include "topksimplexprojector.hpp"
+#include "topk_simplex_projector.hpp"
 
 void printUsage() {
   mexPrintf("Usage: projtopksimplex(X); (k = 1)\n"
