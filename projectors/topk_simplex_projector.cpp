@@ -13,7 +13,7 @@ void TopKSimplexProjector<RealType>::ComputeThresholds(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
-    RealType &hi) {
+    RealType &hi) const {
 
   typename std::vector<RealType>::iterator m_begin, l_begin;
   switch (cone_.CheckSpecialCases(x, t, lo, hi)) {
@@ -38,7 +38,7 @@ template <typename RealType>
 bool TopKSimplexProjector<RealType>::CheckProjectOntoCone(
     std::vector<RealType> &x,
     RealType &t,
-    typename std::vector<RealType>::iterator &m_begin) {
+    typename std::vector<RealType>::iterator &m_begin) const {
 
   // Check if the corresponding lambda is negative
   auto size = std::distance(x.begin(), m_begin);

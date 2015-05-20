@@ -8,12 +8,12 @@
 #include "topk_simplex_projector.hpp"
 
 void printUsage() {
-  mexPrintf("Usage: projtopksimplex(X); (k = 1)\n"
-            "       [X_proj] = projtopksimplex(X,k);\n");
+  mexPrintf("Usage: project_topk_simplex(X); (k = 1, rhs = 1)\n"
+            "       [X_proj] = project_topk_simplex(X,k,rhs);\n");
 }
 
 void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
-  if (nrhs < 1 || nrhs > 2) {
+  if (nrhs < 1 || nrhs > 3) {
     printUsage();
     mexErrMsgIdAndTxt("LIBSDCA:inputmismatch",
       "Wrong number of input arguments.");
@@ -28,6 +28,11 @@ void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
   std::size_t k = 1;
   if (nrhs >= 2) {
     k = static_cast<std::size_t>(mxGetScalar(prhs[1]));
+  }
+
+  double rhs = 1.0;
+  if (nrhs >= 3) {
+    rhs = mxGetScalar(prhs[2]);
   }
 
   std::size_t m = static_cast<std::size_t>(mxGetM(prhs[0]));
@@ -46,11 +51,11 @@ void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
   }
 
   if (mxIsDouble(mxX)) {
-    sdca::TopKSimplexProjector<double> proj(k);
-    proj.Project(static_cast<double*>(mxGetData(mxX)), m, n);
+    sdca::TopKSimplexProjector<double> proj(k, rhs);
+    proj.Project(m, n, static_cast<double*>(mxGetData(mxX)));
   } else if (mxIsSingle(mxX)) {
-    sdca::TopKSimplexProjector<float> proj(k);
-    proj.Project(static_cast<float*>(mxGetData(mxX)), m, n);
+    sdca::TopKSimplexProjector<float> proj(k, static_cast<float>(rhs));
+    proj.Project(m, n, static_cast<float*>(mxGetData(mxX)));
   }
 }
 

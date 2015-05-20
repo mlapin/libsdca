@@ -1,5 +1,5 @@
-#ifndef SDCA_BIASED_TOPKCONEPROJECTOR_HPP
-#define SDCA_BIASED_TOPKCONEPROJECTOR_HPP
+#ifndef SDCA_TOPK_CONE_BIASED_PROJECTOR_HPP
+#define SDCA_TOPK_CONE_BIASED_PROJECTOR_HPP
 
 #include "topk_cone_projector.hpp"
 
@@ -15,7 +15,7 @@ using TopKConeProjector<RealType>::projection_const_;
 public:
   TopKConeBiasedProjector(
       const std::size_t k = 1,
-      const RealType rho = 0
+      const RealType rho = 1
     ) :
       TopKConeProjector<RealType>::TopKConeProjector(k),
       rho_(rho)
@@ -26,7 +26,7 @@ public:
       RealType &t,
       RealType &lo,
       RealType &hi
-    ) override;
+    ) const override;
 
   void set_k(const std::size_t k) override {
     k_ = k;
@@ -56,4 +56,4 @@ private:
 
 }
 
-#endif // SDCA_BIASED_TOPKCONEPROJECTOR_HPP
+#endif // SDCA_TOPK_CONE_BIASED_PROJECTOR_HPP

@@ -22,21 +22,21 @@ public:
       RealType &t,
       RealType &lo,
       RealType &hi
-    ) override;
+    ) const override;
 
   Projection CheckSpecialCases(
       std::vector<RealType> &x,
       RealType &t,
       RealType &lo,
       RealType &hi
-    );
+    ) const;
 
   virtual void ComputeGeneralCase(
       std::vector<RealType> &x,
       RealType &t,
       RealType &lo,
       RealType &hi
-    );
+    ) const;
 
   std::size_t get_k() const { return k_; }
   virtual void set_k(const std::size_t k) {

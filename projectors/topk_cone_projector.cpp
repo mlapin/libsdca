@@ -12,7 +12,7 @@ void TopKConeProjector<RealType>::ComputeThresholds(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
-    RealType &hi) {
+    RealType &hi) const {
 
   switch (CheckSpecialCases(x, t, lo, hi)) {
     case Projection::Zero:
@@ -30,7 +30,7 @@ Projection TopKConeProjector<RealType>::CheckSpecialCases(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
-    RealType &hi) {
+    RealType &hi) const {
 
   // Partially sort x around the kth element
   std::nth_element(x.begin(), x.begin() + k_ - 1, x.end(),
@@ -62,7 +62,7 @@ void TopKConeProjector<RealType>::ComputeGeneralCase(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
-    RealType &hi) {
+    RealType &hi) const {
 
   // Lower bound is always zero
   lo = 0;

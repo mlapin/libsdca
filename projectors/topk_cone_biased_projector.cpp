@@ -13,7 +13,7 @@ void TopKConeBiasedProjector<RealType>::ComputeGeneralCase(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
-    RealType &hi) {
+    RealType &hi) const {
 
   // Lower bound is always zero
   lo = 0;

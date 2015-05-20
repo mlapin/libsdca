@@ -1,4 +1,5 @@
 add_library(${LIB_PROJECTORS} OBJECT
+  projectors.hpp
   projector.hpp
   projector.cpp
   knapsack_projector.hpp

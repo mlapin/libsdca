@@ -1427,7 +1427,7 @@ if(_matlab_find_blas GREATER -1)
   _Matlab_find_library(
     ${_matlab_lib_prefix_for_search}
     Matlab_BLAS_LIBRARY
-    eng
+    mwblas
     PATHS ${_matlab_lib_dir_for_search}
     NO_DEFAULT_PATH
   )

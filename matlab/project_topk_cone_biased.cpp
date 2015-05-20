@@ -8,8 +8,8 @@
 #include "topk_cone_biased_projector.hpp"
 
 void printUsage() {
-  mexPrintf("Usage: projtopkconebiased(X); (k = 1, rho = 0)\n"
-            "       [X_proj] = projtopkconebiased(X,k,rho);\n");
+  mexPrintf("Usage: project_topk_cone_biased(X); (k = 1, rho = 0)\n"
+            "       [X_proj] = project_topk_cone_biased(X,k,rho);\n");
 }
 
 void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
@@ -52,10 +52,10 @@ void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
 
   if (mxIsDouble(mxX)) {
     sdca::TopKConeBiasedProjector<double> proj(k, rho);
-    proj.Project(static_cast<double*>(mxGetData(mxX)), m, n);
+    proj.Project(m, n, static_cast<double*>(mxGetData(mxX)));
   } else if (mxIsSingle(mxX)) {
     sdca::TopKConeBiasedProjector<float> proj(k, static_cast<float>(rho));
-    proj.Project(static_cast<float*>(mxGetData(mxX)), m, n);
+    proj.Project(m, n, static_cast<float*>(mxGetData(mxX)));
   }
 }
 

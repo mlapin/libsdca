@@ -18,15 +18,21 @@
 
 # Copyright 2015 Maksim Lapin.
 
-set(BLAS_LIBRARIES_ORIGINAL ${BLAS_LIBRARIES})
-set(BLAS_LIBRARIES)
-
 if(MKL_FOUND)
 
+  set(BLAS_LIBRARIES)
   list(APPEND BLAS_LIBRARIES "-Wl,--start-group")
-  list(APPEND BLAS_LIBRARIES ${MKL_ILP64_LIBRARY} ${MKL_CORE_LIBRARY})
 
-  if(MKL_USE_SEQUENTIAL)
+  if(USE_ILP64)
+    add_definitions(-DMKL_ILP64)
+    list(APPEND BLAS_LIBRARIES ${MKL_ILP64_LIBRARY})
+  else()
+    list(APPEND BLAS_LIBRARIES ${MKL_LP64_LIBRARY})
+  endif()
+
+  list(APPEND BLAS_LIBRARIES ${MKL_CORE_LIBRARY})
+
+  if(USE_SEQUENTIAL)
     list(APPEND BLAS_LIBRARIES ${MKL_SEQUENTIAL_LIBRARY})
   else()
     list(APPEND BLAS_LIBRARIES ${MKL_GNU_THREAD_LIBRARY})
@@ -34,17 +40,19 @@ if(MKL_FOUND)
 
   list(APPEND BLAS_LIBRARIES "-Wl,--end-group")
 
-  add_definitions(-DBLAS_MKL ${MKL_DEFINITIONS})
+  include_directories("${MKL_INCLUDE_DIRS}")
+  add_definitions(-DBLAS_MKL)
 
-elseif(Matlab_BLAS_LIBRARY_FOUND)
+#elseif(Matlab_BLAS_LIBRARY_FOUND)
 
-  list(APPEND BLAS_LIBRARIES "-lmwblas")
-  add_definitions(-DBLAS_MATLAB)
+#  list(APPEND BLAS_LIBRARIES ${Matlab_BLAS_LIBRARY})
+
+#  include_directories(Matlab_INCLUDE_DIRS)
+#  add_definitions(-DBLAS_MATLAB)
 
 elseif(BLAS_FOUND)
 
-  list(APPEND BLAS_LIBRARIES ${BLAS_LIBRARIES_ORIGINAL})
-  add_definitions(-DBLAS_BLAS)
+  add_definitions(-DBLAS_DEFAULT)
 
 endif()
 
@@ -53,12 +61,13 @@ if(BLAS_LIBRARIES AND Threads_FOUND)
   set(BLAS_FOUND TRUE)
   list(APPEND BLAS_LIBRARIES "-Wl,--as-needed" "-ldl" "-lm")
   list(APPEND BLAS_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
+  message(STATUS "Found BLAS: ${BLAS_LIBRARIES}")
 
 else()
 
   set(BLAS_FOUND FALSE)
   set(BLAS_LIBRARIES)
-  message(FATAL_ERROR "BLAS not found.")
+  message(FATAL_ERROR "BLAS or Threads not found.")
 
 endif()
 

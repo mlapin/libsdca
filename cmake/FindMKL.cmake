@@ -27,6 +27,11 @@ find_path(
   )
 
 find_library(
+  MKL_LP64_LIBRARY
+  NAMES libmkl_intel_lp64.a mkl_intel_lp64
+  PATHS ${MKL_ROOT_DIR}/lib/intel64
+  )
+find_library(
   MKL_ILP64_LIBRARY
   NAMES libmkl_intel_ilp64.a mkl_intel_ilp64
   PATHS ${MKL_ROOT_DIR}/lib/intel64
@@ -52,14 +57,15 @@ find_library(
   PATHS ${MKL_ROOT_DIR}/lib/intel64
   )
 
-set(MKL_INCLUDE_DIRS MKL_INCLUDE_DIR)
-set(MKL_LIBRARIES MKL_ILP64_LIBRARY MKL_CORE_LIBRARY)
-set(MKL_DEFINITIONS "-DMKL_ILP64")
+set(MKL_INCLUDE_DIRS ${MKL_INCLUDE_DIR})
+set(MKL_LIBRARIES ${MKL_CORE_LIBRARY})
+set(MKL_DEFINITIONS)
 
 find_package_handle_standard_args(
   MKL
   DEFAULT_MSG
   MKL_INCLUDE_DIR
+  MKL_LP64_LIBRARY
   MKL_ILP64_LIBRARY
   MKL_CORE_LIBRARY
   MKL_INTEL_THREAD_LIBRARY
@@ -69,6 +75,7 @@ find_package_handle_standard_args(
 
 mark_as_advanced(
   MKL_INCLUDE_DIR
+  MKL_LP64_LIBRARY
   MKL_ILP64_LIBRARY
   MKL_CORE_LIBRARY
   MKL_INTEL_THREAD_LIBRARY

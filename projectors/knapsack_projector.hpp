@@ -24,7 +24,7 @@ public:
       RealType &t,
       RealType &get_lo,
       RealType &get_hi
-    ) override;
+    ) const override;
 
   void PartitionAndComputeThresholds(
       std::vector<RealType> &x,
@@ -33,7 +33,7 @@ public:
       RealType &get_hi,
       typename std::vector<RealType>::iterator &first,
       typename std::vector<RealType>::iterator &last
-    );
+    ) const;
 
   RealType get_lo() const { return lo_; }
   void set_lo(const RealType lo) { lo_ = lo; }

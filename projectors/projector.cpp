@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 
 #include "projector.hpp"
 
@@ -6,22 +7,48 @@ namespace sdca {
 
 template <typename RealType>
 void Projector<RealType>::Project(
-    RealType *x,
-    const std::size_t n) {
-  RealType t, lo, hi;
-  std::vector<RealType> aux(x, x + n);
-  ComputeThresholds(aux, t, lo, hi);
-  Clamp(x, x + n, t, lo, hi);
+    const std::size_t n,
+    RealType *first) const {
+  Project(first, first + n);
 }
 
 template <typename RealType>
 void Projector<RealType>::Project(
-    RealType *x,
+    RealType *first,
+    RealType *last) const {
+  RealType t, lo, hi;
+  std::vector<RealType> aux(first, last);
+  ComputeThresholds(aux, t, lo, hi);
+  Clamp(first, last, t, lo, hi);
+}
+
+template <typename RealType>
+void Projector<RealType>::Project(
     const std::size_t n,
-    const std::size_t num_col) {
-  RealType t, lo, hi, *last = x + n, *end = x + n*num_col;
-  std::vector<RealType> aux(n);
-  for (; x != end; last += n) {
+    RealType *first,
+    std::vector<RealType> &aux) const {
+  Project(first, first + n, aux);
+}
+
+template <typename RealType>
+void Projector<RealType>::Project(
+    RealType *first,
+    RealType *last,
+    std::vector<RealType> &aux) const {
+  RealType t, lo, hi;
+  std::copy(first, last, &aux[0]);
+  ComputeThresholds(aux, t, lo, hi);
+  Clamp(first, last, t, lo, hi);
+}
+
+template <typename RealType>
+void Projector<RealType>::Project(
+    const std::size_t num_row,
+    const std::size_t num_col,
+    RealType *x) const {
+  RealType t, lo, hi, *last = x + num_row, *end = x + num_row*num_col;
+  std::vector<RealType> aux(num_row);
+  for (; x != end; last += num_row) {
     std::copy(x, last, &aux[0]);
     ComputeThresholds(aux, t, lo, hi);
     Clamp(x, last, t, lo, hi);
@@ -35,7 +62,7 @@ void Projector<RealType>::Clamp(
     RealType *last,
     const RealType t,
     const RealType lo,
-    const RealType hi) {
+    const RealType hi) const {
   if (hi <= lo) {
     std::fill(first, last, lo);
   } else if (hi == std::numeric_limits<RealType>::infinity()) {

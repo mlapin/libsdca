@@ -23,13 +23,13 @@ public:
       RealType &t,
       RealType &lo,
       RealType &hi
-    ) override;
+    ) const override;
 
   bool CheckProjectOntoCone(
       std::vector<RealType> &x,
       RealType &t,
       typename std::vector<RealType>::iterator &m_begin
-    );
+    ) const;
 
   TopKConeProjector<RealType> get_cone() const { return cone_; }
 

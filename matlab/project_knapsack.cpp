@@ -8,8 +8,8 @@
 #include "knapsack_projector.hpp"
 
 void printUsage() {
-  mexPrintf("Usage: projknapsack(X); (lo = 0, hi = 1, rhs = 1)\n"
-            "       [X_proj] = projknapsack(X,lo,hi,rhs);\n");
+  mexPrintf("Usage: project_knapsack(X); (lo = 0, hi = 1, rhs = 1)\n"
+            "       [X_proj] = project_knapsack(X,lo,hi,rhs);\n");
 }
 
 void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
@@ -49,13 +49,13 @@ void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
 
   if (mxIsDouble(mxX)) {
     sdca::KnapsackProjector<double> proj(lo, hi, rhs);
-    proj.Project(static_cast<double*>(mxGetData(mxX)), m, n);
+    proj.Project(m, n, static_cast<double*>(mxGetData(mxX)));
   } else if (mxIsSingle(mxX)) {
     sdca::KnapsackProjector<float> proj(
       static_cast<float>(lo),
       static_cast<float>(hi),
       static_cast<float>(rhs));
-    proj.Project(static_cast<float*>(mxGetData(mxX)), m, n);
+    proj.Project(m, n, static_cast<float*>(mxGetData(mxX)));
   }
 }
 

@@ -11,7 +11,7 @@ void KnapsackProjector<RealType>::ComputeThresholds(
     std::vector<RealType> &x,
     RealType &t,
     RealType &lo,
-    RealType &hi) {
+    RealType &hi) const {
 
   typename std::vector<RealType>::iterator m_begin, l_begin;
   PartitionAndComputeThresholds(x, t, lo, hi, m_begin, l_begin);
@@ -24,7 +24,7 @@ void KnapsackProjector<RealType>::PartitionAndComputeThresholds(
     RealType &lo,
     RealType &hi,
     typename std::vector<RealType>::iterator &m_begin,
-    typename std::vector<RealType>::iterator &l_begin) {
+    typename std::vector<RealType>::iterator &l_begin) const {
   /*
    * Based on the Algorithm 3.1 in
    * Kiwiel, K. C. "Variable fixing algorithms for the continuous

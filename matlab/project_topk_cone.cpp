@@ -8,8 +8,8 @@
 #include "topk_cone_projector.hpp"
 
 void printUsage() {
-  mexPrintf("Usage: projtopkcone(X); (k = 1)\n"
-            "       [X_proj] = projtopkcone(X,k);\n");
+  mexPrintf("Usage: project_topk_cone(X); (k = 1)\n"
+            "       [X_proj] = project_topk_cone(X,k);\n");
 }
 
 void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
@@ -47,10 +47,10 @@ void mexFunction(int nlhs, mxArray *plhs[],int nrhs, const mxArray *prhs[]) {
 
   if (mxIsDouble(mxX)) {
     sdca::TopKConeProjector<double> proj(k);
-    proj.Project(static_cast<double*>(mxGetData(mxX)), m, n);
+    proj.Project(m, n, static_cast<double*>(mxGetData(mxX)));
   } else if (mxIsSingle(mxX)) {
     sdca::TopKConeProjector<float> proj(k);
-    proj.Project(static_cast<float*>(mxGetData(mxX)), m, n);
+    proj.Project(m, n, static_cast<float*>(mxGetData(mxX)));
   }
 }
 
