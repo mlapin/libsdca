@@ -52,8 +52,14 @@ void sdca_blas_axpby(
 template <typename RealType>
 RealType sdca_blas_dot(
     const IndexType n,
-    const RealType *__restrict__ X,
-    const RealType *__restrict__ Y
+    const RealType *X,
+    const RealType *Y
+  );
+
+template <typename RealType>
+RealType sdca_blas_asum(
+    const IndexType n,
+    const RealType *X
   );
 
 template <typename RealType>
@@ -66,6 +72,16 @@ void sdca_blas_gemv(
     const CBLAS_TRANSPOSE transA = CblasNoTrans,
     const RealType alpha = static_cast<RealType>(1),
     const RealType beta = static_cast<RealType>(0)
+    );
+
+template <typename RealType>
+void sdca_blas_ger(
+    const IndexType m,
+    const IndexType n,
+    const RealType alpha,
+    const RealType *X,
+    const RealType *Y,
+    RealType *A
     );
 
 }

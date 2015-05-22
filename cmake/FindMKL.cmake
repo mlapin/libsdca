@@ -20,6 +20,19 @@ else()
   file(TO_CMAKE_PATH "/opt/intel/mkl" MKL_ROOT_DIR)
 endif()
 
+set(COMPOSER_ROOT_DIR ${COMPOSER_ROOT_DIR} CACHE PATH
+    "Intel Composer XE installation root path.")
+
+if(COMPOSER_ROOT_DIR)
+  file(TO_CMAKE_PATH ${COMPOSER_ROOT_DIR} COMPOSER_ROOT_DIR)
+elseif($ENV{PROD_DIR})
+  file(TO_CMAKE_PATH $ENV{PROD_DIR} COMPOSER_ROOT_DIR)
+elseif($ENV{CPRO_PATH})
+  file(TO_CMAKE_PATH $ENV{CPRO_PATH} COMPOSER_ROOT_DIR)
+else()
+  file(TO_CMAKE_PATH "/opt/intel/composerxe" COMPOSER_ROOT_DIR)
+endif()
+
 find_path(
   MKL_INCLUDE_DIR
   mkl.h
@@ -57,6 +70,12 @@ find_library(
   PATHS ${MKL_ROOT_DIR}/lib/intel64
   )
 
+find_library(
+  INTEL_OMP_LIBRARY
+  NAMES libiomp5 iomp5
+  PATHS ${COMPOSER_ROOT_DIR}/lib/intel64
+  )
+
 set(MKL_INCLUDE_DIRS ${MKL_INCLUDE_DIR})
 set(MKL_LIBRARIES ${MKL_CORE_LIBRARY})
 set(MKL_DEFINITIONS)
@@ -81,4 +100,5 @@ mark_as_advanced(
   MKL_INTEL_THREAD_LIBRARY
   MKL_GNU_THREAD_LIBRARY
   MKL_SEQUENTIAL_LIBRARY
+  INTEL_OMP_LIBRARY
   )

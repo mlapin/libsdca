@@ -14,8 +14,8 @@ using namespace sdca;
 
 void printUsage(const std::vector<double> &params) {
   mexPrintf(
-    "Usage: A = solve_dual_topk_l2(Y,K);\n"
-    "       [A,info] = solve_dual_topk_l2(Y,K,<parameters>);\n"
+    "Usage: W = solve_primal_topk_l2(Y,X);\n"
+    "       [W,info,A] = solve_primal_topk_l2(Y,X,<parameters>);\n"
     "Parameters can be given in this order (default value in parentheses):\n"
     "  top_k (%g)\n"
     "  svm_c (%g)\n"
@@ -24,9 +24,11 @@ void printUsage(const std::vector<double> &params) {
     "  epsilon (%g)\n"
     "  seed (%g)\n"
     "\n"
-    "Matrix A is a num_tasks-by-num_examples matrix of dual variables and\n"
+    "Matrix W is a num_dimensions-by-num_tasks matrix of primal variables,\n"
+    "matrix A is a num_tasks-by-num_examples matrix of dual variables and\n"
     "  W = Xtrn * A';        %% dim-by-num_examples matrix of predictors\n"
     "  S = A * (Xtrn'*Xtst); %% num_tasks-by-num_examples matrix of scores\n"
+    "  S = W' * Xtst;        %% (same as above)\n"
     "\n",
     params[0], params[1], params[2], params[3], params[4], params[5], params[6]
     );
@@ -71,20 +73,20 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
       "Wrong number of input arguments.");
   }
 
-  if (nlhs < 1 || nlhs > 2) {
+  if (nlhs < 1 || nlhs > 3) {
     printUsage(params);
     mexErrMsgIdAndTxt("LIBSDCA:outputmismatch",
       "Wrong number of output arguments.");
   }
 
   const mxArray *mxY = prhs[0];
-  const mxArray *mxK = prhs[1];
+  const mxArray *mxX = prhs[1];
 
-  mxVerifyNotSparseNotEmpty(mxK, "K");
-  mxVerifySingleOrDouble(mxK, "K");
-  mxVerifyMatrixSquare(mxK, "K");
+  mxVerifyNotSparseNotEmpty(mxX, "X");
+  mxVerifySingleOrDouble(mxX, "X");
 
-  SizeType num_examples = static_cast<SizeType>(mxGetM(mxK));
+  SizeType num_dimensions = static_cast<SizeType>(mxGetM(mxX));
+  SizeType num_examples = static_cast<SizeType>(mxGetN(mxX));
   mxVerifyVectorDimension(mxY, num_examples, "Y");
   mxVerifyNotSparseNotEmpty(mxY, "Y");
   mxVerifyDouble(mxY, "Y");
@@ -113,28 +115,37 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 
   double lambda = 1.0 / (static_cast<double>(num_examples) * svm_c);
 
-  std::cout << "solve_dual_topk_l2[" <<
+  std::cout << "solve_primal_topk_l2[" <<
     "top_k: " << top_k << ", svm_c: " << svm_c << ", lambda: " << lambda <<
     ", check_gap_frequency: " << check_gap_frequency <<
     ", max_num_epoch: " << max_num_epoch <<
     ", epsilon: " << epsilon << ", seed: " << seed << "]" << std::endl;
 
-  mwSize mxDims[2] = {num_tasks, num_examples};
-  mxArray *mxA = mxCreateNumericArray(2, mxDims, mxGetClassID(mxK), mxREAL);
+  mwSize mxDims[2] = {num_dimensions, num_tasks};
+  mxArray *mxW = mxCreateNumericArray(2, mxDims, mxGetClassID(mxX), mxREAL);
+  if (mxW == NULL) {
+    mexErrMsgIdAndTxt(errOutOfMemory, "Failed to allocate memory for W.");
+  }
+
+  mxDims[0] = num_tasks;
+  mxDims[1] = num_examples;
+  mxArray *mxA = mxCreateNumericArray(2, mxDims, mxGetClassID(mxX), mxREAL);
   if (mxA == NULL) {
     mexErrMsgIdAndTxt(errOutOfMemory, "Failed to allocate memory for A.");
   }
 
   mxArray *mxInfo;
-  if (mxIsDouble(mxK)) {
-    const double *Kptr = static_cast<double*>(mxGetData(mxK));
+  if (mxIsDouble(mxX)) {
+    const double *Xptr = static_cast<double*>(mxGetData(mxX));
+    double *Wptr = static_cast<double*>(mxGetData(mxW));
     double *Aptr = static_cast<double*>(mxGetData(mxA));
 
     TopKLossL2RegularizerDualVariablesHelper<double>
       solver_helper(top_k, static_cast<double>(lambda), num_examples);
 
-    DualSolver<double, TopKLossL2RegularizerDualVariablesHelper<double>>
-      solver(solver_helper, num_examples, num_tasks, Kptr, &labels[0], Aptr);
+    PrimalSolver<double, TopKLossL2RegularizerDualVariablesHelper<double>>
+      solver(solver_helper, num_dimensions, num_examples, num_tasks,
+             Xptr, &labels[0], Wptr, Aptr);
 
     solver.set_check_gap_frequency(check_gap_frequency);
     solver.set_max_num_epoch(max_num_epoch);
@@ -144,15 +155,17 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 
     mxInfo = createInfoStruct<double>(solver, svm_c, lambda);
 
-  } else if (mxIsSingle(mxK)) {
-    const float *Kptr = static_cast<float*>(mxGetData(mxK));
+  } else if (mxIsSingle(mxX)) {
+    const float *Xptr = static_cast<float*>(mxGetData(mxX));
+    float *Wptr = static_cast<float*>(mxGetData(mxW));
     float *Aptr = static_cast<float*>(mxGetData(mxA));
 
     TopKLossL2RegularizerDualVariablesHelper<float>
       solver_helper(top_k, static_cast<float>(lambda), num_examples);
 
-    DualSolver<float, TopKLossL2RegularizerDualVariablesHelper<float>>
-      solver(solver_helper, num_examples, num_tasks, Kptr, &labels[0], Aptr);
+    PrimalSolver<float, TopKLossL2RegularizerDualVariablesHelper<float>>
+      solver(solver_helper, num_dimensions, num_examples, num_tasks,
+             Xptr, &labels[0], Wptr, Aptr);
 
     solver.set_check_gap_frequency(check_gap_frequency);
     solver.set_max_num_epoch(max_num_epoch);
@@ -164,7 +177,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 
   }
 
-  if (nlhs > 0) plhs[0] = mxA;
+  if (nlhs > 0) plhs[0] = mxW;
   if (nlhs > 1) plhs[1] = mxInfo;
+  if (nlhs > 2) plhs[2] = mxA;
 }
 

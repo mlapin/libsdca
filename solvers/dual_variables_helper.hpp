@@ -7,24 +7,25 @@
 namespace sdca {
 
 template <typename RealType = double>
-class TopKLossL2RegularizerDualSolverHelper {
+class TopKLossL2RegularizerDualVariablesHelper {
 
 public:
-  TopKLossL2RegularizerDualSolverHelper(
+  TopKLossL2RegularizerDualVariablesHelper(
       const SizeType k,
       const RealType lambda,
       const SizeType num_examples
     ) :
       k_(k),
       k_minus_1_(k-1),
-      k_inverse_(static_cast<RealType>(1) / static_cast<RealType>(k)),
       lambda_(lambda),
       lambda_half_(static_cast<RealType>(0.5) * lambda),
-      num_examples_inverse_(static_cast<RealType>(1) /
-        static_cast<RealType>(num_examples)),
+      num_examples_k_inverse_(static_cast<RealType>(1) /
+        (static_cast<RealType>(num_examples) * static_cast<RealType>(k))),
       projector_(k, 1, static_cast<RealType>(1) /
         (static_cast<RealType>(num_examples) * lambda))
   {}
+
+  std::string get_name() const { return "TopKLossL2Regularizer"; }
 
   void UpdateVariables(
       const SizeType num_tasks,
@@ -54,10 +55,9 @@ public:
 private:
   const SizeType k_;
   const SizeType k_minus_1_;
-  const RealType k_inverse_;
   const RealType lambda_;
   const RealType lambda_half_;
-  const RealType num_examples_inverse_;
+  const RealType num_examples_k_inverse_;
   const TopKSimplexBiasedProjector<RealType> projector_;
 };
 

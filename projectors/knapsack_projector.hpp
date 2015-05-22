@@ -36,18 +36,15 @@ public:
     ) const;
 
   RealType get_lo() const { return lo_; }
-  void set_lo(const RealType lo) { lo_ = lo; }
 
   RealType get_hi() const { return hi_; }
-  void set_hi(const RealType hi) { hi_ = hi; }
 
   RealType get_rhs() const { return rhs_; }
-  void set_rhs(const RealType rhs) { rhs_ = rhs; }
 
 private:
-  RealType lo_;
-  RealType hi_;
-  RealType rhs_;
+  const RealType lo_;
+  const RealType hi_;
+  const RealType rhs_;
 
 };
 

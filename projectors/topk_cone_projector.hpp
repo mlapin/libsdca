@@ -39,17 +39,12 @@ public:
     ) const;
 
   std::size_t get_k() const { return k_; }
-  virtual void set_k(const std::size_t k) {
-    k_ = k;
-    kk_ = static_cast<RealType>(k);
-    projection_const_ = static_cast<RealType>(1) / kk_;
-  }
 
   RealType get_k_real() const { return kk_; }
 
 protected:
-  std::size_t k_;
-  RealType kk_;
+  const std::size_t k_;
+  const RealType kk_;
   RealType projection_const_;
 
 };

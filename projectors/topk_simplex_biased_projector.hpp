@@ -16,7 +16,8 @@ public:
       const RealType rhs = 1
     ) :
       cone_(k, rho),
-      knapsack_(0, rhs/static_cast<RealType>(k), rhs)
+      knapsack_(0, rhs/static_cast<RealType>(k), rhs),
+      rho_rhs_(rho * rhs)
   {}
 
   void ComputeThresholds(
@@ -37,8 +38,9 @@ public:
   KnapsackProjector<RealType> get_knapsack() const { return knapsack_; }
 
 private:
-  TopKConeBiasedProjector<RealType> cone_;
-  KnapsackProjector<RealType> knapsack_;
+  const TopKConeBiasedProjector<RealType> cone_;
+  const KnapsackProjector<RealType> knapsack_;
+  const RealType rho_rhs_;
 };
 
 }

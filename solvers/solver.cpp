@@ -1,7 +1,8 @@
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
 #include <ctime>
+#include <iostream>
+#include <iomanip>
 #include <random>
 
 #include "solver.hpp"
@@ -34,6 +35,17 @@ void Solver<RealType>::Solve() {
 
 template <typename RealType>
 void Solver<RealType>::BeginSolve() {
+#ifdef VERBOSE_BEGIN_END
+  std::cout << get_solver_name() << "::BeginSolve(" <<
+    std::scientific << std::setprecision(16) <<
+    "num_examples: " << get_num_examples() << ", "
+    "num_tasks: " << get_num_tasks() << ", "
+    "check_gap_frequency: " << get_check_gap_frequency() << ", "
+    "max_num_epoch: " << get_max_num_epoch() << ", "
+    "seed: " << get_seed() << ", "
+    "epsilon: " << get_epsilon() << ")" << std::endl;
+#endif
+
   cpu_start_ = std::clock();
   wall_start_ = std::chrono::high_resolution_clock::now();
   cpu_end_ = cpu_start_;
@@ -41,6 +53,8 @@ void Solver<RealType>::BeginSolve() {
 
   status_ = Status::Solving;
   recompute_duality_gap_ = false;
+  primal_objective_ = std::numeric_limits<RealType>::infinity();
+  dual_objective_ = -std::numeric_limits<RealType>::infinity();
 
   generator_.seed(seed_);
 
@@ -63,6 +77,19 @@ void Solver<RealType>::EndSolve() {
 
   cpu_end_ = std::clock();
   wall_end_ = std::chrono::high_resolution_clock::now();
+
+#ifdef VERBOSE_BEGIN_END
+  std::cout << get_solver_name() << "::EndSolve(" <<
+    "status: " << get_status_name() << ", "
+    "epoch: " << get_num_epoch() << ", "
+    "relative_gap: " << get_relative_gap() << ", "
+    "absolute_gap: " << get_absolute_gap() << ", "
+    "primal: " << get_primal_objective() << ", "
+    "dual: " << get_dual_objective() << ", "
+    "cpu_time: " << get_cpu_time() << ", "
+    "wall_time: " << get_wall_time() << ")" << std::endl;
+#endif
+  std::cout.copyfmt(std::ios(nullptr));
 }
 
 template <typename RealType>
@@ -94,12 +121,23 @@ void Solver<RealType>::ComputeDualityGap() {
   if (get_relative_gap() <= epsilon_) {
     status_ = Status::Solved;
   } else {
-    RealType after = get_dual_objective();
-    after += std::numeric_limits<RealType>::epsilon() * after;
+    RealType after = get_dual_objective() * (static_cast<RealType>(1)
+      + kInaccuracyTolerance);
     if (after < before) {
       status_ = Status::DualObjectiveDecreased;
     }
   }
+
+#ifdef VERBOSE_DUALITY_GAP
+  std::cout << "  "
+    "epoch: " << std::setw(4) << get_num_epoch() << std::setw(0) << ", "
+    "primal: " << get_primal_objective() << ", "
+    "dual: " << get_dual_objective() << ", "
+    "absolute_gap: " << get_absolute_gap() << ", "
+    "relative_gap: " << get_relative_gap() << ", "
+    "cpu_time: " << get_cpu_time_now() << ", "
+    "wall_time: " << get_wall_time_now() << std::endl;
+#endif
 
 }
 

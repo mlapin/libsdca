@@ -23,7 +23,7 @@ void TopKConeBiasedProjector<RealType>::ComputeGeneralCase(
 
   RealType min_U = std::numeric_limits<RealType>::infinity();
   RealType sum_u = 0, k_minus_u = kk_;
-  RealType u_plus_rho_k_2 = rho_k_2_, u_rho_k_plus_1 = 0;
+  RealType u_plus_rho_k_2 = rho_k_k_, u_rho_k_plus_1 = 0;
 
   // U is empty in the beginning (m_begin = x.begin)
   for (auto m_begin = x.begin(); m_begin != x.begin() + k_; ++m_begin) {

@@ -6,6 +6,31 @@
 namespace sdca {
 
 template <typename RealType, typename SolverHelperType>
+DualSolver<RealType, SolverHelperType>::DualSolver(
+    const SolverHelperType &solver_helper,
+    const SizeType num_examples,
+    const SizeType num_tasks,
+    const RealType *gram_matrix,
+    const SizeType *labels,
+    RealType *dual_variables
+  ) :
+    Solver<RealType>::Solver(num_examples, num_tasks,
+      solver_helper.get_name() + "DualSolver"),
+    solver_helper_(solver_helper),
+    gram_matrix_(gram_matrix),
+    labels_(labels),
+    dual_variables_(dual_variables),
+    scores_(num_tasks)
+{}
+
+template <typename RealType, typename SolverHelperType>
+void DualSolver<RealType, SolverHelperType>
+::BeginSolve() {
+  Solver<RealType>::BeginSolve();
+  std::fill_n(dual_variables_, num_tasks_ * num_examples_, 0);
+}
+
+template <typename RealType, typename SolverHelperType>
 void DualSolver<RealType, SolverHelperType>
 ::SolveExample(SizeType example) {
 
@@ -61,8 +86,8 @@ void DualSolver<RealType, SolverHelperType>
 }
 
 template class DualSolver<float,
-  TopKLossL2RegularizerDualSolverHelper<float>>;
+  TopKLossL2RegularizerDualVariablesHelper<float>>;
 template class DualSolver<double,
-  TopKLossL2RegularizerDualSolverHelper<double>>;
+  TopKLossL2RegularizerDualVariablesHelper<double>>;
 
 }

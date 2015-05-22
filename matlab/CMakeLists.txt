@@ -25,3 +25,8 @@ ADD_MEX(solve_dual_topk_l2 solve_dual_topk_l2.cpp mex_util.hpp
   $<TARGET_OBJECTS:${LIB_SOLVERS}>
   $<TARGET_OBJECTS:${LIB_PROJECTORS}>
   $<TARGET_OBJECTS:${LIB_UTIL}>)
+
+ADD_MEX(solve_primal_topk_l2 solve_primal_topk_l2.cpp mex_util.hpp
+  $<TARGET_OBJECTS:${LIB_SOLVERS}>
+  $<TARGET_OBJECTS:${LIB_PROJECTORS}>
+  $<TARGET_OBJECTS:${LIB_UTIL}>)

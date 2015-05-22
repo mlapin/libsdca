@@ -36,8 +36,8 @@ public:
   KnapsackProjector<RealType> get_knapsack() const { return knapsack_; }
 
 private:
-  TopKConeProjector<RealType> cone_;
-  KnapsackProjector<RealType> knapsack_;
+  const TopKConeProjector<RealType> cone_;
+  const KnapsackProjector<RealType> knapsack_;
 };
 
 }

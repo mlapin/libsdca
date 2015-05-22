@@ -15,25 +15,35 @@ set(USE_ILP64 TRUE)
 # Whether to use multi-threaded or sequential Intel MKL layer
 set(USE_SEQUENTIAL FALSE)
 
+# Whether to compile Matlab interface (if Matlab is found)
+set(USE_MATLAB TRUE)
 
-# CXX compiler flags, see also:
-# https://www.gnu.org/software/gsl/manual/html_node/GCC-warning-options-for-numerical-programs.html
-#
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Werror -W -Wall -Wextra")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pedantic -Wcast-qual -Wcast-align")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wdouble-promotion -Wconversion")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wpointer-arith -Wwrite-strings")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wshadow -fshort-enums -fno-common")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64 -fopenmp -fstack-protector")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions -freg-struct-return")
+# If set, solver outputs parameters / solution details on begin and end
+add_definitions(-DVERBOSE_BEGIN_END)
 
-set(LTO_FLAGS "-flto flto-partition=none -fno-fat-lto-objects")
-set(LTO_FLAGS "${LTO_FLAGS} -fuse-linker-plugin -funroll-loops")
+# If set, solver outputs some statistics on each duality gap computation
+add_definitions(-DVERBOSE_DUALITY_GAP)
 
-# Debug / Release specific flags
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -DDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${LTO_FLAGS}")
+# CXX compiler flags
+set(WARN_FLAGS "-pedantic -Werror -W -Wall -Wextra -Wwrite-strings")
+set(WARN_FLAGS "${WARN_FLAGS} -Wcast-qual -Wcast-align -Wshadow")
+set(WARN_FLAGS "${WARN_FLAGS} -Wdouble-promotion -Wconversion -Wpointer-arith")
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -m64 ${WARN_FLAGS}")
+
+# Debug / Release specific flags -Wno-unused-variable
+set(DEBUG_FLAGS "-O0 -DDEBUG -fstack-protector-all")
+
+set(RELEASE_FLAGS "-O3 -DNDEBUG -flto -fno-stack-protector -fno-exceptions")
+set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto-partition=none -fno-fat-lto-objects")
+set(RELEASE_FLAGS "${RELEASE_FLAGS} -fuse-linker-plugin -funroll-loops")
+
+# Profiling (add debug symbols)
+#set(RELEASE_FLAGS "${RELEASE_FLAGS} -g")
+
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${DEBUG_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${RELEASE_FLAGS}")
+
 
 # Install prefix
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -52,8 +62,11 @@ endif()
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 # Matlab (do not use their BLAS lib for now as it does not provide CBLAS API)
-#find_package(Matlab COMPONENTS BLAS_LIBRARY)
-find_package(Matlab)
+if(USE_MATLAB)
+  #find_package(Matlab COMPONENTS BLAS_LIBRARY)
+  find_package(Matlab)
+  set(USE_MATLAB ${Matlab_FOUND})
+endif()
 
 # Intel MKL
 find_package(MKL)
@@ -61,7 +74,7 @@ find_package(MKL)
 # BLAS libraries from various vendors (e.g. Atlas BLAS)
 find_package(BLAS)
 
-# Helper script to select a BLAS lib and set linker flags
+# Helper script to select a BLAS lib and set compiler/linker flags
 include(UseBLAS)
 
 
@@ -87,11 +100,11 @@ include_directories(solvers)
 add_subdirectory(solvers)
 
 # Matlab interface
-if(Matlab_FOUND)
+if(USE_MATLAB)
   add_subdirectory(matlab)
-else(Matlab_FOUND)
-  message(WARNING "Matlab not found. Matlab interface will not be compiled.")
-endif(Matlab_FOUND)
+else()
+  message(STATUS "Matlab interface will not be compiled.")
+endif()
 
 
 ###############################################################################

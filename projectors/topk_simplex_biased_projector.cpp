@@ -41,16 +41,17 @@ bool TopKSimplexBiasedProjector<RealType>::CheckProjectOntoCone(
     typename std::vector<RealType>::iterator &m_begin) const {
 
   // Check if the corresponding lambda is negative
+  RealType s = knapsack_.get_rhs();
   auto size = std::distance(x.begin(), m_begin);
   if (size) {
     RealType u = static_cast<RealType>(size);
     RealType sum_k_largest = std::accumulate(x.begin(), m_begin,
       static_cast<RealType>(0));
     RealType k = cone_.get_k_real();
-    RealType rho = cone_.get_rho();
-    return k * ( sum_k_largest + (k - u) * t) < u + rho * k * k;
+    RealType rho_k_k = cone_.get_rho_k_k();
+    return k * ( sum_k_largest + (k - u) * t) < s * (u + rho_k_k);
   } else {
-    return t < cone_.get_rho();
+    return t < rho_rhs_;
   }
 }
 

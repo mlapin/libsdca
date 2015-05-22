@@ -47,7 +47,7 @@ bool TopKSimplexProjector<RealType>::CheckProjectOntoCone(
     RealType sum_k_largest = std::accumulate(x.begin(), m_begin,
       static_cast<RealType>(0));
     RealType k = cone_.get_k_real();
-    return k * ( sum_k_largest + (k - u) * t) < u;
+    return k * ( sum_k_largest + (k - u) * t) < u * knapsack_.get_rhs();
   } else {
     return t < static_cast<RealType>(0);
   }

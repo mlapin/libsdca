@@ -18,8 +18,11 @@ public:
       const RealType rho = 1
     ) :
       TopKConeProjector<RealType>::TopKConeProjector(k),
-      rho_(rho)
-  { precompute_common(); }
+      rho_(rho),
+      rho_k_(rho_ * static_cast<RealType>(k)),
+      rho_k_k_(rho_k_ * static_cast<RealType>(k)),
+      rho_k_plus_1_(rho_k_ + static_cast<RealType>(1))
+  { projection_const_ = static_cast<RealType>(1) / (kk_ + rho_k_k_); }
 
   void ComputeGeneralCase(
       std::vector<RealType> &x,
@@ -28,30 +31,16 @@ public:
       RealType &hi
     ) const override;
 
-  void set_k(const std::size_t k) override {
-    k_ = k;
-    kk_ = static_cast<RealType>(k);
-    precompute_common();
-  }
-
   RealType get_rho() const { return rho_; }
-  void set_rho(const RealType rho) {
-    rho_ = rho;
-    precompute_common();
-  }
+
+  RealType get_rho_k_k() const { return rho_k_k_; }
 
 private:
-  RealType rho_;
-  RealType rho_k_;
-  RealType rho_k_2_;
-  RealType rho_k_plus_1_;
+  const RealType rho_;
+  const RealType rho_k_;
+  const RealType rho_k_k_;
+  const RealType rho_k_plus_1_;
 
-  void precompute_common() {
-    rho_k_ = rho_ * kk_;
-    rho_k_2_ = rho_k_ * kk_;
-    rho_k_plus_1_ = rho_k_ + static_cast<RealType>(1);
-    projection_const_ = static_cast<RealType>(1) / (kk_ + rho_k_2_);
-  }
 };
 
 }

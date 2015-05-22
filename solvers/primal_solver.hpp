@@ -1,5 +1,5 @@
-#ifndef DUAL_SOLVER_HPP
-#define DUAL_SOLVER_HPP
+#ifndef PRIMAL_SOLVER_HPP
+#define PRIMAL_SOLVER_HPP
 
 #include <vector>
 
@@ -9,27 +9,34 @@
 namespace sdca {
 
 template <typename RealType, typename SolverHelperType>
-class DualSolver : public Solver<RealType> {
+class PrimalSolver : public Solver<RealType> {
 
 using Solver<RealType>::num_examples_;
 using Solver<RealType>::num_tasks_;
 
 public:
-  DualSolver(
+  PrimalSolver(
       const SolverHelperType &solver_helper,
+      const SizeType num_dimensions,
       const SizeType num_examples,
       const SizeType num_tasks,
-      const RealType *gram_matrix,
+      const RealType *features,
       const SizeType *labels,
+      RealType *primal_variables,
       RealType *dual_variables
     );
 
 protected:
   const SolverHelperType solver_helper_;
-  const RealType *gram_matrix_;
+  const SizeType num_dimensions_;
+  const RealType *features_;
   const SizeType *labels_;
+  RealType *primal_variables_;
   RealType *dual_variables_;
+  std::vector<RealType> norms_;
   std::vector<RealType> scores_;
+  std::vector<RealType> dual_old_;
+  const RealType diff_tolerance_;
 
   void BeginSolve() override;
 
@@ -41,4 +48,4 @@ protected:
 
 }
 
-#endif // DUAL_SOLVER_HPP
+#endif // PRIMAL_SOLVER_HPP

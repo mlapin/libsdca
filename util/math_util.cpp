@@ -106,8 +106,8 @@ void sdca_blas_axpby<double>(
 template <>
 float sdca_blas_dot(
     const IndexType n,
-    const float *__restrict__ X,
-    const float *__restrict__ Y
+    const float *X,
+    const float *Y
   ) {
   return cblas_sdot(n, X, kIndexOne, Y, kIndexOne);
 }
@@ -115,10 +115,28 @@ float sdca_blas_dot(
 template <>
 double sdca_blas_dot(
     const IndexType n,
-    const double *__restrict__ X,
-    const double *__restrict__ Y
+    const double *X,
+    const double *Y
   ) {
   return cblas_ddot(n, X, kIndexOne, Y, kIndexOne);
+}
+
+
+
+template <>
+float sdca_blas_asum(
+    const IndexType n,
+    const float *X
+  ) {
+  return cblas_sasum(n, X, kIndexOne);
+}
+
+template <>
+double sdca_blas_asum(
+    const IndexType n,
+    const double *X
+  ) {
+  return cblas_dasum(n, X, kIndexOne);
 }
 
 
@@ -151,6 +169,32 @@ void sdca_blas_gemv<double>(
     ) {
   cblas_dgemv(CblasColMajor, transA, m, n, alpha, A, m,
               X, kIndexOne, beta, Y, kIndexOne);
+}
+
+
+
+template <>
+void sdca_blas_ger<float>(
+    const IndexType m,
+    const IndexType n,
+    const float alpha,
+    const float *X,
+    const float *Y,
+    float *A
+    ) {
+  cblas_sger(CblasColMajor, m, n, alpha, X, kIndexOne, Y, kIndexOne, A, m);
+}
+
+template <>
+void sdca_blas_ger<double>(
+    const IndexType m,
+    const IndexType n,
+    const double alpha,
+    const double *X,
+    const double *Y,
+    double *A
+    ) {
+  cblas_dger(CblasColMajor, m, n, alpha, X, kIndexOne, Y, kIndexOne, A, m);
 }
 
 }
