@@ -13,7 +13,7 @@ project(libsdca)
 set(USE_ILP64 TRUE)
 
 # Whether to use multi-threaded or sequential Intel MKL layer
-set(USE_SEQUENTIAL FALSE)
+set(USE_SEQUENTIAL TRUE)
 
 # Whether to compile Matlab interface (if Matlab is found)
 set(USE_MATLAB TRUE)
