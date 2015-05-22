@@ -30,7 +30,7 @@ public:
   static constexpr SizeType kDefaultCheckGapFrequency = 10;
   static constexpr SizeType kDefaultMaxNumEpoch = 100;
   static constexpr SizeType kDefaultSeed = 1;
-  static constexpr RealType kDefaultEpsilon = static_cast<RealType>(1e-2);
+  static constexpr RealType kDefaultEpsilon = static_cast<RealType>(1e-3);
 
 
   static constexpr RealType kInaccuracyTolerance =

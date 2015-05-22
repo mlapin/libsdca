@@ -65,7 +65,7 @@ mxArray * createInfoStruct(sdca::Solver<T> &solver, double C, double lambda) {
 
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
   // Default values of parameters:
-  std::vector<double> params = {1, 1, 10, 100, 1e-2, 1};
+  std::vector<double> params = {1, 1, 10, 100, 1e-3, 1};
 
   if (nrhs < 2 || nrhs > 2 + static_cast<int>(params.size())) {
     printUsage(params);
