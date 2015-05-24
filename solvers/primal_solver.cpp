@@ -118,4 +118,9 @@ template class PrimalSolver<float,
 template class PrimalSolver<double,
   TopKLossL2RegularizerDualVariablesHelper<double>>;
 
+template class PrimalSolver<float,
+  SmoothTopKLossL2RegularizerDualVariablesHelper<float>>;
+template class PrimalSolver<double,
+  SmoothTopKLossL2RegularizerDualVariablesHelper<double>>;
+
 }

@@ -15,8 +15,8 @@ public:
       const RealType rho = 1,
       const RealType rhs = 1
     ) :
-      cone_(k, rho),
       knapsack_(0, rhs/static_cast<RealType>(k), rhs),
+      cone_(k, rho),
       rho_rhs_(rho * rhs)
   {}
 
@@ -33,14 +33,15 @@ public:
       typename std::vector<RealType>::iterator &m_begin
     ) const;
 
-  TopKConeBiasedProjector<RealType> get_cone() const { return cone_; }
-
-  KnapsackProjector<RealType> get_knapsack() const { return knapsack_; }
+  void set_rho(const RealType rho) {
+    rho_rhs_ = rho * knapsack_.get_rhs();
+    cone_.set_rho(rho);
+  }
 
 private:
-  const TopKConeBiasedProjector<RealType> cone_;
   const KnapsackProjector<RealType> knapsack_;
-  const RealType rho_rhs_;
+  TopKConeBiasedProjector<RealType> cone_;
+  RealType rho_rhs_;
 };
 
 }

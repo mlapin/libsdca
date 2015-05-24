@@ -27,7 +27,7 @@ public:
     );
 
 protected:
-  const SolverHelperType solver_helper_;
+  SolverHelperType solver_helper_;
   const SizeType num_dimensions_;
   const RealType *features_;
   const SizeType *labels_;

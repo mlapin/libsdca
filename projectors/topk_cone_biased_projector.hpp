@@ -32,14 +32,21 @@ public:
     ) const override;
 
   RealType get_rho() const { return rho_; }
+  void set_rho(const RealType rho) {
+    rho_ = rho;
+    rho_k_ = rho * kk_;
+    rho_k_k_ = rho_k_ * kk_;
+    rho_k_plus_1_ = rho_k_ + static_cast<RealType>(1);
+    projection_const_ = static_cast<RealType>(1) / (kk_ + rho_k_k_);
+  }
 
   RealType get_rho_k_k() const { return rho_k_k_; }
 
 private:
-  const RealType rho_;
-  const RealType rho_k_;
-  const RealType rho_k_k_;
-  const RealType rho_k_plus_1_;
+  RealType rho_;
+  RealType rho_k_;
+  RealType rho_k_k_;
+  RealType rho_k_plus_1_;
 
 };
 

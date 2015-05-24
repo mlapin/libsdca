@@ -18,7 +18,9 @@ enum class Status {
   Solving = -1,
   Solved = 0,
   DualObjectiveDecreased,
-  MaxNumEpoch
+  MaxNumEpoch,
+  MaxWallTime,
+  MaxCpuTime
 };
 
 using WallClock = std::chrono::high_resolution_clock;
@@ -27,10 +29,12 @@ using CpuTimePoint = std::clock_t;
 
 public:
   static constexpr char const *kDefaultName = "Solver";
+  static constexpr RealType kDefaultEpsilon = static_cast<RealType>(1e-3);
   static constexpr SizeType kDefaultCheckGapFrequency = 10;
   static constexpr SizeType kDefaultMaxNumEpoch = 100;
+  static constexpr double kDefaultMaxWallTime = 0;
+  static constexpr double kDefaultMaxCpuTime = 0;
   static constexpr SizeType kDefaultSeed = 1;
-  static constexpr RealType kDefaultEpsilon = static_cast<RealType>(1e-3);
 
 
   static constexpr RealType kInaccuracyTolerance =
@@ -40,18 +44,22 @@ public:
       const SizeType num_examples,
       const SizeType num_tasks,
       const std::string solver_name = kDefaultName,
+      const RealType epsilon = kDefaultEpsilon,
       const SizeType check_gap_frequency = kDefaultCheckGapFrequency,
       const SizeType max_num_epoch = kDefaultMaxNumEpoch,
-      const SizeType seed = kDefaultSeed,
-      const RealType epsilon = kDefaultEpsilon
+      const double max_wall_time = kDefaultMaxWallTime,
+      const double max_cpu_time = kDefaultMaxCpuTime,
+      const SizeType seed = kDefaultSeed
     ) :
       num_examples_(num_examples),
       num_tasks_(num_tasks),
       solver_name_(solver_name),
+      epsilon_(epsilon),
       check_gap_frequency_(check_gap_frequency),
       max_num_epoch_(max_num_epoch),
+      max_wall_time_(max_wall_time),
+      max_cpu_time_(max_cpu_time),
       seed_(seed),
-      epsilon_(epsilon),
       primal_objective_(0),
       dual_objective_(0),
       status_(Status::Solved),
@@ -69,6 +77,9 @@ public:
 
   std::string get_solver_name() const { return solver_name_; }
 
+  RealType get_epsilon() const { return epsilon_; }
+  void set_epsilon(const RealType epsilon) { epsilon_ = epsilon; }
+
   SizeType get_check_gap_frequency() const { return check_gap_frequency_; }
   void set_check_gap_frequency(const SizeType check_gap_frequency) {
     check_gap_frequency_ = check_gap_frequency;
@@ -79,11 +90,18 @@ public:
     max_num_epoch_ = max_num_epoch;
   }
 
+  double get_max_wall_time() const { return max_wall_time_; }
+  void set_max_wall_time(const double max_wall_time) {
+    max_wall_time_ = max_wall_time;
+  }
+
+  double get_max_cpu_time() const { return max_cpu_time_; }
+  void set_max_cpu_time(const double max_cpu_time) {
+    max_cpu_time_ = max_cpu_time;
+  }
+
   SizeType get_seed() const { return seed_; }
   void set_seed(const SizeType seed) { seed_ = seed; }
-
-  RealType get_epsilon() const { return epsilon_; }
-  void set_epsilon(const RealType epsilon) { epsilon_ = epsilon; }
 
   Status get_status() const { return status_; }
 
@@ -92,6 +110,8 @@ public:
       case Status::Solved: return "Solved";
       case Status::Solving: return "Solving";
       case Status::MaxNumEpoch: return "MaxNumEpoch";
+      case Status::MaxWallTime: return "MaxWallTime";
+      case Status::MaxCpuTime: return "MaxCpuTime";
       case Status::DualObjectiveDecreased: return "DualObjectiveDecreased";
       default: return "Unknown";
     }
@@ -146,10 +166,12 @@ protected:
 
   // Solver parameters
   const std::string solver_name_;
+  RealType epsilon_;
   SizeType check_gap_frequency_;
   SizeType max_num_epoch_;
+  double max_wall_time_;
+  double max_cpu_time_;
   SizeType seed_;
-  RealType epsilon_;
 
   // Objectives
   RealType primal_objective_;

@@ -107,6 +107,15 @@ bool Solver<RealType>::EndEpoch() {
     ComputeDualityGap();
   }
 
+  if (status_ == Status::Solving) {
+    if (max_cpu_time_ > 0 && get_cpu_time_now() >= max_cpu_time_) {
+      status_ = Status::MaxCpuTime;
+    }
+    if (max_wall_time_ > 0 && get_wall_time_now() >= max_wall_time_) {
+      status_ = Status::MaxWallTime;
+    }
+  }
+
   // Stop if not solving
   return status_ != Status::Solving;
 }

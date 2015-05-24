@@ -25,7 +25,7 @@ public:
     );
 
 protected:
-  const SolverHelperType solver_helper_;
+  SolverHelperType solver_helper_;
   const RealType *gram_matrix_;
   const SizeType *labels_;
   RealType *dual_variables_;
