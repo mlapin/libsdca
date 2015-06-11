@@ -3,6 +3,8 @@
 
 #include "projector.hpp"
 #include "knapsack_projector.hpp"
+#include "knapsack_le_projector.hpp"
+#include "knapsack_le_biased_projector.hpp"
 #include "topk_cone_projector.hpp"
 #include "topk_simplex_projector.hpp"
 #include "topk_cone_biased_projector.hpp"

@@ -4,6 +4,10 @@ add_library(${LIB_PROJECTORS} OBJECT
   projector.cpp
   knapsack_projector.hpp
   knapsack_projector.cpp
+  knapsack_le_projector.hpp
+  knapsack_le_projector.cpp
+  knapsack_le_biased_projector.hpp
+  knapsack_le_biased_projector.cpp
   topk_cone_projector.hpp
   topk_cone_projector.cpp
   topk_cone_biased_projector.hpp

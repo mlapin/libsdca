@@ -22,15 +22,15 @@ public:
   void ComputeThresholds(
       std::vector<RealType> &x,
       RealType &t,
-      RealType &get_lo,
-      RealType &get_hi
+      RealType &lo,
+      RealType &hi
     ) const override;
 
   void PartitionAndComputeThresholds(
       std::vector<RealType> &x,
       RealType &t,
-      RealType &get_lo,
-      RealType &get_hi,
+      RealType &lo,
+      RealType &hi,
       typename std::vector<RealType>::iterator &first,
       typename std::vector<RealType>::iterator &last
     ) const;
@@ -41,7 +41,7 @@ public:
 
   RealType get_rhs() const { return rhs_; }
 
-private:
+protected:
   const RealType lo_;
   const RealType hi_;
   const RealType rhs_;

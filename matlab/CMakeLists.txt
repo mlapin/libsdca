@@ -12,6 +12,10 @@ endmacro(ADD_MEX)
 # Projection onto the k-simplex
 ADD_MEX(project_knapsack project_knapsack.cpp mex_util.hpp
   $<TARGET_OBJECTS:${LIB_PROJECTORS}> $<TARGET_OBJECTS:${LIB_UTIL}>)
+ADD_MEX(project_knapsack_le project_knapsack_le.cpp mex_util.hpp
+  $<TARGET_OBJECTS:${LIB_PROJECTORS}> $<TARGET_OBJECTS:${LIB_UTIL}>)
+ADD_MEX(project_knapsack_le_biased project_knapsack_le_biased.cpp mex_util.hpp
+  $<TARGET_OBJECTS:${LIB_PROJECTORS}> $<TARGET_OBJECTS:${LIB_UTIL}>)
 ADD_MEX(project_topk_cone project_topk_cone.cpp mex_util.hpp
   $<TARGET_OBJECTS:${LIB_PROJECTORS}> $<TARGET_OBJECTS:${LIB_UTIL}>)
 ADD_MEX(project_topk_cone_biased project_topk_cone_biased.cpp mex_util.hpp
