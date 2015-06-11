@@ -52,25 +52,22 @@ std::unique_ptr<Solver<T>> createSolver(
     const T *Kptr, const SizeType *labels, T *Aptr) {
 
   if (gamma > 0) {
-    SmoothTopKLossL2RegularizerDualVariablesHelper<T>
-      solver_helper(num_examples, num_tasks, top_k,
-        static_cast<T>(lambda), static_cast<T>(gamma));
-    return std::unique_ptr<Solver<T>>(new
-      DualSolver<T, SmoothTopKLossL2RegularizerDualVariablesHelper<T>>(
-        solver_helper, num_examples, num_tasks, Kptr, &labels[0], Aptr));
+    mexErrMsgIdAndTxt("LIBSDCA:notimplemented",
+      "Smooth HingeTopK loss solver is not implemented yet.");
+    return nullptr;
   } else {
-    TopKLossL2RegularizerDualVariablesHelper<T>
+    HingeTopKLossL2RegularizerDualVariablesHelper<T>
       solver_helper(num_examples, top_k, static_cast<T>(lambda));
     return std::unique_ptr<Solver<T>>(new
-      DualSolver<T, TopKLossL2RegularizerDualVariablesHelper<T>>(
+      DualSolver<T, HingeTopKLossL2RegularizerDualVariablesHelper<T>>(
         solver_helper, num_examples, num_tasks, Kptr, &labels[0], Aptr));
   }
 }
 
 void printUsage(const std::vector<double> &params) {
   mexPrintf(
-    "Usage: A = solve_dual_topk_l2(Y,K);\n"
-    "       [A,info] = solve_dual_topk_l2(Y,K,<parameters>);\n"
+    "Usage: A = solve_dual_hinge_topk_l2(Y,K);\n"
+    "       [A,info] = solve_dual_hinge_topk_l2(Y,K,<parameters>);\n"
     "Parameters can be given in this order (default value in parentheses):\n"
     "  top_k (%g)\n"
     "  svm_c (%g)\n"
@@ -145,7 +142,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
   
   double lambda = 1.0 / (static_cast<double>(num_examples) * svm_c);
   
-  std::cout << "solve_dual_topk_l2 [" <<
+  std::cout << "solve_dual_hinge_topk_l2 [" <<
     "top_k: " << top_k <<
     ", svm_c: " << svm_c <<
     ", lambda: " << lambda <<

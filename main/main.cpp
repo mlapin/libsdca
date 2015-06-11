@@ -12,6 +12,28 @@
 using namespace sdca;
 
 
+
+//#include <fstream>
+//#include <iterator>
+
+//  std::ofstream myfile;
+//  myfile.open("Xorig.txt", std::ios::out | std::ios::app);
+//  std::copy(variables, variables_back, std::ostream_iterator<RealType>(myfile, ","));
+//  myfile << std::endl;
+//  myfile.close();
+
+//  myfile.open("Params.txt", std::ios::out | std::ios::app);
+//  myfile << projector_.get_hi() << "," << projector_.get_rhs() << "," << projector_.get_rho() << std::endl;
+//  myfile.close();
+
+//  projector_.Project(variables, variables_back, scores);
+
+//  myfile.open("Xproj.txt", std::ios::out | std::ios::app);
+//  std::copy(variables, variables_back, std::ostream_iterator<RealType>(myfile, ","));
+//  myfile << std::endl;
+//  myfile.close();
+
+
 template <typename T = double>
 void display_vector(const std::vector<T> &v) {
   std::copy(v.begin(), v.end(), std::ostream_iterator<T>(std::cout, " "));

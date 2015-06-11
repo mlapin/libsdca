@@ -25,12 +25,22 @@ ADD_MEX(project_topk_simplex project_topk_simplex.cpp mex_util.hpp
 ADD_MEX(project_topk_simplex_biased project_topk_simplex_biased.cpp mex_util.hpp
   $<TARGET_OBJECTS:${LIB_PROJECTORS}> $<TARGET_OBJECTS:${LIB_UTIL}>)
 
+ADD_MEX(solve_primal_topk_l2 solve_primal_topk_l2.cpp mex_util.hpp
+  $<TARGET_OBJECTS:${LIB_SOLVERS}>
+  $<TARGET_OBJECTS:${LIB_PROJECTORS}>
+  $<TARGET_OBJECTS:${LIB_UTIL}>)
+
 ADD_MEX(solve_dual_topk_l2 solve_dual_topk_l2.cpp mex_util.hpp
   $<TARGET_OBJECTS:${LIB_SOLVERS}>
   $<TARGET_OBJECTS:${LIB_PROJECTORS}>
   $<TARGET_OBJECTS:${LIB_UTIL}>)
 
-ADD_MEX(solve_primal_topk_l2 solve_primal_topk_l2.cpp mex_util.hpp
+ADD_MEX(solve_primal_hinge_topk_l2 solve_primal_hinge_topk_l2.cpp mex_util.hpp
+  $<TARGET_OBJECTS:${LIB_SOLVERS}>
+  $<TARGET_OBJECTS:${LIB_PROJECTORS}>
+  $<TARGET_OBJECTS:${LIB_UTIL}>)
+
+ADD_MEX(solve_dual_hinge_topk_l2 solve_dual_hinge_topk_l2.cpp mex_util.hpp
   $<TARGET_OBJECTS:${LIB_SOLVERS}>
   $<TARGET_OBJECTS:${LIB_PROJECTORS}>
   $<TARGET_OBJECTS:${LIB_UTIL}>)

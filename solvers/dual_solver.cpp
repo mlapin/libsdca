@@ -95,4 +95,8 @@ template class DualSolver<float,
 template class DualSolver<double,
   SmoothTopKLossL2RegularizerDualVariablesHelper<double>>;
 
+template class DualSolver<float,
+  HingeTopKLossL2RegularizerDualVariablesHelper<float>>;
+template class DualSolver<double,
+  HingeTopKLossL2RegularizerDualVariablesHelper<double>>;
 }

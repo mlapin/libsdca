@@ -14,8 +14,8 @@
 using namespace sdca;
 
 template <typename T>
-mxArray * createInfoStruct(std::unique_ptr<Solver<T>> &solver, double C, double lambda,
-    double gamma) {
+mxArray * createInfoStruct(std::unique_ptr<Solver<T>> &solver,
+    double C, double lambda, double gamma) {
   void const *fields [] = {
     "Solver", mxCreateString(solver->get_solver_name().c_str()),
     "Status", mxCreateScalar(static_cast<double>(solver->get_status())),
