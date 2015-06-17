@@ -10,3 +10,9 @@ add_library(${LIB_SOLVERS} OBJECT
   dual_variables_helper.cpp
   )
 add_definitions(-fPIC)
+set_target_properties(${LIB_SOLVERS}
+  PROPERTIES
+    CXX_VISIBILITY_PRESET "hidden"
+    C_VISIBILITY_PRESET "hidden"
+    VISIBILITY_INLINES_HIDDEN "hidden"
+)

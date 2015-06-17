@@ -27,16 +27,22 @@ add_definitions(-DVERBOSE_DUALITY_GAP)
 # CXX compiler flags
 set(WARN_FLAGS "-pedantic -Werror -W -Wall -Wextra -Wwrite-strings")
 set(WARN_FLAGS "${WARN_FLAGS} -Wcast-qual -Wcast-align -Wshadow")
-set(WARN_FLAGS "${WARN_FLAGS} -Wdouble-promotion -Wconversion -Wpointer-arith")
+set(WARN_FLAGS "${WARN_FLAGS} -Wconversion -Wpointer-arith")
+if(CMAKE_COMPILER_IS_GNUCXX)
+  set(WARN_FLAGS "${WARN_FLAGS} -Wdouble-promotion")
+endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -m64 ${WARN_FLAGS}")
 
 # Debug / Release specific flags -Wno-unused-variable
 set(DEBUG_FLAGS "-O0 -DDEBUG -fstack-protector-all")
 
-set(RELEASE_FLAGS "-O3 -DNDEBUG -flto -fno-stack-protector -fno-exceptions")
-set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto-partition=none -fno-fat-lto-objects")
-set(RELEASE_FLAGS "${RELEASE_FLAGS} -fuse-linker-plugin -funroll-loops")
+set(RELEASE_FLAGS "-O3 -DNDEBUG -fno-stack-protector -fno-exceptions")
+if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
+  set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
+  set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
+  set(RELEASE_FLAGS "${RELEASE_FLAGS} -fuse-linker-plugin")
+endif()
 
 # Profiling (add debug symbols)
 #set(RELEASE_FLAGS "${RELEASE_FLAGS} -g")
@@ -46,11 +52,15 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${RELEASE_FLAGS}")
 
 
 # Install prefix
-if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set (CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}" CACHE PATH
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set (CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/bin" CACHE PATH
     "Install directory used by install." FORCE)
 endif()
 
+# Avoid a warning due to CMP0042
+if(APPLE)
+  set(CMAKE_MACOSX_RPATH ON)
+endif()
 
 ###############################################################################
 #
@@ -61,10 +71,12 @@ endif()
 # Custom Cmake modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
-# Matlab (do not use their BLAS lib for now as it does not provide CBLAS API)
+# Matlab
 if(USE_MATLAB)
-  #find_package(Matlab COMPONENTS BLAS_LIBRARY)
-  find_package(Matlab)
+  # Honor the visibility properties set for targets of type OBJECT
+  # (visibility is set to 'hidden' for mex files, see FindMatlab.cmake)
+  cmake_policy(SET CMP0063 NEW)
+  find_package(Matlab COMPONENTS MX_LIBRARY)
   set(USE_MATLAB ${Matlab_FOUND})
 endif()
 

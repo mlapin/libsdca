@@ -58,6 +58,10 @@ if(MKL_FOUND)
 #  include_directories(Matlab_INCLUDE_DIRS)
 #  add_definitions(-DBLAS_MATLAB)
 
+elseif(BLAS_Accelerate_LIBRARY)
+
+  add_definitions(-DBLAS_ACCELERATE)
+
 elseif(BLAS_FOUND)
 
   add_definitions(-DBLAS_DEFAULT)
@@ -67,7 +71,7 @@ endif()
 if(BLAS_LIBRARIES AND Threads_FOUND)
 
   set(BLAS_FOUND TRUE)
-  list(APPEND BLAS_LIBRARIES "-Wl,--as-needed" "-ldl" "-lm")
+  list(APPEND BLAS_LIBRARIES "-ldl" "-lm")
   list(APPEND BLAS_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
   message(STATUS "Found BLAS: ${BLAS_LIBRARIES}")
 

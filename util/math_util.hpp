@@ -4,6 +4,8 @@
 #if defined(BLAS_MKL)
   //#include <mkl.h> // produces warnings with -pedantic
   #include <mkl_cblas.h>
+#elif defined(BLAS_ACCELERATE)
+  #include <Accelerate/Accelerate.h>
 #elif defined(BLAS_DEFAULT)
   #include <cblas.h>
 #endif
@@ -12,10 +14,8 @@ namespace sdca {
 
 #if defined(BLAS_MKL)
   typedef MKL_INT IndexType;
-#elif defined(BLAS_DEFAULT)
-  typedef int IndexType;
 #else
-  typedef std::ptrdiff_t IndexType;
+  typedef int IndexType;
 #endif
 
 template <typename RealType>

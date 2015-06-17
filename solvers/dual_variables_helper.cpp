@@ -1,7 +1,8 @@
 #include <algorithm>
-#include <vector>
 #include <iostream>
 #include <iomanip>
+#include <numeric>
+#include <vector>
 
 #include "math_util.hpp"
 #include "dual_variables_helper.hpp"
@@ -66,10 +67,11 @@ UpdateLosses(
   scores[label] = static_cast<RealType>(0);
 
   // Sum k largest elements
-  std::nth_element(scores.begin(), scores.begin() + k_minus_1_, scores.end(),
+  auto k_end = scores.begin()
+    + static_cast<typename std::vector<RealType>::difference_type>(k_);
+  std::nth_element(scores.begin(), k_end - 1, scores.end(),
     std::greater<RealType>());
-  a = std::accumulate(scores.begin(), scores.begin() + k_,
-    static_cast<RealType>(0));
+  a = std::accumulate(scores.begin(), k_end, static_cast<RealType>(0));
 
   // max{0, sum_k_largest} (division by k happens later)
   if (a > static_cast<RealType>(0)) {
@@ -248,9 +250,11 @@ UpdateLosses(
   scores[label] = static_cast<RealType>(0);
 
   // Sum k largest positive elements
-  std::nth_element(scores.begin(), scores.begin() + k_minus_1_, scores.end(),
+  auto k_end = scores.begin()
+    + static_cast<typename std::vector<RealType>::difference_type>(k_);
+  std::nth_element(scores.begin(), k_end - 1, scores.end(),
     std::greater<RealType>());
-  for (auto it = scores.begin(); it != scores.begin() + k_; ++it) {
+  for (auto it = scores.begin(); it != k_end; ++it) {
     if (*it > static_cast<RealType>(0)) {
       primal_loss += *it;
     }

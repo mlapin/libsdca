@@ -1,6 +1,8 @@
 #ifndef SDCA_DUAL_SOLVER_HELPER_HPP
 #define SDCA_DUAL_SOLVER_HELPER_HPP
 
+#include <string>
+
 #include "common.hpp"
 #include "projectors.hpp"
 

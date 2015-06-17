@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cassert>
+#include <functional>
+#include <numeric>
 #include <vector>
 
 #include "knapsack_le_biased_projector.hpp"

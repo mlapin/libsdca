@@ -56,7 +56,7 @@ void Solver<RealType>::BeginSolve() {
   primal_objective_ = std::numeric_limits<RealType>::infinity();
   dual_objective_ = -std::numeric_limits<RealType>::infinity();
 
-  generator_.seed(seed_);
+  generator_.seed(static_cast<std::minstd_rand::result_type>(seed_));
 
   examples_.resize(num_examples_);
   std::iota(examples_.begin(), examples_.end(), static_cast<SizeType>(0));

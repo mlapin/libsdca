@@ -6,8 +6,8 @@
 #include <random>
 #include <vector>
 
+#include "common.hpp"
 #include "math_util.hpp"
-#include <mkl_blas.h>
 
 using namespace sdca;
 
@@ -44,48 +44,49 @@ int main() {
   std::mt19937 gen(0);
   std::normal_distribution<> d(0,1);
 
-  IndexType m = 400;
-  IndexType n = 2000;
+  SizeType m = 400;
+  SizeType n = 2000;
   std::vector<double> A, Ki, scores;
   A.reserve(m*n);
-  for (IndexType i = 0; i < m*n; ++i) {
+  for (IndexType i = 0; i < static_cast<IndexType>(m*n); ++i) {
     A.push_back(d(gen));
   }
   Ki.reserve(n);
-  for (IndexType i = 0; i < n; ++i) {
+  for (IndexType i = 0; i < static_cast<IndexType>(n); ++i) {
     Ki.push_back(d(gen));
   }
   scores.resize(m);
 
-  double elapsedTime1(0), elapsedTime2(0);
-  const char *noTrans = "N";
-  const char *trans = "T";
-  double alpha = 1;
-  double beta = 0;
-  const IndexType kIndexOne = static_cast<IndexType>(1);
+  double elapsedTime1(0);
+//  double elapsedTime2(0);
+//  const char *noTrans = "N";
+//  const char *trans = "T";
+//  double alpha = 1;
+//  double beta = 0;
+//  const IndexType kIndexOne = static_cast<IndexType>(1);
 
-  for (IndexType j = 0; j < 20; ++j) {
+//  for (IndexType j = 0; j < 20; ++j) {
 
-    std::clock_t start = std::clock();
+//    std::clock_t start = std::clock();
 
-    for (IndexType i = 0; i < n; ++i) {
-      dgemv(noTrans, &m, &n, &alpha, &A[0], &m, &Ki[0], &kIndexOne,
-           &beta, &scores[0], &kIndexOne);
-    }
+//    for (IndexType i = 0; i < n; ++i) {
+//      dgemv(noTrans, &m, &n, &alpha, &A[0], &m, &Ki[0], &kIndexOne,
+//           &beta, &scores[0], &kIndexOne);
+//    }
 
-    elapsedTime1 += static_cast<double>(std::clock() - start) /
-      CLOCKS_PER_SEC;
+//    elapsedTime1 += static_cast<double>(std::clock() - start) /
+//      CLOCKS_PER_SEC;
 
-    start = std::clock();
+//    start = std::clock();
 
-    for (IndexType i = 0; i < n; ++i) {
-      dgemv(trans, &n, &m, &alpha, &A[0], &n, &Ki[0], &kIndexOne,
-           &beta, &scores[0], &kIndexOne);
-    }
+//    for (IndexType i = 0; i < n; ++i) {
+//      dgemv(trans, &n, &m, &alpha, &A[0], &n, &Ki[0], &kIndexOne,
+//           &beta, &scores[0], &kIndexOne);
+//    }
 
-    elapsedTime2 += static_cast<double>(std::clock() - start) /
-      CLOCKS_PER_SEC;
-  }
+//    elapsedTime2 += static_cast<double>(std::clock() - start) /
+//      CLOCKS_PER_SEC;
+//  }
 
   std::cout << "time (no trans) = " << elapsedTime1 << std::endl;
   std::cout << "time (trans) = " << elapsedTime1 << std::endl;

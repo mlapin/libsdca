@@ -18,3 +18,9 @@ add_library(${LIB_PROJECTORS} OBJECT
   topk_simplex_biased_projector.cpp
   )
 add_definitions(-fPIC)
+set_target_properties(${LIB_PROJECTORS}
+  PROPERTIES
+    CXX_VISIBILITY_PRESET "hidden"
+    C_VISIBILITY_PRESET "hidden"
+    VISIBILITY_INLINES_HIDDEN "hidden"
+)

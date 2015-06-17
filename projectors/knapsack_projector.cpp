@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <numeric>
 #include <vector>
 
 #include "knapsack_projector.hpp"

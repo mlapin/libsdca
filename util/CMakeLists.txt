@@ -4,3 +4,9 @@ add_library(${LIB_UTIL} OBJECT
   math_util.cpp
   )
 add_definitions(-fPIC)
+set_target_properties(${LIB_UTIL}
+  PROPERTIES
+    CXX_VISIBILITY_PRESET "hidden"
+    C_VISIBILITY_PRESET "hidden"
+    VISIBILITY_INLINES_HIDDEN "hidden"
+)

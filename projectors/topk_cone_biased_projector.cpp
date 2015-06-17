@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <functional>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -26,7 +27,9 @@ void TopKConeBiasedProjector<RealType>::ComputeGeneralCase(
   RealType u_plus_rho_k_2 = rho_k_k_, u_rho_k_plus_1 = 0;
 
   // U is empty in the beginning (m_begin = x.begin)
-  for (auto m_begin = x.begin(); m_begin != x.begin() + k_; ++m_begin) {
+  auto k_end = x.begin()
+    + static_cast<typename std::vector<RealType>::difference_type>(k_);
+  for (auto m_begin = x.begin(); m_begin != k_end; ++m_begin) {
 
     RealType min_M = *m_begin;
     RealType sum_m = min_M, m_sum_u = sum_u;

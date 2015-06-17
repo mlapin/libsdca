@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <functional>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -32,12 +33,14 @@ Projection TopKConeProjector<RealType>::CheckSpecialCases(
     RealType &lo,
     RealType &hi) const {
 
+  auto k_end = x.begin()
+    + static_cast<typename std::vector<RealType>::difference_type>(k_);
+
   // Partially sort x around the kth element
-  std::nth_element(x.begin(), x.begin() + k_ - 1, x.end(),
-    std::greater<RealType>());
+  std::nth_element(x.begin(), k_end - 1, x.end(), std::greater<RealType>());
 
   // Sum k largest elements
-  RealType sum_k_largest = std::accumulate(x.begin(), x.begin() + k_,
+  RealType sum_k_largest = std::accumulate(x.begin(), k_end,
     static_cast<RealType>(0));
 
   // Case 1: U empty, M empty, proj = 0
@@ -49,7 +52,7 @@ Projection TopKConeProjector<RealType>::CheckSpecialCases(
   // Case 2: U not empty, M empty, proj = const * sum_k_largest for k largest
   hi = projection_const_ * sum_k_largest;
   t = x[k_-1] - hi;
-  if ((k_ == x.size()) || (t >= *std::max_element(x.begin() + k_, x.end()))) {
+  if ((k_ == x.size()) || (t >= *std::max_element(k_end, x.end()))) {
     return Projection::Constant;
   }
 
@@ -73,8 +76,11 @@ void TopKConeProjector<RealType>::ComputeGeneralCase(
   RealType min_U = std::numeric_limits<RealType>::infinity();
   RealType sum_u = 0, u = 0, k_minus_u = kk_, k_minus_u_sum_u = 0;
 
+  auto k_end = x.begin()
+    + static_cast<typename std::vector<RealType>::difference_type>(k_);
+
   // U is empty in the beginning (m_begin = x.begin)
-  for (auto m_begin = x.begin(); m_begin != x.begin() + k_; ++m_begin) {
+  for (auto m_begin = x.begin(); m_begin != k_end; ++m_begin) {
 
     RealType min_M = *m_begin;
     RealType sum_m = min_M, m_sum_u = sum_u, D = k_minus_u * k_minus_u + u;

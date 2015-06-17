@@ -2,3 +2,4 @@ bin
 build*
 sdca-profiling
 CMakeLists.txt.user
+.DS_Store
