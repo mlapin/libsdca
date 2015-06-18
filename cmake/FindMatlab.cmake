@@ -863,7 +863,11 @@ function(matlab_add_mex )
       ${${prefix}_SRC}
       ${${prefix}_DOCUMENTATION}
       ${${prefix}_UNPARSED_ARGUMENTS})
-  target_include_directories(${${prefix}_NAME} PRIVATE ${Matlab_INCLUDE_DIRS})
+  if(${CMAKE_VERSION} VERSION_GREATER 2.9)
+    target_include_directories(${${prefix}_NAME} PRIVATE ${Matlab_INCLUDE_DIRS})
+  else()
+    include_directories(${Matlab_INCLUDE_DIRS})
+  endif()
 
   if(DEFINED Matlab_MX_LIBRARY)
     target_link_libraries(${${prefix}_NAME} ${Matlab_MX_LIBRARY})
@@ -898,7 +902,9 @@ function(matlab_add_mex )
     if(HAS_MINUS_PTHREAD AND NOT APPLE)
       # Apparently, compiling with -pthread generated the proper link flags
       # and some defines at compilation
-      target_compile_options(${${prefix}_NAME} PRIVATE "-pthread")
+      if(${CMAKE_VERSION} VERSION_GREATER 2.9)
+        target_compile_options(${${prefix}_NAME} PRIVATE "-pthread")
+      endif()
     endif()
 
 
