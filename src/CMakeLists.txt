@@ -1,3 +1,6 @@
+add_subdirectory(prox)
+include_directories(.)
+
 # Utility code
 set(LIB_UTIL "libutil")
 include_directories(util)
