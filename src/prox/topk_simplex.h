@@ -10,34 +10,7 @@
 
 namespace sdca {
 
-template <class ForwardIterator>
-thresholds<ForwardIterator>
-thresholds_topk_simplex(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs
-    ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  const Type K = static_cast<Type>(k);
-  auto proj = topk_cone_special_cases(first, last, k, K);
-  switch (proj.projection) {
-    case projection_case::constant:
-      if (K * proj.result.hi > rhs) {
-        return thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
-      }
-      break;
-    case projection_case::general:
-      auto t = thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
-      if (is_topk_simplex_lt(first, t.first, t.t, K, rhs)) {
-        return thresholds_topk_cone_search(first, last, k);
-      }
-      return t;
-  }
-  return proj.result;
-}
-
-template <class ForwardIterator>
+template <typename ForwardIterator>
 inline
 bool
 is_topk_simplex_lt(
@@ -56,6 +29,63 @@ is_topk_simplex_lt(
   } else {
     return t < static_cast<Type>(0);
   }
+}
+
+template <typename ForwardIterator>
+thresholds<ForwardIterator>
+thresholds_topk_simplex(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    ) {
+  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  const Type K = static_cast<Type>(k);
+  auto proj = topk_cone_special_cases(first, last, k, K);
+  switch (proj.projection) {
+    case projection_case::zero:
+      break;
+    case projection_case::constant:
+      if (K * proj.result.hi > rhs) {
+        return thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
+      }
+      break;
+    case projection_case::general:
+      auto t = thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
+      if (is_topk_simplex_lt(first, t.first, t.t, K, rhs)) {
+        return thresholds_topk_cone_search(first, last, k);
+      }
+      return t;
+  }
+  return proj.result;
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_topk_simplex(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    ) {
+  project(first, last,
+          thresholds_topk_simplex<ForwardIterator>, k, rhs);
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_topk_simplex(
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    ) {
+  project(first, last, aux_first, aux_last,
+          thresholds_topk_simplex<ForwardIterator>, k, rhs);
 }
 
 }

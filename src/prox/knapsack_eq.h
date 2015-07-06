@@ -16,7 +16,7 @@
 
 namespace sdca {
 
-template <class ForwardIterator>
+template <typename ForwardIterator>
 thresholds<ForwardIterator>
 thresholds_knapsack_eq(
     ForwardIterator first,
@@ -29,7 +29,7 @@ thresholds_knapsack_eq(
 
   // Initialization
   const auto num_elements = std::distance(first, last);
-  t = (std::accumulate(first, last, static_cast<Type>(0)) - rhs) /
+  Type t = (std::accumulate(first, last, static_cast<Type>(0)) - rhs) /
     static_cast<Type>(num_elements);
 
   ForwardIterator m_first = first;
@@ -69,6 +69,36 @@ thresholds_knapsack_eq(
   }
 
   return make_thresholds(t, lo, hi, m_first, m_last);
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_knapsack_eq(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
+    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    ) {
+  project(first, last,
+          thresholds_knapsack_eq<ForwardIterator>, lo, hi, rhs);
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_knapsack_eq(
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
+    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    ) {
+  project(first, last, aux_first, aux_last,
+          thresholds_knapsack_eq<ForwardIterator>, lo, hi, rhs);
 }
 
 }

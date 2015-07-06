@@ -10,14 +10,14 @@
 
 namespace sdca {
 
-template <class ForwardIterator>
+template <typename ForwardIterator>
 thresholds<ForwardIterator>
 thresholds_topk_simplex_biased(
     ForwardIterator first,
     ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
     ) {
   using Type = typename std::iterator_traits<ForwardIterator>::value_type;
   const Type K = static_cast<Type>(k);
@@ -38,7 +38,7 @@ thresholds_topk_simplex_biased(
   return proj.result;
 }
 
-template <class ForwardIterator>
+template <typename ForwardIterator>
 inline
 bool
 is_topk_simplex_biased_lt(
@@ -58,6 +58,36 @@ is_topk_simplex_biased_lt(
   } else {
     return t < rho * rhs;
   }
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_topk_simplex_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  project(first, last,
+          thresholds_topk_simplex_biased<ForwardIterator>, k, rhs, rho);
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_topk_simplex_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  project(first, last, aux_first, aux_last,
+          thresholds_topk_simplex_biased<ForwardIterator>, k, rhs, rho);
 }
 
 }

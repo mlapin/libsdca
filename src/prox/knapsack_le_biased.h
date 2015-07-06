@@ -7,43 +7,7 @@
 
 namespace sdca {
 
-template <class ForwardIterator>
-thresholds<ForwardIterator>
-thresholds_knapsack_le_biased(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho
-    ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-
-  // First, check if the inequality constraint is active (sum > rhs)
-  auto m_first = std::partition(first, last,
-    [=](const Type &x){ return x >= hi; });
-  auto m_last = std::partition(m_first, last,
-    [=](const Type &x){ return x > lo; });
-
-  auto sum = std::accumulate(m_first, m_last, static_cast<Type>(0));
-  sum += hi * static_cast<Type>(std::distance(first, m_first));
-  sum += lo * static_cast<Type>(std::distance(m_last, last));
-
-  // Special cases: 1) equality constraint; 2) t = 0
-  if (sum > rhs) {
-    auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs);
-    if (t.t >= rho * rhs) {
-      return t;
-    }
-  } else if (rho * sum == static_cast<Type>(0)) {
-    return make_thresholds(static_cast<Type>(0), lo, hi, m_first, m_last);
-  }
-
-  // General case
-  return thresholds_knapsack_le_biased_search(first, last, lo, hi, rhs, rho);
-}
-
-template <class ForwardIterator>
+template <typename ForwardIterator>
 thresholds<ForwardIterator>
 thresholds_knapsack_le_biased_search(
     ForwardIterator first,
@@ -87,7 +51,7 @@ thresholds_knapsack_le_biased_search(
       //  (4)  hi + t  <= min_U = (m_first - 1) or (+Inf)
       //  (5)       t  <= rho * rhs
 
-      t = (lo * num_L + hi * num_U + sum_M) / (rho_inverse + num_M);
+      Type t = (lo * num_L + hi * num_U + sum_M) / (rho_inverse + num_M);
       if (t <= rho_rhs) {
         Type tt = hi + t;
         if (max_M <= tt && tt <= min_U) {
@@ -121,6 +85,74 @@ thresholds_knapsack_le_biased_search(
   // Should never reach here
   assert(false);
   return make_thresholds(lo, lo, hi, first, first);
+}
+
+template <typename ForwardIterator>
+thresholds<ForwardIterator>
+thresholds_knapsack_le_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
+    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+
+  // First, check if the inequality constraint is active (sum > rhs)
+  auto m_first = std::partition(first, last,
+    [=](const Type &x){ return x >= hi; });
+  auto m_last = std::partition(m_first, last,
+    [=](const Type &x){ return x > lo; });
+
+  auto sum = std::accumulate(m_first, m_last, static_cast<Type>(0));
+  sum += hi * static_cast<Type>(std::distance(first, m_first));
+  sum += lo * static_cast<Type>(std::distance(m_last, last));
+
+  // Special cases: 1) equality constraint; 2) t = 0
+  if (sum > rhs) {
+    auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs);
+    if (t.t >= rho * rhs) {
+      return t;
+    }
+  } else if (rho * sum == static_cast<Type>(0)) {
+    return make_thresholds(0, lo, hi, m_first, m_last);
+  }
+
+  // General case
+  return thresholds_knapsack_le_biased_search(first, last, lo, hi, rhs, rho);
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_knapsack_le_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
+    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  project(first, last,
+          thresholds_knapsack_le_biased<ForwardIterator>, lo, hi, rhs, rho);
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_knapsack_le_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
+    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  project(first, last, aux_first, aux_last,
+          thresholds_knapsack_le_biased<ForwardIterator>, lo, hi, rhs, rho);
 }
 
 }

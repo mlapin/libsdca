@@ -9,6 +9,8 @@
 #include "common.hpp"
 #include "math_util.hpp"
 
+#include "prox/topk_simplex.h"
+
 using namespace sdca;
 
 
@@ -44,8 +46,8 @@ int main() {
   std::mt19937 gen(0);
   std::normal_distribution<> d(0,1);
 
-  SizeType m = 400;
-  SizeType n = 2000;
+  SizeType m = 10;
+  SizeType n = 1;
   std::vector<double> A, Ki, scores;
   A.reserve(m*n);
   for (IndexType i = 0; i < static_cast<IndexType>(m*n); ++i) {
@@ -56,6 +58,13 @@ int main() {
     Ki.push_back(d(gen));
   }
   scores.resize(m);
+
+  display_vector(A);
+//  auto t = thresholds_knapsack_eq(A.begin(), A.end());
+  project_topk_simplex(A.begin(), A.end());
+  display_vector(A);
+//  std::cout << "t = " << t.t << "; lo = " << t.lo <<
+//               "; hi = " << t.hi << std::endl;
 
   double elapsedTime1(0);
 //  double elapsedTime2(0);

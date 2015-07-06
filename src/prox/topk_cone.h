@@ -10,13 +10,13 @@
 
 namespace sdca {
 
-template <class ForwardIterator>
+template <typename ForwardIterator>
 struct topk_cone_projection {
   projection_case projection;
   thresholds<ForwardIterator> result;
 };
 
-template <class ForwardIterator>
+template <typename ForwardIterator>
 inline
 topk_cone_projection<ForwardIterator>
 topk_cone_special_cases(
@@ -26,7 +26,7 @@ topk_cone_special_cases(
     const typename std::iterator_traits<ForwardIterator>::value_type div_const
     ) {
   using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  topk_cone_projection proj;
+  topk_cone_projection<ForwardIterator> proj;
 
   // Partially sort data around the kth element
   auto k_last = std::next(first, k);
@@ -38,7 +38,7 @@ topk_cone_special_cases(
   // Case 1: U empty, M empty, proj = 0
   if (sum_k_largest <= 0) {
     proj.projection = projection_case::zero;
-    proj.result = make_thresholds<Type>(0, 0, 0, first, first);
+    proj.result = make_thresholds(0, 0, 0, first, first);
     return proj;
   }
 
@@ -48,7 +48,7 @@ topk_cone_special_cases(
   if ((k == std::distance(first, last)) ||
       (t >= *std::max_element(k_last, last))) {
     proj.projection = projection_case::constant;
-    proj.result = make_thresholds(t, static_cast<Type>(0), hi, k_last, k_last);
+    proj.result = make_thresholds(t, 0, hi, k_last, k_last);
     return proj;
   }
 
@@ -56,23 +56,7 @@ topk_cone_special_cases(
   return proj;
 }
 
-template <class ForwardIterator>
-thresholds<ForwardIterator>
-thresholds_topk_cone(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k
-    ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  auto proj = topk_cone_special_cases(first, last, k, static_cast<Type>(k));
-  if (proj.projection == projection_case::general) {
-    return thresholds_topk_cone_search(first, last, k);
-  } else {
-    return proj.result;
-  }
-}
-
-template <class ForwardIterator>
+template <typename ForwardIterator>
 thresholds<ForwardIterator>
 thresholds_topk_cone_search(
     ForwardIterator first,
@@ -111,12 +95,12 @@ thresholds_topk_cone_search(
       //  (3)  hi + t  >= max_M = (m_first) or (-Inf)
       //  (4)  hi + t  <= min_U = (m_first - 1) or (+Inf)
 
-      t  = (num_U * sum_M - k_minus_num_U_sum_U) / D;
-      hi = (num_M_sum_U   + k_minus_num_U * sum_M) / D;
+      Type t  = (num_U * sum_M - k_minus_num_U_sum_U) / D;
+      Type hi = (num_M_sum_U   + k_minus_num_U * sum_M) / D;
       Type tt = hi + t;
       if (max_M <= tt && tt <= min_U) {
         if (t <= min_M && ((m_last == last) || *m_last <= t)) {
-          return make_thresholds(t, static_cast<Type>(0), hi, m_first, m_last);
+          return make_thresholds(t, 0, hi, m_first, m_last);
         }
       }
 
@@ -144,7 +128,49 @@ thresholds_topk_cone_search(
   }
 
   // Default to 0
-  return make_thresholds<Type>(0, 0, 0, first, first);
+  return make_thresholds(0, 0, 0, first, first);
+}
+
+template <typename ForwardIterator>
+thresholds<ForwardIterator>
+thresholds_topk_cone(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1
+    ) {
+  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  auto proj = topk_cone_special_cases(first, last, k, static_cast<Type>(k));
+  if (proj.projection == projection_case::general) {
+    return thresholds_topk_cone_search(first, last, k);
+  } else {
+    return proj.result;
+  }
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_topk_cone(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1
+    ) {
+  project(first, last,
+          thresholds_topk_cone<ForwardIterator>, k);
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_topk_cone(
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1
+    ) {
+  project(first, last, aux_first, aux_last,
+          thresholds_topk_cone<ForwardIterator>, k);
 }
 
 }

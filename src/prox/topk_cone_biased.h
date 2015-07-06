@@ -6,29 +6,11 @@
 #include <iterator>
 #include <numeric>
 
-#include "proxdef.h"
+#include "topk_cone.h"
 
 namespace sdca {
 
-template <class ForwardIterator>
-thresholds<ForwardIterator>
-thresholds_topk_cone_biased(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho
-    ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  const Type K = static_cast<Type>(k);
-  auto proj = topk_cone_special_cases(first, last, k, K + rho * K * K);
-  if (proj.projection == projection_case::general) {
-    return thresholds_topk_cone_biased_search(first, last, k, rho);
-  } else {
-    return proj.result;
-  }
-}
-
-template <class ForwardIterator>
+template <typename ForwardIterator>
 thresholds<ForwardIterator>
 thresholds_topk_cone_biased_search(
     ForwardIterator first,
@@ -69,12 +51,12 @@ thresholds_topk_cone_biased_search(
       //  (3)  hi + t  >= max_M = (m_first) or (-Inf)
       //  (4)  hi + t  <= min_U = (m_first - 1) or (+Inf)
 
-      t  = (num_U_plus_rho_k_2 * sum_M - k_minus_num_U_sum_U) / D;
-      hi = (num_M_sum_U + k_minus_num_U * sum_M) / D;
+      Type t  = (num_U_plus_rho_k_2 * sum_M - k_minus_num_U_sum_U) / D;
+      Type hi = (num_M_sum_U + k_minus_num_U * sum_M) / D;
       Type tt = hi + t;
       if (max_M <= tt && tt <= min_U) {
         if (t <= min_M && ((m_last == last) || *m_last <= t)) {
-          return make_thresholds(t, static_cast<Type>(0), hi, m_first, m_last);
+          return make_thresholds(t, 0, hi, m_first, m_last);
         }
       }
 
@@ -102,7 +84,53 @@ thresholds_topk_cone_biased_search(
   }
 
   // Default to 0
-  return make_thresholds<Type>(0, 0, 0, first, first);
+  return make_thresholds(0, 0, 0, first, first);
+}
+
+template <typename ForwardIterator>
+thresholds<ForwardIterator>
+thresholds_topk_cone_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  const Type K = static_cast<Type>(k);
+  auto proj = topk_cone_special_cases(first, last, k, K + rho * K * K);
+  if (proj.projection == projection_case::general) {
+    return thresholds_topk_cone_biased_search(first, last, k, rho);
+  } else {
+    return proj.result;
+  }
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_topk_cone_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  project(first, last,
+          thresholds_topk_cone_biased<ForwardIterator>, k, rho);
+}
+
+template <typename ForwardIterator>
+inline
+void
+project_topk_cone_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  project(first, last, aux_first, aux_last,
+          thresholds_topk_cone_biased<ForwardIterator>, k, rho);
 }
 
 }
