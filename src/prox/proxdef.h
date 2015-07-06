@@ -8,7 +8,7 @@
 
 namespace sdca {
 
-enum class projection_case {
+enum class projection {
   zero = 0,
   constant,
   general

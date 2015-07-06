@@ -6,10 +6,10 @@
 #include <random>
 #include <vector>
 
-#include "common.hpp"
-#include "math_util.hpp"
+//#include "common.hpp"
+//#include "math_util.hpp"
 
-#include "prox/topk_simplex.h"
+#include "prox/topk_simplex_biased.h"
 
 using namespace sdca;
 
@@ -46,6 +46,10 @@ int main() {
   std::mt19937 gen(0);
   std::normal_distribution<> d(0,1);
 
+  using RealType = double;
+  using IndexType = std::vector<RealType>::difference_type;
+  using SizeType = std::vector<RealType>::size_type;
+
   SizeType m = 10;
   SizeType n = 1;
   std::vector<double> A, Ki, scores;
@@ -61,7 +65,7 @@ int main() {
 
   display_vector(A);
 //  auto t = thresholds_knapsack_eq(A.begin(), A.end());
-  project_topk_simplex(A.begin(), A.end());
+  project_topk_simplex_biased(A.begin(), A.end());
   display_vector(A);
 //  std::cout << "t = " << t.t << "; lo = " << t.lo <<
 //               "; hi = " << t.hi << std::endl;

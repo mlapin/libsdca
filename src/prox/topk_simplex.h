@@ -43,14 +43,14 @@ thresholds_topk_simplex(
   const Type K = static_cast<Type>(k);
   auto proj = topk_cone_special_cases(first, last, k, K);
   switch (proj.projection) {
-    case projection_case::zero:
+    case projection::zero:
       break;
-    case projection_case::constant:
+    case projection::constant:
       if (K * proj.result.hi > rhs) {
         return thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
       }
       break;
-    case projection_case::general:
+    case projection::general:
       auto t = thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
       if (is_topk_simplex_lt(first, t.first, t.t, K, rhs)) {
         return thresholds_topk_cone_search(first, last, k);

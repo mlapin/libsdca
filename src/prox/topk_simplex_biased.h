@@ -11,34 +11,6 @@
 namespace sdca {
 
 template <typename ForwardIterator>
-thresholds<ForwardIterator>
-thresholds_topk_simplex_biased(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
-    ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  const Type K = static_cast<Type>(k);
-  auto proj = topk_cone_special_cases(first, last, k, K);
-  switch (proj.projection) {
-    case projection_case::constant:
-      if (K * proj.result.hi > rhs) {
-        return thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
-      }
-      break;
-    case projection_case::general:
-      auto t = thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
-      if (is_topk_simplex_biased_lt(first, t.first, t.t, K, rhs, rho)) {
-        return thresholds_topk_cone_biased_search(first, last, k, rho);
-      }
-      return t;
-  }
-  return proj.result;
-}
-
-template <typename ForwardIterator>
 inline
 bool
 is_topk_simplex_biased_lt(
@@ -58,6 +30,36 @@ is_topk_simplex_biased_lt(
   } else {
     return t < rho * rhs;
   }
+}
+
+template <typename ForwardIterator>
+thresholds<ForwardIterator>
+thresholds_topk_simplex_biased(
+    ForwardIterator first,
+    ForwardIterator last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  const Type K = static_cast<Type>(k);
+  auto proj = topk_cone_special_cases(first, last, k, K);
+  switch (proj.projection) {
+    case projection::zero:
+      break;
+    case projection::constant:
+      if (K * proj.result.hi > rhs) {
+        return thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
+      }
+      break;
+    case projection::general:
+      auto t = thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
+      if (is_topk_simplex_biased_lt(first, t.first, t.t, K, rhs, rho)) {
+        return thresholds_topk_cone_biased_search(first, last, k, rho);
+      }
+      return t;
+  }
+  return proj.result;
 }
 
 template <typename ForwardIterator>

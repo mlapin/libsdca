@@ -75,7 +75,7 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 # Avoid a warning due to CMP0042
-if(APPLE)
+if(POLICY CMP0042 AND APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
@@ -91,7 +91,7 @@ endif()
 #------------------------------------------------------------------------------
 # Honor the visibility properties set for targets of type OBJECT
 # (visibility is set to 'hidden' for mex files, see FindMatlab.cmake)
-if(${CMAKE_VERSION} VERSION_GREATER 2.9)
+if(POLICY CMP0063)
   cmake_policy(SET CMP0063 NEW)
 endif()
 find_package(Matlab COMPONENTS MX_LIBRARY)
