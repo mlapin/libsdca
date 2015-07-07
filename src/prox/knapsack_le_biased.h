@@ -155,6 +155,24 @@ project_knapsack_le_biased(
           thresholds_knapsack_le_biased<ForwardIterator>, lo, hi, rhs, rho);
 }
 
+template <typename ForwardIterator>
+inline
+void
+project_knapsack_le_biased(
+    const typename std::iterator_traits<ForwardIterator>::difference_type dim,
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
+    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    ) {
+  project(dim, first, last, aux_first, aux_last,
+          thresholds_knapsack_le_biased<ForwardIterator>, lo, hi, rhs, rho);
+}
+
 }
 
 #endif

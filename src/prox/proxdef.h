@@ -123,6 +123,31 @@ project(
     x = std::max(t.lo, std::min(x - t.t, t.hi)); });
 }
 
+template <typename ForwardIterator,
+          typename Algorithm,
+          typename... Types>
+inline
+void
+project(
+    const typename std::iterator_traits<ForwardIterator>::difference_type dim,
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    Algorithm compute,
+    Types... params
+    ) {
+  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  ForwardIterator vec_last = first + dim;
+  for (; first != last; vec_last += dim) {
+    std::copy(first, vec_last, aux_first);
+    auto t = compute(aux_first, aux_last, params...);
+    std::for_each(first, vec_last, [=](Type& x){
+      x = std::max(t.lo, std::min(x - t.t, t.hi)); });
+    first = vec_last;
+  }
+}
+
 }
 
 #endif

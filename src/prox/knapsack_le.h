@@ -64,6 +64,23 @@ project_knapsack_le(
           thresholds_knapsack_le<ForwardIterator>, lo, hi, rhs);
 }
 
+template <typename ForwardIterator>
+inline
+void
+project_knapsack_le(
+    const typename std::iterator_traits<ForwardIterator>::difference_type dim,
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
+    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    ) {
+  project(dim, first, last, aux_first, aux_last,
+          thresholds_knapsack_le<ForwardIterator>, lo, hi, rhs);
+}
+
 }
 
 #endif

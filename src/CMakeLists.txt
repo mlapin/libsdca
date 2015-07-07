@@ -21,18 +21,20 @@ if(${Matlab_FOUND})
   include_directories(matlab)
   include_directories(${Matlab_INCLUDE_DIRS})
 
-  #LINK_TO ${BLAS_LIBRARIES}
+  set(MEX_PROX libsdca_prox)
+  add_definitions(-DMEX_PROX="${MEX_PROX}")
+
   matlab_add_mex(
-    NAME sdca_project
-    SRC matlab/mex_project.cpp matlab/mex_util.h ${PROX_SRCS}
+    NAME ${MEX_PROX}
+    SRC matlab/mex_prox.cpp matlab/mex_util.h ${PROX_SRCS}
     )
 
-  set_target_properties(sdca_project
+  set_target_properties(${MEX_PROX}
     PROPERTIES COMPILE_FLAGS "-Wno-unused-parameter"
     )
 
   install(
-    TARGETS sdca_project
+    TARGETS ${MEX_PROX}
     DESTINATION matlab
     )
 else()

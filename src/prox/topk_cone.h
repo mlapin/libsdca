@@ -173,6 +173,21 @@ project_topk_cone(
           thresholds_topk_cone<ForwardIterator>, k);
 }
 
+template <typename ForwardIterator>
+inline
+void
+project_topk_cone(
+    const typename std::iterator_traits<ForwardIterator>::difference_type dim,
+    ForwardIterator first,
+    ForwardIterator last,
+    ForwardIterator aux_first,
+    ForwardIterator aux_last,
+    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1
+    ) {
+  project(dim, first, last, aux_first, aux_last,
+          thresholds_topk_cone<ForwardIterator>, k);
+}
+
 }
 
 #endif
