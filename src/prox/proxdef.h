@@ -8,7 +8,7 @@
 
 namespace sdca {
 
-enum class projection {
+enum class projection_type {
   zero = 0,
   constant,
   general

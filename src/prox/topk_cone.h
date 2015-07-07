@@ -12,7 +12,7 @@ namespace sdca {
 
 template <typename ForwardIterator>
 struct topk_cone_projection {
-  projection projection;
+  projection_type projection;
   thresholds<ForwardIterator> result;
 };
 
@@ -37,7 +37,7 @@ topk_cone_special_cases(
 
   // Case 1: U empty, M empty, proj = 0
   if (sum_k_largest <= 0) {
-    proj.projection = projection::zero;
+    proj.projection = projection_type::zero;
     proj.result = make_thresholds(0, 0, 0, first, first);
     return proj;
   }
@@ -47,12 +47,12 @@ topk_cone_special_cases(
   Type t = *(k_last - 1) - hi;
   if ((k == std::distance(first, last)) ||
       (t >= *std::max_element(k_last, last))) {
-    proj.projection = projection::constant;
+    proj.projection = projection_type::constant;
     proj.result = make_thresholds(t, 0, hi, k_last, k_last);
     return proj;
   }
 
-  proj.projection = projection::general;
+  proj.projection = projection_type::general;
   return proj;
 }
 
@@ -140,7 +140,7 @@ thresholds_topk_cone(
     ) {
   using Type = typename std::iterator_traits<ForwardIterator>::value_type;
   auto proj = topk_cone_special_cases(first, last, k, static_cast<Type>(k));
-  if (proj.projection == projection::general) {
+  if (proj.projection == projection_type::general) {
     return thresholds_topk_cone_search(first, last, k);
   } else {
     return proj.result;
