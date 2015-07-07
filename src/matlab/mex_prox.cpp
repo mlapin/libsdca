@@ -31,6 +31,8 @@ mex_main(
   }
 
   const mxArray* opts = (nrhs > 1) ? prhs[1] : nullptr;
+  mxCheckStruct(opts, "opts");
+
   auto lo = mxGetFieldValueOrDefault<Type>(opts, "lo", 0);
   auto hi = mxGetFieldValueOrDefault<Type>(opts, "hi", 1);
   auto rhs = mxGetFieldValueOrDefault<Type>(opts, "rhs", 1);
@@ -79,7 +81,12 @@ mex_main(
   }
 }
 
-void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+void mexFunction(
+    const int nlhs,
+    mxArray* plhs[],
+    const int nrhs,
+    const mxArray* prhs[]
+    ) {
   mxCheckArgNum(nrhs, 1, 2, printUsage);
   mxCheckArgNum(nlhs, 0, 1, printUsage);
   mxCheckNotSparse(prhs[0], "A");
