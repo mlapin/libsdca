@@ -44,7 +44,7 @@ thresholds_topk_simplex_biased(
   using Type = typename std::iterator_traits<ForwardIterator>::value_type;
   const Type K = static_cast<Type>(k);
   auto proj = topk_cone_special_cases(first, last, k, K + rho * K * K);
-  switch (proj.type) {
+  switch (proj.projection) {
     case projection::zero:
       break;
     case projection::constant:

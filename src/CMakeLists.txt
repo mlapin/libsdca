@@ -4,6 +4,10 @@ set(PLAY_SRCS
   play/main.cpp
   )
 
+set(LINALG_SRCS
+  linalg/linalg.h
+  )
+
 set(PROX_SRCS
   prox/prox.h
   prox/proxdef.h
@@ -18,6 +22,8 @@ set(PROX_SRCS
 
 set(SOLVE_SRCS
   solve/solvedef.h
+  solve/solver.h
+  solve/primal_solver.h
   )
 
 # Matlab interface
@@ -46,5 +52,5 @@ else()
 endif()
 
 # A playground for quick checks and small tests
-add_executable(main ${PLAY_SRCS} ${PROX_SRCS} ${SOLVE_SRCS})
+add_executable(main ${PLAY_SRCS} ${LINALG_SRCS} ${PROX_SRCS} ${SOLVE_SRCS})
 target_link_libraries(main ${BLAS_LIBRARIES})

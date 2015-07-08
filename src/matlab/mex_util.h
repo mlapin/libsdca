@@ -14,7 +14,7 @@ enum error_index {
   err_var_range,
   err_out_of_memory,
   err_read_failed,
-  err_proj_type,
+  err_proj_type
 };
 
 static const char* err_id[] = {
@@ -25,7 +25,7 @@ static const char* err_id[] = {
   "LIBSDCA:var_range",
   "LIBSDCA:out_of_memory",
   "LIBSDCA:read_failed",
-  "LIBSDCA:proj_type",
+  "LIBSDCA:proj_type"
 };
 
 static const char* err_msg[] = {
@@ -36,7 +36,7 @@ static const char* err_msg[] = {
   "'%s' is out of range.",
   "Out of memory (cannot allocate memory for '%s').",
   "Failed to read the value of '%s'.",
-  "Unknown projection type '%s'.",
+  "Unknown projection type '%s'."
 };
 
 template <typename Usage>
