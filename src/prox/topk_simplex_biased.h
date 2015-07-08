@@ -44,15 +44,15 @@ thresholds_topk_simplex_biased(
   using Type = typename std::iterator_traits<ForwardIterator>::value_type;
   const Type K = static_cast<Type>(k);
   auto proj = topk_cone_special_cases(first, last, k, K + rho * K * K);
-  switch (proj.projection) {
-    case projection_type::zero:
+  switch (proj.type) {
+    case projection::zero:
       break;
-    case projection_type::constant:
+    case projection::constant:
       if (K * proj.result.hi > rhs) {
         return thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
       }
       break;
-    case projection_type::general:
+    case projection::general:
       auto t = thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
       if (is_topk_simplex_biased_lt(first, t.first, t.t, K, rhs, rho)) {
         return thresholds_topk_cone_biased_search(first, last, k, rho);

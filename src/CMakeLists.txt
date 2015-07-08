@@ -1,5 +1,9 @@
 include_directories(.)
 
+set(PLAY_SRCS
+  play/main.cpp
+  )
+
 set(PROX_SRCS
   prox/prox.h
   prox/proxdef.h
@@ -12,8 +16,8 @@ set(PROX_SRCS
   prox/topk_simplex_biased.h
   )
 
-set(PLAY_SRCS
-  play/main.cpp
+set(SOLVE_SRCS
+  solve/solvedef.h
   )
 
 # Matlab interface
@@ -42,5 +46,5 @@ else()
 endif()
 
 # A playground for quick checks and small tests
-add_executable(main ${PLAY_SRCS} ${PROX_SRCS})
+add_executable(main ${PLAY_SRCS} ${PROX_SRCS} ${SOLVE_SRCS})
 target_link_libraries(main ${BLAS_LIBRARIES})

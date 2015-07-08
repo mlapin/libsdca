@@ -98,4 +98,3 @@ void mexFunction(
      mex_main<float>(nlhs, plhs, nrhs, prhs);
   }
 }
-
