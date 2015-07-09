@@ -114,5 +114,9 @@ int main() {
   std::cout << "sizeof(MKL_INT) = " << sizeof(MKL_INT) << std::endl;
 #endif
 
+  long double s, t = 3.0;
+  s = 1.0 - (4.0/t - 1.0)*t;
+  std::cout << "s = " << s << std::endl;
+
   return 0;
 }
