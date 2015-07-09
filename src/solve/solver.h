@@ -4,33 +4,39 @@
 #include <algorithm>
 #include <random>
 
+#include "linalg/linalg.h"
 #include "solvedef.h"
 
 namespace sdca {
 
-template <typename real_type>
-class solver {
+template <typename Result = long double>
+class solver_base {
 public:
-  solver(
-      const std::size_t __num_examples,
-      const sdca::stopping_criteria& __criteria
+  typedef BlasInt index_type;
+  typedef Result result_type;
+  static constexpr result_type dual_decrease_tolerance =
+    1.0 + 8.0 * std::numeric_limits<double>::epsilon();
+
+  solver_base(
+      const sdca::stopping_criteria& __criteria,
+      const std::size_t __num_examples
     ) :
-      num_examples_(__num_examples),
       criteria_(__criteria),
+      num_examples_(__num_examples),
       status_(sdca::status::none),
       epoch_(0),
       cpu_start_(0),
       cpu_end_(0),
       primal_(0),
       dual_(0),
-      recompute_duality_gap_(false)
+      gap_(0)
   {}
 
   void solve() {
     begin_solve();
     for (epoch_ = 0; epoch_ < criteria_.max_num_epoch; ++epoch_) {
       begin_epoch();
-      for (std::size_t i = 0; i < num_examples_; ++i) {
+      for (index_type i = 0; i < num_examples_; ++i) {
         solve_example(examples_[i]);
       }
       if (end_epoch()) {
@@ -40,53 +46,55 @@ public:
     end_solve();
   }
 
-  const std::size_t num_examples() const { return num_examples_; }
+  index_type num_examples() const { return num_examples_; }
 
-  const sdca::stopping_criteria& stopping_criteria() const { return criteria_; }
+  sdca::stopping_criteria& criteria() const { return criteria_; }
 
-  const sdca::status status() const { return status_; }
+  sdca::status status() const { return status_; }
 
-  const std::string status_name() const { return sdca::status_name[status_]; }
+  std::string status_name() const {
+    return sdca::status_name[static_cast<status_type>(status_)];
+  }
 
-  const std::size_t epoch() const { return epoch_; }
+  std::size_t epoch() const { return epoch_; }
 
-  const double cpu_time() const {
+  double cpu_time() const {
     return static_cast<double>(cpu_end_ - cpu_start_) / CLOCKS_PER_SEC;
   }
 
-  const double wall_time() const {
+  double wall_time() const {
     return std::chrono::duration<double>(wall_end_ - wall_start_).count();
   }
 
-  const double cpu_time_now() const {
+  double cpu_time_now() const {
     return static_cast<double>(std::clock() - cpu_start_) / CLOCKS_PER_SEC;
   }
 
-  const double wall_time_now() const {
+  double wall_time_now() const {
     return std::chrono::duration<double>(
       std::chrono::high_resolution_clock::now() - wall_start_).count();
   }
 
-  const real_type primal() const { return primal_; }
+  const result_type primal() const { return primal_; }
 
-  const real_type dual() const { return dual_; }
+  const result_type dual() const { return dual_; }
 
-  const real_type absolute_gap() const { return primal() - dual(); }
+  const result_type absolute_gap() const { return gap_; }
 
-  const real_type relative_gap() const {
-    real_type max = std::max(std::abs(primal()), std::abs(dual()));
-    return (max > static_cast<real_type>(0))
-      ? (max < std::numeric_limits<real_type>::infinity()
-        ? absolute_gap() / max
-        : std::numeric_limits<real_type>::infinity())
-      : static_cast<real_type>(0);
+  const result_type relative_gap() const {
+    result_type max = std::max(std::abs(primal_), std::abs(dual_));
+    return (max > static_cast<result_type>(0))
+      ? (max < std::numeric_limits<result_type>::infinity()
+        ? gap_ / max
+        : std::numeric_limits<result_type>::infinity())
+      : static_cast<result_type>(0);
   }
 
-  const std::vector<state<real_type>>& states() const { return states_; }
+  const std::vector<state<result_type>>& states() const { return states_; }
 
 protected:
-  const std::size_t num_examples_;
   const sdca::stopping_criteria criteria_;
+  const index_type num_examples_;
 
   // Current progress
   sdca::status status_;
@@ -95,12 +103,13 @@ protected:
   cpu_time_point cpu_end_;
   wall_time_point wall_start_;
   wall_time_point wall_end_;
-  real_type primal_;
-  real_type dual_;
-  std::vector<state<real_type>> states_;
+  result_type primal_;
+  result_type dual_;
+  result_type gap_;
+  std::vector<state<result_type>> states_;
 
   // Other
-  bool recompute_duality_gap_;
+  bool recompute_gap_;
   std::minstd_rand generator_;
   std::vector<std::size_t> examples_;
 
@@ -112,9 +121,10 @@ protected:
     wall_end_ = wall_start_;
 
     status_ = sdca::status::solving;
-    primal_ = std::numeric_limits<real_type>::infinity();
-    dual_ = -std::numeric_limits<real_type>::infinity();
-    recompute_duality_gap_ = false;
+    primal_ = std::numeric_limits<result_type>::infinity();
+    dual_ = -std::numeric_limits<result_type>::infinity();
+    gap_ = std::numeric_limits<result_type>::infinity();
+    recompute_gap_ = false;
 
     generator_.seed();
     examples_.resize(num_examples_);
@@ -129,7 +139,7 @@ protected:
         --epoch_; // correct to the last executed epoch
       }
     }
-    if (recompute_duality_gap_) {
+    if (recompute_gap_) {
       compute_duality_gap();
     }
     cpu_end_ = std::clock();
@@ -137,7 +147,7 @@ protected:
   }
 
   virtual void begin_epoch() {
-    recompute_duality_gap_ = true;
+    recompute_gap_ = true;
     std::shuffle(examples_.begin(), examples_.end(), generator_);
   }
 
@@ -159,23 +169,22 @@ protected:
   }
 
   virtual void compute_duality_gap() {
-    recompute_duality_gap_ = false;
-    real_type before = dual();
+    recompute_gap_ = false;
+    result_type dual_before = dual_;
     compute_objectives();
-    if (relative_gap() <= criteria_.epsilon) {
+    result_type max = std::max(std::abs(primal_), std::abs(dual_));
+    if (gap_ <= static_cast<result_type>(criteria_.epsilon) * max) {
       status_ = sdca::status::solved;
     } else {
-      real_type after = dual() * (static_cast<real_type>(1)
-        + std::numeric_limits<real_type>::epsilon());
-      if (after < before) {
+      if (dual_ * dual_decrease_tolerance < dual_before) {
         status_ = sdca::status::dual_decreased;
       }
     }
     states_.emplace_back(
-      epoch_, cpu_time_now(), wall_time_now(), primal(), dual());
+      epoch_, cpu_time_now(), wall_time_now(), primal_, dual_, gap_);
   }
 
-  virtual void solve_example(std::size_t example) = 0;
+  virtual void solve_example(const index_type i) = 0;
 
   virtual void compute_objectives() = 0;
 

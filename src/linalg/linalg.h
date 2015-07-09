@@ -15,14 +15,26 @@
 namespace sdca {
 
 #if defined(BLAS_MKL)
-  typedef MKL_INT index_type;
+  typedef MKL_INT BlasInt;
 #else
-  typedef int index_type;
+  typedef int BlasInt;
 #endif
+
+template <typename DataType, typename ResultType>
+inline
+void kahan_sum(
+    const DataType& x,
+    ResultType& sum,
+    ResultType& c) {
+  ResultType y = static_cast<ResultType>(x) - c;
+  ResultType t = sum + y;
+  c = (t - sum) - y;
+  sum = t;
+}
 
 inline
 void sdca_blas_scal(
-    const index_type n,
+    const BlasInt n,
     const float alpha,
     float* X
   ) {
@@ -31,7 +43,7 @@ void sdca_blas_scal(
 
 inline
 void sdca_blas_scal(
-    const index_type n,
+    const BlasInt n,
     const double alpha,
     double* X
   ) {
@@ -40,7 +52,7 @@ void sdca_blas_scal(
 
 inline
 void sdca_blas_copy(
-    const index_type n,
+    const BlasInt n,
     const float* X,
     float* Y
   ) {
@@ -49,7 +61,7 @@ void sdca_blas_copy(
 
 inline
 void sdca_blas_copy(
-    const index_type n,
+    const BlasInt n,
     const double* X,
     double* Y
   ) {
@@ -58,7 +70,7 @@ void sdca_blas_copy(
 
 inline
 void sdca_blas_axpy(
-    const index_type n,
+    const BlasInt n,
     const float alpha,
     const float* X,
     float* Y
@@ -68,7 +80,7 @@ void sdca_blas_axpy(
 
 inline
 void sdca_blas_axpy(
-    const index_type n,
+    const BlasInt n,
     const double alpha,
     const double* X,
     double* Y
@@ -78,7 +90,7 @@ void sdca_blas_axpy(
 
 inline
 void sdca_blas_axpby(
-    const index_type n,
+    const BlasInt n,
     const float alpha,
     const float* X,
     const float beta,
@@ -94,7 +106,7 @@ void sdca_blas_axpby(
 
 inline
 void sdca_blas_axpby(
-    const index_type n,
+    const BlasInt n,
     const double alpha,
     const double* X,
     const double beta,
@@ -110,7 +122,7 @@ void sdca_blas_axpby(
 
 inline
 float sdca_blas_dot(
-    const index_type n,
+    const BlasInt n,
     const float* X,
     const float* Y
   ) {
@@ -119,7 +131,7 @@ float sdca_blas_dot(
 
 inline
 double sdca_blas_dot(
-    const index_type n,
+    const BlasInt n,
     const double* X,
     const double* Y
   ) {
@@ -128,7 +140,7 @@ double sdca_blas_dot(
 
 inline
 float sdca_blas_asum(
-    const index_type n,
+    const BlasInt n,
     const float* X
   ) {
   return cblas_sasum(n, X, 1);
@@ -136,7 +148,7 @@ float sdca_blas_asum(
 
 inline
 double sdca_blas_asum(
-    const index_type n,
+    const BlasInt n,
     const double* X
   ) {
   return cblas_dasum(n, X, 1);
@@ -144,8 +156,8 @@ double sdca_blas_asum(
 
 inline
 void sdca_blas_gemv(
-    const index_type m,
-    const index_type n,
+    const BlasInt m,
+    const BlasInt n,
     const float* A,
     const float* X,
     float* Y,
@@ -159,8 +171,8 @@ void sdca_blas_gemv(
 
 inline
 void sdca_blas_gemv(
-    const index_type m,
-    const index_type n,
+    const BlasInt m,
+    const BlasInt n,
     const double* A,
     const double* X,
     double* Y,
@@ -174,8 +186,8 @@ void sdca_blas_gemv(
 
 inline
 void sdca_blas_ger(
-    const index_type m,
-    const index_type n,
+    const BlasInt m,
+    const BlasInt n,
     const float alpha,
     const float* X,
     const float* Y,
@@ -186,8 +198,8 @@ void sdca_blas_ger(
 
 inline
 void sdca_blas_ger(
-    const index_type m,
-    const index_type n,
+    const BlasInt m,
+    const BlasInt n,
     const double alpha,
     const double* X,
     const double* Y,
@@ -196,4 +208,44 @@ void sdca_blas_ger(
   cblas_dger(CblasColMajor, m, n, alpha, X, 1, Y, 1, A, m);
 }
 
+inline
+void sdca_blas_gemm(
+    const BlasInt m,
+    const BlasInt n,
+    const BlasInt k,
+    const float* A,
+    const BlasInt lda,
+    const float* B,
+    const BlasInt ldb,
+    float* C,
+    const CBLAS_TRANSPOSE transA = CblasNoTrans,
+    const CBLAS_TRANSPOSE transB = CblasNoTrans,
+    const float alpha = 1,
+    const float beta = 0
+    ) {
+  cblas_sgemm(CblasColMajor, transA, transB, m, n, k,
+              alpha, A, lda, B, ldb, beta, C, m);
 }
+
+inline
+void sdca_blas_gemm(
+    const BlasInt m,
+    const BlasInt n,
+    const BlasInt k,
+    const double* A,
+    const BlasInt lda,
+    const double* B,
+    const BlasInt ldb,
+    double* C,
+    const CBLAS_TRANSPOSE transA = CblasNoTrans,
+    const CBLAS_TRANSPOSE transB = CblasNoTrans,
+    const double alpha = 1,
+    const double beta = 0
+    ) {
+  cblas_dgemm(CblasColMajor, transA, transB, m, n, k,
+              alpha, A, lda, B, ldb, beta, C, m);
+}
+
+}
+
+#endif

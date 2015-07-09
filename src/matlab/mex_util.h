@@ -8,35 +8,50 @@ namespace sdca {
 
 enum error_index {
   err_argnum = 0,
-  err_type_real,
-  err_type_struct,
-  err_type_no_sparse,
-  err_var_range,
+  err_arg_single,
+  err_arg_double,
+  err_arg_real,
+  err_arg_struct,
+  err_arg_not_sparse,
+  err_arg_not_empty,
+  err_arg_range,
+  err_vec_dim,
   err_out_of_memory,
   err_read_failed,
-  err_proj_type
+  err_proj_type,
+  err_labels_range
 };
 
 static const char* err_id[] = {
   "LIBSDCA:argnum",
-  "LIBSDCA:type_real",
-  "LIBSDCA:type_struct",
-  "LIBSDCA:type_no_sparse",
-  "LIBSDCA:var_range",
+  "LIBSDCA:arg_single",
+  "LIBSDCA:arg_double",
+  "LIBSDCA:arg_real",
+  "LIBSDCA:arg_struct",
+  "LIBSDCA:arg_not_sparse",
+  "LIBSDCA:arg_not_empty",
+  "LIBSDCA:arg_range",
+  "LIBSDCA:vec_dim",
   "LIBSDCA:out_of_memory",
   "LIBSDCA:read_failed",
-  "LIBSDCA:proj_type"
+  "LIBSDCA:proj_type",
+  "LIBSDCA:labels_range"
 };
 
 static const char* err_msg[] = {
   "Invalid number of input/output arguments.",
+  "'%s' must be single.",
+  "'%s' must be double.",
   "'%s' must be single or double.",
   "'%s' must be a struct.",
-  "'%s' must not be sparse.",
+  "'%s' must be not sparse.",
+  "'%s' must be not empty.",
   "'%s' is out of range.",
+  "'%s' must be a %u dimensional vector.",
   "Out of memory (cannot allocate memory for '%s').",
   "Failed to read the value of '%s'.",
   "Unknown projection type '%s'."
+  "Invalid labels range (must be 1:T or 0:T-1)."
 };
 
 template <typename Usage>
@@ -62,7 +77,29 @@ mxCheckRange(
     const char* name
     ) {
   if (var < min || var > max) {
-    mexErrMsgIdAndTxt(err_id[err_var_range], err_msg[err_var_range], name);
+    mexErrMsgIdAndTxt(err_id[err_arg_range], err_msg[err_arg_range], name);
+  }
+}
+
+void
+mxCheckSingle(
+    const mxArray* pa,
+    const char* name
+    ) {
+  if (pa != nullptr && !mxIsSingle(pa)) {
+    mexErrMsgIdAndTxt(
+      err_id[err_arg_single], err_msg[err_arg_single], name);
+  }
+}
+
+void
+mxCheckDouble(
+    const mxArray* pa,
+    const char* name
+    ) {
+  if (pa != nullptr && !mxIsDouble(pa)) {
+    mexErrMsgIdAndTxt(
+      err_id[err_arg_double], err_msg[err_arg_double], name);
   }
 }
 
@@ -71,9 +108,9 @@ mxCheckReal(
     const mxArray* pa,
     const char* name
     ) {
-  if (pa != nullptr && !mxIsDouble(pa) && !mxIsSingle(pa)) {
+  if (pa != nullptr && !mxIsSingle(pa) && !mxIsDouble(pa)) {
     mexErrMsgIdAndTxt(
-      err_id[err_type_real], err_msg[err_type_real], name);
+      err_id[err_arg_real], err_msg[err_arg_real], name);
   }
 }
 
@@ -84,7 +121,7 @@ mxCheckStruct(
     ) {
   if (pa != nullptr && !mxIsStruct(pa)) {
     mexErrMsgIdAndTxt(
-      err_id[err_type_struct], err_msg[err_type_struct], name);
+      err_id[err_arg_struct], err_msg[err_arg_struct], name);
   }
 }
 
@@ -95,9 +132,36 @@ mxCheckNotSparse(
     ) {
   if (pa != nullptr && mxIsSparse(pa)) {
     mexErrMsgIdAndTxt(
-      err_id[err_type_no_sparse], err_msg[err_type_no_sparse], name);
+      err_id[err_arg_not_sparse], err_msg[err_arg_not_sparse], name);
   }
 }
+
+void
+mxCheckNotEmpty(
+    const mxArray* pa,
+    const char* name
+    ) {
+  if (pa == nullptr || mxIsEmpty(pa)) {
+    mexErrMsgIdAndTxt(
+      err_id[err_arg_not_empty], err_msg[err_arg_not_empty], name);
+  }
+}
+
+template <typename IndexType>
+void
+mxCheckVector(
+    const IndexType dim,
+    const mxArray* pa,
+    const char* name
+    ) {
+  if (!( (static_cast<IndexType>(mxGetM(pa)) == dim && mxGetN(pa) == 1)
+      || (mxGetM(pa) == 1 && static_cast<IndexType>(mxGetN(pa)) == dim) )) {
+    mexErrMsgIdAndTxt(
+      err_id[err_vec_dim], err_msg[err_vec_dim], name,
+      static_cast<std::size_t>(dim));
+  }
+}
+
 
 template <typename Type>
 inline

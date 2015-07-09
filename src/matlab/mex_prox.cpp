@@ -22,7 +22,7 @@ mex_main(
     const mxArray* prhs[]
     ) {
 
-  mxArray *mxX;
+  mxArray* mxX;
   if (nlhs == 0) {
     mxX = const_cast<mxArray*>(prhs[0]); // in-place
   } else {
@@ -90,6 +90,7 @@ void mexFunction(
   mxCheckArgNum(nrhs, 1, 2, printUsage);
   mxCheckArgNum(nlhs, 0, 1, printUsage);
   mxCheckNotSparse(prhs[0], "A");
+  mxCheckNotEmpty(prhs[0], "A");
   mxCheckReal(prhs[0], "A");
 
   if (mxIsDouble(prhs[0])) {

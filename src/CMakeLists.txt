@@ -21,9 +21,11 @@ set(PROX_SRCS
   )
 
 set(SOLVE_SRCS
+  solve/solve.h
   solve/solvedef.h
   solve/solver.h
   solve/primal_solver.h
+  solve/l2_hinge_topk.h
   )
 
 # Matlab interface
@@ -32,15 +34,23 @@ if(${Matlab_FOUND})
   include_directories(${Matlab_INCLUDE_DIRS})
 
   set(MEX_PROX libsdca_prox)
-  add_definitions(-DMEX_PROX="${MEX_PROX}")
+  set(MEX_SOLVE libsdca_solve)
+  add_definitions(-DMEX_PROX="${MEX_PROX}" -DMEX_SOLVE="${MEX_SOLVE}")
 
   matlab_add_mex(
     NAME ${MEX_PROX}
     SRC matlab/mex_prox.cpp matlab/mex_util.h ${PROX_SRCS}
     )
 
-  set_target_properties(${MEX_PROX}
-    PROPERTIES COMPILE_FLAGS "-Wno-unused-parameter"
+  matlab_add_mex(
+    NAME ${MEX_SOLVE}
+    SRC matlab/mex_solve.cpp matlab/mex_util.h
+        ${LINALG_SRCS} ${PROX_SRCS} ${SOLVE_SRCS}
+    LINK_TO ${BLAS_LIBRARIES}
+    )
+
+  set_target_properties(${MEX_SOLVE} PROPERTIES
+    COMPILE_FLAGS "-Wno-unused-variable -Wno-unused-parameter"
     )
 
   install(
@@ -48,7 +58,7 @@ if(${Matlab_FOUND})
     DESTINATION matlab
     )
 else()
-  message(STATUS "Matlab interface will not be compiled.")
+  message(STATUS "Matlab interface is not compiled.")
 endif()
 
 # A playground for quick checks and small tests
