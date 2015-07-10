@@ -50,7 +50,7 @@ static const char* err_msg[] = {
   "'%s' must be a %u dimensional vector.",
   "Out of memory (cannot allocate memory for '%s').",
   "Failed to read the value of '%s'.",
-  "Unknown projection type '%s'."
+  "Unknown projection type '%s'.",
   "Invalid labels range (must be 1:T or 0:T-1)."
 };
 

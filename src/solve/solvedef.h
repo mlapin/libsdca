@@ -26,14 +26,16 @@ static const char* status_name[] = {
   "max_wall_time"
 };
 
-using status_type = std::underlying_type<status>::type;
 using wall_clock = std::chrono::high_resolution_clock;
-using wall_time_point = std::chrono::time_point<wall_clock>;
-using cpu_time_point = std::clock_t;
+typedef typename std::chrono::time_point<wall_clock> wall_time_point;
+typedef typename std::clock_t cpu_time_point;
+typedef typename std::underlying_type<status>::type status_type;
+typedef typename std::size_t size_type;
+typedef typename std::ptrdiff_t difference_type;
 
 struct stopping_criteria {
-  std::size_t check_epoch = 10;
-  std::size_t max_num_epoch = 100;
+  size_type check_epoch = 10;
+  size_type max_num_epoch = 100;
   double max_cpu_time = 0;
   double max_wall_time = 0;
   double epsilon = 1e-3;
@@ -42,7 +44,7 @@ struct stopping_criteria {
 template <typename Result>
 struct state {
   typedef Result result_type;
-  std::size_t epoch;
+  size_type epoch;
   double cpu_time;
   double wall_time;
   result_type primal;
@@ -59,7 +61,7 @@ struct state {
     {}
 
   state(
-      const std::size_t __epoch,
+      const size_type __epoch,
       const double __cpu_time,
       const double __wall_time,
       const result_type __primal,

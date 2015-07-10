@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <random>
 
-#include "linalg/linalg.h"
 #include "solvedef.h"
 
 namespace sdca {
@@ -12,18 +11,17 @@ namespace sdca {
 template <typename Result = long double>
 class solver_base {
 public:
-  typedef BlasInt index_type;
   typedef Result result_type;
   static constexpr result_type dual_decrease_tolerance =
     1.0 + 8.0 * std::numeric_limits<double>::epsilon();
 
   solver_base(
-      const sdca::stopping_criteria& __criteria,
-      const std::size_t __num_examples
+      const stopping_criteria& __criteria,
+      const size_type __num_examples
     ) :
       criteria_(__criteria),
       num_examples_(__num_examples),
-      status_(sdca::status::none),
+      status_(status::none),
       epoch_(0),
       cpu_start_(0),
       cpu_end_(0),
@@ -36,7 +34,7 @@ public:
     begin_solve();
     for (epoch_ = 0; epoch_ < criteria_.max_num_epoch; ++epoch_) {
       begin_epoch();
-      for (index_type i = 0; i < num_examples_; ++i) {
+      for (size_type i = 0; i < num_examples_; ++i) {
         solve_example(examples_[i]);
       }
       if (end_epoch()) {
@@ -45,18 +43,6 @@ public:
     }
     end_solve();
   }
-
-  index_type num_examples() const { return num_examples_; }
-
-  sdca::stopping_criteria& criteria() const { return criteria_; }
-
-  sdca::status status() const { return status_; }
-
-  std::string status_name() const {
-    return sdca::status_name[static_cast<status_type>(status_)];
-  }
-
-  std::size_t epoch() const { return epoch_; }
 
   double cpu_time() const {
     return static_cast<double>(cpu_end_ - cpu_start_) / CLOCKS_PER_SEC;
@@ -93,12 +79,12 @@ public:
   const std::vector<state<result_type>>& states() const { return states_; }
 
 protected:
-  const sdca::stopping_criteria criteria_;
-  const index_type num_examples_;
+  const stopping_criteria criteria_;
+  const size_type num_examples_;
 
   // Current progress
-  sdca::status status_;
-  std::size_t epoch_;
+  status status_;
+  size_type epoch_;
   cpu_time_point cpu_start_;
   cpu_time_point cpu_end_;
   wall_time_point wall_start_;
@@ -111,7 +97,7 @@ protected:
   // Other
   bool recompute_gap_;
   std::minstd_rand generator_;
-  std::vector<std::size_t> examples_;
+  std::vector<size_type> examples_;
 
 
   virtual void begin_solve() {
@@ -184,7 +170,7 @@ protected:
       epoch_, cpu_time_now(), wall_time_now(), primal_, dual_, gap_);
   }
 
-  virtual void solve_example(const index_type i) = 0;
+  virtual void solve_example(const size_type i) = 0;
 
   virtual void compute_objectives() = 0;
 

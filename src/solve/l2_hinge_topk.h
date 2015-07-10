@@ -1,34 +1,30 @@
 #ifndef SDCA_SOLVE_L2_TOPK_LOSS_H
 #define SDCA_SOLVE_L2_TOPK_LOSS_H
 
-#include <utility>
 #include "linalg/linalg.h"
 #include "prox/topk_simplex_biased.h"
+#include "solvedef.h"
 
 namespace sdca {
 
-template <typename Data, typename Result = long double>
+template <typename data_type, typename result_type = long double>
 struct l2_hinge_topk {
-  typedef BlasInt index_type;
-  typedef Data data_type;
-  typedef Result result_type;
-
-  const typename std::iterator_traits<data_type*>::difference_type k;
+  const difference_type k;
   const data_type rhs;
   const result_type c_div_k;
 
   l2_hinge_topk(
-      const std::size_t top_k,
+      const size_type top_k,
       const data_type svm_c
     ) :
-      k(top_k),
+      k(static_cast<difference_type>(top_k)),
       rhs(svm_c),
       c_div_k(static_cast<result_type>(svm_c) / static_cast<result_type>(top_k))
   {}
 
   void update(
-      const index_type num_tasks,
-      const index_type label,
+      const blas_int num_tasks,
+      const size_type label,
       const data_type norm_squared,
       data_type* variables,
       data_type* scores
@@ -63,8 +59,8 @@ struct l2_hinge_topk {
   }
 
   void loss(
-      const index_type num_tasks,
-      const index_type label,
+      const blas_int num_tasks,
+      const size_type label,
       const data_type* variables,
       data_type* scores,
       data_type &regularizer,
@@ -104,11 +100,11 @@ struct l2_hinge_topk {
   }
 };
 
-template <typename Data, typename Result = long double>
+template <typename data_type, typename result_type = long double>
 inline
-l2_hinge_topk<Data, Result>
-make_l2_hinge_topk(const std::size_t top_k, const Data svm_c) {
-  return l2_hinge_topk<Data, Result>(top_k, svm_c);
+l2_hinge_topk<data_type, result_type>
+make_l2_hinge_topk(const size_type top_k, const data_type svm_c) {
+  return l2_hinge_topk<data_type, result_type>(top_k, svm_c);
 }
 
 }
