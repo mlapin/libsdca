@@ -6,47 +6,37 @@
 
 namespace sdca {
 
-template <typename Computer, typename Data, typename Result = long double>
+template <typename Objective, typename Data, typename Result = long double>
 class primal_solver : public solver_base<Result> {
 public:
   typedef solver_base<Result> base;
-  typedef Computer computer_type;
+  typedef problem_data<data_type> problem_type;
+  typedef Objective objective_type;
   typedef Data data_type;
   typedef Result result_type;
 
   primal_solver(
+      const problem_type& __problem,
       const stopping_criteria& __criteria,
-      const computer_type& __computer,
-      const size_type __num_dimensions,
-      const size_type __num_examples,
-      const size_type __num_tasks,
-      const size_type* __labels,
-      const data_type* __features,
-      data_type* __primal_variables,
-      data_type* __dual_variables,
-      const bool __is_warm_restart = false
+      const objective_type& __objective
     ) :
-      base::solver_base(__criteria, __num_examples),
-      computer_(__computer),
-      num_dimensions_(__num_dimensions),
-      num_tasks_(__num_tasks),
-      labels_(__labels),
-      features_(__features),
-      primal_variables_(__primal_variables),
-      dual_variables_(__dual_variables),
-      is_warm_restart_(__is_warm_restart),
-      norms_(__num_examples),
-      scores_(__num_tasks),
-      vars_before_(__num_tasks),
-      diff_tolerance_(static_cast<data_type>(__num_tasks) *
+      base::solver_base(__criteria, __problem.num_examples),
+      objective_(__objective),
+      num_dimensions_(__problem.num_dimensions),
+      num_tasks_(__problem.num_tasks),
+      labels_(__problem.labels),
+      features_(__problem.data),
+      primal_variables_(__problem.primal_variables),
+      dual_variables_(__problem.dual_variables),
+      norms_(__problem.num_examples),
+      scores_(__problem.num_tasks),
+      vars_before_(__problem.num_tasks),
+      diff_tolerance_(static_cast<data_type>(__problem.num_tasks) *
         2 * std::numeric_limits<data_type>::epsilon()),
-      D(static_cast<blas_int>(__num_dimensions)),
-      N(static_cast<blas_int>(__num_examples)),
-      T(static_cast<blas_int>(__num_tasks))
+      D(static_cast<blas_int>(__problem.num_dimensions)),
+      N(static_cast<blas_int>(__problem.num_examples)),
+      T(static_cast<blas_int>(__problem.num_tasks))
   {}
-
-  bool is_warm_restart() const { return is_warm_restart_; }
-  void is_warm_restart(const bool value) { is_warm_restart_ = value; }
 
 protected:
   // Protected members of the base class
@@ -56,7 +46,7 @@ protected:
   using base::gap_;
 
   // Main variables
-  computer_type computer_;
+  objective_type objective_;
   const size_type num_dimensions_;
   const size_type num_tasks_;
   const size_type* labels_;
@@ -65,7 +55,6 @@ protected:
   data_type* dual_variables_;
 
   // Other
-  bool is_warm_restart_;
   std::vector<data_type> norms_;
   std::vector<data_type> scores_;
   std::vector<data_type> vars_before_;
@@ -79,14 +68,6 @@ protected:
   // Initialization
   void begin_solve() override {
     base::begin_solve();
-    if (is_warm_restart_) {
-      // Let W = X * A'
-      sdca_blas_gemm(D, T, N, features_, D, dual_variables_, T,
-        primal_variables_, CblasNoTrans, CblasTrans);
-    } else {
-      std::fill_n(primal_variables_, D * T, 0);
-      std::fill_n(dual_variables_, T * N, 0);
-    }
     for (size_type i = 0; i < num_examples_; ++i) {
       const data_type* x_i = features_ + num_dimensions_ * i;
       norms_[i] = sdca_blas_dot(D, x_i, x_i);
@@ -105,7 +86,7 @@ protected:
     // Update dual variables
     data_type* vars = dual_variables_ + num_tasks_ * i;
     std::copy_n(vars, num_tasks_, &vars_before_[0]);
-    computer_.update(T, labels_[i], norms_[i], vars, &scores_[0]);
+    objective_.update_dual(T, labels_[i], norms_[i], vars, &scores_[0]);
 
     // Update primal variables
     sdca_blas_axpy(T, -1, vars, &vars_before_[0]);
@@ -142,7 +123,7 @@ protected:
       // Compute regularizer and losses
       data_type regul, p_loss, d_loss;
       data_type* vars = dual_variables_ + num_tasks_ * i;
-      computer_.loss(T, labels_[i], vars, &scores_[0],
+      objective_.regularized_loss(T, labels_[i], vars, &scores_[0],
         regul, p_loss, d_loss);
 
       // Increment the sums
@@ -151,31 +132,23 @@ protected:
       kahan_sum(d_loss, d_loss_sum, d_loss_comp);
     }
 
-    // Compute final objectives
-    computer_.objective(regul_sum, p_loss_sum, d_loss_sum,
+    // Compute primal/dual objectives and the duality gap
+    objective_.primal_dual_gap(regul_sum, p_loss_sum, d_loss_sum,
       primal_, dual_, gap_);
   }
 
 };
 
-template <typename Computer, typename Data, typename Result = long double>
+template <typename Objective, typename Data, typename Result = long double>
 inline
-primal_solver<Computer, Data, Result>
+primal_solver<Objective, Data, Result>
 make_primal_solver(
-    const stopping_criteria& criteria,
-    const Computer& computer,
-    const size_type num_dimensions,
-    const size_type num_examples,
-    const size_type num_tasks,
-    const size_type* labels,
-    const Data* features,
-    Data* primal_variables,
-    Data* dual_variables,
-    const bool is_warm_restart = false
+    const problem_data<Data>& problem,
+    const Objective& objective,
+    const stopping_criteria& criteria
   ) {
-  return primal_solver<Computer, Data, Result>(
-    criteria, computer, num_dimensions, num_examples, num_tasks,
-    labels, features, primal_variables, dual_variables, is_warm_restart);
+  return primal_solver<Objective, Data, Result>(
+    problem, objective, criteria);
 }
 
 }

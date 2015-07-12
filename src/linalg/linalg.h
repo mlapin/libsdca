@@ -15,7 +15,7 @@
 namespace sdca {
 
 #if defined(BLAS_MKL)
-  typedef MKL_INT blas_type;
+  typedef MKL_INT blas_int;
 #else
   typedef int blas_int;
 #endif

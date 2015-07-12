@@ -22,7 +22,7 @@ struct l2_hinge_topk {
       c_div_k(static_cast<result_type>(svm_c) / static_cast<result_type>(top_k))
   {}
 
-  void update(
+  void update_dual(
       const blas_int num_tasks,
       const size_type label,
       const data_type norm_squared,
@@ -58,7 +58,7 @@ struct l2_hinge_topk {
     std::swap(*variables_back, variables[label]);
   }
 
-  void loss(
+  void regularized_loss(
       const blas_int num_tasks,
       const size_type label,
       const data_type* variables,
@@ -84,7 +84,7 @@ struct l2_hinge_topk {
     primal_loss = std::max(static_cast<data_type>(0), a);
   }
 
-  void objective(
+  void primal_dual_gap(
       const result_type regularizer,
       const result_type primal_loss,
       const result_type dual_loss,
@@ -103,7 +103,10 @@ struct l2_hinge_topk {
 template <typename data_type, typename result_type = long double>
 inline
 l2_hinge_topk<data_type, result_type>
-make_l2_hinge_topk(const size_type top_k, const data_type svm_c) {
+make_l2_hinge_topk(
+    const size_type top_k,
+    const data_type svm_c
+  ) {
   return l2_hinge_topk<data_type, result_type>(top_k, svm_c);
 }
 

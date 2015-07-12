@@ -33,7 +33,7 @@ typedef typename std::size_t size_type;
 typedef typename std::ptrdiff_t difference_type;
 
 template <typename Data>
-struct problem {
+struct problem_data {
   typedef Data data_type;
   size_type num_dimensions = 0;
   size_type num_examples = 0;

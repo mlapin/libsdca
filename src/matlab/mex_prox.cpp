@@ -8,7 +8,8 @@
 
 using namespace sdca;
 
-void printUsage() {
+void
+printUsage() {
   mexPrintf("Usage: X = %s(A);\n"
             "       X = %s(A, opts);\n", MEX_PROX, MEX_PROX);
 }
@@ -81,7 +82,8 @@ mex_main(
   }
 }
 
-void mexFunction(
+void
+mexFunction(
     const int nlhs,
     mxArray* plhs[],
     const int nrhs,
