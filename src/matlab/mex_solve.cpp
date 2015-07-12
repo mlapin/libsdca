@@ -31,18 +31,23 @@ mex_main(
   auto n = mxGetN(p_data);
 
   mxCheckVector(n, p_labels, "labels");
-  std::vector<std::size_t> labels(mxGetPr(p_labels), mxGetPr(p_labels) + n);
+  std::vector<size_type> labels(mxGetPr(p_labels), mxGetPr(p_labels) + n);
   auto minmax = std::minmax_element(mxGetPr(p_labels), mxGetPr(p_labels) + n);
   if (*minmax.first == 1) {
-    std::for_each(labels.begin(), labels.end(), [](std::size_t &x){ x -= 1; });
+    std::for_each(labels.begin(), labels.end(), [](size_type &x){ x -= 1; });
     *minmax.second -= 1;
   } else if (*minmax.first != 0) {
     mexErrMsgIdAndTxt(err_id[err_labels_range], err_msg[err_labels_range]);
   }
 
-  auto num_tasks = static_cast<std::size_t>(*minmax.second) + 1;
-  auto k = mxGetFieldValueOrDefault<std::size_t>(opts, "k", 1);
+  auto num_tasks = static_cast<size_type>(*minmax.second) + 1;
+  auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
+  mxCheckRange<size_type>(k, 0, num_tasks, "k");
   auto c = mxGetFieldValueOrDefault<data_type>(opts, "c", 1);
+  mxCheck<data_type>(std::greater_equal<data_type>(), c, 0, "c");
+//  auto is_dual = mxGetFieldValueOrDefault<bool>(opts, "dual", false);
+  std::string obj_name = mxGetFieldValueOrDefault(
+    opts, "objective", std::string("l2_hinge_topk"));
 
   stopping_criteria criteria;
   auto computer = make_l2_hinge_topk(k, c);

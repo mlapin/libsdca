@@ -6,7 +6,7 @@
 
 namespace sdca {
 
-enum error_index {
+enum err_index {
   err_argnum = 0,
   err_arg_single,
   err_arg_double,
@@ -77,6 +77,19 @@ mxCheckRange(
     const char* name
     ) {
   if (var < min || var > max) {
+    mexErrMsgIdAndTxt(err_id[err_arg_range], err_msg[err_arg_range], name);
+  }
+}
+
+template <typename Type, typename Compare>
+void
+mxCheck(
+    Compare comp,
+    const Type var,
+    const Type value,
+    const char* name
+    ) {
+  if (!comp(var, value)) {
     mexErrMsgIdAndTxt(err_id[err_arg_range], err_msg[err_arg_range], name);
   }
 }

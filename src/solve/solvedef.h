@@ -15,7 +15,7 @@ enum class status {
   max_cpu_time,
   max_wall_time
 };
-
+typedef typename std::underlying_type<status>::type status_type;
 static const char* status_name[] = {
   "none",
   "solving",
@@ -29,9 +29,20 @@ static const char* status_name[] = {
 using wall_clock = std::chrono::high_resolution_clock;
 typedef typename std::chrono::time_point<wall_clock> wall_time_point;
 typedef typename std::clock_t cpu_time_point;
-typedef typename std::underlying_type<status>::type status_type;
 typedef typename std::size_t size_type;
 typedef typename std::ptrdiff_t difference_type;
+
+template <typename Data>
+struct problem {
+  typedef Data data_type;
+  size_type num_dimensions = 0;
+  size_type num_examples = 0;
+  size_type num_tasks = 0;
+  size_type* labels = nullptr;
+  data_type* data = nullptr;
+  data_type* primal_variables = nullptr;
+  data_type* dual_variables = nullptr;
+};
 
 struct stopping_criteria {
   size_type check_epoch = 10;

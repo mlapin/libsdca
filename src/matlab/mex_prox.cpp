@@ -42,8 +42,8 @@ mex_main(
   std::ptrdiff_t m = static_cast<std::ptrdiff_t>(mxGetM(mxX));
   std::ptrdiff_t n = static_cast<std::ptrdiff_t>(mxGetN(mxX));
 
-  mxCheckRange<Type>(rhs, 0, std::numeric_limits<Type>::infinity(), "rhs");
-  mxCheckRange<Type>(rho, 0, std::numeric_limits<Type>::infinity(), "rho");
+  mxCheck<Type>(std::greater_equal<Type>(), rhs, 0, "rhs");
+  mxCheck<Type>(std::greater_equal<Type>(), rho, 0, "rho");
   mxCheckRange<std::ptrdiff_t>(k, 1, m, "k");
 
   std::vector<Type> aux(static_cast<std::size_t>(m));
