@@ -247,11 +247,11 @@ mxGetFieldValueOrDefault(
 
 template <typename Type>
 inline
-const Type
+void
 mxSetFieldValue(
     const mxArray* pa,
     const char* name,
-    const Type& value
+    Type& value
     ) {
   if (pa != nullptr) {
     mxArray* field = mxGetField(pa, 0, name);
@@ -270,7 +270,6 @@ mxCreateScalar(
   return mxCreateDoubleScalar(static_cast<double>(value));
 }
 
-template <typename Type>
 inline
 mxArray*
 mxCreateStruct(
@@ -282,12 +281,15 @@ mxCreateStruct(
   for (auto field : fields) {
     names.push_back(field.first.c_str());
   }
-  mxArray* pa = mxCreateStructMatrix(1, 1, fields.size(), &names[0]);
+  mxArray* pa = mxCreateStructMatrix(1, 1,
+    static_cast<int>(fields.size()), &names[0]);
   mxCheckCreated(pa, name);
   for (std::size_t i = 0; i < fields.size(); ++i) {
-    mxSetFieldByNumber(pa, 0, i, fields[i].second);
+    mxSetFieldByNumber(pa, 0, static_cast<int>(i), fields[i].second);
   }
   return pa;
+}
+
 }
 
 #endif

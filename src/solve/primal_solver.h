@@ -10,7 +10,7 @@ template <typename Objective, typename Data, typename Result = long double>
 class primal_solver : public solver_base<Result> {
 public:
   typedef solver_base<Result> base;
-  typedef problem_data<data_type> problem_type;
+  typedef problem_data<Data> problem_type;
   typedef Objective objective_type;
   typedef Data data_type;
   typedef Result result_type;
@@ -144,11 +144,11 @@ inline
 primal_solver<Objective, Data, Result>
 make_primal_solver(
     const problem_data<Data>& problem,
-    const Objective& objective,
-    const stopping_criteria& criteria
+    const stopping_criteria& criteria,
+    const Objective& objective
   ) {
   return primal_solver<Objective, Data, Result>(
-    problem, objective, criteria);
+    problem, criteria, objective);
 }
 
 }

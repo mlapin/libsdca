@@ -49,9 +49,9 @@ if(${Matlab_FOUND})
     LINK_TO ${BLAS_LIBRARIES}
     )
 
-  set_target_properties(${MEX_SOLVE} PROPERTIES
-    COMPILE_FLAGS "-Wno-unused-variable -Wno-unused-parameter"
-    )
+#  set_target_properties(${MEX_SOLVE} PROPERTIES
+#    COMPILE_FLAGS "-Wno-unused-variable -Wno-unused-parameter"
+#    )
 
   install(
     TARGETS ${MEX_PROX}

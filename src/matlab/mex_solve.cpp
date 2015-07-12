@@ -73,14 +73,14 @@ set_problem_data(
       model.problem.num_tasks, mxGetClassID(p_data), mxREAL);
     mxCheckCreated(mxW, "W");
     model.problem.primal_variables = static_cast<data_type*>(mxGetData(mxW));
-    model.fields.emplace_back(make_pair("W", mxW));
+    model.fields.emplace_back(std::make_pair("W", mxW));
   }
 
   mxArray *mxA = mxCreateNumericMatrix(model.problem.num_tasks,
     model.problem.num_examples, mxGetClassID(p_data), mxREAL);
   mxCheckCreated(mxA, "A");
   model.problem.dual_variables = static_cast<data_type*>(mxGetData(mxA));
-  model.fields.emplace_back(make_pair("A", mxA));
+  model.fields.emplace_back(std::make_pair("A", mxA));
 }
 
 template <typename data_type>
@@ -132,7 +132,7 @@ mex_main(
   auto c = mxGetFieldValueOrDefault<data_type>(opts, "c", 1);
   mxCheck<data_type>(std::greater_equal<data_type>(), c, 0, "c");
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
-  mxCheckRange<size_type>(k, 0, num_tasks, "k");
+  mxCheckRange<size_type>(k, 1, model.problem.num_tasks, "k");
 
   std::string objective = mxGetFieldValueOrDefault(
     opts, "objective", std::string("l2_hinge_topk"));
