@@ -21,7 +21,7 @@ struct result {
   problem_data<Data> problem;
   stopping_criteria criteria;
   std::vector<size_type> labels;
-  std::vector<std::pair<const char*, mxArray*>> fields;
+  std::vector<std::pair<const char*, const mxArray*>> fields;
 };
 
 template <typename Data>

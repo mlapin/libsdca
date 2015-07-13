@@ -273,7 +273,7 @@ mxCreateScalar(
 inline
 mxArray*
 mxCreateStruct(
-    const std::vector<std::pair<const char*, mxArray*>>& fields,
+    const std::vector<std::pair<const char*, const mxArray*>>& fields,
     const char* name
   ) {
   std::vector<const char*> names;
@@ -285,7 +285,8 @@ mxCreateStruct(
     static_cast<int>(fields.size()), &names[0]);
   mxCheckCreated(pa, name);
   for (std::size_t i = 0; i < fields.size(); ++i) {
-    mxSetFieldByNumber(pa, 0, static_cast<int>(i), fields[i].second);
+    mxSetFieldByNumber(pa, 0, static_cast<int>(i),
+      const_cast<mxArray*>(fields[i].second));
   }
   return pa;
 }
