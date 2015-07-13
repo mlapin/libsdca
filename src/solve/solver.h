@@ -21,7 +21,7 @@ public:
     ) :
       criteria_(__criteria),
       num_examples_(__num_examples),
-      status_(status::none),
+      status_(solver_status::none),
       epoch_(0),
       cpu_start_(0),
       cpu_end_(0),
@@ -76,6 +76,12 @@ public:
       : static_cast<result_type>(0);
   }
 
+  solver_status status() const { return status_; }
+
+  std::string status_name() const {
+    return solver_status_name[static_cast<solver_status_type>(status_)];
+  }
+
   const std::vector<state<result_type>>& states() const { return states_; }
 
 protected:
@@ -83,7 +89,7 @@ protected:
   const size_type num_examples_;
 
   // Current progress
-  status status_;
+  solver_status status_;
   size_type epoch_;
   cpu_time_point cpu_start_;
   cpu_time_point cpu_end_;
@@ -106,7 +112,7 @@ protected:
     cpu_end_ = cpu_start_;
     wall_end_ = wall_start_;
 
-    status_ = sdca::status::solving;
+    status_ = solver_status::solving;
     primal_ = std::numeric_limits<result_type>::infinity();
     dual_ = -std::numeric_limits<result_type>::infinity();
     gap_ = std::numeric_limits<result_type>::infinity();
@@ -118,9 +124,9 @@ protected:
   }
 
   virtual void end_solve() {
-    if (status_ == sdca::status::solving &&
+    if (status_ == solver_status::solving &&
         epoch_ >= criteria_.max_num_epoch) {
-      status_ = sdca::status::max_num_epoch;
+      status_ = solver_status::max_num_epoch;
       if (epoch_ > 0) {
         --epoch_; // correct to the last executed epoch
       }
@@ -142,16 +148,16 @@ protected:
         ((epoch_ % criteria_.check_epoch) == (criteria_.check_epoch - 1))) {
       compute_duality_gap();
     }
-    if (status_ == sdca::status::solving) {
+    if (status_ == solver_status::solving) {
       if (criteria_.max_cpu_time > 0 &&
           cpu_time_now() >= criteria_.max_cpu_time) {
-        status_ = sdca::status::max_cpu_time;
+        status_ = solver_status::max_cpu_time;
       } else if (criteria_.max_wall_time > 0 &&
           wall_time_now() >= criteria_.max_wall_time) {
-        status_ = sdca::status::max_wall_time;
+        status_ = solver_status::max_wall_time;
       }
     }
-    return status_ != sdca::status::solving;
+    return status_ != solver_status::solving;
   }
 
   virtual void compute_duality_gap() {
@@ -160,10 +166,10 @@ protected:
     compute_objectives();
     result_type max = std::max(std::abs(primal_), std::abs(dual_));
     if (gap_ <= static_cast<result_type>(criteria_.epsilon) * max) {
-      status_ = sdca::status::solved;
+      status_ = solver_status::solved;
     } else {
       if (dual_ * dual_decrease_tolerance < dual_before) {
-        status_ = sdca::status::dual_decreased;
+        status_ = solver_status::dual_decreased;
       }
     }
     states_.emplace_back(

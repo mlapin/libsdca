@@ -6,7 +6,7 @@
 
 namespace sdca {
 
-enum class status {
+enum class solver_status {
   none = 0,
   solving,
   solved,
@@ -15,8 +15,8 @@ enum class status {
   max_cpu_time,
   max_wall_time
 };
-typedef typename std::underlying_type<status>::type status_type;
-static const char* status_name[] = {
+typedef typename std::underlying_type<solver_status>::type solver_status_type;
+static const char* solver_status_name[] = {
   "none",
   "solving",
   "solved",

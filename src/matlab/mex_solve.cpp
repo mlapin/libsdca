@@ -17,19 +17,81 @@ printUsage() {
 
 template <typename Data>
 struct result {
-  bool is_dual;
+  bool is_dual = false;
   problem_data<Data> problem;
   stopping_criteria criteria;
   std::vector<size_type> labels;
   std::vector<std::pair<std::string, mxArray*>> fields;
 };
 
-template <typename data_type>
+template <typename Data, typename Type>
+inline
+void
+add_field(
+    const char* name,
+    const Type value,
+    result<Data>& model
+  ) {
+  model.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
+}
+
+template <typename Data>
+inline
+void
+add_field(
+    const char* name,
+    const std::string value,
+    result<Data>& model
+  ) {
+  model.fields.emplace_back(std::make_pair(name,
+    mxCreateString(value.c_str())));
+}
+
+template <typename Data>
+inline
+void
+add_field(
+    const char* name,
+    const mxArray* value,
+    result<Data>& model
+  ) {
+  model.fields.emplace_back(std::make_pair(name, value));
+}
+
+template <typename Data, typename Type>
+inline
+void
+add_field_opts_value(
+    const mxArray* opts,
+    const char* name,
+    Type& value,
+    result<Data>& model
+  ) {
+  mxSetFieldValue(opts, name, value);
+  model.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
+}
+
+template <typename Data>
+inline
+void
+set_stopping_criteria(
+    const mxArray* opts,
+    result<Data>& model
+  ) {
+  auto c = &model.criteria;
+  add_field_opts_value(opts, "check_epoch", c->check_epoch, model);
+  add_field_opts_value(opts, "max_num_epoch", c->max_num_epoch, model);
+  add_field_opts_value(opts, "max_cpu_time", c->max_cpu_time, model);
+  add_field_opts_value(opts, "max_wall_time", c->max_wall_time, model);
+  add_field_opts_value(opts, "epsilon", c->epsilon, model);
+}
+
+template <typename Data>
 inline
 void
 set_labels(
     const mxArray* p_labels,
-    result<data_type>& model
+    result<Data>& model
   ) {
   auto n = model.problem.num_examples;
   mxCheckVector(n, p_labels, "labels");
@@ -48,20 +110,20 @@ set_labels(
   model.problem.num_tasks = static_cast<size_type>(*minmax.second) + 1;
 }
 
-template <typename data_type>
+template <typename Data>
 inline
 void
 set_problem_data(
     const mxArray* p_data,
     const mxArray* p_labels,
     const mxArray* opts,
-    result<data_type>& model
+    result<Data>& model
   ) {
-  model.problem.data = static_cast<data_type*>(mxGetData(p_data));
+  model.problem.data = static_cast<Data*>(mxGetData(p_data));
   model.problem.num_examples = mxGetN(p_data);
   set_labels(p_labels, model);
 
-  model.is_dual = mxGetFieldValueOrDefault<bool>(opts, "dual", false);
+  add_field_opts_value(opts, "is_dual", model.is_dual, model);
   if (model.is_dual) {
     // Work in the dual
     model.problem.num_dimensions = 0;
@@ -72,37 +134,23 @@ set_problem_data(
     mxArray *mxW = mxCreateNumericMatrix(model.problem.num_dimensions,
       model.problem.num_tasks, mxGetClassID(p_data), mxREAL);
     mxCheckCreated(mxW, "W");
-    model.problem.primal_variables = static_cast<data_type*>(mxGetData(mxW));
-    model.fields.emplace_back(std::make_pair("W", mxW));
+    model.problem.primal_variables = static_cast<Data*>(mxGetData(mxW));
+    add_field<Data>("W", mxW, model);
   }
 
   mxArray *mxA = mxCreateNumericMatrix(model.problem.num_tasks,
     model.problem.num_examples, mxGetClassID(p_data), mxREAL);
   mxCheckCreated(mxA, "A");
-  model.problem.dual_variables = static_cast<data_type*>(mxGetData(mxA));
-  model.fields.emplace_back(std::make_pair("A", mxA));
-}
-
-template <typename data_type>
-inline
-void
-set_stopping_criteria(
-    const mxArray* opts,
-    result<data_type>& model
-  ) {
-  mxSetFieldValue(opts, "check_epoch", model.criteria.check_epoch);
-  mxSetFieldValue(opts, "max_num_epoch", model.criteria.max_num_epoch);
-  mxSetFieldValue(opts, "max_cpu_time", model.criteria.max_cpu_time);
-  mxSetFieldValue(opts, "max_wall_time", model.criteria.max_wall_time);
-  mxSetFieldValue(opts, "epsilon", model.criteria.epsilon);
+  model.problem.dual_variables = static_cast<Data*>(mxGetData(mxA));
+  add_field<Data>("A", mxA, model);
 }
 
 template <typename Objective, typename Data>
 inline
 void
 make_solver_solve(
-    const result<Data> model,
-    const Objective objective
+    const Objective objective,
+    result<Data>& model
   ) {
   if (model.is_dual) {
     mexErrMsgIdAndTxt(err_id[err_not_implemented], err_msg[err_not_implemented],
@@ -110,10 +158,17 @@ make_solver_solve(
   } else {
     auto solver = make_primal_solver(model.problem, model.criteria, objective);
     solver.solve();
+    add_field("primal", solver.primal(), model);
+    add_field("dual", solver.dual(), model);
+    add_field("absolute_gap", solver.absolute_gap(), model);
+    add_field("relative_gap", solver.relative_gap(), model);
+    add_field("cpu_time", solver.cpu_time(), model);
+    add_field("wall_time", solver.wall_time(), model);
+    add_field("status", solver.status_name(), model);
   }
 }
 
-template <typename data_type>
+template <typename Data>
 void
 mex_main(
     mxArray* plhs[],
@@ -125,19 +180,19 @@ mex_main(
   const mxArray* opts = (nrhs > 2) ? prhs[2] : nullptr;
   mxCheckStruct(opts, "opts");
 
-  result<data_type> model;
+  result<Data> model;
   set_problem_data(p_data, p_labels, opts, model);
   set_stopping_criteria(opts, model);
 
-  auto c = mxGetFieldValueOrDefault<data_type>(opts, "c", 1);
-  mxCheck<data_type>(std::greater_equal<data_type>(), c, 0, "c");
+  auto c = mxGetFieldValueOrDefault<Data>(opts, "c", 1);
+  mxCheck<Data>(std::greater_equal<Data>(), c, 0, "c");
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
   mxCheckRange<size_type>(k, 1, model.problem.num_tasks, "k");
 
   std::string objective = mxGetFieldValueOrDefault(
     opts, "objective", std::string("l2_hinge_topk"));
   if (objective == "l2_hinge_topk") {
-    make_solver_solve(model, make_l2_hinge_topk(k, c));
+    make_solver_solve(make_l2_hinge_topk(k, c), model);
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_obj_type], err_msg[err_obj_type], objective.c_str());
