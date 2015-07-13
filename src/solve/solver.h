@@ -76,6 +76,8 @@ public:
       : static_cast<result_type>(0);
   }
 
+  size_type epoch() const { return epoch_; }
+
   solver_status status() const { return status_; }
 
   std::string status_name() const {

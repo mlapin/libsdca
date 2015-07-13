@@ -1,6 +1,8 @@
 #ifndef SDCA_SOLVE_L2_TOPK_LOSS_H
 #define SDCA_SOLVE_L2_TOPK_LOSS_H
 
+#include <iostream>
+
 #include "linalg/linalg.h"
 #include "prox/topk_simplex_biased.h"
 #include "solvedef.h"
@@ -20,7 +22,9 @@ struct l2_hinge_topk {
       k(static_cast<difference_type>(top_k)),
       rhs(svm_c),
       c_div_k(static_cast<result_type>(svm_c) / static_cast<result_type>(top_k))
-  {}
+  {
+    std::cout << "k = " << top_k << "; " << "c = " << svm_c << std::endl;
+  }
 
   void update_dual(
       const blas_int num_tasks,
@@ -97,6 +101,9 @@ struct l2_hinge_topk {
     duality_gap = primal_objective - dual_objective + regularizer;
     primal_objective += static_cast<result_type>(0.5) * regularizer;
     dual_objective -= static_cast<result_type>(0.5) * regularizer;
+    std::cout << "primal = " << primal_objective << "; "
+              << "dual = " << dual_objective << "; "
+              << "gap = " << duality_gap << std::endl;
   }
 };
 

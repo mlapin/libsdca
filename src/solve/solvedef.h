@@ -45,7 +45,7 @@ struct problem_data {
 };
 
 struct stopping_criteria {
-  size_type check_epoch = 10;
+  size_type check_epoch = 1;
   size_type max_num_epoch = 100;
   double max_cpu_time = 0;
   double max_wall_time = 0;
