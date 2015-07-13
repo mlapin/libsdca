@@ -21,31 +21,8 @@ struct result {
   problem_data<Data> problem;
   stopping_criteria criteria;
   std::vector<size_type> labels;
-  std::vector<std::pair<std::string, mxArray*>> fields;
+  std::vector<std::pair<const char*, mxArray*>> fields;
 };
-
-template <typename Data, typename Type>
-inline
-void
-add_field(
-    const char* name,
-    const Type value,
-    result<Data>& model
-  ) {
-  model.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
-}
-
-template <typename Data>
-inline
-void
-add_field(
-    const char* name,
-    const std::string value,
-    result<Data>& model
-  ) {
-  model.fields.emplace_back(std::make_pair(name,
-    mxCreateString(value.c_str())));
-}
 
 template <typename Data>
 inline
@@ -56,6 +33,17 @@ add_field(
     result<Data>& model
   ) {
   model.fields.emplace_back(std::make_pair(name, value));
+}
+
+template <typename Data, typename Type>
+inline
+void
+add_field_scalar(
+    const char* name,
+    const Type value,
+    result<Data>& model
+  ) {
+  model.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
 }
 
 template <typename Data, typename Type>
@@ -123,7 +111,7 @@ set_problem_data(
   model.problem.num_examples = mxGetN(p_data);
   set_labels(p_labels, model);
 
-  add_field_opts_value(opts, "is_dual", model.is_dual, model);
+  model.is_dual = mxGetFieldValueOrDefault(opts, "is_dual", false);
   if (model.is_dual) {
     // Work in the dual
     model.problem.num_dimensions = 0;
@@ -135,14 +123,19 @@ set_problem_data(
       model.problem.num_tasks, mxGetClassID(p_data), mxREAL);
     mxCheckCreated(mxW, "W");
     model.problem.primal_variables = static_cast<Data*>(mxGetData(mxW));
-    add_field<Data>("W", mxW, model);
+    add_field("W", mxW, model);
   }
 
   mxArray *mxA = mxCreateNumericMatrix(model.problem.num_tasks,
     model.problem.num_examples, mxGetClassID(p_data), mxREAL);
   mxCheckCreated(mxA, "A");
   model.problem.dual_variables = static_cast<Data*>(mxGetData(mxA));
-  add_field<Data>("A", mxA, model);
+  add_field("A", mxA, model);
+
+  add_field_scalar("num_dimensions", model.problem.num_dimensions, model);
+  add_field_scalar("num_examples", model.problem.num_examples, model);
+  add_field_scalar("num_tasks", model.problem.num_tasks, model);
+  add_field_scalar("is_dual", model.is_dual, model);
 }
 
 template <typename Objective, typename Data>
@@ -158,13 +151,13 @@ make_solver_solve(
   } else {
     auto solver = make_primal_solver(model.problem, model.criteria, objective);
     solver.solve();
-    add_field("primal", solver.primal(), model);
-    add_field("dual", solver.dual(), model);
-    add_field("absolute_gap", solver.absolute_gap(), model);
-    add_field("relative_gap", solver.relative_gap(), model);
-    add_field("cpu_time", solver.cpu_time(), model);
-    add_field("wall_time", solver.wall_time(), model);
-    add_field("status", solver.status_name(), model);
+    add_field("status", mxCreateString(solver.status_name().c_str()), model);
+    add_field_scalar("primal", solver.primal(), model);
+    add_field_scalar("dual", solver.dual(), model);
+    add_field_scalar("absolute_gap", solver.absolute_gap(), model);
+    add_field_scalar("relative_gap", solver.relative_gap(), model);
+    add_field_scalar("cpu_time", solver.cpu_time(), model);
+    add_field_scalar("wall_time", solver.wall_time(), model);
   }
 }
 
@@ -189,9 +182,12 @@ mex_main(
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
   mxCheckRange<size_type>(k, 1, model.problem.num_tasks, "k");
 
+  add_field_scalar("c", c, model);
+
   std::string objective = mxGetFieldValueOrDefault(
     opts, "objective", std::string("l2_hinge_topk"));
   if (objective == "l2_hinge_topk") {
+    add_field_scalar("k", k, model);
     make_solver_solve(make_l2_hinge_topk(k, c), model);
   } else {
     mexErrMsgIdAndTxt(

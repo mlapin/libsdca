@@ -273,13 +273,13 @@ mxCreateScalar(
 inline
 mxArray*
 mxCreateStruct(
-    const std::vector<std::pair<std::string, mxArray*>>& fields,
+    const std::vector<std::pair<const char*, mxArray*>>& fields,
     const char* name
   ) {
   std::vector<const char*> names;
   names.reserve(fields.size());
   for (auto field : fields) {
-    names.push_back(field.first.c_str());
+    names.push_back(field.first);
   }
   mxArray* pa = mxCreateStructMatrix(1, 1,
     static_cast<int>(fields.size()), &names[0]);
