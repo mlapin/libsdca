@@ -72,7 +72,7 @@ add_states(
   mxCheckCreated(pa, "states");
   int i = 0;
   for (auto& state : states) {
-    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(state.epoch));
+    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(state.num_epoch));
     mxSetFieldByNumber(pa, i, 1, mxCreateScalar(state.cpu_time));
     mxSetFieldByNumber(pa, i, 2, mxCreateScalar(state.wall_time));
     mxSetFieldByNumber(pa, i, 3, mxCreateScalar(state.primal));
@@ -84,29 +84,25 @@ add_states(
     std::make_pair("states", const_cast<const mxArray*>(pa)));
 }
 
-template <typename Data>
 inline
 void
-set_stopping_criteria(
-    const mxArray* opts,
-    result<Data>& model
+set_logging_options(
+    const mxArray* opts
   ) {
-  auto c = &model.criteria;
-  add_field_opts_value(opts, "check_epoch", c->check_epoch, model);
-  add_field_opts_value(opts, "max_num_epoch", c->max_num_epoch, model);
-  add_field_opts_value(opts, "max_cpu_time", c->max_cpu_time, model);
-  add_field_opts_value(opts, "max_wall_time", c->max_wall_time, model);
-  add_field_opts_value(opts, "epsilon", c->epsilon, model);
-  mxCheck<size_type>(std::greater_equal<size_type>(),
-    c->check_epoch, 0, "check_epoch");
-  mxCheck<size_type>(std::greater_equal<size_type>(),
-    c->max_num_epoch, 0, "max_num_epoch");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->max_cpu_time, 0, "max_cpu_time");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->max_wall_time, 0, "max_wall_time");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->epsilon, 0, "epsilon");
+  std::string log_level = mxGetFieldValueOrDefault(
+    opts, "log_level", std::string("info"));
+  if (log_level == "none") {
+    logging::set_level(logging::none);
+  } else if (log_level == "info") {
+    logging::set_level(logging::info);
+  } else if (log_level == "verbose") {
+    logging::set_level(logging::verbose);
+  } else if (log_level == "debug") {
+    logging::set_level(logging::debug);
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_log_level], err_msg[err_log_level], log_level.c_str());
+  }
 }
 
 template <typename Data>
@@ -172,6 +168,31 @@ set_problem_data(
   add_field_scalar("is_dual", model.is_dual, model);
 }
 
+template <typename Data>
+inline
+void
+set_stopping_criteria(
+    const mxArray* opts,
+    result<Data>& model
+  ) {
+  auto c = &model.criteria;
+  add_field_opts_value(opts, "check_epoch", c->check_epoch, model);
+  add_field_opts_value(opts, "max_num_epoch", c->max_num_epoch, model);
+  add_field_opts_value(opts, "max_cpu_time", c->max_cpu_time, model);
+  add_field_opts_value(opts, "max_wall_time", c->max_wall_time, model);
+  add_field_opts_value(opts, "epsilon", c->epsilon, model);
+  mxCheck<size_type>(std::greater_equal<size_type>(),
+    c->check_epoch, 0, "check_epoch");
+  mxCheck<size_type>(std::greater_equal<size_type>(),
+    c->max_num_epoch, 0, "max_num_epoch");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->max_cpu_time, 0, "max_cpu_time");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->max_wall_time, 0, "max_wall_time");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->epsilon, 0, "epsilon");
+}
+
 template <typename Objective, typename Data>
 inline
 void
@@ -190,7 +211,7 @@ make_solver_solve(
     add_field_scalar("dual", solver.dual(), model);
     add_field_scalar("absolute_gap", solver.absolute_gap(), model);
     add_field_scalar("relative_gap", solver.relative_gap(), model);
-    add_field_scalar("epoch", solver.epoch(), model);
+    add_field_scalar("num_epoch", solver.num_epoch(), model);
     add_field_scalar("cpu_time", solver.cpu_time(), model);
     add_field_scalar("wall_time", solver.wall_time(), model);
     add_states(solver.states(), model);
@@ -209,13 +230,20 @@ mex_main(
   const mxArray* opts = (nrhs > 2) ? prhs[2] : nullptr;
   mxCheckStruct(opts, "opts");
 
+  set_logging_options(opts);
+
   result<Data> model;
   set_problem_data(p_data, p_labels, opts, model);
   set_stopping_criteria(opts, model);
 
+  std::string objective = mxGetFieldValueOrDefault(
+    opts, "objective", std::string("l2_hinge_topk"));
+  add_field("objective", mxCreateString(objective.c_str()), model);
+
   auto c = mxGetFieldValueOrDefault<Data>(opts, "c", 1);
   mxCheck<Data>(std::greater_equal<Data>(), c, 0, "c");
   add_field_scalar("c", c, model);
+
   auto C = mxGetFieldValueOrDefault<Data>(opts, "C",
     c/static_cast<Data>(model.problem.num_examples));
   mxCheck<Data>(std::greater_equal<Data>(), C, 0, "C");
@@ -224,8 +252,6 @@ mex_main(
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
   mxCheckRange<size_type>(k, 1, model.problem.num_tasks, "k");
 
-  std::string objective = mxGetFieldValueOrDefault(
-    opts, "objective", std::string("l2_hinge_topk"));
   if (objective == "l2_hinge_topk") {
     add_field_scalar("k", k, model);
     make_solver_solve(make_l2_hinge_topk(k, C), model);

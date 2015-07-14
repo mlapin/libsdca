@@ -24,6 +24,7 @@ enum err_index {
   err_labels_range,
   err_proj_type,
   err_obj_type,
+  err_log_level,
   err_not_implemented
 };
 
@@ -43,6 +44,7 @@ static const char* err_id[] = {
   "LIBSDCA:labels_range",
   "LIBSDCA:proj_type",
   "LIBSDCA:obj_type",
+  "LIBSDCA:log_level",
   "LIBSDCA:not_implemented"
 };
 
@@ -62,6 +64,7 @@ static const char* err_msg[] = {
   "Invalid labels range (must be 1:T or 0:T-1).",
   "Unknown projection type '%s'.",
   "Unknown objective type '%s'.",
+  "Unknown log level '%s'.",
   "%s is not implemented yet."
 };
 

@@ -8,6 +8,10 @@ set(LINALG_SRCS
   linalg/linalg.h
   )
 
+set(LOGGING_SRCS
+  logging/logging.h
+  )
+
 set(PROX_SRCS
   prox/prox.h
   prox/proxdef.h
@@ -45,7 +49,7 @@ if(${Matlab_FOUND})
   matlab_add_mex(
     NAME ${MEX_SOLVE}
     SRC matlab/mex_solve.cpp matlab/mex_util.h
-        ${LINALG_SRCS} ${PROX_SRCS} ${SOLVE_SRCS}
+        ${LOGGING_SRCS} ${LINALG_SRCS} ${PROX_SRCS} ${SOLVE_SRCS}
     LINK_TO ${BLAS_LIBRARIES}
     )
 

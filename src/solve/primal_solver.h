@@ -1,6 +1,8 @@
 #ifndef SDCA_SOLVE_PRIMAL_SOLVER_H
 #define SDCA_SOLVE_PRIMAL_SOLVER_H
 
+#include <iostream>
+
 #include "linalg/linalg.h"
 #include "solver.h"
 
@@ -60,7 +62,7 @@ protected:
   std::vector<data_type> vars_before_;
   const data_type diff_tolerance_;
 
-  // BLAS
+  // BLAS (avoid static casts)
   const blas_int D;
   const blas_int N;
   const blas_int T;
@@ -70,7 +72,8 @@ protected:
     base::begin_solve();
     for (size_type i = 0; i < num_examples_; ++i) {
       const data_type* x_i = features_ + num_dimensions_ * i;
-      norms_[i] = sdca_blas_dot(D, x_i, x_i);
+      data_type a = sdca_blas_dot(D, x_i, x_i);
+      norms_[i] = (a > 0) ? static_cast<data_type>(1) / a : 0;
     }
   }
 
@@ -98,15 +101,16 @@ protected:
 
   void compute_objectives() override {
     // Let W = X * A'
+    // (recompute W from scratch to avoid the accumulated numerical error)
     sdca_blas_gemm(D, T, N, features_, D, dual_variables_, T,
       primal_variables_, CblasNoTrans, CblasTrans);
 
-    // Compute the sums over all examples
+    // Compute the three sums independently over all training examples
     result_type regul_sum = 0;
     result_type p_loss_sum = 0;
     result_type d_loss_sum = 0;
 
-    // Use Kahan summation
+    // Compensation variables for the Kahan summation
     result_type regul_comp = 0;
     result_type p_loss_comp = 0;
     result_type d_loss_comp = 0;
@@ -120,7 +124,7 @@ protected:
       // Let scores = A * K_i = W' * x_i
       sdca_blas_gemv(D, T, primal_variables_, x_i, &scores_[0], CblasTrans);
 
-      // Compute regularizer and losses
+      // Compute the regularization term and primal/dual losses
       data_type regul, p_loss, d_loss;
       data_type* vars = dual_variables_ + num_tasks_ * i;
       objective_.regularized_loss(T, labels_[i], vars, &scores_[0],
@@ -132,7 +136,7 @@ protected:
       kahan_sum(d_loss, d_loss_sum, d_loss_comp);
     }
 
-    // Compute primal/dual objectives and the duality gap
+    // Compute the overall primal/dual objectives and the duality gap
     objective_.primal_dual_gap(regul_sum, p_loss_sum, d_loss_sum,
       primal_, dual_, gap_);
   }

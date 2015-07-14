@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <random>
 
+#include "logging/logging.h"
 #include "solvedef.h"
 
 namespace sdca {
@@ -23,8 +24,8 @@ public:
       num_examples_(__num_examples),
       status_(solver_status::none),
       epoch_(0),
-      cpu_start_(0),
-      cpu_end_(0),
+      cpu_time_(0),
+      wall_time_(0),
       primal_(0),
       dual_(0),
       gap_(0)
@@ -44,22 +45,17 @@ public:
     end_solve();
   }
 
-  double cpu_time() const {
-    return static_cast<double>(cpu_end_ - cpu_start_) / CLOCKS_PER_SEC;
+  solver_status status() const { return status_; }
+
+  std::string status_name() const {
+    return solver_status_name[static_cast<solver_status_type>(status_)];
   }
 
-  double wall_time() const {
-    return std::chrono::duration<double>(wall_end_ - wall_start_).count();
-  }
+  size_type num_epoch() const { return epoch_ + 1; }
 
-  double cpu_time_now() const {
-    return static_cast<double>(std::clock() - cpu_start_) / CLOCKS_PER_SEC;
-  }
+  double cpu_time() const { return cpu_time_; }
 
-  double wall_time_now() const {
-    return std::chrono::duration<double>(
-      std::chrono::high_resolution_clock::now() - wall_start_).count();
-  }
+  double wall_time() const { return wall_time_; }
 
   const result_type primal() const { return primal_; }
 
@@ -76,14 +72,6 @@ public:
       : static_cast<result_type>(0);
   }
 
-  size_type epoch() const { return epoch_; }
-
-  solver_status status() const { return status_; }
-
-  std::string status_name() const {
-    return solver_status_name[static_cast<solver_status_type>(status_)];
-  }
-
   const std::vector<state<result_type>>& states() const { return states_; }
 
 protected:
@@ -94,9 +82,9 @@ protected:
   solver_status status_;
   size_type epoch_;
   cpu_time_point cpu_start_;
-  cpu_time_point cpu_end_;
   wall_time_point wall_start_;
-  wall_time_point wall_end_;
+  double cpu_time_;
+  double wall_time_;
   result_type primal_;
   result_type dual_;
   result_type gap_;
@@ -111,14 +99,14 @@ protected:
   virtual void begin_solve() {
     cpu_start_ = std::clock();
     wall_start_ = wall_clock::now();
-    cpu_end_ = cpu_start_;
-    wall_end_ = wall_start_;
 
     status_ = solver_status::solving;
     primal_ = std::numeric_limits<result_type>::infinity();
     dual_ = -std::numeric_limits<result_type>::infinity();
     gap_ = std::numeric_limits<result_type>::infinity();
     recompute_gap_ = false;
+
+    logging::set_format_scientific();
 
     generator_.seed();
     examples_.resize(num_examples_);
@@ -136,8 +124,10 @@ protected:
     if (recompute_gap_) {
       compute_duality_gap();
     }
-    cpu_end_ = std::clock();
-    wall_end_ = wall_clock::now();
+    cpu_time_ += cpu_time_now();
+    wall_time_ += wall_time_now();
+
+    logging::set_format_default();
   }
 
   virtual void begin_epoch() {
@@ -169,13 +159,28 @@ protected:
     result_type max = std::max(std::abs(primal_), std::abs(dual_));
     if (gap_ <= static_cast<result_type>(criteria_.epsilon) * max) {
       status_ = solver_status::solved;
-    } else {
-      if (dual_ * dual_decrease_tolerance < dual_before) {
-        status_ = solver_status::dual_decreased;
-      }
+    } else if (dual_ * dual_decrease_tolerance < dual_before) {
+      status_ = solver_status::dual_decreased;
     }
     states_.emplace_back(
-      epoch_, cpu_time_now(), wall_time_now(), primal_, dual_, gap_);
+      num_epoch(), cpu_time_now(), wall_time_now(), primal_, dual_, gap_);
+    LOG_VERBOSE << "  "
+      "epoch: " << std::setw(4) << num_epoch() << std::setw(0) << ", "
+      "primal: " << primal() << ", "
+      "dual: " << dual() << ", "
+      "absolute_gap: " << absolute_gap() << ", "
+      "relative_gap: " << relative_gap() << ", "
+      "cpu_time: " << cpu_time_now() << ", "
+      "wall_time: " << wall_time_now() << std::endl;
+  }
+
+  double cpu_time_now() const {
+    return static_cast<double>(std::clock() - cpu_start_) / CLOCKS_PER_SEC;
+  }
+
+  double wall_time_now() const {
+    return std::chrono::duration<double>(
+      std::chrono::high_resolution_clock::now() - wall_start_).count();
   }
 
   virtual void solve_example(const size_type i) = 0;

@@ -55,7 +55,7 @@ struct stopping_criteria {
 template <typename Result>
 struct state {
   typedef Result result_type;
-  size_type epoch;
+  size_type num_epoch;
   double cpu_time;
   double wall_time;
   result_type primal;
@@ -63,7 +63,7 @@ struct state {
   result_type gap;
 
   state() :
-      epoch(0),
+      num_epoch(0),
       cpu_time(0),
       wall_time(0),
       primal(std::numeric_limits<result_type>::infinity()),
@@ -72,14 +72,14 @@ struct state {
     {}
 
   state(
-      const size_type __epoch,
+      const size_type __num_epoch,
       const double __cpu_time,
       const double __wall_time,
       const result_type __primal,
       const result_type __dual,
       const result_type __gap
     ) :
-      epoch(__epoch),
+      num_epoch(__num_epoch),
       cpu_time(__cpu_time),
       wall_time(__wall_time),
       primal(__primal),
