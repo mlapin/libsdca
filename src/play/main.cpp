@@ -65,8 +65,8 @@ int main() {
 
   display_vector(A);
 //  auto t = thresholds_knapsack_eq(A.begin(), A.end());
-  project_topk_simplex_biased(A.begin(), A.end());
-  display_vector(A);
+//  project_topk_simplex_biased(A.begin(), A.end());
+//  display_vector(A);
 //  std::cout << "t = " << t.t << "; lo = " << t.lo <<
 //               "; hi = " << t.hi << std::endl;
 

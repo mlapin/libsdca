@@ -16,20 +16,22 @@
 
 namespace sdca {
 
-template <typename ForwardIterator>
+template <typename ForwardIterator,
+          typename Summator = std_sum<ForwardIterator>>
 thresholds<ForwardIterator>
 thresholds_knapsack_eq(
     ForwardIterator first,
     ForwardIterator last,
     const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
     const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    Summator sum = Summator()
     ) {
   using Type = typename std::iterator_traits<ForwardIterator>::value_type;
 
   // Initialization
   const auto num_elements = std::distance(first, last);
-  Type t = (std::accumulate(first, last, static_cast<Type>(0)) - rhs) /
+  Type t = (sum(first, last, static_cast<Type>(0)) - rhs) /
     static_cast<Type>(num_elements);
 
   ForwardIterator m_first = first;
@@ -40,13 +42,13 @@ thresholds_knapsack_eq(
     auto lo_it = std::partition(m_first, m_last, [=](const Type &x){
       return x > tt; });
     Type infeas_lo = + static_cast<Type>(std::distance(lo_it, m_last))
-      * tt - std::accumulate(lo_it, m_last, static_cast<Type>(0));
+      * tt - sum(lo_it, m_last, static_cast<Type>(0));
 
     tt = hi + t;
     auto hi_it = std::partition(m_first, lo_it, [=](const Type &x){
       return x > tt; });
     Type infeas_hi = - static_cast<Type>(std::distance(m_first, hi_it))
-      * tt + std::accumulate(m_first, hi_it, static_cast<Type>(0));
+      * tt + sum(m_first, hi_it, static_cast<Type>(0));
 
     // Variable fixing (using the incremental multiplier formula (23))
     if (infeas_lo > infeas_hi) {
@@ -71,7 +73,8 @@ thresholds_knapsack_eq(
   return make_thresholds(t, lo, hi, m_first, m_last);
 }
 
-template <typename ForwardIterator>
+template <typename ForwardIterator,
+          typename Summator = std_sum<ForwardIterator>>
 inline
 void
 project_knapsack_eq(
@@ -79,13 +82,15 @@ project_knapsack_eq(
     ForwardIterator last,
     const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
     const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    Summator sum = Summator()
     ) {
   project(first, last,
-          thresholds_knapsack_eq<ForwardIterator>, lo, hi, rhs);
+          thresholds_knapsack_eq<ForwardIterator, Summator>, lo, hi, rhs, sum);
 }
 
-template <typename ForwardIterator>
+template <typename ForwardIterator,
+          typename Summator = std_sum<ForwardIterator>>
 inline
 void
 project_knapsack_eq(
@@ -95,13 +100,15 @@ project_knapsack_eq(
     ForwardIterator aux_last,
     const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
     const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    Summator sum = Summator()
     ) {
   project(first, last, aux_first, aux_last,
-          thresholds_knapsack_eq<ForwardIterator>, lo, hi, rhs);
+          thresholds_knapsack_eq<ForwardIterator, Summator>, lo, hi, rhs, sum);
 }
 
-template <typename ForwardIterator>
+template <typename ForwardIterator,
+          typename Summator = std_sum<ForwardIterator>>
 inline
 void
 project_knapsack_eq(
@@ -112,10 +119,11 @@ project_knapsack_eq(
     ForwardIterator aux_last,
     const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
     const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    Summator sum = Summator()
     ) {
   project(dim, first, last, aux_first, aux_last,
-          thresholds_knapsack_eq<ForwardIterator>, lo, hi, rhs);
+          thresholds_knapsack_eq<ForwardIterator, Summator>, lo, hi, rhs, sum);
 }
 
 }

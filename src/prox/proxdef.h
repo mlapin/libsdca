@@ -1,6 +1,8 @@
 #ifndef SDCA_PROX_PROXDEF_H
 #define SDCA_PROX_PROXDEF_H
 
+#include <iostream>
+
 #include <algorithm>
 #include <iterator>
 #include <limits>
@@ -147,6 +149,31 @@ project(
     first = vec_last;
   }
 }
+
+//template <typename Iterator>
+//struct std_sum {
+//  typedef typename std::iterator_traits<Iterator>::value_type Type;
+//  std_sum() { std::cout << "std sum" << std::endl; }
+//  inline Type operator()(Iterator first, Iterator last, Type init) {
+//    return std::accumulate(first, last, init);
+//  }
+//};
+
+template <typename Iterator, typename Result = long double>
+struct std_sum {
+  typedef typename std::iterator_traits<Iterator>::value_type Type;
+//  std_sum() { std::cout << "std sum 3" << std::endl; }
+  inline Type operator()(Iterator first, Iterator last, Type init) {
+    Result sum = static_cast<Result>(init), c = 0;
+    for (; first != last; ++first) {
+      Result y = static_cast<Result>(*first) - c;
+      Result t = sum + y;
+      c = (t - sum) - y;
+      sum = t;
+    }
+    return static_cast<Type>(sum);
+  }
+};
 
 }
 

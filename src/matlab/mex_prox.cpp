@@ -58,7 +58,7 @@ mex_main(
   if (proj == "knapsack_eq") {
     project_knapsack_eq(
       m, first, last, aux_first, aux_last, lo, hi, rhs);
-  } else if (proj == "knapsack_le") {
+  } /*else if (proj == "knapsack_le") {
     project_knapsack_le(
       m, first, last, aux_first, aux_last, lo, hi, rhs);
   } else if (proj == "knapsack_le_biased") {
@@ -76,7 +76,7 @@ mex_main(
   } else if (proj == "topk_simplex_biased") {
     project_topk_simplex_biased(
       m, first, last, aux_first, aux_last, k, rhs, rho);
-  } else {
+  }*/ else {
     mexErrMsgIdAndTxt(
       err_id[err_proj_type], err_msg[err_proj_type], proj.c_str());
   }
