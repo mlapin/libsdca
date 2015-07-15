@@ -29,7 +29,14 @@ public:
       primal_(0),
       dual_(0),
       gap_(0)
-  {}
+  {
+    LOG_INFO << "stopping_criteria: "
+      "epsilon = " << __criteria.epsilon << ", "
+      "check_epoch = " << __criteria.check_epoch << ", "
+      "max_num_epoch = " << __criteria.max_num_epoch << ", "
+      "max_cpu_time = " << __criteria.max_cpu_time << ", "
+      "max_wall_time = " << __criteria.max_wall_time << std::endl;
+  }
 
   void solve() {
     begin_solve();
@@ -118,12 +125,19 @@ protected:
       if (epoch_ > 0) {
         --epoch_; // correct to the last executed epoch
       }
+      LOG_DEBUG << "  (warning) "
+        "epochs limit: " << num_epoch() << std::endl;
     }
     if (recompute_gap_) {
       compute_duality_gap();
     }
     cpu_time_ += cpu_time_now();
     wall_time_ += wall_time_now();
+    LOG_INFO << "status: " << status_name() << " ("
+      "epoch = " << num_epoch() << ", "
+      "relative_gap = " << relative_gap() << ", "
+      "cpu_time = " << cpu_time_now() << ", "
+      "wall_time = " << wall_time_now() << ")" << std::endl;
   }
 
   virtual void begin_epoch() {
@@ -140,9 +154,13 @@ protected:
       if (criteria_.max_cpu_time > 0 &&
           cpu_time_now() >= criteria_.max_cpu_time) {
         status_ = solver_status::max_cpu_time;
+        LOG_DEBUG << "  (warning) "
+          "cpu time limit: " << cpu_time_now() << std::endl;
       } else if (criteria_.max_wall_time > 0 &&
           wall_time_now() >= criteria_.max_wall_time) {
         status_ = solver_status::max_wall_time;
+        LOG_DEBUG << "  (warning) "
+          "wall time limit: " << wall_time_now() << std::endl;
       }
     }
     return status_ != solver_status::solving;
@@ -157,11 +175,13 @@ protected:
       status_ = solver_status::solved;
     } else if (dual_ * dual_decrease_tolerance < dual_before) {
       status_ = solver_status::dual_decreased;
+      LOG_DEBUG << "  (warning) "
+        "dual objective decreased by " << (dual_before - dual_) << std::endl;
     }
     states_.emplace_back(
       num_epoch(), cpu_time_now(), wall_time_now(), primal_, dual_, gap_);
     LOG_VERBOSE << "  "
-      "epoch: " << std::setw(4) << num_epoch() << std::setw(0) << ", "
+      "epoch: " << std::setw(3) << num_epoch() << std::setw(0) << ", "
       "primal: " << primal() << ", "
       "dual: " << dual() << ", "
       "absolute_gap: " << absolute_gap() << ", "

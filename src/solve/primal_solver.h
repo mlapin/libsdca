@@ -1,8 +1,6 @@
 #ifndef SDCA_SOLVE_PRIMAL_SOLVER_H
 #define SDCA_SOLVE_PRIMAL_SOLVER_H
 
-#include <iostream>
-
 #include "linalg/linalg.h"
 #include "solver.h"
 
@@ -38,7 +36,12 @@ public:
       D(static_cast<blas_int>(__problem.num_dimensions)),
       N(static_cast<blas_int>(__problem.num_examples)),
       T(static_cast<blas_int>(__problem.num_tasks))
-  {}
+  {
+    LOG_INFO << "formulation: primal ("
+      "num_dimensions = " << __problem.num_dimensions << ", "
+      "num_examples = " << __problem.num_examples << ", "
+      "num_tasks = " << __problem.num_tasks << ")" << std::endl;
+  }
 
 protected:
   // Protected members of the base class
@@ -89,7 +92,7 @@ protected:
     // Update dual variables
     data_type* vars = dual_variables_ + num_tasks_ * i;
     std::copy_n(vars, num_tasks_, &vars_before_[0]);
-    objective_.update_dual(T, labels_[i], norms_[i], vars, &scores_[0]);
+    objective_.update_variables(T, labels_[i], norms_[i], vars, &scores_[0]);
 
     // Update primal variables
     sdca_blas_axpy(T, -1, vars, &vars_before_[0]);

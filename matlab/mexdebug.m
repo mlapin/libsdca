@@ -26,7 +26,12 @@ if 1
   max_wall_time = 0;
   max_cpu_time = 0;
 
-  model = libsdca_solve(Xtrn, Ytrn);
+  opts.epsilon = 1e-15;
+  opts.check_epoch = 10;
+  opts.max_num_epoch = 1000;
+  opts.log_level = 'debug';
+
+  model = libsdca_solve(Xtrn, Ytrn, opts);
   disp(model);
   [~,pred] = max(model.W'*Xtrn);
   fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));

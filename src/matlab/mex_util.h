@@ -303,12 +303,14 @@ class mat_streambuf : public std::streambuf {
 protected:
   virtual std::streamsize xsputn(const char_type* s, std::streamsize n) {
     mexPrintf("%.*s", n, s);
+    mexEvalString("drawnow;");
     return n;
   }
 
   virtual int_type overflow(int_type c = traits_type::eof()) {
     if (c != traits_type::eof()) {
       mexPrintf("%c", c);
+      mexEvalString("drawnow;");
     }
     return c;
   }

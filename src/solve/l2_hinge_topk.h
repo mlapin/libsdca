@@ -1,9 +1,8 @@
 #ifndef SDCA_SOLVE_L2_TOPK_LOSS_H
 #define SDCA_SOLVE_L2_TOPK_LOSS_H
 
-#include <iostream>
-
 #include "linalg/linalg.h"
+#include "logging/logging.h"
 #include "prox/topk_simplex_biased.h"
 #include "solvedef.h"
 
@@ -23,10 +22,12 @@ struct l2_hinge_topk {
       rhs(svm_c),
       c_div_k(static_cast<Result>(svm_c) / static_cast<Result>(top_k))
   {
-    std::cout << "k = " << top_k << "; " << "c = " << svm_c << std::endl;
+    LOG_INFO << "objective: l2_hinge_topk ("
+      "k = " << top_k << ", "
+      "C = " << svm_c << ")" << std::endl;
   }
 
-  void update_dual(
+  void update_variables(
       const blas_int num_tasks,
       const size_type label,
       const Data norm2_inv,
