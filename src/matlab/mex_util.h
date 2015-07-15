@@ -1,6 +1,7 @@
 #ifndef SDCA_MATLAB_MEX_UTIL_H
 #define SDCA_MATLAB_MEX_UTIL_H
 
+#include <iostream>
 #include <string>
 #include <vector>
 #include <utility>
@@ -25,6 +26,7 @@ enum err_index {
   err_proj_type,
   err_obj_type,
   err_log_level,
+  err_log_format,
   err_not_implemented
 };
 
@@ -45,6 +47,7 @@ static const char* err_id[] = {
   "LIBSDCA:proj_type",
   "LIBSDCA:obj_type",
   "LIBSDCA:log_level",
+  "LIBSDCA:log_format",
   "LIBSDCA:not_implemented"
 };
 
@@ -65,6 +68,7 @@ static const char* err_msg[] = {
   "Unknown projection type '%s'.",
   "Unknown objective type '%s'.",
   "Unknown log level '%s'.",
+  "Unknown log format '%s'.",
   "%s is not implemented yet."
 };
 
@@ -293,6 +297,38 @@ mxCreateStruct(
   }
   return pa;
 }
+
+// http://stackoverflow.com/questions/243696/correctly-over-loading-a-stringbuf-to-replace-cout-in-a-matlab-mex-file
+class mat_streambuf : public std::streambuf {
+protected:
+  virtual std::streamsize xsputn(const char_type* s, std::streamsize n) {
+    mexPrintf("%.*s", n, s);
+    return n;
+  }
+
+  virtual int_type overflow(int_type c = traits_type::eof()) {
+    if (c != traits_type::eof()) {
+      mexPrintf("%c", c);
+    }
+    return c;
+  }
+};
+
+class mat_cout_hijack {
+public:
+  mat_cout_hijack() {
+    std_buf_ = std::cout.rdbuf(&mat_buf_);
+  }
+  ~mat_cout_hijack() {
+    release();
+  }
+  void release() {
+    std::cout.rdbuf(std_buf_);
+  }
+private:
+  mat_streambuf mat_buf_;
+  std::streambuf* std_buf_;
+};
 
 }
 

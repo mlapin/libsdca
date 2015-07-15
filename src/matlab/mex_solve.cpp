@@ -1,4 +1,4 @@
-
+#include <iostream>
 #include "mex_util.h"
 #include "solve/solve.h"
 
@@ -70,7 +70,7 @@ add_states(
     {"epoch", "cpu_time", "wall_time", "primal", "dual", "gap"};
   mxArray* pa = mxCreateStructMatrix(states.size(), 1, 6, names);
   mxCheckCreated(pa, "states");
-  int i = 0;
+  size_type i = 0;
   for (auto& state : states) {
     mxSetFieldByNumber(pa, i, 0, mxCreateScalar(state.num_epoch));
     mxSetFieldByNumber(pa, i, 1, mxCreateScalar(state.cpu_time));
@@ -102,6 +102,21 @@ set_logging_options(
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_log_level], err_msg[err_log_level], log_level.c_str());
+  }
+
+  std::string log_format = mxGetFieldValueOrDefault(
+    opts, "log_format", std::string("short_f"));
+  if (log_format == "short_f") {
+    logging::set_format(logging::short_f);
+  } else if (log_format == "long_f") {
+    logging::set_format(logging::long_f);
+  } else if (log_format == "short_e") {
+    logging::set_format(logging::short_e);
+  } else if (log_format == "long_e") {
+    logging::set_format(logging::long_e);
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_log_format], err_msg[err_log_format], log_format.c_str());
   }
 }
 
@@ -230,6 +245,7 @@ mex_main(
   const mxArray* opts = (nrhs > 2) ? prhs[2] : nullptr;
   mxCheckStruct(opts, "opts");
 
+  mat_cout_hijack mat_cout;
   set_logging_options(opts);
 
   result<Data> model;
@@ -261,6 +277,7 @@ mex_main(
   }
 
   plhs[0] = mxCreateStruct(model.fields, "model");
+  mat_cout.release();
 }
 
 void
@@ -281,9 +298,11 @@ mexFunction(
   mxCheckNotEmpty(prhs[1], "labels");
   mxCheckDouble(prhs[1], "labels");
 
+  logging::format_push();
   if (mxIsDouble(prhs[0])) {
      mex_main<double>(plhs, nrhs, prhs);
   } else if (mxIsSingle(prhs[0])) {
      mex_main<float>(plhs, nrhs, prhs);
   }
+  logging::format_pop();
 }

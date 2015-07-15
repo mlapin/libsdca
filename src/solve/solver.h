@@ -106,8 +106,6 @@ protected:
     gap_ = std::numeric_limits<result_type>::infinity();
     recompute_gap_ = false;
 
-    logging::set_format_scientific();
-
     generator_.seed();
     examples_.resize(num_examples_);
     std::iota(examples_.begin(), examples_.end(), 0);
@@ -126,8 +124,6 @@ protected:
     }
     cpu_time_ += cpu_time_now();
     wall_time_ += wall_time_now();
-
-    logging::set_format_default();
   }
 
   virtual void begin_epoch() {
