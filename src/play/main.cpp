@@ -24,9 +24,10 @@ int main() {
   using ResultType = float;
   using IndexType = std::vector<RealType>::difference_type;
   using SizeType = std::vector<RealType>::size_type;
+  using IteratorType = std::vector<RealType>::iterator;
 
-  SizeType dim = 100000;
-  SizeType repeat = 1000;
+  SizeType dim = 10000;
+  SizeType repeat = 100000;
 
   std::mt19937 gen(0);
   std::uniform_int_distribution<SizeType> dice(1, 3);
@@ -46,10 +47,13 @@ int main() {
   display(v);
 
   ResultType sum1(0), sum2(0);
-  double sum3(0), sum4(0);
+  double sum3(0), sum4(0), sum5(0), sum6(0);
 
-  double et1(0), et2(0), et3(0), et4(0);
+  double et1(0), et2(0), et3(0), et4(0), et5(0), et6(0);
   std::clock_t start;
+
+  std_sum<IteratorType, double> stdsum;
+  kahan_sum<IteratorType, double> kahansum;
 
   for (SizeType i = 0; i < repeat; ++i) {
     // Work 1
@@ -71,6 +75,16 @@ int main() {
     start = std::clock();
     sum4 = kahan_accumulate(v.begin(), v.end(), sum4);
     et4 += static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
+
+    // Work 5
+    start = std::clock();
+    sum5 = stdsum(v.begin(), v.end(), sum5);
+    et5 += static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
+
+    // Work 6
+    start = std::clock();
+    sum6 = kahansum(v.begin(), v.end(), sum6);
+    et6 += static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
   }
 
   std::cout << std::scientific << std::setprecision(15);
@@ -78,11 +92,15 @@ int main() {
   std::cout << "sum2 = " << sum2 << std::endl;
   std::cout << "sum3 = " << sum3 << std::endl;
   std::cout << "sum4 = " << sum4 << std::endl;
+  std::cout << "sum5 = " << sum5 << std::endl;
+  std::cout << "sum6 = " << sum6 << std::endl;
 
   std::cout << "time (work 1) = " << et1 << std::endl;
   std::cout << "time (work 2) = " << et2 << std::endl;
   std::cout << "time (work 3) = " << et3 << std::endl;
   std::cout << "time (work 4) = " << et4 << std::endl;
+  std::cout << "time (work 5) = " << et5 << std::endl;
+  std::cout << "time (work 6) = " << et6 << std::endl;
 
 //  std::cout << "sizeof(int) = " << sizeof(int) << std::endl;
 //  std::cout << "sizeof(long int) = " << sizeof(long int) << std::endl;

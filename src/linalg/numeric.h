@@ -51,7 +51,6 @@ struct kahan_sum {
   }
 };
 
-
 }
 
 #endif
