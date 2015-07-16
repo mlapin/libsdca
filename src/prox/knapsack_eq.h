@@ -1,12 +1,6 @@
 #ifndef SDCA_PROX_KNAPSACK_EQ_H
 #define SDCA_PROX_KNAPSACK_EQ_H
 
-#include <algorithm>
-#include <iterator>
-#include <limits>
-#include <numeric>
-
-#include "linalg/numeric.h"
 #include "proxdef.h"
 
 /*
@@ -21,7 +15,7 @@ namespace sdca {
 template <typename Iterator,
           typename Result,
           typename Summator = std_sum<Iterator, Result>>
-thresholds<Result, Iterator>
+thresholds<Iterator, Result>
 thresholds_knapsack_eq(
     Iterator first,
     Iterator last,
@@ -44,14 +38,14 @@ thresholds_knapsack_eq(
     // Feasibility check
     result_type tt = lo + t;
     auto lo_it = std::partition(m_first, m_last,
-      [=](const data_type &x){ return x > tt; });
+      [=](const data_type& x){ return x > tt; });
     data_type infeas_lo =
       + tt * static_cast<result_type>(std::distance(lo_it, m_last))
       - sum(lo_it, m_last, static_cast<result_type>(0));
 
     tt = hi + t;
     auto hi_it = std::partition(m_first, lo_it,
-      [=](const data_type &x){ return x > tt; });
+      [=](const data_type& x){ return x > tt; });
     result_type infeas_hi =
       - tt * static_cast<result_type>(std::distance(m_first, hi_it))
       + sum(m_first, hi_it, static_cast<result_type>(0));

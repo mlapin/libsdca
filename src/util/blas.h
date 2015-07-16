@@ -1,5 +1,5 @@
-#ifndef SDCA_LINALG_BLAS_H
-#define SDCA_LINALG_BLAS_H
+#ifndef SDCA_UTIL_BLAS_H
+#define SDCA_UTIL_BLAS_H
 
 #if defined(BLAS_MKL)
   //#include <mkl.h> // produces warnings with -pedantic
@@ -12,7 +12,7 @@
 
 namespace sdca {
 
-#if defined(BLAS_MKL)
+#if defined(MKL_INT)
   typedef MKL_INT blas_int;
 #else
   typedef int blas_int;

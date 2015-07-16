@@ -5,6 +5,8 @@
 #include <iterator>
 #include <limits>
 
+#include "util/numeric.h"
+
 namespace sdca {
 
 enum class projection {
@@ -13,8 +15,8 @@ enum class projection {
   general
 };
 
-template <typename Result,
-          typename Iterator>
+template <typename Iterator,
+          typename Result>
 struct thresholds {
   typedef Result result_type;
   typedef Iterator iterator_type;
@@ -61,28 +63,41 @@ struct thresholds {
 
 template <typename Result>
 inline
-thresholds<Result, Result*>
+thresholds<Result*, Result>
 make_thresholds(
     const Result t
   ) {
-  return thresholds<Result, Result*>(t);
+  return thresholds<Result*, Result>(t);
 }
 
 template <typename Result>
 inline
-thresholds<Result, Result*>
+thresholds<Result*, Result>
 make_thresholds(
     const Result t,
     const Result lo,
     const Result hi
   ) {
-  return thresholds<Result, Result*>(t, lo, hi);
+  return thresholds<Result*, Result>(t, lo, hi);
 }
 
-template <typename Result,
-          typename Iterator>
+template <typename Iterator,
+          typename Result>
 inline
-thresholds<Result, Iterator>
+thresholds<Iterator, Result>
+make_thresholds(
+    const Result lo,
+    const Result hi,
+    const Iterator first,
+    const Iterator last
+  ) {
+  return thresholds<Iterator, Result>(0, lo, hi, first, last);
+}
+
+template <typename Iterator,
+          typename Result>
+inline
+thresholds<Iterator, Result>
 make_thresholds(
     const Result t,
     const Result lo,
@@ -90,7 +105,7 @@ make_thresholds(
     const Iterator first,
     const Iterator last
   ) {
-  return thresholds<Result, Iterator>(t, lo, hi, first, last);
+  return thresholds<Iterator, Result>(t, lo, hi, first, last);
 }
 
 template <typename Iterator,

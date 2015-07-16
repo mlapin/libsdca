@@ -7,38 +7,40 @@
 
 namespace sdca {
 
-template <typename ForwardIterator>
-thresholds<ForwardIterator>
+template <typename Iterator,
+          typename Result>
+thresholds<Iterator, Result>
 thresholds_knapsack_le_biased_search(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho
+    Iterator first,
+    Iterator last,
+    const Result lo,
+    const Result hi,
+    const Result rhs,
+    const Result rho
     ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  typedef typename std::iterator_traits<Iterator>::value_type data_type;
+  typedef Result result_type;
 
   // At this point, rho must be positive
   assert(rho > 0);
 
   // Sort data to search efficiently
-  std::sort(first, last, std::greater<Type>());
+  std::sort(first, last, std::greater<data_type>());
 
   // Precompute some constants
-  Type rho_rhs = rho * rhs;
-  Type rho_inverse = static_cast<Type>(1) / rho;
-  Type num_X = static_cast<Type>(std::distance(first, last));
-  Type num_U = 0;
-  Type min_U = +std::numeric_limits<Type>::infinity();
+  result_type rho_rhs = rho * rhs;
+  result_type rho_inverse = static_cast<result_type>(1) / rho;
+  result_type num_X = static_cast<result_type>(std::distance(first, last));
+  result_type num_U = 0;
+  result_type min_U = +std::numeric_limits<result_type>::infinity();
 
   // Grow U starting with empty
   for (auto m_first = first;;) {
 
-    Type min_M = +std::numeric_limits<Type>::infinity();
-    Type max_M = -std::numeric_limits<Type>::infinity();
-    Type num_M = 0, sum_M = 0;
-    Type num_L = num_X - num_U;
+    result_type min_M = +std::numeric_limits<result_type>::infinity();
+    result_type max_M = -std::numeric_limits<result_type>::infinity();
+    result_type num_M = 0, sum_M = 0;
+    result_type num_L = num_X - num_U;
 
     // Grow M starting with empty
     for (auto m_last = m_first;;) {
@@ -51,9 +53,9 @@ thresholds_knapsack_le_biased_search(
       //  (4)  hi + t  <= min_U = (m_first - 1) or (+Inf)
       //  (5)       t  <= rho * rhs
 
-      Type t = (lo * num_L + hi * num_U + sum_M) / (rho_inverse + num_M);
+      result_type t = (lo * num_L + hi * num_U + sum_M) / (rho_inverse + num_M);
       if (t <= rho_rhs) {
-        Type tt = hi + t;
+        result_type tt = hi + t;
         if (max_M <= tt && tt <= min_U) {
           tt = lo + t;
           if (tt <= min_M && ((m_last == last) || *m_last <= tt)) {
@@ -68,8 +70,9 @@ thresholds_knapsack_le_biased_search(
       }
       min_M = *m_last;
       max_M = *m_first;
-      sum_M += min_M;
+      sum_M += min_M; // TODO: kahan_add
       ++num_M;
+      --num_L;
       ++m_last;
     }
 
@@ -84,93 +87,109 @@ thresholds_knapsack_le_biased_search(
 
   // Should never reach here
   assert(false);
-  return make_thresholds(lo, lo, hi, first, first);
+  return make_thresholds(0, lo, hi, first, first);
 }
 
-template <typename ForwardIterator>
-thresholds<ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
+thresholds<Iterator, Result>
 thresholds_knapsack_le_biased(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    Iterator first,
+    Iterator last,
+    const Result lo = 0,
+    const Result hi = 1,
+    const Result rhs = 1,
+    const Result rho = 1,
+    Summator sum = Summator()
     ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  typedef typename std::iterator_traits<Iterator>::value_type data_type;
+  typedef Result result_type;
 
   // First, check if the inequality constraint is active (sum > rhs)
   auto m_first = std::partition(first, last,
-    [=](const Type &x){ return x >= hi; });
+    [=](const data_type& x){ return x >= hi; });
   auto m_last = std::partition(m_first, last,
-    [=](const Type &x){ return x > lo; });
+    [=](const data_type& x){ return x > lo; });
 
-  auto sum = std::accumulate(m_first, m_last, static_cast<Type>(0));
-  sum += hi * static_cast<Type>(std::distance(first, m_first));
-  sum += lo * static_cast<Type>(std::distance(m_last, last));
+  result_type s = sum(m_first, m_last, static_cast<result_type>(0))
+    + hi * static_cast<result_type>(std::distance(first, m_first))
+    + lo * static_cast<result_type>(std::distance(m_last, last));
 
   // Special cases: 1) equality constraint; 2) t = 0
-  if (sum > rhs) {
-    auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs);
+  if (s > rhs) {
+    auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs, sum);
     if (t.t >= rho * rhs) {
       return t;
     }
-  } else if (rho * sum == static_cast<Type>(0)) {
-    return make_thresholds(0, lo, hi, m_first, m_last);
+  } else if (rho * s == static_cast<result_type>(0)) {
+    return make_thresholds(lo, hi, m_first, m_last);
   }
 
   // General case
   return thresholds_knapsack_le_biased_search(first, last, lo, hi, rhs, rho);
 }
 
-template <typename ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_le_biased(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    Iterator first,
+    Iterator last,
+    const Result lo = 0,
+    const Result hi = 1,
+    const Result rhs = 1,
+    const Result rho = 1,
+    Summator sum = Summator()
     ) {
   project(first, last,
-          thresholds_knapsack_le_biased<ForwardIterator>, lo, hi, rhs, rho);
+    thresholds_knapsack_le_biased<Iterator, Result, Summator>,
+    lo, hi, rhs, rho, sum);
 }
 
-template <typename ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_le_biased(
-    ForwardIterator first,
-    ForwardIterator last,
-    ForwardIterator aux_first,
-    ForwardIterator aux_last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
+    const Result lo = 0,
+    const Result hi = 1,
+    const Result rhs = 1,
+    const Result rho = 1,
+    Summator sum = Summator()
     ) {
   project(first, last, aux_first, aux_last,
-          thresholds_knapsack_le_biased<ForwardIterator>, lo, hi, rhs, rho);
+    thresholds_knapsack_le_biased<Iterator, Result, Summator>,
+    lo, hi, rhs, rho, sum);
 }
 
-template <typename ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_le_biased(
-    const typename std::iterator_traits<ForwardIterator>::difference_type dim,
-    ForwardIterator first,
-    ForwardIterator last,
-    ForwardIterator aux_first,
-    ForwardIterator aux_last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rho = 1
+    const typename std::iterator_traits<Iterator>::difference_type dim,
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
+    const Result lo = 0,
+    const Result hi = 1,
+    const Result rhs = 1,
+    const Result rho = 1,
+    Summator sum = Summator()
     ) {
   project(dim, first, last, aux_first, aux_last,
-          thresholds_knapsack_le_biased<ForwardIterator>, lo, hi, rhs, rho);
+    thresholds_knapsack_le_biased<Iterator, Result, Summator>,
+    lo, hi, rhs, rho, sum);
 }
 
 }

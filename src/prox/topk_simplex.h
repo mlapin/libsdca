@@ -1,58 +1,57 @@
 #ifndef SDCA_PROX_TOPK_SIMPLEX_H
 #define SDCA_PROX_TOPK_SIMPLEX_H
 
-#include <algorithm>
-#include <iterator>
-#include <numeric>
-
 #include "knapsack_eq.h"
 #include "topk_cone.h"
 
 namespace sdca {
 
-template <typename ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 bool
 is_topk_simplex_lt(
-    const ForwardIterator u_first,
-    const ForwardIterator u_last,
-    const typename std::iterator_traits<ForwardIterator>::value_type t,
-    const typename std::iterator_traits<ForwardIterator>::value_type k,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs
+    const Iterator u_first,
+    const Iterator u_last,
+    const Result t,
+    const Result k,
+    const Result rhs,
+    Summator sum = Summator()
     ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  auto size = std::distance(u_first, u_last);
-  if (size) {
-    const Type num_U = static_cast<Type>(size);
-    const Type sum_U = std::accumulate(u_first, u_last, static_cast<Type>(0));
-    return k * ( sum_U + (k - num_U) * t) < rhs * num_U;
+  if (u_first == u_last) {
+    return t < 0;
   } else {
-    return t < static_cast<Type>(0);
+    Result num_U = static_cast<Result>(std::distance(u_first, u_last));
+    Result sum_U = sum(u_first, u_last, static_cast<Result>(0));
+    return k * ( sum_U + (k - num_U) * t) < rhs * num_U;
   }
 }
 
-template <typename ForwardIterator>
-thresholds<ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
+thresholds<Iterator, Result>
 thresholds_topk_simplex(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    Iterator first,
+    Iterator last,
+    const typename std::iterator_traits<Iterator>::difference_type k = 1,
+    const Result rhs = 1,
+    Summator sum = Summator()
     ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  const Type K = static_cast<Type>(k);
-  auto proj = topk_cone_special_cases(first, last, k, K);
+  Result K = static_cast<Result>(k), lo(0);
+  auto proj = topk_cone_special_cases(first, last, k, K, sum);
   switch (proj.projection) {
     case projection::zero:
       break;
     case projection::constant:
       if (K * proj.result.hi > rhs) {
-        return thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
+        return thresholds_knapsack_eq(first, last, lo, rhs / K, rhs, sum);
       }
       break;
     case projection::general:
-      auto t = thresholds_knapsack_eq(first, last, 0, rhs / K, rhs);
-      if (is_topk_simplex_lt(first, t.first, t.t, K, rhs)) {
+      auto t = thresholds_knapsack_eq(first, last, lo, rhs / K, rhs, sum);
+      if (is_topk_simplex_lt(first, t.first, t.t, K, rhs, sum)) {
         return thresholds_topk_cone_search(first, last, k);
       }
       return t;
@@ -60,48 +59,57 @@ thresholds_topk_simplex(
   return proj.result;
 }
 
-template <typename ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_topk_simplex(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    Iterator first,
+    Iterator last,
+    const typename std::iterator_traits<Iterator>::difference_type k = 1,
+    const Result rhs = 1,
+    Summator sum = Summator()
     ) {
   project(first, last,
-          thresholds_topk_simplex<ForwardIterator>, k, rhs);
+    thresholds_topk_simplex<Iterator, Result, Summator>, k, rhs, sum);
 }
 
-template <typename ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_topk_simplex(
-    ForwardIterator first,
-    ForwardIterator last,
-    ForwardIterator aux_first,
-    ForwardIterator aux_last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
+    const typename std::iterator_traits<Iterator>::difference_type k = 1,
+    const Result rhs = 1,
+    Summator sum = Summator()
     ) {
   project(first, last, aux_first, aux_last,
-          thresholds_topk_simplex<ForwardIterator>, k, rhs);
+    thresholds_topk_simplex<Iterator, Result, Summator>, k, rhs, sum);
 }
 
-template <typename ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_topk_simplex(
-    const typename std::iterator_traits<ForwardIterator>::difference_type dim,
-    ForwardIterator first,
-    ForwardIterator last,
-    ForwardIterator aux_first,
-    ForwardIterator aux_last,
-    const typename std::iterator_traits<ForwardIterator>::difference_type k = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1
+    const typename std::iterator_traits<Iterator>::difference_type dim,
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
+    const typename std::iterator_traits<Iterator>::difference_type k = 1,
+    const Result rhs = 1,
+    Summator sum = Summator()
     ) {
   project(dim, first, last, aux_first, aux_last,
-          thresholds_topk_simplex<ForwardIterator>, k, rhs);
+    thresholds_topk_simplex<Iterator, Result, Summator>, k, rhs, sum);
 }
 
 }

@@ -3,11 +3,11 @@
 
 #include "proxdef.h"
 #include "knapsack_eq.h"
-//#include "knapsack_le.h"
-//#include "knapsack_le_biased.h"
-//#include "topk_cone.h"
-//#include "topk_cone_biased.h"
-//#include "topk_simplex.h"
-//#include "topk_simplex_biased.h"
+#include "knapsack_le.h"
+#include "knapsack_le_biased.h"
+#include "topk_cone.h"
+#include "topk_cone_biased.h"
+#include "topk_simplex.h"
+#include "topk_simplex_biased.h"
 
 #endif

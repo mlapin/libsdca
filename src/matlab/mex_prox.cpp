@@ -14,7 +14,7 @@ printUsage() {
             "       X = %s(A, opts);\n", MEX_PROX, MEX_PROX);
 }
 
-template <typename Type>
+template <typename Data>
 void
 mex_main(
     const int nlhs,
@@ -31,52 +31,54 @@ mex_main(
     plhs[0] = mxX;
   }
 
+  typedef double Result;
   const mxArray* opts = (nrhs > 1) ? prhs[1] : nullptr;
   mxCheckStruct(opts, "opts");
 
-  auto lo = mxGetFieldValueOrDefault<Type>(opts, "lo", 0);
-  auto hi = mxGetFieldValueOrDefault<Type>(opts, "hi", 1);
-  auto rhs = mxGetFieldValueOrDefault<Type>(opts, "rhs", 1);
-  auto rho = mxGetFieldValueOrDefault<Type>(opts, "rho", 1);
+  auto lo = mxGetFieldValueOrDefault<Result>(opts, "lo", 0);
+  auto hi = mxGetFieldValueOrDefault<Result>(opts, "hi", 1);
+  auto rhs = mxGetFieldValueOrDefault<Result>(opts, "rhs", 1);
+  auto rho = mxGetFieldValueOrDefault<Result>(opts, "rho", 1);
   auto k = mxGetFieldValueOrDefault<std::ptrdiff_t>(opts, "k", 1);
 
   std::ptrdiff_t m = static_cast<std::ptrdiff_t>(mxGetM(mxX));
   std::ptrdiff_t n = static_cast<std::ptrdiff_t>(mxGetN(mxX));
 
-  mxCheck<Type>(std::greater_equal<Type>(), rhs, 0, "rhs");
-  mxCheck<Type>(std::greater_equal<Type>(), rho, 0, "rho");
+  mxCheck<Result>(std::greater_equal<Result>(), rhs, 0, "rhs");
+  mxCheck<Result>(std::greater_equal<Result>(), rho, 0, "rho");
   mxCheckRange<std::ptrdiff_t>(k, 1, m, "k");
 
-  std::vector<Type> aux(static_cast<std::size_t>(m));
-  Type* first = static_cast<Type*>(mxGetData(mxX));
-  Type* last = first + m*n;
-  Type* aux_first = &aux[0];
-  Type* aux_last = aux_first + m;
+  std::vector<Data> aux(static_cast<std::size_t>(m));
+  Data* first = static_cast<Data*>(mxGetData(mxX));
+  Data* last = first + m*n;
+  Data* aux_first = &aux[0];
+  Data* aux_last = aux_first + m;
 
+  kahan_sum<Data*, Result> sum;
   std::string proj = mxGetFieldValueOrDefault(
     opts, "proj", std::string("knapsack_eq"));
   if (proj == "knapsack_eq") {
     project_knapsack_eq(
-      m, first, last, aux_first, aux_last, lo, hi, rhs);
-  } /*else if (proj == "knapsack_le") {
+      m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
+  } else if (proj == "knapsack_le") {
     project_knapsack_le(
-      m, first, last, aux_first, aux_last, lo, hi, rhs);
+      m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
   } else if (proj == "knapsack_le_biased") {
     project_knapsack_le_biased(
-      m, first, last, aux_first, aux_last, lo, hi, rhs, rho);
+      m, first, last, aux_first, aux_last, lo, hi, rhs, rho, sum);
   } else if (proj == "topk_cone") {
     project_topk_cone(
-      m, first, last, aux_first, aux_last, k);
+      m, first, last, aux_first, aux_last, k, sum);
   } else if (proj == "topk_cone_biased") {
     project_topk_cone_biased(
-      m, first, last, aux_first, aux_last, k, rho);
+      m, first, last, aux_first, aux_last, k, rho, sum);
   } else if (proj == "topk_simplex") {
     project_topk_simplex(
-      m, first, last, aux_first, aux_last, k, rhs);
+      m, first, last, aux_first, aux_last, k, rhs, sum);
   } else if (proj == "topk_simplex_biased") {
     project_topk_simplex_biased(
-      m, first, last, aux_first, aux_last, k, rhs, rho);
-  }*/ else {
+      m, first, last, aux_first, aux_last, k, rhs, rho, sum);
+  } else {
     mexErrMsgIdAndTxt(
       err_id[err_proj_type], err_msg[err_proj_type], proj.c_str());
   }

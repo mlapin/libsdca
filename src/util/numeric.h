@@ -1,5 +1,7 @@
-#ifndef SDCA_LINALG_NUMERIC_H
-#define SDCA_LINALG_NUMERIC_H
+#ifndef SDCA_UTIL_NUMERIC_H
+#define SDCA_UTIL_NUMERIC_H
+
+#include <numeric>
 
 namespace sdca {
 
@@ -37,7 +39,7 @@ kahan_accumulate(
 
 template <typename Iterator, typename Result>
 struct std_sum {
-//  std_sum() { std::cout << "std sum" << std::endl; }
+  std_sum() { std::cout << "std sum" << std::endl; }
   inline Result operator()(Iterator first, Iterator last, Result init) {
     return std::accumulate(first, last, init);
   }

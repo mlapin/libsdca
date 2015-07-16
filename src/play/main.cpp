@@ -7,7 +7,7 @@
 #include <random>
 #include <vector>
 
-#include "linalg/numeric.h"
+#include "util/numeric.h"
 
 using namespace sdca;
 
