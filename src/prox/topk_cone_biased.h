@@ -53,7 +53,8 @@ thresholds_topk_cone_biased_search(
       result_type hi = (num_M_sum_U + k_minus_num_U * sum_M) / D;
       result_type tt = hi + t;
       if (max_M <= tt && tt <= min_U) {
-        if (t <= min_M && ((m_last == last) || *m_last <= t)) {
+        if (t <= min_M &&
+            ((m_last == last) || static_cast<result_type>(*m_last) <= t)) {
           return thresholds<Iterator, Result>(t, 0, hi, m_first, m_last);
         }
       }
@@ -82,7 +83,7 @@ thresholds_topk_cone_biased_search(
   }
 
   // Default to 0
-  return make_thresholds<Iterator, Result>(0, 0, 0, first, first);
+  return thresholds<Iterator, Result>(0, 0, 0, first, first);
 }
 
 template <typename Iterator,

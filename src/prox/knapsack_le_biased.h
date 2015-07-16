@@ -58,7 +58,8 @@ thresholds_knapsack_le_biased_search(
         result_type tt = hi + t;
         if (max_M <= tt && tt <= min_U) {
           tt = lo + t;
-          if (tt <= min_M && ((m_last == last) || *m_last <= tt)) {
+          if (tt <= min_M &&
+              ((m_last == last) || static_cast<result_type>(*m_last) <= tt)) {
             return make_thresholds(t, lo, hi, m_first, m_last);
           }
         }
@@ -108,9 +109,9 @@ thresholds_knapsack_le_biased(
 
   // First, check if the inequality constraint is active (sum > rhs)
   auto m_first = std::partition(first, last,
-    [=](const data_type& x){ return x >= hi; });
+    [=](const result_type x){ return x >= hi; });
   auto m_last = std::partition(m_first, last,
-    [=](const data_type& x){ return x > lo; });
+    [=](const result_type x){ return x > lo; });
 
   result_type s = sum(m_first, m_last, static_cast<result_type>(0))
     + hi * static_cast<result_type>(std::distance(first, m_first))

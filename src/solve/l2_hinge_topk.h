@@ -1,8 +1,7 @@
 #ifndef SDCA_SOLVE_L2_TOPK_LOSS_H
 #define SDCA_SOLVE_L2_TOPK_LOSS_H
 
-#include "linalg/linalg.h"
-#include "logging/logging.h"
+#include "util/util.h"
 #include "prox/topk_simplex_biased.h"
 #include "solvedef.h"
 

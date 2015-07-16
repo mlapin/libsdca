@@ -45,12 +45,12 @@ if(${Matlab_FOUND})
     SRC matlab/mex_prox.cpp matlab/mex_util.h ${PROX_SRCS} ${UTIL_SRCS}
     )
 
-#  matlab_add_mex(
-#    NAME ${MEX_SOLVE}
-#    SRC matlab/mex_solve.cpp matlab/mex_util.h
-#        ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
-#    LINK_TO ${BLAS_LIBRARIES}
-#    )
+  matlab_add_mex(
+    NAME ${MEX_SOLVE}
+    SRC matlab/mex_solve.cpp matlab/mex_util.h
+        ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
+    LINK_TO ${BLAS_LIBRARIES}
+    )
 
 #  set_target_properties(${MEX_SOLVE} PROPERTIES
 #    COMPILE_FLAGS "-Wno-unused-variable -Wno-unused-parameter"

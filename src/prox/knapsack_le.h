@@ -22,9 +22,9 @@ thresholds_knapsack_le(
 
   // First, check if the inequality constraint is active (sum > rhs)
   auto m_first = std::partition(first, last,
-    [=](const data_type& x){ return x >= hi; });
+    [=](const result_type x){ return x >= hi; });
   auto m_last = std::partition(m_first, last,
-    [=](const data_type& x){ return x > lo; });
+    [=](const result_type x){ return x > lo; });
 
   result_type s = sum(m_first, m_last, static_cast<result_type>(0))
     + hi * static_cast<result_type>(std::distance(first, m_first))

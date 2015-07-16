@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <random>
 
-#include "logging/logging.h"
+#include "util/logging.h"
 #include "solvedef.h"
 
 namespace sdca {

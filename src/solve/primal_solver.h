@@ -1,7 +1,7 @@
 #ifndef SDCA_SOLVE_PRIMAL_SOLVER_H
 #define SDCA_SOLVE_PRIMAL_SOLVER_H
 
-#include "linalg/linalg.h"
+#include "util/util.h"
 #include "solver.h"
 
 namespace sdca {

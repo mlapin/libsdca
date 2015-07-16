@@ -40,14 +40,14 @@ thresholds_knapsack_eq(
     // Feasibility check
     result_type tt = lo + t;
     auto lo_it = std::partition(m_first, m_last,
-      [=](const data_type& x){ return x > tt; });
+      [=](const result_type x){ return x > tt; });
     result_type infeas_lo =
       + tt * static_cast<result_type>(std::distance(lo_it, m_last))
       - sum(lo_it, m_last, static_cast<result_type>(0));
 
     tt = hi + t;
     auto hi_it = std::partition(m_first, lo_it,
-      [=](const data_type& x){ return x > tt; });
+      [=](const result_type x){ return x > tt; });
     result_type infeas_hi =
       - tt * static_cast<result_type>(std::distance(m_first, hi_it))
       + sum(m_first, hi_it, static_cast<result_type>(0));

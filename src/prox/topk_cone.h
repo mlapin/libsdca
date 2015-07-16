@@ -45,9 +45,9 @@ topk_cone_special_cases(
 
   // Case 2: U not empty, M empty, proj = const * sum_k_largest for k largest
   result_type hi = sum_k_largest / div_const;
-  result_type t = *(k_last - 1) - hi;
+  result_type t = static_cast<result_type>(*(k_last - 1)) - hi;
   if ((k == std::distance(first, last)) ||
-      (t >= *std::max_element(k_last, last))) {
+      (t >= static_cast<result_type>(*std::max_element(k_last, last)))) {
     proj.projection = projection::constant;
     proj.result = thresholds<Iterator, Result>(t, 0, hi, k_last, k_last);
     return proj;
@@ -102,7 +102,8 @@ thresholds_topk_cone_search(
       result_type hi = (num_M_sum_U   + k_minus_num_U * sum_M) / D;
       result_type tt = hi + t;
       if (max_M <= tt && tt <= min_U) {
-        if (t <= min_M && ((m_last == last) || *m_last <= t)) {
+        if (t <= min_M &&
+            ((m_last == last) || static_cast<result_type>(*m_last) <= t)) {
           return thresholds<Iterator, Result>(t, 0, hi, m_first, m_last);
         }
       }
@@ -131,7 +132,7 @@ thresholds_topk_cone_search(
   }
 
   // Default to 0
-  return make_thresholds<Iterator, Result>(0, 0, 0, first, first);
+  return thresholds<Iterator, Result>(0, 0, 0, first, first);
 }
 
 template <typename Iterator,
