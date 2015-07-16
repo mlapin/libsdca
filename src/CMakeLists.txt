@@ -6,6 +6,8 @@ set(PLAY_SRCS
 
 set(LINALG_SRCS
   linalg/linalg.h
+  linalg/blas.h
+  linalg/numeric.h
   )
 
 set(LOGGING_SRCS

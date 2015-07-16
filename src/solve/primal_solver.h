@@ -134,9 +134,9 @@ protected:
         regul, p_loss, d_loss);
 
       // Increment the sums
-      kahan_sum(regul, regul_sum, regul_comp);
-      kahan_sum(p_loss, p_loss_sum, p_loss_comp);
-      kahan_sum(d_loss, d_loss_sum, d_loss_comp);
+      kahan_add(regul, regul_sum, regul_comp);
+      kahan_add(p_loss, p_loss_sum, p_loss_comp);
+      kahan_add(d_loss, d_loss_sum, d_loss_comp);
     }
 
     // Compute the overall primal/dual objectives and the duality gap
