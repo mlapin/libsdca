@@ -35,6 +35,23 @@ kahan_accumulate(
   return init;
 }
 
+template <typename Iterator, typename Result>
+struct std_sum {
+//  std_sum() { std::cout << "std sum" << std::endl; }
+  inline Result operator()(Iterator first, Iterator last, Result init) {
+    return std::accumulate(first, last, init);
+  }
+};
+
+template <typename Iterator, typename Result>
+struct kahan_sum {
+//  std_sum() { std::cout << "kahan sum" << std::endl; }
+  inline Result operator()(Iterator first, Iterator last, Result init) {
+    return kahan_accumulate(first, last, init);
+  }
+};
+
+
 }
 
 #endif

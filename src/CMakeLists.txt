@@ -18,12 +18,12 @@ set(PROX_SRCS
   prox/prox.h
   prox/proxdef.h
   prox/knapsack_eq.h
-  prox/knapsack_le.h
-  prox/knapsack_le_biased.h
-  prox/topk_cone.h
-  prox/topk_cone_biased.h
-  prox/topk_simplex.h
-  prox/topk_simplex_biased.h
+#  prox/knapsack_le.h
+#  prox/knapsack_le_biased.h
+#  prox/topk_cone.h
+#  prox/topk_cone_biased.h
+#  prox/topk_simplex.h
+#  prox/topk_simplex_biased.h
   )
 
 set(SOLVE_SRCS
@@ -48,19 +48,19 @@ if(${Matlab_FOUND})
     SRC matlab/mex_prox.cpp matlab/mex_util.h ${PROX_SRCS}
     )
 
-  matlab_add_mex(
-    NAME ${MEX_SOLVE}
-    SRC matlab/mex_solve.cpp matlab/mex_util.h
-        ${LOGGING_SRCS} ${LINALG_SRCS} ${PROX_SRCS} ${SOLVE_SRCS}
-    LINK_TO ${BLAS_LIBRARIES}
-    )
+#  matlab_add_mex(
+#    NAME ${MEX_SOLVE}
+#    SRC matlab/mex_solve.cpp matlab/mex_util.h
+#        ${LOGGING_SRCS} ${LINALG_SRCS} ${PROX_SRCS} ${SOLVE_SRCS}
+#    LINK_TO ${BLAS_LIBRARIES}
+#    )
 
 #  set_target_properties(${MEX_SOLVE} PROPERTIES
 #    COMPILE_FLAGS "-Wno-unused-variable -Wno-unused-parameter"
 #    )
 
   install(
-    TARGETS ${MEX_PROX} ${MEX_SOLVE}
+    TARGETS ${MEX_PROX} #${MEX_SOLVE}
     DESTINATION matlab
     )
 else()

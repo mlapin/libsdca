@@ -1,12 +1,9 @@
 #ifndef SDCA_PROX_PROXDEF_H
 #define SDCA_PROX_PROXDEF_H
 
-#include <iostream>
-
 #include <algorithm>
 #include <iterator>
 #include <limits>
-#include <vector>
 
 namespace sdca {
 
@@ -16,42 +13,43 @@ enum class projection {
   general
 };
 
-template <typename ForwardIterator>
+template <typename Result,
+          typename Iterator>
 struct thresholds {
-  typedef ForwardIterator iterator_type;
-  typedef typename std::iterator_traits<ForwardIterator>::value_type value_type;
+  typedef Result result_type;
+  typedef Iterator iterator_type;
 
-  value_type t;
-  value_type lo;
-  value_type hi;
-  ForwardIterator first;
-  ForwardIterator last;
+  result_type t;
+  result_type lo;
+  result_type hi;
+  iterator_type first;
+  iterator_type last;
 
   thresholds() :
     t(0),
-    lo(-std::numeric_limits<value_type>::infinity()),
-    hi(+std::numeric_limits<value_type>::infinity())
+    lo(-std::numeric_limits<result_type>::infinity()),
+    hi(+std::numeric_limits<result_type>::infinity())
   {}
 
-  thresholds(const value_type& __t) :
+  thresholds(const result_type __t) :
     t(__t),
-    lo(-std::numeric_limits<value_type>::infinity()),
-    hi(+std::numeric_limits<value_type>::infinity())
+    lo(-std::numeric_limits<result_type>::infinity()),
+    hi(+std::numeric_limits<result_type>::infinity())
   {}
 
-  thresholds(const value_type& __t,
-             const value_type& __lo,
-             const value_type& __hi) :
+  thresholds(const result_type __t,
+             const result_type __lo,
+             const result_type __hi) :
     t(__t),
     lo(__lo),
     hi(__hi)
   {}
 
-  thresholds(const value_type& __t,
-             const value_type& __lo,
-             const value_type& __hi,
-             const iterator_type& __first,
-             const iterator_type& __last) :
+  thresholds(const result_type __t,
+             const result_type __lo,
+             const result_type __hi,
+             const iterator_type __first,
+             const iterator_type __last) :
     t(__t),
     lo(__lo),
     hi(__hi),
@@ -61,119 +59,111 @@ struct thresholds {
 
 };
 
-template <typename Type>
+template <typename Result>
 inline
-thresholds<Type*>
-make_thresholds(const Type& t) {
-  return thresholds<Type*>(t);
-}
-
-template <typename Type>
-inline
-thresholds<Type*>
-make_thresholds(const Type& t, const Type& lo, const Type& hi) {
-  return thresholds<Type*>(t, lo, hi);
-}
-
-template <typename ForwardIterator>
-inline
-thresholds<ForwardIterator>
+thresholds<Result, Result*>
 make_thresholds(
-    const typename std::iterator_traits<ForwardIterator>::value_type& t,
-    const typename std::iterator_traits<ForwardIterator>::value_type& lo,
-    const typename std::iterator_traits<ForwardIterator>::value_type& hi,
-    const ForwardIterator& first,
-    const ForwardIterator& last) {
-  return thresholds<ForwardIterator>(t, lo, hi, first, last);
+    const Result t
+  ) {
+  return thresholds<Result, Result*>(t);
 }
 
-template <typename ForwardIterator,
+template <typename Result>
+inline
+thresholds<Result, Result*>
+make_thresholds(
+    const Result t,
+    const Result lo,
+    const Result hi
+  ) {
+  return thresholds<Result, Result*>(t, lo, hi);
+}
+
+template <typename Result,
+          typename Iterator>
+inline
+thresholds<Result, Iterator>
+make_thresholds(
+    const Result t,
+    const Result lo,
+    const Result hi,
+    const Iterator first,
+    const Iterator last
+  ) {
+  return thresholds<Result, Iterator>(t, lo, hi, first, last);
+}
+
+template <typename Iterator,
           typename Algorithm,
           typename... Types>
 inline
 void
 project(
-    ForwardIterator first,
-    ForwardIterator last,
+    Iterator first,
+    Iterator last,
     Algorithm compute,
     Types... params
     ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  std::vector<Type> aux(first, last);
-  auto t = compute(aux.begin(), aux.end(), params...);
-  std::for_each(first, last, [=](Type& x){
-    x = std::max(t.lo, std::min(x - t.t, t.hi)); });
+  typedef typename std::iterator_traits<Iterator>::value_type data_type;
+  std::vector<data_type> aux(first, last);
+  auto thresholds = compute(aux.begin(), aux.end(), params...);
+  data_type t(static_cast<data_type>(thresholds.t));
+  data_type lo(static_cast<data_type>(thresholds.lo));
+  data_type hi(static_cast<data_type>(thresholds.hi));
+  std::for_each(first, last,
+    [=](data_type& x){ x = std::max(lo, std::min(x - t, hi)); });
 }
 
-template <typename ForwardIterator,
+template <typename Iterator,
           typename Algorithm,
           typename... Types>
 inline
 void
 project(
-    ForwardIterator first,
-    ForwardIterator last,
-    ForwardIterator aux_first,
-    ForwardIterator aux_last,
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
     Algorithm compute,
     Types... params
     ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  typedef typename std::iterator_traits<Iterator>::value_type data_type;
   std::copy(first, last, aux_first);
-  auto t = compute(aux_first, aux_last, params...);
-  std::for_each(first, last, [=](Type& x){
-    x = std::max(t.lo, std::min(x - t.t, t.hi)); });
+  auto thresholds = compute(aux_first, aux_last, params...);
+  data_type t(static_cast<data_type>(thresholds.t));
+  data_type lo(static_cast<data_type>(thresholds.lo));
+  data_type hi(static_cast<data_type>(thresholds.hi));
+  std::for_each(first, last,
+    [=](data_type& x){ x = std::max(lo, std::min(x - t, hi)); });
 }
 
-template <typename ForwardIterator,
+template <typename Iterator,
           typename Algorithm,
           typename... Types>
 inline
 void
 project(
-    const typename std::iterator_traits<ForwardIterator>::difference_type dim,
-    ForwardIterator first,
-    ForwardIterator last,
-    ForwardIterator aux_first,
-    ForwardIterator aux_last,
+    const typename std::iterator_traits<Iterator>::difference_type dim,
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
     Algorithm compute,
     Types... params
     ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
-  ForwardIterator vec_last = first + dim;
+  typedef typename std::iterator_traits<Iterator>::value_type data_type;
+  Iterator vec_last = first + dim;
   for (; first != last; vec_last += dim) {
     std::copy(first, vec_last, aux_first);
-    auto t = compute(aux_first, aux_last, params...);
-    std::for_each(first, vec_last, [=](Type& x){
-      x = std::max(t.lo, std::min(x - t.t, t.hi)); });
+    auto thresholds = compute(aux_first, aux_last, params...);
+    data_type t(static_cast<data_type>(thresholds.t));
+    data_type lo(static_cast<data_type>(thresholds.lo));
+    data_type hi(static_cast<data_type>(thresholds.hi));
+    std::for_each(first, vec_last,
+      [=](data_type& x){ x = std::max(lo, std::min(x - t, hi)); });
     first = vec_last;
   }
 }
-
-//template <typename Iterator>
-//struct std_sum {
-//  typedef typename std::iterator_traits<Iterator>::value_type Type;
-//  std_sum() { std::cout << "std sum" << std::endl; }
-//  inline Type operator()(Iterator first, Iterator last, Type init) {
-//    return std::accumulate(first, last, init);
-//  }
-//};
-
-template <typename Iterator, typename Result = long double>
-struct std_sum {
-  typedef typename std::iterator_traits<Iterator>::value_type Type;
-//  std_sum() { std::cout << "std sum 3" << std::endl; }
-  inline Type operator()(Iterator first, Iterator last, Type init) {
-    Result sum = static_cast<Result>(init), c = 0;
-    for (; first != last; ++first) {
-      Result y = static_cast<Result>(*first) - c;
-      Result t = sum + y;
-      c = (t - sum) - y;
-      sum = t;
-    }
-    return static_cast<Type>(sum);
-  }
-};
 
 }
 

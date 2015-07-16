@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
 #include <numeric>
 
+#include "linalg/numeric.h"
 #include "proxdef.h"
 
 /*
@@ -16,114 +18,134 @@
 
 namespace sdca {
 
-template <typename ForwardIterator,
-          typename Summator = std_sum<ForwardIterator>>
-thresholds<ForwardIterator>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
+thresholds<Result, Iterator>
 thresholds_knapsack_eq(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    Iterator first,
+    Iterator last,
+    const Result lo = 0,
+    const Result hi = 1,
+    const Result rhs = 1,
     Summator sum = Summator()
     ) {
-  using Type = typename std::iterator_traits<ForwardIterator>::value_type;
+  typedef typename std::iterator_traits<Iterator>::value_type data_type;
+  typedef Result result_type;
 
   // Initialization
-  const auto num_elements = std::distance(first, last);
-  Type t = (sum(first, last, static_cast<Type>(0)) - rhs) /
-    static_cast<Type>(num_elements);
+  result_type eps = std::numeric_limits<result_type>::epsilon()
+    * std::max(static_cast<result_type>(1), std::abs(rhs));
+  result_type t = (sum(first, last, static_cast<result_type>(0)) - rhs) /
+    static_cast<result_type>(std::distance(first, last));
 
-  ForwardIterator m_first = first;
-  ForwardIterator m_last = last;
-  for (auto iter = num_elements; iter > 0; --iter) {
+  Iterator m_first = first, m_last = last;
+  for (;;) {
     // Feasibility check
-    Type tt = lo + t;
-    auto lo_it = std::partition(m_first, m_last, [=](const Type &x){
-      return x > tt; });
-    Type infeas_lo = + static_cast<Type>(std::distance(lo_it, m_last))
-      * tt - sum(lo_it, m_last, static_cast<Type>(0));
+    result_type tt = lo + t;
+    auto lo_it = std::partition(m_first, m_last,
+      [=](const data_type &x){ return x > tt; });
+    data_type infeas_lo =
+      + tt * static_cast<result_type>(std::distance(lo_it, m_last))
+      - sum(lo_it, m_last, static_cast<result_type>(0));
 
     tt = hi + t;
-    auto hi_it = std::partition(m_first, lo_it, [=](const Type &x){
-      return x > tt; });
-    Type infeas_hi = - static_cast<Type>(std::distance(m_first, hi_it))
-      * tt + sum(m_first, hi_it, static_cast<Type>(0));
+    auto hi_it = std::partition(m_first, lo_it,
+      [=](const data_type &x){ return x > tt; });
+    result_type infeas_hi =
+      - tt * static_cast<result_type>(std::distance(m_first, hi_it))
+      + sum(m_first, hi_it, static_cast<result_type>(0));
 
     // Variable fixing (using the incremental multiplier formula (23))
-    if (infeas_lo > infeas_hi) {
+    if (std::abs(infeas_hi - infeas_lo) <= eps) {
+      m_first = hi_it;
       m_last = lo_it;
-      tt = +infeas_lo;
+      break;
     } else if (infeas_lo < infeas_hi) {
       m_first = hi_it;
       tt = -infeas_hi;
-    } else {
-      m_first = hi_it;
+    } else { //infeas_lo > infeas_hi
       m_last = lo_it;
-      break;
+      tt = +infeas_lo;
     }
-    auto size = std::distance(m_first, m_last);
-    if (size) {
-      t += tt / static_cast<Type>(size);
+    if (m_first == m_last) {
+      break;
     } else {
-      break;
+      t += tt / static_cast<result_type>(std::distance(m_first, m_last));
     }
+  }
+
+  // (Optional) Recompute t to increase numerical accuracy (see Lemma 5.3)
+  if (m_first == m_last) {
+    if (m_last != last) {
+      t = static_cast<result_type>(*std::max_element(m_last, last)) - lo;
+    } else if (first != m_first) {
+      t = static_cast<result_type>(*std::min_element(first, m_first)) - hi;
+    }
+  } else {
+    t = rhs - hi * static_cast<result_type>(std::distance(first, m_first))
+            - lo * static_cast<result_type>(std::distance(m_last, last));
+    t = sum(m_first, m_last, -t)
+      / static_cast<result_type>(std::distance(m_first, m_last));
   }
 
   return make_thresholds(t, lo, hi, m_first, m_last);
 }
 
-template <typename ForwardIterator,
-          typename Summator = std_sum<ForwardIterator>>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_eq(
-    ForwardIterator first,
-    ForwardIterator last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    Iterator first,
+    Iterator last,
+    const Result lo = 0,
+    const Result hi = 1,
+    const Result rhs = 1,
     Summator sum = Summator()
     ) {
   project(first, last,
-          thresholds_knapsack_eq<ForwardIterator, Summator>, lo, hi, rhs, sum);
+    thresholds_knapsack_eq<Iterator, Result, Summator>, lo, hi, rhs, sum);
 }
 
-template <typename ForwardIterator,
-          typename Summator = std_sum<ForwardIterator>>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_eq(
-    ForwardIterator first,
-    ForwardIterator last,
-    ForwardIterator aux_first,
-    ForwardIterator aux_last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
+    const Result lo = 0,
+    const Result hi = 1,
+    const Result rhs = 1,
     Summator sum = Summator()
     ) {
   project(first, last, aux_first, aux_last,
-          thresholds_knapsack_eq<ForwardIterator, Summator>, lo, hi, rhs, sum);
+    thresholds_knapsack_eq<Iterator, Result, Summator>, lo, hi, rhs, sum);
 }
 
-template <typename ForwardIterator,
-          typename Summator = std_sum<ForwardIterator>>
+template <typename Iterator,
+          typename Result,
+          typename Summator = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_eq(
-    const typename std::iterator_traits<ForwardIterator>::difference_type dim,
-    ForwardIterator first,
-    ForwardIterator last,
-    ForwardIterator aux_first,
-    ForwardIterator aux_last,
-    const typename std::iterator_traits<ForwardIterator>::value_type lo = 0,
-    const typename std::iterator_traits<ForwardIterator>::value_type hi = 1,
-    const typename std::iterator_traits<ForwardIterator>::value_type rhs = 1,
+    const typename std::iterator_traits<Iterator>::difference_type dim,
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
+    const Result lo = 0,
+    const Result hi = 1,
+    const Result rhs = 1,
     Summator sum = Summator()
     ) {
   project(dim, first, last, aux_first, aux_last,
-          thresholds_knapsack_eq<ForwardIterator, Summator>, lo, hi, rhs, sum);
+    thresholds_knapsack_eq<Iterator, Result, Summator>, lo, hi, rhs, sum);
 }
 
 }
