@@ -54,7 +54,7 @@ thresholds_topk_cone_biased_search(
       result_type tt = hi + t;
       if (max_M <= tt && tt <= min_U) {
         if (t <= min_M && ((m_last == last) || *m_last <= t)) {
-          return make_thresholds(t, 0, hi, m_first, m_last);
+          return thresholds<Iterator, Result>(t, 0, hi, m_first, m_last);
         }
       }
 

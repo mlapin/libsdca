@@ -87,7 +87,7 @@ thresholds_knapsack_le_biased_search(
 
   // Should never reach here
   assert(false);
-  return make_thresholds(0, lo, hi, first, first);
+  return thresholds<Iterator, Result>(0, lo, hi, first, first);
 }
 
 template <typename Iterator,
@@ -123,7 +123,7 @@ thresholds_knapsack_le_biased(
       return t;
     }
   } else if (rho * s == static_cast<result_type>(0)) {
-    return make_thresholds(lo, hi, m_first, m_last);
+    return thresholds<Iterator, Result>(0, lo, hi, m_first, m_last);
   }
 
   // General case

@@ -39,7 +39,7 @@ topk_cone_special_cases(
   // Case 1: U empty, M empty, proj = 0
   if (sum_k_largest <= 0) {
     proj.projection = projection::zero;
-    proj.result = make_thresholds<Iterator, Result>(0, 0, 0, first, first);
+    proj.result = thresholds<Iterator, Result>(0, 0, 0, first, first);
     return proj;
   }
 
@@ -49,7 +49,7 @@ topk_cone_special_cases(
   if ((k == std::distance(first, last)) ||
       (t >= *std::max_element(k_last, last))) {
     proj.projection = projection::constant;
-    proj.result = make_thresholds(t, 0, hi, k_last, k_last);
+    proj.result = thresholds<Iterator, Result>(t, 0, hi, k_last, k_last);
     return proj;
   }
 
@@ -103,7 +103,7 @@ thresholds_topk_cone_search(
       result_type tt = hi + t;
       if (max_M <= tt && tt <= min_U) {
         if (t <= min_M && ((m_last == last) || *m_last <= t)) {
-          return make_thresholds(t, 0, hi, m_first, m_last);
+          return thresholds<Iterator, Result>(t, 0, hi, m_first, m_last);
         }
       }
 

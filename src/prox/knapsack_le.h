@@ -33,7 +33,7 @@ thresholds_knapsack_le(
   if (s > rhs) {
     return thresholds_knapsack_eq(first, last, lo, hi, rhs, sum);
   } else {
-    return make_thresholds(lo, hi, m_first, m_last);
+    return thresholds<Iterator, Result>(0, lo, hi, m_first, m_last);
   }
 }
 

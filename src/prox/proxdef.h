@@ -86,19 +86,6 @@ template <typename Iterator,
 inline
 thresholds<Iterator, Result>
 make_thresholds(
-    const Result lo,
-    const Result hi,
-    const Iterator first,
-    const Iterator last
-  ) {
-  return thresholds<Iterator, Result>(0, lo, hi, first, last);
-}
-
-template <typename Iterator,
-          typename Result>
-inline
-thresholds<Iterator, Result>
-make_thresholds(
     const Result t,
     const Result lo,
     const Result hi,

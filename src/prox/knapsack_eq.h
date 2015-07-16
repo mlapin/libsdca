@@ -1,6 +1,8 @@
 #ifndef SDCA_PROX_KNAPSACK_EQ_H
 #define SDCA_PROX_KNAPSACK_EQ_H
 
+#include <cmath>
+
 #include "proxdef.h"
 
 /*
@@ -39,7 +41,7 @@ thresholds_knapsack_eq(
     result_type tt = lo + t;
     auto lo_it = std::partition(m_first, m_last,
       [=](const data_type& x){ return x > tt; });
-    data_type infeas_lo =
+    result_type infeas_lo =
       + tt * static_cast<result_type>(std::distance(lo_it, m_last))
       - sum(lo_it, m_last, static_cast<result_type>(0));
 
