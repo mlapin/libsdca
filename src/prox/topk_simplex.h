@@ -52,7 +52,8 @@ thresholds_topk_simplex(
     case projection::general:
       auto t = thresholds_knapsack_eq(first, last, lo, rhs / K, rhs, sum);
       if (is_topk_simplex_lt(first, t.first, t.t, K, rhs, sum)) {
-        return thresholds_topk_cone_search<Iterator, Result>(first, last, k);
+        return thresholds_topk_cone_search<Iterator, Result, Summation>(
+          first, last, k, sum);
       }
       return t;
   }

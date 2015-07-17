@@ -8,7 +8,8 @@
 namespace sdca {
 
 template <typename Iterator,
-          typename Result>
+          typename Result,
+          typename Summation = std_sum<Iterator, Result>>
 thresholds<Iterator, Result>
 thresholds_knapsack_le_biased_search(
     Iterator first,
@@ -16,7 +17,8 @@ thresholds_knapsack_le_biased_search(
     const Result lo,
     const Result hi,
     const Result rhs,
-    const Result rho
+    const Result rho,
+    Summation sum = Summation()
     ) {
   // At this point, rho must be positive
   assert(rho > 0);
@@ -68,7 +70,7 @@ thresholds_knapsack_le_biased_search(
       }
       min_M = static_cast<Result>(*m_last);
       max_M = static_cast<Result>(*m_first);
-      kahan_add(min_M, sum_M, sum_M_comp); // sum_M += min_M;
+      sum.add(min_M, sum_M, sum_M_comp); // sum_M += min_M;
       --num_L;
       ++num_M;
       ++m_last;
@@ -122,7 +124,8 @@ thresholds_knapsack_le_biased(
   }
 
   // General case
-  return thresholds_knapsack_le_biased_search(first, last, lo, hi, rhs, rho);
+  return thresholds_knapsack_le_biased_search(
+    first, last, lo, hi, rhs, rho, sum);
 }
 
 template <typename Iterator,

@@ -6,13 +6,15 @@
 namespace sdca {
 
 template <typename Iterator,
-          typename Result>
+          typename Result,
+          typename Summation = std_sum<Iterator, Result>>
 thresholds<Iterator, Result>
 thresholds_topk_cone_biased_search(
     Iterator first,
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k,
-    const Result rho
+    const Result rho,
+    Summation sum = Summation()
     ) {
   // Sort data to search efficiently
   typedef typename std::iterator_traits<Iterator>::value_type Data;
@@ -33,7 +35,7 @@ thresholds_topk_cone_biased_search(
     Result max_M = -std::numeric_limits<Result>::infinity();
     Result sum_M = 0, sum_M_comp = 0;
     Result num_M_sum_U = 0, num_M_sum_U_comp = 0;
-    Result D = k_minus_num_U * k_minus_num_U, D_inv = 0;
+    Result D = k_minus_num_U * k_minus_num_U;
     Result k_minus_num_U_sum_U = k_minus_num_U * sum_U;
 
     // Grow M starting with empty
@@ -48,8 +50,8 @@ thresholds_topk_cone_biased_search(
       //  (3)  hi + t  >= max_M = (m_first) or (-Inf)
       //  (4)  hi + t  <= min_U = (m_first - 1) or (+Inf)
 
-      Result t  = (num_U_plus_rho_k_2 * sum_M - k_minus_num_U_sum_U) * D_inv;
-      Result hi = (num_M_sum_U + k_minus_num_U * sum_M) * D_inv;
+      Result t  = (num_U_plus_rho_k_2 * sum_M - k_minus_num_U_sum_U) / D;
+      Result hi = (num_M_sum_U + k_minus_num_U * sum_M) / D;
       Result tt = hi + t;
       if (max_M <= tt && tt <= min_U) {
         if (t <= min_M &&
@@ -64,10 +66,9 @@ thresholds_topk_cone_biased_search(
       }
       min_M = static_cast<Result>(*m_last);
       max_M = static_cast<Result>(*m_first);
-      kahan_add(min_M, sum_M, sum_M_comp); // sum_M += min_M;
-      kahan_add(sum_U, num_M_sum_U, num_M_sum_U_comp); // num_M_sum_U += sum_U;
+      sum.add(min_M, sum_M, sum_M_comp); // sum_M += min_M;
+      sum.add(sum_U, num_M_sum_U, num_M_sum_U_comp); // num_M_sum_U += sum_U;
       D += num_U_plus_rho_k_2;
-      D_inv = static_cast<Result>(1) / D;
       ++m_last;
     }
 
@@ -76,7 +77,7 @@ thresholds_topk_cone_biased_search(
       break;
     }
     min_U = static_cast<Result>(*m_first);
-    kahan_add(min_U, sum_U, sum_U_comp); // sum_U += min_U;
+    sum.add(min_U, sum_U, sum_U_comp); // sum_U += min_U;
     --k_minus_num_U;
     ++num_U_plus_rho_k_2;
     ++m_first;
@@ -100,7 +101,7 @@ thresholds_topk_cone_biased(
   Result K = static_cast<Result>(k);
   auto proj = topk_cone_special_cases(first, last, k, K + rho * K * K, sum);
   if (proj.projection == projection::general) {
-    return thresholds_topk_cone_biased_search(first, last, k, rho);
+    return thresholds_topk_cone_biased_search(first, last, k, rho, sum);
   } else {
     return proj.thresholds;
   }

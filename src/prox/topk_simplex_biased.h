@@ -54,7 +54,7 @@ thresholds_topk_simplex_biased(
     case projection::general:
       auto t = thresholds_knapsack_eq(first, last, lo, rhs / K, rhs, sum);
       if (is_topk_simplex_biased_lt(first, t.first, t.t, K, rhs, rho, sum)) {
-        return thresholds_topk_cone_biased_search(first, last, k, rho);
+        return thresholds_topk_cone_biased_search(first, last, k, rho, sum);
       }
       return t;
   }

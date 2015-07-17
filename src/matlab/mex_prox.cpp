@@ -1,4 +1,3 @@
-
 #include "mex_util.h"
 #include "prox/prox.h"
 
@@ -53,32 +52,32 @@ mex_main(
   Data* aux_first = &aux[0];
   Data* aux_last = aux_first + m;
 
-  std::string projection = mxGetFieldValueOrDefault(
-    opts, "projection", std::string("knapsack_eq"));
-  if (projection == "knapsack_eq") {
-    project_knapsack_eq(
+  std::string proj = mxGetFieldValueOrDefault(
+    opts, "proj", std::string("knapsack_eq"));
+  if (proj == "knapsack_eq") {
+    project_knapsack_eq<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
-  } else if (projection == "knapsack_le") {
-    project_knapsack_le(
+  } else if (proj == "knapsack_le") {
+    project_knapsack_le<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
-  } else if (projection == "knapsack_le_biased") {
-    project_knapsack_le_biased(
+  } else if (proj == "knapsack_le_biased") {
+    project_knapsack_le_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, rho, sum);
-  } else if (projection == "topk_cone") {
-    project_topk_cone(
+  } else if (proj == "topk_cone") {
+    project_topk_cone<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, sum);
-  } else if (projection == "topk_cone_biased") {
-    project_topk_cone_biased(
+  } else if (proj == "topk_cone_biased") {
+    project_topk_cone_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rho, sum);
-  } else if (projection == "topk_simplex") {
-    project_topk_simplex(
+  } else if (proj == "topk_simplex") {
+    project_topk_simplex<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rhs, sum);
-  } else if (projection == "topk_simplex_biased") {
-    project_topk_simplex_biased(
+  } else if (proj == "topk_simplex_biased") {
+    project_topk_simplex_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rhs, rho, sum);
   } else {
     mexErrMsgIdAndTxt(
-      err_id[err_proj_type], err_msg[err_proj_type], projection.c_str());
+      err_id[err_proj_type], err_msg[err_proj_type], proj.c_str());
   }
 }
 
