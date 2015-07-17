@@ -25,6 +25,8 @@ enum err_index {
   err_labels_range,
   err_proj_type,
   err_obj_type,
+  err_sum_type,
+  err_prec_type,
   err_log_level,
   err_log_format,
   err_not_implemented
@@ -46,6 +48,8 @@ static const char* err_id[] = {
   "LIBSDCA:labels_range",
   "LIBSDCA:proj_type",
   "LIBSDCA:obj_type",
+  "LIBSDCA:sum_type",
+  "LIBSDCA:prec_type",
   "LIBSDCA:log_level",
   "LIBSDCA:log_format",
   "LIBSDCA:not_implemented"
@@ -66,7 +70,9 @@ static const char* err_msg[] = {
   "Failed to read the value of '%s'.",
   "Invalid labels range (must be 1:T or 0:T-1).",
   "Unknown projection type '%s'.",
-  "Unknown objective type '%s'.",
+  "Unknown objective function '%s'.",
+  "Unknown summation algorithm '%s'.",
+  "Unknown floating point precision '%s'.",
   "Unknown log level '%s'.",
   "Unknown log format '%s'.",
   "%s is not implemented yet."

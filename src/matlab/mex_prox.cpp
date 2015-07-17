@@ -14,13 +14,16 @@ printUsage() {
             "       X = %s(A, opts);\n", MEX_PROX, MEX_PROX);
 }
 
-template <typename Data>
+template <typename Data,
+          typename Result,
+          typename Summation>
 void
 mex_main(
     const int nlhs,
     mxArray* plhs[],
-    const int nrhs,
-    const mxArray* prhs[]
+    const mxArray* prhs[],
+    const mxArray* opts,
+    Summation sum
     ) {
 
   mxArray* mxX;
@@ -30,10 +33,6 @@ mex_main(
     mxX = mxDuplicateArray(prhs[0]);
     plhs[0] = mxX;
   }
-
-  typedef double Result;
-  const mxArray* opts = (nrhs > 1) ? prhs[1] : nullptr;
-  mxCheckStruct(opts, "opts");
 
   auto lo = mxGetFieldValueOrDefault<Result>(opts, "lo", 0);
   auto hi = mxGetFieldValueOrDefault<Result>(opts, "hi", 1);
@@ -54,33 +53,79 @@ mex_main(
   Data* aux_first = &aux[0];
   Data* aux_last = aux_first + m;
 
-  kahan_sum<Data*, Result> sum;
-  std::string proj = mxGetFieldValueOrDefault(
-    opts, "proj", std::string("knapsack_eq"));
-  if (proj == "knapsack_eq") {
+  std::string projection = mxGetFieldValueOrDefault(
+    opts, "projection", std::string("knapsack_eq"));
+  if (projection == "knapsack_eq") {
     project_knapsack_eq(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
-  } else if (proj == "knapsack_le") {
+  } else if (projection == "knapsack_le") {
     project_knapsack_le(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
-  } else if (proj == "knapsack_le_biased") {
+  } else if (projection == "knapsack_le_biased") {
     project_knapsack_le_biased(
       m, first, last, aux_first, aux_last, lo, hi, rhs, rho, sum);
-  } else if (proj == "topk_cone") {
+  } else if (projection == "topk_cone") {
     project_topk_cone(
       m, first, last, aux_first, aux_last, k, sum);
-  } else if (proj == "topk_cone_biased") {
+  } else if (projection == "topk_cone_biased") {
     project_topk_cone_biased(
       m, first, last, aux_first, aux_last, k, rho, sum);
-  } else if (proj == "topk_simplex") {
+  } else if (projection == "topk_simplex") {
     project_topk_simplex(
       m, first, last, aux_first, aux_last, k, rhs, sum);
-  } else if (proj == "topk_simplex_biased") {
+  } else if (projection == "topk_simplex_biased") {
     project_topk_simplex_biased(
       m, first, last, aux_first, aux_last, k, rhs, rho, sum);
   } else {
     mexErrMsgIdAndTxt(
-      err_id[err_proj_type], err_msg[err_proj_type], proj.c_str());
+      err_id[err_proj_type], err_msg[err_proj_type], projection.c_str());
+  }
+}
+
+template <typename Data,
+          typename Result>
+inline void
+mex_main(
+    const int nlhs,
+    mxArray* plhs[],
+    const mxArray* prhs[],
+    const mxArray* opts
+    ) {
+  std::string summation = mxGetFieldValueOrDefault(
+    opts, "summation", std::string("standard"));
+  if (summation == "standard") {
+    std_sum<Data*, Result> sum;
+    mex_main<Data, Result, std_sum<Data*, Result>>(
+      nlhs, plhs, prhs, opts, sum);
+  } else if (summation == "kahan") {
+    kahan_sum<Data*, Result> sum;
+    mex_main<Data, Result, kahan_sum<Data*, Result>>(
+      nlhs, plhs, prhs, opts, sum);
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_sum_type], err_msg[err_sum_type], summation.c_str());
+  }
+}
+
+template <typename Data>
+inline void
+mex_main(
+    const int nlhs,
+    mxArray* plhs[],
+    const int nrhs,
+    const mxArray* prhs[]
+    ) {
+  const mxArray* opts = (nrhs > 1) ? prhs[1] : nullptr;
+  mxCheckStruct(opts, "opts");
+  std::string precision = mxGetFieldValueOrDefault(
+    opts, "precision", std::string("double"));
+  if (precision == "double") {
+    mex_main<Data, double>(nlhs, plhs, prhs, opts);
+  } else if (precision == "single" || precision == "float") {
+    mex_main<Data, float>(nlhs, plhs, prhs, opts);
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_prec_type], err_msg[err_prec_type], precision.c_str());
   }
 }
 

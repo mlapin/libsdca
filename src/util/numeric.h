@@ -9,13 +9,13 @@ template <typename Data, typename Result>
 inline
 void
 kahan_add(
-    const Data& x,
+    const Data& value,
     Result& sum,
-    Result& c
+    Result& compensation
   ) {
-  Result y = static_cast<Result>(x) - c;
+  Result y = static_cast<Result>(value) - compensation;
   Result t = sum + y;
-  c = (t - sum) - y;
+  compensation = (t - sum) - y;
   sum = t;
 }
 

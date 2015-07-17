@@ -8,7 +8,7 @@ namespace sdca {
 
 template <typename Iterator,
           typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Summation = std_sum<Iterator, Result>>
 inline
 bool
 is_topk_simplex_biased_lt(
@@ -18,7 +18,7 @@ is_topk_simplex_biased_lt(
     const Result k,
     const Result rhs,
     const Result rho,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   if (u_first == u_last) {
     return t < rho * rhs;
@@ -30,8 +30,8 @@ is_topk_simplex_biased_lt(
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 thresholds<Iterator, Result>
 thresholds_topk_simplex_biased(
     Iterator first,
@@ -39,7 +39,7 @@ thresholds_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   Result K = static_cast<Result>(k), lo(0);
   auto proj = topk_cone_special_cases(first, last, k, K + rho * K * K, sum);
@@ -47,7 +47,7 @@ thresholds_topk_simplex_biased(
     case projection::zero:
       break;
     case projection::constant:
-      if (K * proj.result.hi > rhs) {
+      if (K * proj.thresholds.hi > rhs) {
         return thresholds_knapsack_eq(first, last, lo, rhs / K, rhs, sum);
       }
       break;
@@ -58,12 +58,12 @@ thresholds_topk_simplex_biased(
       }
       return t;
   }
-  return proj.result;
+  return proj.thresholds;
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_topk_simplex_biased(
@@ -72,16 +72,16 @@ project_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(first, last,
-    thresholds_topk_simplex_biased<Iterator, Result, Summator>,
+    thresholds_topk_simplex_biased<Iterator, Result, Summation>,
     k, rhs, rho, sum);
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_topk_simplex_biased(
@@ -92,16 +92,16 @@ project_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
-    thresholds_topk_simplex_biased<Iterator, Result, Summator>,
+    thresholds_topk_simplex_biased<Iterator, Result, Summation>,
     k, rhs, rho, sum);
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_topk_simplex_biased(
@@ -113,10 +113,10 @@ project_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
-    thresholds_topk_simplex_biased<Iterator, Result, Summator>,
+    thresholds_topk_simplex_biased<Iterator, Result, Summation>,
     k, rhs, rho, sum);
 }
 

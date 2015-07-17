@@ -18,8 +18,8 @@ enum class projection {
 template <typename Iterator,
           typename Result>
 struct thresholds {
-  typedef Result result_type;
   typedef Iterator iterator_type;
+  typedef Result result_type;
 
   result_type t;
   result_type lo;
@@ -29,12 +29,6 @@ struct thresholds {
 
   thresholds() :
     t(0),
-    lo(-std::numeric_limits<result_type>::infinity()),
-    hi(+std::numeric_limits<result_type>::infinity())
-  {}
-
-  thresholds(const result_type __t) :
-    t(__t),
     lo(-std::numeric_limits<result_type>::infinity()),
     hi(+std::numeric_limits<result_type>::infinity())
   {}
@@ -60,15 +54,6 @@ struct thresholds {
   {}
 
 };
-
-template <typename Result>
-inline
-thresholds<Result*, Result>
-make_thresholds(
-    const Result t
-  ) {
-  return thresholds<Result*, Result>(t);
-}
 
 template <typename Result>
 inline
@@ -106,14 +91,14 @@ project(
     Algorithm compute,
     Types... params
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type data_type;
-  std::vector<data_type> aux(first, last);
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  std::vector<Data> aux(first, last);
   auto thresholds = compute(aux.begin(), aux.end(), params...);
-  data_type t(static_cast<data_type>(thresholds.t));
-  data_type lo(static_cast<data_type>(thresholds.lo));
-  data_type hi(static_cast<data_type>(thresholds.hi));
+  Data t(static_cast<Data>(thresholds.t));
+  Data lo(static_cast<Data>(thresholds.lo));
+  Data hi(static_cast<Data>(thresholds.hi));
   std::for_each(first, last,
-    [=](data_type& x){ x = std::max(lo, std::min(x - t, hi)); });
+    [=](Data& x){ x = std::max(lo, std::min(x - t, hi)); });
 }
 
 template <typename Iterator,
@@ -129,14 +114,14 @@ project(
     Algorithm compute,
     Types... params
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type data_type;
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
   std::copy(first, last, aux_first);
   auto thresholds = compute(aux_first, aux_last, params...);
-  data_type t(static_cast<data_type>(thresholds.t));
-  data_type lo(static_cast<data_type>(thresholds.lo));
-  data_type hi(static_cast<data_type>(thresholds.hi));
+  Data t(static_cast<Data>(thresholds.t));
+  Data lo(static_cast<Data>(thresholds.lo));
+  Data hi(static_cast<Data>(thresholds.hi));
   std::for_each(first, last,
-    [=](data_type& x){ x = std::max(lo, std::min(x - t, hi)); });
+    [=](Data& x){ x = std::max(lo, std::min(x - t, hi)); });
 }
 
 template <typename Iterator,
@@ -153,16 +138,16 @@ project(
     Algorithm compute,
     Types... params
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type data_type;
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
   Iterator vec_last = first + dim;
   for (; first != last; vec_last += dim) {
     std::copy(first, vec_last, aux_first);
     auto thresholds = compute(aux_first, aux_last, params...);
-    data_type t(static_cast<data_type>(thresholds.t));
-    data_type lo(static_cast<data_type>(thresholds.lo));
-    data_type hi(static_cast<data_type>(thresholds.hi));
+    Data t(static_cast<Data>(thresholds.t));
+    Data lo(static_cast<Data>(thresholds.lo));
+    Data hi(static_cast<Data>(thresholds.hi));
     std::for_each(first, vec_last,
-      [=](data_type& x){ x = std::max(lo, std::min(x - t, hi)); });
+      [=](Data& x){ x = std::max(lo, std::min(x - t, hi)); });
     first = vec_last;
   }
 }

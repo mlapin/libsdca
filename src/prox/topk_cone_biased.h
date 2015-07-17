@@ -14,28 +14,27 @@ thresholds_topk_cone_biased_search(
     const typename std::iterator_traits<Iterator>::difference_type k,
     const Result rho
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type data_type;
-  typedef Result result_type;
-
   // Sort data to search efficiently
-  std::sort(first, last, std::greater<data_type>());
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  std::sort(first, last, std::greater<Data>());
 
   // Precompute some constants
   auto k_last = std::next(first, k);
-  result_type k_minus_num_U = static_cast<result_type>(k);
-  result_type num_U_plus_rho_k_2 =
-    rho * static_cast<result_type>(k) * static_cast<result_type>(k);
-  result_type min_U = +std::numeric_limits<result_type>::infinity();
-  result_type sum_U = 0;
+  Result k_minus_num_U = static_cast<Result>(k);
+  Result num_U_plus_rho_k_2 =
+    rho * static_cast<Result>(k) * static_cast<Result>(k);
+  Result min_U = +std::numeric_limits<Result>::infinity();
+  Result sum_U = 0, sum_U_comp = 0;
 
   // Grow U starting with empty
   for (auto m_first = first;;) {
 
-    result_type min_M = +std::numeric_limits<result_type>::infinity();
-    result_type max_M = -std::numeric_limits<result_type>::infinity();
-    result_type sum_M = 0, num_M_sum_U = 0;
-    result_type D = k_minus_num_U * k_minus_num_U;
-    result_type k_minus_num_U_sum_U = k_minus_num_U * sum_U;
+    Result min_M = +std::numeric_limits<Result>::infinity();
+    Result max_M = -std::numeric_limits<Result>::infinity();
+    Result sum_M = 0, sum_M_comp = 0;
+    Result num_M_sum_U = 0, num_M_sum_U_comp = 0;
+    Result D = k_minus_num_U * k_minus_num_U, D_inv = 0;
+    Result k_minus_num_U_sum_U = k_minus_num_U * sum_U;
 
     // Grow M starting with empty
     for (auto m_last = m_first;;) {
@@ -49,12 +48,12 @@ thresholds_topk_cone_biased_search(
       //  (3)  hi + t  >= max_M = (m_first) or (-Inf)
       //  (4)  hi + t  <= min_U = (m_first - 1) or (+Inf)
 
-      result_type t  = (num_U_plus_rho_k_2 * sum_M - k_minus_num_U_sum_U) / D;
-      result_type hi = (num_M_sum_U + k_minus_num_U * sum_M) / D;
-      result_type tt = hi + t;
+      Result t  = (num_U_plus_rho_k_2 * sum_M - k_minus_num_U_sum_U) * D_inv;
+      Result hi = (num_M_sum_U + k_minus_num_U * sum_M) * D_inv;
+      Result tt = hi + t;
       if (max_M <= tt && tt <= min_U) {
         if (t <= min_M &&
-            ((m_last == last) || static_cast<result_type>(*m_last) <= t)) {
+            ((m_last == last) || static_cast<Result>(*m_last) <= t)) {
           return thresholds<Iterator, Result>(t, 0, hi, m_first, m_last);
         }
       }
@@ -63,23 +62,24 @@ thresholds_topk_cone_biased_search(
       if (m_last == last) {
         break;
       }
-      min_M = *m_last;
-      max_M = *m_first;
-      sum_M += min_M; // TODO: kahan_add
-      ++m_last;
+      min_M = static_cast<Result>(*m_last);
+      max_M = static_cast<Result>(*m_first);
+      kahan_add(min_M, sum_M, sum_M_comp); // sum_M += min_M;
+      kahan_add(sum_U, num_M_sum_U, num_M_sum_U_comp); // num_M_sum_U += sum_U;
       D += num_U_plus_rho_k_2;
-      num_M_sum_U += sum_U;
+      D_inv = static_cast<Result>(1) / D;
+      ++m_last;
     }
 
     // Increment the set U
     if (m_first == k_last) {
       break;
     }
-    min_U = *m_first;
-    sum_U += min_U; // TODO: kahan_add
-    ++m_first;
+    min_U = static_cast<Result>(*m_first);
+    kahan_add(min_U, sum_U, sum_U_comp); // sum_U += min_U;
     --k_minus_num_U;
     ++num_U_plus_rho_k_2;
+    ++m_first;
   }
 
   // Default to 0
@@ -87,28 +87,28 @@ thresholds_topk_cone_biased_search(
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 thresholds<Iterator, Result>
 thresholds_topk_cone_biased(
     Iterator first,
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   Result K = static_cast<Result>(k);
   auto proj = topk_cone_special_cases(first, last, k, K + rho * K * K, sum);
   if (proj.projection == projection::general) {
     return thresholds_topk_cone_biased_search(first, last, k, rho);
   } else {
-    return proj.result;
+    return proj.thresholds;
   }
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_topk_cone_biased(
@@ -116,15 +116,15 @@ project_topk_cone_biased(
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(first, last,
-    thresholds_topk_cone_biased<Iterator, Result, Summator>, k, rho, sum);
+    thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_topk_cone_biased(
@@ -134,15 +134,15 @@ project_topk_cone_biased(
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
-    thresholds_topk_cone_biased<Iterator, Result, Summator>, k, rho, sum);
+    thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_topk_cone_biased(
@@ -153,10 +153,10 @@ project_topk_cone_biased(
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
-    thresholds_topk_cone_biased<Iterator, Result, Summator>, k, rho, sum);
+    thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);
 }
 
 }

@@ -6,17 +6,16 @@
 #include "proxdef.h"
 
 /*
- * Based on the Algorithm 3.1 in
- * Kiwiel, K. C. "Variable fixing algorithms for the continuous
- * quadratic knapsack problem."
+ * Based on the Algorithm 3.1 in Kiwiel, K. C.,
+ * "Variable fixing algorithms for the continuous quadratic knapsack problem.",
  * Journal of Optimization Theory and Applications 136.3 (2008): 445-458.
  */
 
 namespace sdca {
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 thresholds<Iterator, Result>
 thresholds_knapsack_eq(
     Iterator first,
@@ -24,33 +23,30 @@ thresholds_knapsack_eq(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type data_type;
-  typedef Result result_type;
-
   // Initialization
-  result_type eps = std::numeric_limits<result_type>::epsilon()
-    * std::max(static_cast<result_type>(1), std::abs(rhs));
-  result_type t = (sum(first, last, static_cast<result_type>(0)) - rhs) /
-    static_cast<result_type>(std::distance(first, last));
+  Result eps = std::numeric_limits<Result>::epsilon()
+    * std::max(static_cast<Result>(1), std::abs(rhs));
+  Result t = (sum(first, last, static_cast<Result>(0)) - rhs) /
+    static_cast<Result>(std::distance(first, last));
 
   Iterator m_first = first, m_last = last;
   for (;;) {
     // Feasibility check
-    result_type tt = lo + t;
+    Result tt = lo + t;
     auto lo_it = std::partition(m_first, m_last,
-      [=](const result_type x){ return x > tt; });
-    result_type infeas_lo =
-      + tt * static_cast<result_type>(std::distance(lo_it, m_last))
-      - sum(lo_it, m_last, static_cast<result_type>(0));
+      [=](const Result x){ return x > tt; });
+    Result infeas_lo =
+      + tt * static_cast<Result>(std::distance(lo_it, m_last))
+      - sum(lo_it, m_last, static_cast<Result>(0));
 
     tt = hi + t;
     auto hi_it = std::partition(m_first, lo_it,
-      [=](const result_type x){ return x > tt; });
-    result_type infeas_hi =
-      - tt * static_cast<result_type>(std::distance(m_first, hi_it))
-      + sum(m_first, hi_it, static_cast<result_type>(0));
+      [=](const Result x){ return x > tt; });
+    Result infeas_hi =
+      - tt * static_cast<Result>(std::distance(m_first, hi_it))
+      + sum(m_first, hi_it, static_cast<Result>(0));
 
     // Variable fixing (using the incremental multiplier formula (23))
     if (std::abs(infeas_hi - infeas_lo) <= eps) {
@@ -67,30 +63,30 @@ thresholds_knapsack_eq(
     if (m_first == m_last) {
       break;
     } else {
-      t += tt / static_cast<result_type>(std::distance(m_first, m_last));
+      t += tt / static_cast<Result>(std::distance(m_first, m_last));
     }
   }
 
   // (Optional) Recompute t to increase numerical accuracy (see Lemma 5.3)
   if (m_first == m_last) {
     if (m_last != last) {
-      t = static_cast<result_type>(*std::max_element(m_last, last)) - lo;
+      t = static_cast<Result>(*std::max_element(m_last, last)) - lo;
     } else if (first != m_first) {
-      t = static_cast<result_type>(*std::min_element(first, m_first)) - hi;
+      t = static_cast<Result>(*std::min_element(first, m_first)) - hi;
     }
   } else {
-    t = rhs - hi * static_cast<result_type>(std::distance(first, m_first))
-            - lo * static_cast<result_type>(std::distance(m_last, last));
+    t = rhs - hi * static_cast<Result>(std::distance(first, m_first))
+            - lo * static_cast<Result>(std::distance(m_last, last));
     t = sum(m_first, m_last, -t)
-      / static_cast<result_type>(std::distance(m_first, m_last));
+      / static_cast<Result>(std::distance(m_first, m_last));
   }
 
   return make_thresholds(t, lo, hi, m_first, m_last);
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_eq(
@@ -99,15 +95,15 @@ project_knapsack_eq(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(first, last,
-    thresholds_knapsack_eq<Iterator, Result, Summator>, lo, hi, rhs, sum);
+    thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_eq(
@@ -118,15 +114,15 @@ project_knapsack_eq(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
-    thresholds_knapsack_eq<Iterator, Result, Summator>, lo, hi, rhs, sum);
+    thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
 }
 
 template <typename Iterator,
-          typename Result,
-          typename Summator = std_sum<Iterator, Result>>
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
 inline
 void
 project_knapsack_eq(
@@ -138,10 +134,10 @@ project_knapsack_eq(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summator sum = Summator()
+    Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
-    thresholds_knapsack_eq<Iterator, Result, Summator>, lo, hi, rhs, sum);
+    thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
 }
 
 }

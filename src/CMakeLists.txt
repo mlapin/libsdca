@@ -57,7 +57,7 @@ if(${Matlab_FOUND})
 #    )
 
   install(
-    TARGETS ${MEX_PROX} #${MEX_SOLVE}
+    TARGETS ${MEX_PROX} ${MEX_SOLVE}
     DESTINATION matlab
     )
 else()
