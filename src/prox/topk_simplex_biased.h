@@ -20,12 +20,14 @@ is_topk_simplex_biased_lt(
     const Result rho,
     Summation sum = Summation()
     ) {
+  Result eps = std::numeric_limits<Result>::epsilon()
+    * std::max(static_cast<Result>(1), std::abs(rhs));
   if (u_first == u_last) {
-    return t < rho * rhs;
+    return t < rho * rhs - eps;
   } else {
     Result num_U = static_cast<Result>(std::distance(u_first, u_last));
     Result sum_U = sum(u_first, u_last, static_cast<Result>(0));
-    return k * ( sum_U + (k - num_U) * t) < rhs * (num_U + rho * k * k);
+    return k * ( sum_U + (k - num_U) * t) < rhs * (num_U + rho * k * k) - eps;
   }
 }
 

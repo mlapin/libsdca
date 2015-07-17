@@ -15,7 +15,7 @@ if 0
   B = libsdca_prox(A, opts);
 end
 
-if 1
+if 0
   load('data/sun397-cnn.mat');
   top_k = 10;
   svm_c = 10;
@@ -36,3 +36,6 @@ if 1
   [~,pred] = max(model.W'*Xtrn);
   fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
 end
+
+cd /BS/mlapin-projects1/work/simplex/test
+runtestcases_2

@@ -91,7 +91,7 @@ mex_main(
     const mxArray* opts
     ) {
   std::string summation = mxGetFieldValueOrDefault(
-    opts, "summation", std::string("standard"));
+    opts, "summation", std::string("kahan"));
   if (summation == "standard") {
     std_sum<Data*, Result> sum;
     mex_main<Data, Result, std_sum<Data*, Result>>(
@@ -117,7 +117,7 @@ mex_main(
   const mxArray* opts = (nrhs > 1) ? prhs[1] : nullptr;
   mxCheckStruct(opts, "opts");
   std::string precision = mxGetFieldValueOrDefault(
-    opts, "precision", std::string("double"));
+    opts, "precision", std::string("float"));
   if (precision == "double") {
     mex_main<Data, double>(nlhs, plhs, prhs, opts);
   } else if (precision == "single" || precision == "float") {
