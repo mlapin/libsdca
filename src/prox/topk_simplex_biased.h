@@ -18,10 +18,9 @@ is_topk_simplex_biased_lt(
     const Result k,
     const Result rhs,
     const Result rho,
+    const Result eps,
     Summation sum = Summation()
     ) {
-  Result eps = std::numeric_limits<Result>::epsilon()
-    * std::max(static_cast<Result>(1), std::abs(rhs));
   if (u_first == u_last) {
     return t < rho * rhs - eps;
   } else {
@@ -43,19 +42,23 @@ thresholds_topk_simplex_biased(
     const Result rho = 1,
     Summation sum = Summation()
     ) {
+  assert(rho >= 0);
   Result K = static_cast<Result>(k), lo(0);
+  Result eps = std::numeric_limits<Result>::epsilon()
+    * std::max(static_cast<Result>(1), std::abs(rhs));
   auto proj = topk_cone_special_cases(first, last, k, K + rho * K * K, sum);
   switch (proj.projection) {
     case projection::zero:
       break;
     case projection::constant:
-      if (K * proj.thresholds.hi > rhs) {
+      if (K * proj.thresholds.hi > rhs + eps) {
         return thresholds_knapsack_eq(first, last, lo, rhs / K, rhs, sum);
       }
       break;
     case projection::general:
       auto t = thresholds_knapsack_eq(first, last, lo, rhs / K, rhs, sum);
-      if (is_topk_simplex_biased_lt(first, t.first, t.t, K, rhs, rho, sum)) {
+      if (is_topk_simplex_biased_lt(
+            first, t.first, t.t, K, rhs, rho, eps, sum)) {
         return thresholds_topk_cone_biased_search(first, last, k, rho, sum);
       }
       return t;

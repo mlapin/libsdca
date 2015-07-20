@@ -17,14 +17,14 @@ thresholds_knapsack_le(
     const Result rhs = 1,
     Summation sum = Summation()
     ) {
+  Result eps = std::numeric_limits<Result>::epsilon()
+    * std::max(static_cast<Result>(1), std::abs(rhs));
+
   // First, check if the inequality constraint is active (sum > rhs)
   auto m_first = std::partition(first, last,
     [=](const Result x){ return x >= hi; });
   auto m_last = std::partition(m_first, last,
     [=](const Result x){ return x > lo; });
-
-  Result eps = std::numeric_limits<Result>::epsilon()
-    * std::max(static_cast<Result>(1), std::abs(rhs));
   Result s = sum(m_first, m_last, static_cast<Result>(0))
     + hi * static_cast<Result>(std::distance(first, m_first))
     + lo * static_cast<Result>(std::distance(m_last, last));

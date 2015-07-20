@@ -74,6 +74,7 @@ thresholds_topk_cone_search(
   Result k_minus_num_U = static_cast<Result>(k);
   Result min_U = +std::numeric_limits<Result>::infinity();
   Result num_U = 0, sum_U = 0, sum_U_comp = 0;
+  Result eps = static_cast<Result>(k) * std::numeric_limits<Result>::epsilon();
 
   // Grow U starting with empty
   for (auto m_first = first;;) {
@@ -100,9 +101,9 @@ thresholds_topk_cone_search(
       Result t  = (num_U * sum_M - k_minus_num_U_sum_U) / D;
       Result hi = (num_M_sum_U   + k_minus_num_U * sum_M) / D;
       Result tt = hi + t;
-      if (max_M <= tt && tt <= min_U) {
-        if (t <= min_M &&
-            ((m_last == last) || static_cast<Result>(*m_last) <= t)) {
+      if (max_M - eps <= tt && tt <= min_U + eps) {
+        if (t <= min_M + eps &&
+            ((m_last == last) || static_cast<Result>(*m_last) - eps <= t)) {
           return thresholds<Iterator, Result>(t, 0, hi, m_first, m_last);
         }
       }

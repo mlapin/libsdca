@@ -1,9 +1,9 @@
 #ifndef SDCA_PROX_KNAPSACK_LE_BIASED_H
 #define SDCA_PROX_KNAPSACK_LE_BIASED_H
-
+#include <iostream>
 #include <functional>
 
-#include "knapsack_eq.h"
+#include "knapsack_le.h"
 
 namespace sdca {
 
@@ -22,6 +22,8 @@ thresholds_knapsack_le_biased_search(
     ) {
   // At this point, rho must be positive
   assert(rho > 0);
+  Result eps = std::numeric_limits<Result>::epsilon()
+    * std::max(static_cast<Result>(1), std::abs(rhs));
 
   // Sort data to search efficiently
   typedef typename std::iterator_traits<Iterator>::value_type Data;
@@ -53,12 +55,12 @@ thresholds_knapsack_le_biased_search(
       //  (5)       t  <= rho * rhs
 
       Result t = (lo * num_L + hi * num_U + sum_M) / (rho_inverse + num_M);
-      if (t <= rho_rhs) {
+      if (t <= rho_rhs + eps) {
         Result tt = hi + t;
-        if (max_M <= tt && tt <= min_U) {
+        if (max_M - eps <= tt && tt <= min_U + eps) {
           tt = lo + t;
-          if (tt <= min_M &&
-              ((m_last == last) || static_cast<Result>(*m_last) <= tt)) {
+          if (tt <= min_M + eps &&
+              ((m_last == last) || static_cast<Result>(*m_last) - eps <= tt)) {
             return make_thresholds(t, lo, hi, m_first, m_last);
           }
         }
@@ -102,26 +104,18 @@ thresholds_knapsack_le_biased(
     const Result rho = 1,
     Summation sum = Summation()
     ) {
-  // First, check if the inequality constraint is active (sum > rhs)
-  auto m_first = std::partition(first, last,
-    [=](const Result x){ return x >= hi; });
-  auto m_last = std::partition(m_first, last,
-    [=](const Result x){ return x > lo; });
+  assert(rho >= 0);
+  if (rho == 0) {
+    return thresholds_knapsack_le(first, last, lo, hi, rhs, sum);
+  }
 
-  Result eps = std::numeric_limits<Result>::epsilon()
-    * std::max(static_cast<Result>(1), std::abs(rhs));
-  Result s = sum(m_first, m_last, static_cast<Result>(0))
-    + hi * static_cast<Result>(std::distance(first, m_first))
-    + lo * static_cast<Result>(std::distance(m_last, last));
+  Result eps = 0; // std::numeric_limits<Result>::epsilon();
+    //* std::max(static_cast<Result>(1), std::abs(rhs));
 
-  // Special cases: 1) equality constraint; 2) t = 0
-  if (s > rhs + eps) {
-    auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs, sum);
-    if (t.t >= rho * rhs - eps) {
-      return t;
-    }
-  } else if (std::abs(rho * s) <= eps) {
-    return thresholds<Iterator, Result>(0, lo, hi, m_first, m_last);
+  // Equality constraint
+  auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs, sum);
+  if (t.t >= rho * rhs - eps) {
+    return t;
   }
 
   // General case
