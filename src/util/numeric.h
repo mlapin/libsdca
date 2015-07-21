@@ -5,9 +5,32 @@
 
 namespace sdca {
 
+template <typename Type>
+struct type_traits {
+  static constexpr const char*
+  name() { return "unknown type"; }
+};
+
+template <>
+struct type_traits<float> {
+  static constexpr const char*
+  name() { return "float"; }
+};
+
+template <>
+struct type_traits<double> {
+  static constexpr const char*
+  name() { return "double"; }
+};
+
+template <>
+struct type_traits<long double> {
+  static constexpr const char*
+  name() { return "long double"; }
+};
+
 template <typename Data, typename Result>
-inline
-void
+inline void
 kahan_add(
     const Data& value,
     Result& sum,
@@ -20,8 +43,7 @@ kahan_add(
 }
 
 template <typename Iterator, typename Result>
-inline
-Result
+inline Result
 kahan_accumulate(
     Iterator first,
     Iterator last,
@@ -40,13 +62,16 @@ kahan_accumulate(
 template <typename Iterator, typename Result>
 struct std_sum {
 //  std_sum() { std::cout << "std sum" << std::endl; }
-  inline
-  Result
+
+  constexpr const char*
+  name() { return "standard"; }
+
+  inline Result
   operator()(Iterator first, Iterator last, Result init) const {
     return std::accumulate(first, last, init);
   }
-  inline
-  void
+
+  inline void
   add(const Result& value, Result& sum, Result&) const {
     sum += value;
   }
@@ -55,13 +80,16 @@ struct std_sum {
 template <typename Iterator, typename Result>
 struct kahan_sum {
 //  kahan_sum() { std::cout << "kahan sum" << std::endl; }
-  inline
-  Result
+
+  constexpr const char*
+  name() { return "kahan"; }
+
+  inline Result
   operator()(Iterator first, Iterator last, Result init) const {
     return kahan_accumulate(first, last, init);
   }
-  inline
-  void
+
+  inline void
   add(const Result& value, Result& sum, Result& compensation) const {
     kahan_add(value, sum, compensation);
   }

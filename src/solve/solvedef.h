@@ -10,7 +10,7 @@ enum class solver_status {
   none = 0,
   solving,
   solved,
-  dual_decreased,
+  no_progress,
   max_num_epoch,
   max_cpu_time,
   max_wall_time
@@ -20,7 +20,7 @@ static const char* solver_status_name[] = {
   "none",
   "solving",
   "solved",
-  "dual_decreased",
+  "no_progress",
   "max_num_epoch",
   "max_cpu_time",
   "max_wall_time"

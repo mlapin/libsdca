@@ -13,8 +13,8 @@ template <typename Result>
 class solver_base {
 public:
   typedef Result result_type;
-  static constexpr result_type dual_decrease_tolerance = static_cast<Result>(
-    1.0 + 2.0 * std::numeric_limits<double>::epsilon());
+  static constexpr result_type sufficient_increase = static_cast<Result>(1)
+    + std::numeric_limits<result_type>::epsilon();
 
   solver_base(
       const stopping_criteria& __criteria,
@@ -173,10 +173,11 @@ protected:
     result_type max = std::max(std::abs(primal_), std::abs(dual_));
     if (gap_ <= static_cast<result_type>(criteria_.epsilon) * max) {
       status_ = solver_status::solved;
-    } else if (dual_ * dual_decrease_tolerance < dual_before) {
-      status_ = solver_status::dual_decreased;
+    } else if (dual_ < sufficient_increase * dual_before) {
+      status_ = solver_status::no_progress;
       LOG_DEBUG << "  (warning) "
-        "dual objective decreased by " << (dual_before - dual_) << std::endl;
+        "no progress due to insufficient dual objective increase: "
+        << (dual_ - dual_before) << std::endl;
     }
     states_.emplace_back(
       num_epoch(), cpu_time_now(), wall_time_now(), primal_, dual_, gap_);

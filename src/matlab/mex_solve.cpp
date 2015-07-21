@@ -220,6 +220,9 @@ set_problem_data(
   add_field_scalar("num_examples", model.problem.num_examples, model);
   add_field_scalar("num_tasks", model.problem.num_tasks, model);
   add_field_scalar("is_dual", model.is_dual, model);
+
+  add_field("data_precision", mxCreateString(type_traits<Data>::name()), model);
+  add_field("precision", mxCreateString(type_traits<Result>::name()), model);
 }
 
 inline
@@ -256,6 +259,9 @@ set_logging_options(
     mexErrMsgIdAndTxt(
       err_id[err_log_format], err_msg[err_log_format], log_format.c_str());
   }
+
+//  add_field("log_level", mxCreateString(log_level.c_str()), model);
+//  add_field("log_format", mxCreateString(log_format.c_str()), model);
 }
 
 template <typename Data,

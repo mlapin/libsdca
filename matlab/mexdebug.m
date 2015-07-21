@@ -32,12 +32,13 @@ if 1
   max_cpu_time = 0;
 
   opts.epsilon = 1e-15;
-  opts.check_epoch = 10;
-  opts.max_num_epoch = 1000;
+  opts.check_epoch = 1;
+  opts.max_num_epoch = 100;
+  opts.precision = 'double';
   opts.log_level = 'debug';
   opts.log_format = 'long_e';
 
-  model = libsdca_solve(Xtrn, Ytrn, opts);
+  model = libsdca_solve(single(Xtrn), Ytrn, opts);
   disp(model);
   [~,pred] = max(model.W'*Xtrn);
   fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
