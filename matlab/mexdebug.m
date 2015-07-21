@@ -16,6 +16,11 @@ if 0
 end
 
 if 0
+  cd /BS/mlapin-projects1/work/simplex/test
+  runtestcases_2
+end
+
+if 1
   load('data/sun397-cnn.mat');
   top_k = 10;
   svm_c = 10;
@@ -30,12 +35,10 @@ if 0
   opts.check_epoch = 10;
   opts.max_num_epoch = 1000;
   opts.log_level = 'debug';
+  opts.log_format = 'long_e';
 
   model = libsdca_solve(Xtrn, Ytrn, opts);
   disp(model);
   [~,pred] = max(model.W'*Xtrn);
   fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
 end
-
-cd /BS/mlapin-projects1/work/simplex/test
-runtestcases_2

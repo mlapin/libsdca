@@ -1,29 +1,34 @@
 #ifndef SDCA_SOLVE_L2_TOPK_LOSS_H
 #define SDCA_SOLVE_L2_TOPK_LOSS_H
 
-#include "util/util.h"
 #include "prox/topk_simplex_biased.h"
 #include "solvedef.h"
+#include "util/util.h"
 
 namespace sdca {
 
-template <typename Data, typename Result = long double>
+template <typename Data,
+          typename Result,
+          typename Summation>
 struct l2_hinge_topk {
   const difference_type k;
-  const Data rhs;
+  const Result rhs;
   const Result c_div_k;
+  Summation sum;
 
   l2_hinge_topk(
-      const size_type top_k,
-      const Data svm_c
+      const size_type __k,
+      const Result __C,
+      Summation __sum
     ) :
-      k(static_cast<difference_type>(top_k)),
-      rhs(svm_c),
-      c_div_k(static_cast<Result>(svm_c) / static_cast<Result>(top_k))
+      k(static_cast<difference_type>(__k)),
+      rhs(__C),
+      c_div_k(__C / static_cast<Result>(__k)),
+      sum(__sum)
   {
     LOG_INFO << "objective: l2_hinge_topk ("
-      "k = " << top_k << ", "
-      "C = " << svm_c << ")" << std::endl;
+      "k = " << __k << ", "
+      "C = " << __C << ")" << std::endl;
   }
 
   void update_variables(
@@ -33,7 +38,6 @@ struct l2_hinge_topk {
       Data* variables,
       Data* scores
       ) const {
-
     Data a = norm2_inv;
     sdca_blas_axpby(num_tasks, a, scores, -1, variables);
 
@@ -48,12 +52,13 @@ struct l2_hinge_topk {
     std::for_each(variables, variables_back, [&](Data &x){ x += a; });
 
     // Project onto the topk simplex
+    Result rho = 1;
     project_topk_simplex_biased(variables, variables_back,
-      scores, scores_back, k, rhs);
+      scores, scores_back, k, rhs, rho, sum);
 
     // The last one is the sum
-    *variables_back = std::accumulate(
-      variables, variables_back, static_cast<Data>(0));
+    *variables_back = static_cast<Data>(sum(
+      variables, variables_back, static_cast<Result>(0)));
 
     // Change the sign of all but last one
     std::for_each(variables, variables_back, [](Data &x){ x = -x; });
@@ -67,13 +72,13 @@ struct l2_hinge_topk {
       const size_type label,
       const Data* variables,
       Data* scores,
-      Data &regularizer,
-      Data &primal_loss,
-      Data &dual_loss
+      Result &regularizer,
+      Result &primal_loss,
+      Result &dual_loss
     ) const {
-
-    regularizer = sdca_blas_dot(num_tasks, scores, variables);
-    dual_loss = variables[label];
+    regularizer = static_cast<Result>(
+      sdca_blas_dot(num_tasks, scores, variables));
+    dual_loss = static_cast<Result>(variables[label]);
 
     Data a = static_cast<Data>(1) - scores[label];
     std::for_each(scores, scores + num_tasks, [&](Data &x){ x += a; });
@@ -82,10 +87,10 @@ struct l2_hinge_topk {
     // Sum k largest elements
     std::nth_element(scores, scores + k - 1, scores + num_tasks,
       std::greater<Data>());
-    a = std::accumulate(scores, scores + k, static_cast<Data>(0));
 
     // max{0, sum_k_largest} (division by k happens later)
-    primal_loss = std::max(static_cast<Data>(0), a);
+    primal_loss = std::max(static_cast<Result>(0),
+      sum(scores, scores + k, static_cast<Result>(0)));
   }
 
   void primal_dual_gap(
@@ -103,16 +108,6 @@ struct l2_hinge_topk {
     dual_objective -= static_cast<Result>(0.5) * regularizer;
   }
 };
-
-template <typename Data, typename Result = long double>
-inline
-l2_hinge_topk<Data, Result>
-make_l2_hinge_topk(
-    const size_type top_k,
-    const Data svm_c
-  ) {
-  return l2_hinge_topk<Data, Result>(top_k, svm_c);
-}
 
 }
 

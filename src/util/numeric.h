@@ -40,10 +40,14 @@ kahan_accumulate(
 template <typename Iterator, typename Result>
 struct std_sum {
 //  std_sum() { std::cout << "std sum" << std::endl; }
-  inline Result operator()(Iterator first, Iterator last, Result init) {
+  inline
+  Result
+  operator()(Iterator first, Iterator last, Result init) const {
     return std::accumulate(first, last, init);
   }
-  inline void add(const Result& value, Result& sum, Result&) {
+  inline
+  void
+  add(const Result& value, Result& sum, Result&) const {
     sum += value;
   }
 };
@@ -51,10 +55,14 @@ struct std_sum {
 template <typename Iterator, typename Result>
 struct kahan_sum {
 //  kahan_sum() { std::cout << "kahan sum" << std::endl; }
-  inline Result operator()(Iterator first, Iterator last, Result init) {
+  inline
+  Result
+  operator()(Iterator first, Iterator last, Result init) const {
     return kahan_accumulate(first, last, init);
   }
-  inline void add(const Result& value, Result& sum, Result& compensation) {
+  inline
+  void
+  add(const Result& value, Result& sum, Result& compensation) const {
     kahan_add(value, sum, compensation);
   }
 };

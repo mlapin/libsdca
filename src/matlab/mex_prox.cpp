@@ -122,6 +122,8 @@ mex_main(
     mex_main<Data, double>(nlhs, plhs, prhs, opts);
   } else if (precision == "single" || precision == "float") {
     mex_main<Data, float>(nlhs, plhs, prhs, opts);
+  } else if (precision == "long_double" || precision == "long double") {
+    mex_main<Data, long double>(nlhs, plhs, prhs, opts);
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_prec_type], err_msg[err_prec_type], precision.c_str());

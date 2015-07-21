@@ -6,7 +6,9 @@
 
 namespace sdca {
 
-template <typename Objective, typename Data, typename Result = long double>
+template <typename Objective,
+          typename Data,
+          typename Result>
 class primal_solver : public solver_base<Result> {
 public:
   typedef solver_base<Result> base;
@@ -31,8 +33,8 @@ public:
       norms_(__problem.num_examples),
       scores_(__problem.num_tasks),
       vars_before_(__problem.num_tasks),
-      diff_tolerance_(static_cast<data_type>(__problem.num_tasks) *
-        2 * std::numeric_limits<data_type>::epsilon()),
+      diff_tolerance_(static_cast<data_type>(__problem.num_tasks)
+        * std::numeric_limits<data_type>::epsilon()),
       D(static_cast<blas_int>(__problem.num_dimensions)),
       N(static_cast<blas_int>(__problem.num_examples)),
       T(static_cast<blas_int>(__problem.num_tasks))
@@ -104,7 +106,7 @@ protected:
 
   void compute_objectives() override {
     // Let W = X * A'
-    // (recompute W from scratch to avoid the accumulated numerical error)
+    // (recompute W from scratch to minimize the accumulated numerical error)
     sdca_blas_gemm(D, T, N, features_, D, dual_variables_, T,
       primal_variables_, CblasNoTrans, CblasTrans);
 
@@ -128,7 +130,7 @@ protected:
       sdca_blas_gemv(D, T, primal_variables_, x_i, &scores_[0], CblasTrans);
 
       // Compute the regularization term and primal/dual losses
-      data_type regul, p_loss, d_loss;
+      result_type regul(0), p_loss(0), d_loss(0);
       data_type* vars = dual_variables_ + num_tasks_ * i;
       objective_.regularized_loss(T, labels_[i], vars, &scores_[0],
         regul, p_loss, d_loss);
@@ -145,18 +147,6 @@ protected:
   }
 
 };
-
-template <typename Objective, typename Data, typename Result = long double>
-inline
-primal_solver<Objective, Data, Result>
-make_primal_solver(
-    const problem_data<Data>& problem,
-    const stopping_criteria& criteria,
-    const Objective& objective
-  ) {
-  return primal_solver<Objective, Data, Result>(
-    problem, criteria, objective);
-}
 
 }
 

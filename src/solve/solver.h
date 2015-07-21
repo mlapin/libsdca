@@ -9,12 +9,12 @@
 
 namespace sdca {
 
-template <typename Result = long double>
+template <typename Result>
 class solver_base {
 public:
   typedef Result result_type;
-  static constexpr result_type dual_decrease_tolerance =
-    1.0 + 8.0 * std::numeric_limits<double>::epsilon();
+  static constexpr result_type dual_decrease_tolerance = static_cast<Result>(
+    1.0 + 2.0 * std::numeric_limits<double>::epsilon());
 
   solver_base(
       const stopping_criteria& __criteria,
