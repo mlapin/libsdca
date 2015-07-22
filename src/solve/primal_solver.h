@@ -72,8 +72,8 @@ protected:
   const blas_int T;
 
   // Initialization
-  void begin_solve() override {
-    base::begin_solve();
+  void initialize() override {
+    base::initialize();
     for (size_type i = 0; i < num_examples_; ++i) {
       const data_type* x_i = features_ + num_dimensions_ * i;
       data_type a = sdca_blas_dot(D, x_i, x_i);

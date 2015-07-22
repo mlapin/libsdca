@@ -19,7 +19,8 @@ enum err_index {
   err_arg_not_sparse,
   err_arg_not_empty,
   err_arg_range,
-  err_vec_dim,
+  err_vec_dim_class,
+  err_mat_dim_class,
   err_out_of_memory,
   err_read_failed,
   err_labels_range,
@@ -42,7 +43,8 @@ static const char* err_id[] = {
   "LIBSDCA:arg_not_sparse",
   "LIBSDCA:arg_not_empty",
   "LIBSDCA:arg_range",
-  "LIBSDCA:vec_dim",
+  "LIBSDCA:vec_dim_class",
+  "LIBSDCA:mat_dim_class",
   "LIBSDCA:out_of_memory",
   "LIBSDCA:read_failed",
   "LIBSDCA:labels_range",
@@ -65,7 +67,8 @@ static const char* err_msg[] = {
   "'%s' must be not sparse.",
   "'%s' must be not empty.",
   "'%s' is out of range.",
-  "'%s' must be a %u dimensional vector.",
+  "'%s' must be a %u dimensional vector of class %s.",
+  "'%s' must be a %u-by-%u dimensional matrix of class %s.",
   "Out of memory (cannot allocate memory for '%s').",
   "Failed to read the value of '%s'.",
   "Invalid labels range (must be 1:T or 0:T-1).",
@@ -77,6 +80,15 @@ static const char* err_msg[] = {
   "Unknown log format '%s'.",
   "%s is not implemented yet."
 };
+
+inline const char*
+to_string(mxClassID class_id) {
+  switch (class_id) {
+    case mxDOUBLE_CLASS: return "double";
+    case mxSINGLE_CLASS: return "single";
+    default: return "unknown";
+  }
+}
 
 template <typename Usage>
 inline void
@@ -202,21 +214,41 @@ mxCheckCreated(
   }
 }
 
-template <typename IndexType>
+template <typename SizeType>
 inline void
 mxCheckVector(
-    const IndexType dim,
     const mxArray* pa,
-    const char* name
+    const char* name,
+    const SizeType n,
+    const mxClassID class_id = mxDOUBLE_CLASS
     ) {
-  if (!( (static_cast<IndexType>(mxGetM(pa)) == dim && mxGetN(pa) == 1)
-      || (mxGetM(pa) == 1 && static_cast<IndexType>(mxGetN(pa)) == dim) )) {
+  if (!( (static_cast<SizeType>(mxGetM(pa)) == n && mxGetN(pa) == 1) ||
+         (mxGetM(pa) == 1 && static_cast<SizeType>(mxGetN(pa)) == n) ) ||
+      mxIsComplex(pa) || mxGetClassID(pa) != class_id) {
     mexErrMsgIdAndTxt(
-      err_id[err_vec_dim], err_msg[err_vec_dim], name,
-      static_cast<std::size_t>(dim));
+      err_id[err_vec_dim_class], err_msg[err_vec_dim_class], name,
+      static_cast<std::size_t>(n), to_string(class_id));
   }
 }
 
+template <typename SizeType>
+inline void
+mxCheckMatrix(
+    const mxArray* pa,
+    const char* name,
+    const SizeType m,
+    const SizeType n,
+    const mxClassID class_id = mxDOUBLE_CLASS
+    ) {
+  if (static_cast<SizeType>(mxGetM(pa)) != m ||
+      static_cast<SizeType>(mxGetN(pa)) != n ||
+      mxIsComplex(pa) || mxGetClassID(pa) != class_id) {
+    mexErrMsgIdAndTxt(
+      err_id[err_mat_dim_class], err_msg[err_mat_dim_class], name,
+      static_cast<std::size_t>(m), static_cast<std::size_t>(n),
+      to_string(class_id));
+  }
+}
 
 template <typename Type>
 inline const Type

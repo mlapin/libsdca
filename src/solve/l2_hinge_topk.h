@@ -60,8 +60,8 @@ struct l2_hinge_topk {
       scores, scores_back, k, rhs, rho, sum);
 
     // The last one is the sum
-    *variables_back = static_cast<Data>(sum(
-      variables, variables_back, static_cast<Result>(0)));
+    *variables_back = static_cast<Data>(std::min(rhs,
+      sum(variables, variables_back, static_cast<Result>(0)) ));
 
     // Change the sign of all but last one
     std::for_each(variables, variables_back, [](Data &x){ x = -x; });

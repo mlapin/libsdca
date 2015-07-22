@@ -33,7 +33,7 @@ topk_cone_special_cases(
   topk_cone_projection<Iterator, Result> proj;
 
   // Case 1: U empty, M empty, proj = 0
-  Result eps = div_const * std::numeric_limits<Result>::epsilon();
+  Result eps = static_cast<Result>(k) * std::numeric_limits<Result>::epsilon();
   Result sum_k_largest = sum(first, k_last, static_cast<Result>(0));
   if (sum_k_largest <= eps) {
     proj.projection = projection::zero;
@@ -45,7 +45,7 @@ topk_cone_special_cases(
   Result hi = sum_k_largest / div_const;
   Result t = static_cast<Result>(*(k_last - 1)) - hi;
   if ((k == std::distance(first, last)) ||
-      (t >= static_cast<Result>(*std::max_element(k_last, last)) - eps)) {
+      (t >= static_cast<Result>(*std::max_element(k_last, last)) - eps )) {
     proj.projection = projection::constant;
     proj.thresholds = thresholds<Iterator, Result>(t, 0, hi, k_last, k_last);
     return proj;

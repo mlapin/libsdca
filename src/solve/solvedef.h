@@ -12,9 +12,10 @@ enum class solver_status {
   solving,
   solved,
   no_progress,
-  max_num_epoch,
+  max_epoch,
   max_cpu_time,
-  max_wall_time
+  max_wall_time,
+  failed
 };
 typedef typename std::underlying_type<solver_status>::type solver_status_type;
 static const char* solver_status_name[] = {
@@ -22,9 +23,10 @@ static const char* solver_status_name[] = {
   "solving",
   "solved",
   "no_progress",
-  "max_num_epoch",
+  "max_epoch",
   "max_cpu_time",
-  "max_wall_time"
+  "max_wall_time",
+  "failed"
 };
 
 using wall_clock = std::chrono::high_resolution_clock;
@@ -55,8 +57,9 @@ struct problem_data {
 };
 
 struct stopping_criteria {
+  bool check_on_start = false;
   size_type check_epoch = 1;
-  size_type max_num_epoch = 100;
+  size_type max_epoch = 0;
   double max_cpu_time = 0;
   double max_wall_time = 0;
   double epsilon = 1e-3;
@@ -65,8 +68,9 @@ struct stopping_criteria {
   to_string() const {
     std::ostringstream str;
     str << "epsilon = " << epsilon << ", "
+           "check_on_start = " << check_on_start << ", "
            "check_epoch = " << check_epoch << ", "
-           "max_num_epoch = " << max_num_epoch << ", "
+           "max_epoch = " << max_epoch << ", "
            "max_cpu_time = " << max_cpu_time << ", "
            "max_wall_time = " << max_wall_time;
     return str.str();
@@ -76,7 +80,7 @@ struct stopping_criteria {
 template <typename Result>
 struct state {
   typedef Result result_type;
-  size_type num_epoch;
+  size_type epoch;
   double cpu_time;
   double wall_time;
   result_type primal;
@@ -84,7 +88,7 @@ struct state {
   result_type gap;
 
   state() :
-      num_epoch(0),
+      epoch(0),
       cpu_time(0),
       wall_time(0),
       primal(std::numeric_limits<result_type>::infinity()),
@@ -93,14 +97,14 @@ struct state {
     {}
 
   state(
-      const size_type __num_epoch,
+      const size_type __epoch,
       const double __cpu_time,
       const double __wall_time,
       const result_type __primal,
       const result_type __dual,
       const result_type __gap
     ) :
-      num_epoch(__num_epoch),
+      epoch(__epoch),
       cpu_time(__cpu_time),
       wall_time(__wall_time),
       primal(__primal),
