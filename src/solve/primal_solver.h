@@ -38,10 +38,10 @@ public:
       N(static_cast<blas_int>(__problem.num_examples)),
       T(static_cast<blas_int>(__problem.num_tasks))
   {
-    LOG_INFO << "formulation: primal ("
-      "num_dimensions = " << __problem.num_dimensions << ", "
-      "num_examples = " << __problem.num_examples << ", "
-      "num_tasks = " << __problem.num_tasks << ")" << std::endl;
+    LOG_INFO << "solver: primal" << std::endl
+      << "problem: " << __problem.to_string() << std::endl
+      << "objective: " << __objective.to_string() << std::endl
+      << "stopping criteria: " << __criteria.to_string() << std::endl;
   }
 
 protected:
@@ -52,7 +52,7 @@ protected:
   using base::gap_;
 
   // Main variables
-  objective_type objective_;
+  const objective_type objective_;
   const size_type num_dimensions_;
   const size_type num_tasks_;
   const size_type* labels_;

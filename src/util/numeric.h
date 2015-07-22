@@ -64,7 +64,7 @@ struct std_sum {
 //  std_sum() { std::cout << "std sum" << std::endl; }
 
   constexpr const char*
-  name() { return "standard"; }
+  name() const { return "standard"; }
 
   inline Result
   operator()(Iterator first, Iterator last, Result init) const {
@@ -82,7 +82,7 @@ struct kahan_sum {
 //  kahan_sum() { std::cout << "kahan sum" << std::endl; }
 
   constexpr const char*
-  name() { return "kahan"; }
+  name() const { return "kahan"; }
 
   inline Result
   operator()(Iterator first, Iterator last, Result init) const {

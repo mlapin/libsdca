@@ -25,10 +25,13 @@ struct l2_hinge_topk {
       rhs(__C),
       c_div_k(__C / static_cast<Result>(__k)),
       sum(__sum)
-  {
-    LOG_INFO << "objective: l2_hinge_topk ("
-      "k = " << __k << ", "
-      "C = " << __C << ")" << std::endl;
+  {}
+
+  inline std::string
+  to_string() const {
+    std::ostringstream str;
+    str << "l2_hinge_topk (k = " << k << ", C = " << rhs << ")";
+    return str.str();
   }
 
   void update_variables(

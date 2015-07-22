@@ -18,8 +18,8 @@ namespace sdca {
   typedef int blas_int;
 #endif
 
-inline
-void sdca_blas_scal(
+inline void
+sdca_blas_scal(
     const blas_int n,
     const float alpha,
     float* X
@@ -27,8 +27,8 @@ void sdca_blas_scal(
   cblas_sscal(n, alpha, X, 1);
 }
 
-inline
-void sdca_blas_scal(
+inline void
+sdca_blas_scal(
     const blas_int n,
     const double alpha,
     double* X
@@ -36,8 +36,8 @@ void sdca_blas_scal(
   cblas_dscal(n, alpha, X, 1);
 }
 
-inline
-void sdca_blas_copy(
+inline void
+sdca_blas_copy(
     const blas_int n,
     const float* X,
     float* Y
@@ -45,8 +45,8 @@ void sdca_blas_copy(
   cblas_scopy(n, X, 1, Y, 1);
 }
 
-inline
-void sdca_blas_copy(
+inline void
+sdca_blas_copy(
     const blas_int n,
     const double* X,
     double* Y
@@ -54,8 +54,8 @@ void sdca_blas_copy(
   cblas_dcopy(n, X, 1, Y, 1);
 }
 
-inline
-void sdca_blas_axpy(
+inline void
+sdca_blas_axpy(
     const blas_int n,
     const float alpha,
     const float* X,
@@ -64,8 +64,8 @@ void sdca_blas_axpy(
   cblas_saxpy(n, alpha, X, 1, Y, 1);
 }
 
-inline
-void sdca_blas_axpy(
+inline void
+sdca_blas_axpy(
     const blas_int n,
     const double alpha,
     const double* X,
@@ -74,8 +74,8 @@ void sdca_blas_axpy(
   cblas_daxpy(n, alpha, X, 1, Y, 1);
 }
 
-inline
-void sdca_blas_axpby(
+inline void
+sdca_blas_axpby(
     const blas_int n,
     const float alpha,
     const float* X,
@@ -90,8 +90,8 @@ void sdca_blas_axpby(
 #endif
 }
 
-inline
-void sdca_blas_axpby(
+inline void
+sdca_blas_axpby(
     const blas_int n,
     const double alpha,
     const double* X,
@@ -106,8 +106,8 @@ void sdca_blas_axpby(
 #endif
 }
 
-inline
-float sdca_blas_dot(
+inline float
+sdca_blas_dot(
     const blas_int n,
     const float* X,
     const float* Y
@@ -115,8 +115,8 @@ float sdca_blas_dot(
   return cblas_sdot(n, X, 1, Y, 1);
 }
 
-inline
-double sdca_blas_dot(
+inline double
+sdca_blas_dot(
     const blas_int n,
     const double* X,
     const double* Y
@@ -124,24 +124,24 @@ double sdca_blas_dot(
   return cblas_ddot(n, X, 1, Y, 1);
 }
 
-inline
-float sdca_blas_asum(
+inline float
+sdca_blas_asum(
     const blas_int n,
     const float* X
   ) {
   return cblas_sasum(n, X, 1);
 }
 
-inline
-double sdca_blas_asum(
+inline double
+sdca_blas_asum(
     const blas_int n,
     const double* X
   ) {
   return cblas_dasum(n, X, 1);
 }
 
-inline
-void sdca_blas_gemv(
+inline void
+sdca_blas_gemv(
     const blas_int m,
     const blas_int n,
     const float* A,
@@ -155,8 +155,8 @@ void sdca_blas_gemv(
               X, 1, beta, Y, 1);
 }
 
-inline
-void sdca_blas_gemv(
+inline void
+sdca_blas_gemv(
     const blas_int m,
     const blas_int n,
     const double* A,
@@ -170,8 +170,8 @@ void sdca_blas_gemv(
               X, 1, beta, Y, 1);
 }
 
-inline
-void sdca_blas_ger(
+inline void
+sdca_blas_ger(
     const blas_int m,
     const blas_int n,
     const float alpha,
@@ -182,8 +182,8 @@ void sdca_blas_ger(
   cblas_sger(CblasColMajor, m, n, alpha, X, 1, Y, 1, A, m);
 }
 
-inline
-void sdca_blas_ger(
+inline void
+sdca_blas_ger(
     const blas_int m,
     const blas_int n,
     const double alpha,
@@ -194,8 +194,8 @@ void sdca_blas_ger(
   cblas_dger(CblasColMajor, m, n, alpha, X, 1, Y, 1, A, m);
 }
 
-inline
-void sdca_blas_gemm(
+inline void
+sdca_blas_gemm(
     const blas_int m,
     const blas_int n,
     const blas_int k,
@@ -213,8 +213,8 @@ void sdca_blas_gemm(
               alpha, A, lda, B, ldb, beta, C, m);
 }
 
-inline
-void sdca_blas_gemm(
+inline void
+sdca_blas_gemm(
     const blas_int m,
     const blas_int n,
     const blas_int k,

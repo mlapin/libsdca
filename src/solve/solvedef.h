@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <limits>
+#include <sstream>
 
 namespace sdca {
 
@@ -42,6 +43,15 @@ struct problem_data {
   data_type* data = nullptr;
   data_type* primal_variables = nullptr;
   data_type* dual_variables = nullptr;
+
+  inline std::string
+  to_string() const {
+    std::ostringstream str;
+    str << "num_dimensions = " << num_dimensions << ", "
+           "num_examples = " << num_examples << ", "
+           "num_tasks = " << num_tasks;
+    return str.str();
+  }
 };
 
 struct stopping_criteria {
@@ -50,6 +60,17 @@ struct stopping_criteria {
   double max_cpu_time = 0;
   double max_wall_time = 0;
   double epsilon = 1e-3;
+
+  inline std::string
+  to_string() const {
+    std::ostringstream str;
+    str << "epsilon = " << epsilon << ", "
+           "check_epoch = " << check_epoch << ", "
+           "max_num_epoch = " << max_num_epoch << ", "
+           "max_cpu_time = " << max_cpu_time << ", "
+           "max_wall_time = " << max_wall_time;
+    return str.str();
+  }
 };
 
 template <typename Result>

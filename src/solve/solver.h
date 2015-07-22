@@ -29,14 +29,7 @@ public:
       primal_(0),
       dual_(0),
       gap_(0)
-  {
-    LOG_INFO << "stopping_criteria: "
-      "epsilon = " << __criteria.epsilon << ", "
-      "check_epoch = " << __criteria.check_epoch << ", "
-      "max_num_epoch = " << __criteria.max_num_epoch << ", "
-      "max_cpu_time = " << __criteria.max_cpu_time << ", "
-      "max_wall_time = " << __criteria.max_wall_time << std::endl;
-  }
+  {}
 
   void solve() {
     begin_solve();

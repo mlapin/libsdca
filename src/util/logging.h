@@ -25,14 +25,12 @@ enum format {
 level __level__;
 std::ios __ios_state__(nullptr);
 
-inline
-void
+inline void
 set_level(level __level) {
   __level__ = __level;
 }
 
-inline
-void
+inline void
 set_format(format __format) {
   switch (__format) {
     case short_f:
@@ -50,14 +48,12 @@ set_format(format __format) {
   }
 }
 
-inline
-void
+inline void
 format_push() {
   __ios_state__.copyfmt(std::cout);
 }
 
-inline
-void
+inline void
 format_pop() {
   std::cout.copyfmt(__ios_state__);
 }

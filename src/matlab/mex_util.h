@@ -79,7 +79,7 @@ static const char* err_msg[] = {
 };
 
 template <typename Usage>
-void
+inline void
 mxCheckArgNum(
     const int argnum,
     const int min,
@@ -93,7 +93,7 @@ mxCheckArgNum(
 }
 
 template <typename Type>
-void
+inline void
 mxCheckRange(
     const Type var,
     const Type min,
@@ -106,7 +106,7 @@ mxCheckRange(
 }
 
 template <typename Type, typename Compare>
-void
+inline void
 mxCheck(
     Compare comp,
     const Type var,
@@ -118,7 +118,7 @@ mxCheck(
   }
 }
 
-void
+inline void
 mxCheckSingle(
     const mxArray* pa,
     const char* name
@@ -128,7 +128,7 @@ mxCheckSingle(
   }
 }
 
-void
+inline void
 mxCheckDouble(
     const mxArray* pa,
     const char* name
@@ -138,7 +138,7 @@ mxCheckDouble(
   }
 }
 
-void
+inline void
 mxCheckReal(
     const mxArray* pa,
     const char* name
@@ -149,7 +149,7 @@ mxCheckReal(
   }
 }
 
-void
+inline void
 mxCheckSquare(
     const mxArray* pa,
     const char* name
@@ -159,7 +159,7 @@ mxCheckSquare(
   }
 }
 
-void
+inline void
 mxCheckStruct(
     const mxArray* pa,
     const char* name
@@ -169,7 +169,7 @@ mxCheckStruct(
   }
 }
 
-void
+inline void
 mxCheckNotSparse(
     const mxArray* pa,
     const char* name
@@ -180,7 +180,7 @@ mxCheckNotSparse(
   }
 }
 
-void
+inline void
 mxCheckNotEmpty(
     const mxArray* pa,
     const char* name
@@ -191,7 +191,7 @@ mxCheckNotEmpty(
   }
 }
 
-void
+inline void
 mxCheckCreated(
     const mxArray* pa,
     const char* name
@@ -203,7 +203,7 @@ mxCheckCreated(
 }
 
 template <typename IndexType>
-void
+inline void
 mxCheckVector(
     const IndexType dim,
     const mxArray* pa,
@@ -219,8 +219,7 @@ mxCheckVector(
 
 
 template <typename Type>
-inline
-const Type
+inline const Type
 mxGetFieldValueOrDefault(
     const mxArray* pa,
     const char* name,
@@ -236,8 +235,7 @@ mxGetFieldValueOrDefault(
 }
 
 template <>
-inline
-const std::string
+inline const std::string
 mxGetFieldValueOrDefault(
     const mxArray* pa,
     const char* name,
@@ -259,8 +257,7 @@ mxGetFieldValueOrDefault(
 }
 
 template <typename Type>
-inline
-void
+inline void
 mxSetFieldValue(
     const mxArray* pa,
     const char* name,
@@ -275,16 +272,14 @@ mxSetFieldValue(
 }
 
 template <typename Type>
-inline
-mxArray*
+inline mxArray*
 mxCreateScalar(
     const Type value
   ) {
   return mxCreateDoubleScalar(static_cast<double>(value));
 }
 
-inline
-mxArray*
+inline mxArray*
 mxCreateStruct(
     const std::vector<std::pair<const char*, const mxArray*>>& fields,
     const char* name

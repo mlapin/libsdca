@@ -16,7 +16,7 @@ printUsage() {
 
 template <typename Data,
           typename Result>
-struct result {
+struct solution {
   typedef Data data_type;
   typedef Result result_type;
   bool is_dual = false;
@@ -28,12 +28,11 @@ struct result {
 
 template <typename Data,
           typename Result>
-inline
-void
+inline void
 add_field(
     const char* name,
     const mxArray* value,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   model.fields.emplace_back(std::make_pair(name, value));
 }
@@ -41,12 +40,11 @@ add_field(
 template <typename Data,
           typename Result,
           typename Type>
-inline
-void
+inline void
 add_field_scalar(
     const char* name,
     const Type value,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   model.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
 }
@@ -54,13 +52,12 @@ add_field_scalar(
 template <typename Data,
           typename Result,
           typename Type>
-inline
-void
+inline void
 add_field_opts_value(
     const mxArray* opts,
     const char* name,
     Type& value,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   mxSetFieldValue(opts, name, value);
   model.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
@@ -68,11 +65,10 @@ add_field_opts_value(
 
 template <typename Data,
           typename Result>
-inline
-void
+inline void
 add_states(
     const std::vector<state<Result>>& states,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   const char* names[] =
     {"epoch", "cpu_time", "wall_time", "primal", "dual", "gap"};
@@ -95,11 +91,10 @@ add_states(
 template <typename Solver,
           typename Data,
           typename Result>
-inline
-void
+inline void
 solve_model(
     Solver solver,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   solver.solve();
   add_field("status", mxCreateString(solver.status_name().c_str()), model);
@@ -116,11 +111,10 @@ solve_model(
 template <typename Objective,
           typename Data,
           typename Result>
-inline
-void
+inline void
 make_solver_solve(
     const Objective objective,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   if (model.is_dual) {
     mexErrMsgIdAndTxt(err_id[err_not_implemented], err_msg[err_not_implemented],
@@ -133,11 +127,10 @@ make_solver_solve(
 
 template <typename Data,
           typename Result>
-inline
-void
+inline void
 set_stopping_criteria(
     const mxArray* opts,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   auto c = &model.criteria;
   add_field_opts_value(opts, "check_epoch", c->check_epoch, model);
@@ -159,11 +152,10 @@ set_stopping_criteria(
 
 template <typename Data,
           typename Result>
-inline
-void
+inline void
 set_labels(
     const mxArray* labels,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   auto n = model.problem.num_examples;
   mxCheckVector(n, labels, "labels");
@@ -183,13 +175,12 @@ set_labels(
 
 template <typename Data,
           typename Result>
-inline
-void
+inline void
 set_problem_data(
     const mxArray* data,
     const mxArray* labels,
     const mxArray* opts,
-    result<Data, Result>& model
+    solution<Data, Result>& model
   ) {
   model.problem.data = static_cast<Data*>(mxGetData(data));
   model.problem.num_examples = mxGetN(data);
@@ -221,14 +212,16 @@ set_problem_data(
   add_field_scalar("num_tasks", model.problem.num_tasks, model);
   add_field_scalar("is_dual", model.is_dual, model);
 
-  add_field("data_precision", mxCreateString(type_traits<Data>::name()), model);
   add_field("precision", mxCreateString(type_traits<Result>::name()), model);
+  add_field("data_precision", mxCreateString(type_traits<Data>::name()), model);
 }
 
-inline
-void
+template <typename Data,
+          typename Result>
+inline void
 set_logging_options(
-    const mxArray* opts
+    const mxArray* opts,
+    solution<Data, Result>& model
   ) {
   std::string log_level = mxGetFieldValueOrDefault(
     opts, "log_level", std::string("info"));
@@ -260,8 +253,8 @@ set_logging_options(
       err_id[err_log_format], err_msg[err_log_format], log_format.c_str());
   }
 
-//  add_field("log_level", mxCreateString(log_level.c_str()), model);
-//  add_field("log_format", mxCreateString(log_format.c_str()), model);
+  add_field("log_level", mxCreateString(log_level.c_str()), model);
+  add_field("log_format", mxCreateString(log_format.c_str()), model);
 }
 
 template <typename Data,
@@ -274,11 +267,10 @@ mex_main(
     const mxArray* opts,
     Summation sum
     ) {
-  set_logging_options(opts);
-
-  result<Data, Result> model;
+  solution<Data, Result> model;
   set_problem_data(prhs[0], prhs[1], opts, model);
   set_stopping_criteria(opts, model);
+  set_logging_options(opts, model);
 
   std::string objective = mxGetFieldValueOrDefault(
     opts, "objective", std::string("l2_hinge_topk"));

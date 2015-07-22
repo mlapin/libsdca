@@ -32,8 +32,8 @@ if 1
   max_cpu_time = 0;
 
   opts.epsilon = 1e-15;
-  opts.check_epoch = 1;
-  opts.max_num_epoch = 100;
+  opts.check_epoch = 2;
+  opts.max_num_epoch = 10;
   opts.precision = 'double';
   opts.log_level = 'debug';
   opts.log_format = 'long_e';
