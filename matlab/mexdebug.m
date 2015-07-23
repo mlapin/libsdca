@@ -23,16 +23,16 @@ end
 if 1
   load('data/sun397-cnn.mat');
 
-  opts.objective = 'l2_topk_hinge';
+  opts.objective = 'l2_hinge_topk';
   opts.k = 10;
-  opts.gamma = 10;
+  opts.gamma = 0;
   opts.epsilon = 1e-5;
-  opts.check_epoch = 10;
-  opts.max_num_epoch = 50;
+  opts.check_epoch = 5;
+  opts.max_num_epoch = 100;
   opts.precision = 'double';
   opts.log_level = 'debug';
   opts.log_format = 'long_e';
-  opts.is_dual = 1;
+  opts.is_dual = 0;
 
   if opts.is_dual
     model = libsdca_solve(single(Xtrn)'*single(Xtrn), Ytrn, opts);
