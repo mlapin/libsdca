@@ -327,8 +327,13 @@ mex_main(
   if (objective == "l2_hinge_topk") {
     add_field_scalar("k", k, model);
     add_field_scalar("gamma", gamma, model);
-    make_solver_solve(
-      l2_hinge_topk<Data, Result, Summation>(k, C, gamma, sum), model);
+    if (gamma > 0) {
+      make_solver_solve(
+        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum), model);
+    } else {
+      make_solver_solve(
+        l2_hinge_topk<Data, Result, Summation>(k, C, sum), model);
+    }
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_obj_type], err_msg[err_obj_type], objective.c_str());

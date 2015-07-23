@@ -1,6 +1,6 @@
 clear;
 close all;
-addpath('libsdca-debug');
+addpath('libsdca-release');
 
 if 0
   d = 10;
@@ -15,17 +15,18 @@ if 0
   B = libsdca_prox(A, opts);
 end
 
-if 1
+if 0
   cd /BS/mlapin-projects1/work/simplex/test
   runtestcases_2
 end
 
-if 0
+if 1
   load('data/sun397-cnn.mat');
 
-  opts.k = 100;
+  opts.k = 1;
+  opts.gamma = .1;
   opts.epsilon = 1e-4;
-  opts.check_epoch = 2;
+  opts.check_epoch = 1;
   opts.max_num_epoch = 50;
   opts.precision = 'double';
   opts.log_level = 'debug';
