@@ -13,24 +13,30 @@ template <typename Data,
 struct l2_hinge_topk {
   const difference_type k;
   const Result rhs;
+  const Result gamma;
   const Result c_div_k;
+  const Result gamma_div_c;
   Summation sum;
 
   l2_hinge_topk(
       const size_type __k,
       const Result __C,
+      const Result __gamma,
       Summation __sum
     ) :
       k(static_cast<difference_type>(__k)),
       rhs(__C),
+      gamma(__gamma),
       c_div_k(__C / static_cast<Result>(__k)),
+      gamma_div_c(__gamma / __C),
       sum(__sum)
   {}
 
   inline std::string
   to_string() const {
     std::ostringstream str;
-    str << "l2_hinge_topk (k = " << k << ", C = " << rhs << ")";
+    str << "l2_hinge_topk (k = " << k << ", C = " << rhs << ", "
+           "gamma = " << gamma << ")";
     return str.str();
   }
 
@@ -41,8 +47,10 @@ struct l2_hinge_topk {
       Data* variables,
       Data* scores
       ) const {
-    Data a = norm2_inv;
-    sdca_blas_axpby(num_tasks, a, scores, -1, variables);
+    Result rho = static_cast<Result>(1) /
+      (static_cast<Result>(1) + gamma_div_c * static_cast<Result>(norm2_inv));
+    Data a = norm2_inv * static_cast<Data>(rho);
+    sdca_blas_axpby(num_tasks, a, scores, -static_cast<Data>(rho), variables);
 
     // Place ground truth at the back
     Data *scores_back = scores + num_tasks - 1;
@@ -55,7 +63,6 @@ struct l2_hinge_topk {
     std::for_each(variables, variables_back, [&](Data &x){ x += a; });
 
     // Project onto the topk simplex
-    Result rho = 1;
     project_topk_simplex_biased(variables, variables_back,
       scores, scores_back, k, rhs, rho, sum);
 

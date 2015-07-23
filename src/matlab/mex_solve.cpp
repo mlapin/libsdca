@@ -310,21 +310,25 @@ mex_main(
   add_field("objective", mxCreateString(objective.c_str()), model);
 
   auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
-  mxCheck<Result>(std::greater_equal<Result>(), c, 0, "c");
+  mxCheck<Result>(std::greater<Result>(), c, 0, "c");
   add_field_scalar("c", c, model);
 
   auto C = mxGetFieldValueOrDefault<Result>(opts, "C",
     c/static_cast<Result>(model.problem.num_examples));
-  mxCheck<Result>(std::greater_equal<Result>(), C, 0, "C");
+  mxCheck<Result>(std::greater<Result>(), C, 0, "C");
   add_field_scalar("C", C, model);
 
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
   mxCheckRange<size_type>(k, 1, model.problem.num_tasks - 1, "k");
 
+  auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
+  mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
+
   if (objective == "l2_hinge_topk") {
     add_field_scalar("k", k, model);
+    add_field_scalar("gamma", gamma, model);
     make_solver_solve(
-      l2_hinge_topk<Data, Result, Summation>(k, C, sum), model);
+      l2_hinge_topk<Data, Result, Summation>(k, C, gamma, sum), model);
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_obj_type], err_msg[err_obj_type], objective.c_str());
