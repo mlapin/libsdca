@@ -1,6 +1,6 @@
 clear;
 close all;
-addpath('libsdca-debug');
+addpath('libsdca-release');
 
 if 0
   d = 10;
@@ -27,16 +27,24 @@ if 1
   opts.k = 10;
   opts.gamma = 10;
   opts.epsilon = 1e-5;
-  opts.check_epoch = 1;
+  opts.check_epoch = 10;
   opts.max_num_epoch = 50;
   opts.precision = 'double';
   opts.log_level = 'debug';
   opts.log_format = 'long_e';
+  opts.is_dual = 1;
 
-  model = libsdca_solve(single(Xtrn), Ytrn, opts);
-  disp(model);
-  [~,pred] = max(model.W'*Xtrn);
-  fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
+  if opts.is_dual
+    model = libsdca_solve(single(Xtrn)'*single(Xtrn), Ytrn, opts);
+    disp(model);
+    [~,pred] = max(model.A*Xtrn'*Xtrn);
+    fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
+  else
+    model = libsdca_solve(single(Xtrn), Ytrn, opts);
+    disp(model);
+    [~,pred] = max(model.W'*Xtrn);
+    fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
+  end
   
   if 0
   opts2 = model;

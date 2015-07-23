@@ -20,6 +20,7 @@ set(SOLVE_SRCS
   solve/solve.h
   solve/solvedef.h
   solve/solver.h
+  solve/dual_solver.h
   solve/primal_solver.h
   solve/l2_hinge_topk.h
   solve/l2_topk_hinge.h

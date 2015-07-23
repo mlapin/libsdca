@@ -140,8 +140,8 @@ make_solver_solve(
     Objective objective
   ) {
   if (model.is_dual) {
-    mexErrMsgIdAndTxt(err_id[err_not_implemented], err_msg[err_not_implemented],
-      "Dual solver");
+    solve_model(dual_solver<Objective, Data, Result>(
+      model.problem, model.criteria, objective), model);
   } else {
     solve_model(primal_solver<Objective, Data, Result>(
       model.problem, model.criteria, objective), model);
