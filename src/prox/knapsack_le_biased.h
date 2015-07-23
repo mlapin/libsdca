@@ -126,8 +126,7 @@ thresholds_knapsack_le_biased(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_knapsack_le_biased(
     Iterator first,
     Iterator last,
@@ -145,8 +144,7 @@ project_knapsack_le_biased(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_knapsack_le_biased(
     Iterator first,
     Iterator last,
@@ -166,8 +164,7 @@ project_knapsack_le_biased(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_knapsack_le_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,

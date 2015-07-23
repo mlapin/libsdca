@@ -7,10 +7,10 @@
 
 using namespace sdca;
 
-void
+inline void
 printUsage() {
   mexPrintf("Usage: model = %s(X, Y);\n"
-            "       model = %s(data, labels [, opts]);\n"
+            "       model = %s(data, labels, opts);\n"
             , MEX_SOLVE, MEX_SOLVE);
 }
 
@@ -199,14 +199,14 @@ set_stopping_criteria(
   auto c = &model.criteria;
   add_field_opts_value(opts, "check_on_start", c->check_on_start, model);
   add_field_opts_value(opts, "check_epoch", c->check_epoch, model);
-  add_field_opts_value(opts, "max_num_epoch", c->max_epoch, model);
+  add_field_opts_value(opts, "max_epoch", c->max_epoch, model);
   add_field_opts_value(opts, "max_cpu_time", c->max_cpu_time, model);
   add_field_opts_value(opts, "max_wall_time", c->max_wall_time, model);
   add_field_opts_value(opts, "epsilon", c->epsilon, model);
   mxCheck<size_type>(std::greater_equal<size_type>(),
     c->check_epoch, 0, "check_epoch");
   mxCheck<size_type>(std::greater_equal<size_type>(),
-    c->max_epoch, 0, "max_num_epoch");
+    c->max_epoch, 0, "max_epoch");
   mxCheck<double>(std::greater_equal<double>(),
     c->max_cpu_time, 0, "max_cpu_time");
   mxCheck<double>(std::greater_equal<double>(),
@@ -306,7 +306,7 @@ mex_main(
   set_logging_options(opts, model);
 
   std::string objective = mxGetFieldValueOrDefault(
-    opts, "objective", std::string("l2_hinge_topk"));
+    opts, "objective", std::string("l2_topk_hinge"));
   add_field("objective", mxCreateString(objective.c_str()), model);
 
   auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
@@ -324,17 +324,7 @@ mex_main(
   auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
   mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
 
-  if (objective == "l2_hinge_topk") {
-    add_field_scalar("k", k, model);
-    add_field_scalar("gamma", gamma, model);
-    if (gamma > 0) {
-      make_solver_solve(model,
-        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum));
-    } else {
-      make_solver_solve(model,
-        l2_hinge_topk<Data, Result, Summation>(k, C, sum));
-    }
-  } else if (objective == "l2_topk_hinge") {
+  if (objective == "l2_topk_hinge") {
     add_field_scalar("k", k, model);
     add_field_scalar("gamma", gamma, model);
     if (gamma > 0) {
@@ -344,9 +334,19 @@ mex_main(
       make_solver_solve(model,
         l2_topk_hinge<Data, Result, Summation>(k, C, sum));
     }
+  } else if (objective == "l2_hinge_topk") {
+    add_field_scalar("k", k, model);
+    add_field_scalar("gamma", gamma, model);
+    if (gamma > 0) {
+      make_solver_solve(model,
+        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum));
+    } else {
+      make_solver_solve(model,
+        l2_hinge_topk<Data, Result, Summation>(k, C, sum));
+    }
   } else {
     mexErrMsgIdAndTxt(
-      err_id[err_obj_type], err_msg[err_obj_type], objective.c_str());
+      err_id[err_objective], err_msg[err_objective], objective.c_str());
   }
 
   plhs[0] = mxCreateStruct(model.fields, "model");
@@ -362,7 +362,7 @@ mex_main(
     ) {
   std::string summation = mxGetFieldValueOrDefault(
     opts, "summation", std::string("standard"));
-  if (summation == "standard") {
+  if (summation == "standard" || summation == "default") {
     std_sum<Data*, Result> sum;
     mex_main<Data, Result, std_sum<Data*, Result>>(plhs, prhs, opts, sum);
   } else if (summation == "kahan") {
@@ -370,7 +370,7 @@ mex_main(
     mex_main<Data, Result, kahan_sum<Data*, Result>>(plhs, prhs, opts, sum);
   } else {
     mexErrMsgIdAndTxt(
-      err_id[err_sum_type], err_msg[err_sum_type], summation.c_str());
+      err_id[err_summation], err_msg[err_summation], summation.c_str());
   }
 }
 
@@ -389,11 +389,11 @@ mex_main(
     mex_main<Data, double>(plhs, prhs, opts);
   } else if (precision == "single" || precision == "float") {
     mex_main<Data, float>(plhs, prhs, opts);
-  } else if (precision == "long_double" || precision == "long double") {
+  } else if (precision == "long double" || precision == "long_double") {
     mex_main<Data, long double>(plhs, prhs, opts);
   } else {
     mexErrMsgIdAndTxt(
-      err_id[err_prec_type], err_msg[err_prec_type], precision.c_str());
+      err_id[err_precision], err_msg[err_precision], precision.c_str());
   }
 }
 

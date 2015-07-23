@@ -112,8 +112,7 @@ thresholds_topk_cone_biased(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_cone_biased(
     Iterator first,
     Iterator last,
@@ -128,8 +127,7 @@ project_topk_cone_biased(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_cone_biased(
     Iterator first,
     Iterator last,
@@ -146,8 +144,7 @@ project_topk_cone_biased(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_cone_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,

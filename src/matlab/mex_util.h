@@ -10,7 +10,7 @@
 namespace sdca {
 
 enum err_index {
-  err_argnum = 0,
+  err_arg_count = 0,
   err_arg_single,
   err_arg_double,
   err_arg_real,
@@ -24,17 +24,17 @@ enum err_index {
   err_out_of_memory,
   err_read_failed,
   err_labels_range,
-  err_proj_type,
-  err_obj_type,
-  err_sum_type,
-  err_prec_type,
+  err_prox,
+  err_objective,
+  err_summation,
+  err_precision,
   err_log_level,
   err_log_format,
   err_not_implemented
 };
 
 static const char* err_id[] = {
-  "LIBSDCA:argnum",
+  "LIBSDCA:arg_count",
   "LIBSDCA:arg_single",
   "LIBSDCA:arg_double",
   "LIBSDCA:arg_real",
@@ -48,10 +48,10 @@ static const char* err_id[] = {
   "LIBSDCA:out_of_memory",
   "LIBSDCA:read_failed",
   "LIBSDCA:labels_range",
-  "LIBSDCA:proj_type",
-  "LIBSDCA:obj_type",
-  "LIBSDCA:sum_type",
-  "LIBSDCA:prec_type",
+  "LIBSDCA:prox",
+  "LIBSDCA:objective",
+  "LIBSDCA:summation",
+  "LIBSDCA:precision",
   "LIBSDCA:log_level",
   "LIBSDCA:log_format",
   "LIBSDCA:not_implemented"
@@ -72,12 +72,12 @@ static const char* err_msg[] = {
   "Out of memory (cannot allocate memory for '%s').",
   "Failed to read the value of '%s'.",
   "Invalid labels range (must be 1:T or 0:T-1).",
-  "Unknown projection type '%s'.",
-  "Unknown objective function '%s'.",
-  "Unknown summation algorithm '%s'.",
-  "Unknown floating point precision '%s'.",
-  "Unknown log level '%s'.",
-  "Unknown log format '%s'.",
+  "Unknown prox '%s'.",
+  "Unknown objective '%s'.",
+  "Unknown summation '%s'.",
+  "Unknown precision '%s'.",
+  "Unknown log_level '%s'.",
+  "Unknown log_format '%s'.",
   "%s is not implemented yet."
 };
 
@@ -100,7 +100,7 @@ mxCheckArgNum(
     ) {
   if (argnum < min || argnum > max) {
     usage();
-    mexErrMsgIdAndTxt(err_id[err_argnum], err_msg[err_argnum]);
+    mexErrMsgIdAndTxt(err_id[err_arg_count], err_msg[err_arg_count]);
   }
 }
 

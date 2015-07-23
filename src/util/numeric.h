@@ -61,8 +61,6 @@ kahan_accumulate(
 
 template <typename Iterator, typename Result>
 struct std_sum {
-//  std_sum() { std::cout << "std sum" << std::endl; }
-
   constexpr const char*
   name() const { return "standard"; }
 
@@ -79,8 +77,6 @@ struct std_sum {
 
 template <typename Iterator, typename Result>
 struct kahan_sum {
-//  kahan_sum() { std::cout << "kahan sum" << std::endl; }
-
   constexpr const char*
   name() const { return "kahan"; }
 

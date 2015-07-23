@@ -16,7 +16,6 @@ struct topk_cone_projection {
 template <typename Iterator,
           typename Result,
           typename Summation = std_sum<Iterator, Result>>
-inline
 topk_cone_projection<Iterator, Result>
 topk_cone_special_cases(
     Iterator first,
@@ -158,8 +157,7 @@ thresholds_topk_cone(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_cone(
     Iterator first,
     Iterator last,
@@ -173,8 +171,7 @@ project_topk_cone(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_cone(
     Iterator first,
     Iterator last,
@@ -190,8 +187,7 @@ project_topk_cone(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_cone(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,

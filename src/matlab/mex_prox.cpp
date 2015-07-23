@@ -7,7 +7,7 @@
 
 using namespace sdca;
 
-void
+inline void
 printUsage() {
   mexPrintf("Usage: X = %s(A);\n"
             "       X = %s(A, opts);\n", MEX_PROX, MEX_PROX);
@@ -52,32 +52,32 @@ mex_main(
   Data* aux_first = &aux[0];
   Data* aux_last = aux_first + m;
 
-  std::string proj = mxGetFieldValueOrDefault(
-    opts, "proj", std::string("knapsack_eq"));
-  if (proj == "knapsack_eq") {
+  std::string prox = mxGetFieldValueOrDefault(
+    opts, "prox", std::string("knapsack_eq"));
+  if (prox == "knapsack_eq") {
     project_knapsack_eq<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
-  } else if (proj == "knapsack_le") {
+  } else if (prox == "knapsack_le") {
     project_knapsack_le<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
-  } else if (proj == "knapsack_le_biased") {
+  } else if (prox == "knapsack_le_biased") {
     project_knapsack_le_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, rho, sum);
-  } else if (proj == "topk_cone") {
-    project_topk_cone<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, k, sum);
-  } else if (proj == "topk_cone_biased") {
-    project_topk_cone_biased<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, k, rho, sum);
-  } else if (proj == "topk_simplex") {
+  } else if (prox == "topk_simplex") {
     project_topk_simplex<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rhs, sum);
-  } else if (proj == "topk_simplex_biased") {
+  } else if (prox == "topk_simplex_biased") {
     project_topk_simplex_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rhs, rho, sum);
+  } else if (prox == "topk_cone") {
+    project_topk_cone<Data*, Result, Summation>(
+      m, first, last, aux_first, aux_last, k, sum);
+  } else if (prox == "topk_cone_biased") {
+    project_topk_cone_biased<Data*, Result, Summation>(
+      m, first, last, aux_first, aux_last, k, rho, sum);
   } else {
     mexErrMsgIdAndTxt(
-      err_id[err_proj_type], err_msg[err_proj_type], proj.c_str());
+      err_id[err_prox], err_msg[err_prox], prox.c_str());
   }
 }
 
@@ -92,7 +92,7 @@ mex_main(
     ) {
   std::string summation = mxGetFieldValueOrDefault(
     opts, "summation", std::string("standard"));
-  if (summation == "standard") {
+  if (summation == "standard" || summation == "default") {
     std_sum<Data*, Result> sum;
     mex_main<Data, Result, std_sum<Data*, Result>>(
       nlhs, plhs, prhs, opts, sum);
@@ -102,7 +102,7 @@ mex_main(
       nlhs, plhs, prhs, opts, sum);
   } else {
     mexErrMsgIdAndTxt(
-      err_id[err_sum_type], err_msg[err_sum_type], summation.c_str());
+      err_id[err_summation], err_msg[err_summation], summation.c_str());
   }
 }
 
@@ -122,11 +122,11 @@ mex_main(
     mex_main<Data, double>(nlhs, plhs, prhs, opts);
   } else if (precision == "single" || precision == "float") {
     mex_main<Data, float>(nlhs, plhs, prhs, opts);
-  } else if (precision == "long_double" || precision == "long double") {
+  } else if (precision == "long double" || precision == "long_double") {
     mex_main<Data, long double>(nlhs, plhs, prhs, opts);
   } else {
     mexErrMsgIdAndTxt(
-      err_id[err_prec_type], err_msg[err_prec_type], precision.c_str());
+      err_id[err_precision], err_msg[err_precision], precision.c_str());
   }
 }
 

@@ -39,8 +39,7 @@ thresholds_knapsack_le(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_knapsack_le(
     Iterator first,
     Iterator last,
@@ -56,8 +55,7 @@ project_knapsack_le(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_knapsack_le(
     Iterator first,
     Iterator last,
@@ -75,8 +73,7 @@ project_knapsack_le(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_knapsack_le(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,

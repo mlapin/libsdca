@@ -22,31 +22,18 @@ end
 
 if 1
   load('data/sun397-cnn.mat');
-  
-  classes = unique(Ytrn);
-  n = size(Xtrn,2);
-  T = numel(classes);
-  C = 1/n;
-  A0 = repmat(-C/(T-1)/2,T,n);
-  for c = 1:T
-    A0(c, Ytrn == classes(c)) = C/2;
-  end
-  A0 = randn(T,n);
 
-  opts.W = single(Xtrn * A0');
-  opts.A = single(A0);
-  opts.check_on_start = 1;
   opts.objective = 'l2_hinge_topk';
-  opts.C = C;
+  opts.c = 1;
   opts.k = 10;
   opts.gamma = 0;
   opts.epsilon = 1e-5;
   opts.check_epoch = 5;
-  opts.max_num_epoch = 100;
+  opts.max_epoch = 100;
   opts.precision = 'double';
   opts.log_level = 'debug';
   opts.log_format = 'long_e';
-  opts.is_dual = 0;
+  opts.is_dual = 1;
 
   if opts.is_dual
     model = libsdca_solve(single(Xtrn)'*single(Xtrn), Ytrn, opts);

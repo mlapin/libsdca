@@ -27,15 +27,13 @@ struct l2_topk_hinge {
       sum(__sum)
   {}
 
-  inline std::string
-  to_string() const {
+  inline std::string to_string() const {
     std::ostringstream str;
     str << "l2_topk_hinge (k = " << k << ", C = " << c << ", gamma = 0)";
     return str.str();
   }
 
-  void
-  update_variables(
+  void update_variables(
       const blas_int num_tasks,
       const size_type label,
       const Data norm2_inv,
@@ -71,8 +69,7 @@ struct l2_topk_hinge {
     std::swap(*variables_back, variables[label]);
   }
 
-  void
-  regularized_loss(
+  void regularized_loss(
       const blas_int num_tasks,
       const size_type label,
       const Data* variables,
@@ -98,8 +95,7 @@ struct l2_topk_hinge {
     primal_loss = sum(scores, it, static_cast<Result>(0));
   }
 
-  inline void
-  primal_dual_gap(
+  inline void primal_dual_gap(
       const Result regularizer,
       const Result primal_loss,
       const Result dual_loss,
@@ -144,16 +140,14 @@ struct l2_topk_hinge_smooth {
       sum(__sum)
   {}
 
-  inline std::string
-  to_string() const {
+  inline std::string to_string() const {
     std::ostringstream str;
     str << "l2_topk_hinge (k = " << k << ", C = " << c << ", "
            "gamma = " << gamma << ")";
     return str.str();
   }
 
-  void
-  update_variables(
+  void update_variables(
       const blas_int num_tasks,
       const size_type label,
       const Data norm2_inv,
@@ -191,8 +185,7 @@ struct l2_topk_hinge_smooth {
     std::swap(*variables_back, variables[label]);
   }
 
-  void
-  regularized_loss(
+  void regularized_loss(
       const blas_int num_tasks,
       const size_type label,
       const Data* variables,
@@ -224,8 +217,7 @@ struct l2_topk_hinge_smooth {
     primal_loss = ph - static_cast<Result>(0.5) * pp;
   }
 
-  inline void
-  primal_dual_gap(
+  inline void primal_dual_gap(
       const Result regularizer,
       const Result primal_loss,
       const Result dual_loss,

@@ -9,8 +9,7 @@ namespace sdca {
 template <typename Iterator,
           typename Result,
           typename Summation = std_sum<Iterator, Result>>
-inline
-bool
+inline bool
 is_topk_simplex_lt(
     const Iterator u_first,
     const Iterator u_last,
@@ -66,8 +65,7 @@ thresholds_topk_simplex(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_simplex(
     Iterator first,
     Iterator last,
@@ -82,8 +80,7 @@ project_topk_simplex(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_simplex(
     Iterator first,
     Iterator last,
@@ -100,8 +97,7 @@ project_topk_simplex(
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
-inline
-void
+inline void
 project_topk_simplex(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
