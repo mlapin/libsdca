@@ -5,5 +5,6 @@
 #include "solver.h"
 #include "primal_solver.h"
 #include "l2_hinge_topk.h"
+#include "l2_topk_hinge.h"
 
 #endif

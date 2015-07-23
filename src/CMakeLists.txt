@@ -22,6 +22,7 @@ set(SOLVE_SRCS
   solve/solver.h
   solve/primal_solver.h
   solve/l2_hinge_topk.h
+  solve/l2_topk_hinge.h
   )
 
 set(UTIL_SRCS

@@ -1,6 +1,6 @@
 clear;
 close all;
-addpath('libsdca-release');
+addpath('libsdca-debug');
 
 if 0
   d = 10;
@@ -23,9 +23,10 @@ end
 if 1
   load('data/sun397-cnn.mat');
 
-  opts.k = 1;
-  opts.gamma = .1;
-  opts.epsilon = 1e-4;
+  opts.objective = 'l2_topk_hinge';
+  opts.k = 10;
+  opts.gamma = 10;
+  opts.epsilon = 1e-5;
   opts.check_epoch = 1;
   opts.max_num_epoch = 50;
   opts.precision = 'double';

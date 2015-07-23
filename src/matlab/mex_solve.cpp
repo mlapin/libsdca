@@ -136,8 +136,8 @@ template <typename Objective,
           typename Result>
 inline void
 make_solver_solve(
-    const Objective objective,
-    solution<Data, Result>& model
+    solution<Data, Result>& model,
+    Objective objective
   ) {
   if (model.is_dual) {
     mexErrMsgIdAndTxt(err_id[err_not_implemented], err_msg[err_not_implemented],
@@ -328,11 +328,21 @@ mex_main(
     add_field_scalar("k", k, model);
     add_field_scalar("gamma", gamma, model);
     if (gamma > 0) {
-      make_solver_solve(
-        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum), model);
+      make_solver_solve(model,
+        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum));
     } else {
-      make_solver_solve(
-        l2_hinge_topk<Data, Result, Summation>(k, C, sum), model);
+      make_solver_solve(model,
+        l2_hinge_topk<Data, Result, Summation>(k, C, sum));
+    }
+  } else if (objective == "l2_topk_hinge") {
+    add_field_scalar("k", k, model);
+    add_field_scalar("gamma", gamma, model);
+    if (gamma > 0) {
+      make_solver_solve(model,
+        l2_topk_hinge_smooth<Data, Result, Summation>(k, C, gamma, sum));
+    } else {
+      make_solver_solve(model,
+        l2_topk_hinge<Data, Result, Summation>(k, C, sum));
     }
   } else {
     mexErrMsgIdAndTxt(

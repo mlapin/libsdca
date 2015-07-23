@@ -109,8 +109,8 @@ thresholds_knapsack_le_biased(
     return thresholds_knapsack_le(first, last, lo, hi, rhs, sum);
   }
 
-  Result eps = 0; // std::numeric_limits<Result>::epsilon();
-    //* std::max(static_cast<Result>(1), std::abs(rhs));
+  Result eps = std::numeric_limits<Result>::epsilon()
+    * std::max(static_cast<Result>(1), std::abs(rhs));
 
   // Equality constraint
   auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs, sum);

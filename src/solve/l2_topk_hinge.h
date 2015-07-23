@@ -1,8 +1,7 @@
-#ifndef SDCA_SOLVE_L2_HINGE_TOPK_LOSS_H
-#define SDCA_SOLVE_L2_HINGE_TOPK_LOSS_H
+#ifndef SDCA_SOLVE_L2_TOPK_HINGE_LOSS_H
+#define SDCA_SOLVE_L2_TOPK_HINGE_LOSS_H
 
-#include "prox/topk_simplex.h"
-#include "prox/topk_simplex_biased.h"
+#include "prox/knapsack_le_biased.h"
 #include "solvedef.h"
 #include "util/util.h"
 
@@ -11,13 +10,13 @@ namespace sdca {
 template <typename Data,
           typename Result,
           typename Summation>
-struct l2_hinge_topk {
+struct l2_topk_hinge {
   const difference_type k;
   const Result c;
   const Result c_div_k;
   Summation sum;
 
-  l2_hinge_topk(
+  l2_topk_hinge(
       const size_type __k,
       const Result __c,
       Summation __sum
@@ -31,7 +30,7 @@ struct l2_hinge_topk {
   inline std::string
   to_string() const {
     std::ostringstream str;
-    str << "l2_hinge_topk (k = " << k << ", C = " << c << ", gamma = 0)";
+    str << "l2_topk_hinge (k = " << k << ", C = " << c << ", gamma = 0)";
     return str.str();
   }
 
@@ -43,7 +42,7 @@ struct l2_hinge_topk {
       Data* variables,
       Data* scores
       ) const {
-    Result rhs = c, rho = 1;
+    Result lo = 0, hi = c_div_k, rhs = c, rho = 1;
     Data a = norm2_inv;
     sdca_blas_axpby(num_tasks, a, scores, -1, variables);
 
@@ -58,8 +57,8 @@ struct l2_hinge_topk {
     std::for_each(variables, variables_back, [&](Data &x){ x += a; });
 
     // Project onto the feasible set
-    project_topk_simplex_biased(variables, variables_back,
-      scores, scores_back, k, rhs, rho, sum);
+    project_knapsack_le_biased(variables, variables_back,
+      scores, scores_back, lo, hi, rhs, rho, sum);
 
     // The last one is the sum
     *variables_back = static_cast<Data>(std::min(rhs,
@@ -94,9 +93,9 @@ struct l2_hinge_topk {
     std::nth_element(scores, scores + k - 1, scores + num_tasks,
       std::greater<Data>());
 
-    // max{0, sum_k_largest} (division by k happens later)
-    primal_loss = std::max(static_cast<Result>(0),
-      sum(scores, scores + k, static_cast<Result>(0)));
+    // sum_k_largest max{0, score_i} (division by k happens later)
+    auto it = std::partition(scores, scores + k, [](Data x){ return x > 0; });
+    primal_loss = sum(scores, it, static_cast<Result>(0));
   }
 
   inline void
@@ -119,15 +118,17 @@ struct l2_hinge_topk {
 template <typename Data,
           typename Result,
           typename Summation>
-struct l2_hinge_topk_smooth {
+struct l2_topk_hinge_smooth {
   const difference_type k;
   const Result c;
   const Result gamma;
+  const Result c_div_k;
   const Result c_div_gamma;
+  const Result gamma_div_k;
   const Result gamma_div_c;
   Summation sum;
 
-  l2_hinge_topk_smooth(
+  l2_topk_hinge_smooth(
       const size_type __k,
       const Result __c,
       const Result __gamma,
@@ -136,7 +137,9 @@ struct l2_hinge_topk_smooth {
       k(static_cast<difference_type>(__k)),
       c(__c),
       gamma(__gamma),
+      c_div_k(__c / static_cast<Result>(__k)),
       c_div_gamma(__c / __gamma),
+      gamma_div_k(__gamma / static_cast<Result>(__k)),
       gamma_div_c(__gamma / __c),
       sum(__sum)
   {}
@@ -144,7 +147,7 @@ struct l2_hinge_topk_smooth {
   inline std::string
   to_string() const {
     std::ostringstream str;
-    str << "l2_hinge_topk (k = " << k << ", C = " << c << ", "
+    str << "l2_topk_hinge (k = " << k << ", C = " << c << ", "
            "gamma = " << gamma << ")";
     return str.str();
   }
@@ -157,7 +160,8 @@ struct l2_hinge_topk_smooth {
       Data* variables,
       Data* scores
       ) const {
-    Result rhs = c, rho = static_cast<Result>(1) /
+    Result lo = 0, hi = c_div_k, rhs = c;
+    Result rho = static_cast<Result>(1) /
       (static_cast<Result>(1) + gamma_div_c * static_cast<Result>(norm2_inv));
     Data a = norm2_inv * static_cast<Data>(rho);
     sdca_blas_axpby(num_tasks, a, scores, -static_cast<Data>(rho), variables);
@@ -173,8 +177,8 @@ struct l2_hinge_topk_smooth {
     std::for_each(variables, variables_back, [&](Data &x){ x += a; });
 
     // Project onto the feasible set
-    project_topk_simplex_biased(variables, variables_back,
-      scores, scores_back, k, rhs, rho, sum);
+    project_knapsack_le_biased(variables, variables_back,
+      scores, scores_back, lo, hi, rhs, rho, sum);
 
     // The last one is the sum
     *variables_back = static_cast<Data>(std::min(rhs,
@@ -210,7 +214,9 @@ struct l2_hinge_topk_smooth {
     scores[label] = static_cast<Data>(0);
 
     // loss = 1/gamma (<p,h> - 1/2 <p,p>), p =proj_{k,gamma}(h), h = c + a
-    auto t = thresholds_topk_simplex(scores, scores + num_tasks, k, gamma, sum);
+    Result lo = 0, hi = gamma_div_k, rhs = gamma;
+    auto t = thresholds_knapsack_le(
+      scores, scores + num_tasks, lo, hi, rhs, sum);
     Result ph = correlation(t, scores, scores + num_tasks, sum);
     Result pp = norm2(t, scores, scores + num_tasks, sum);
 
