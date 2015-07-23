@@ -17,15 +17,6 @@ set(USE_ILP64 TRUE)
 set(USE_SEQUENTIAL FALSE)
 
 #------------------------------------------------------------------------------
-# Verbosity configuration (TODO: change to logging with runtime configuration)
-#------------------------------------------------------------------------------
-# If set, solver outputs parameters / solution details on begin and end
-add_definitions(-DVERBOSE_BEGIN_END)
-
-# If set, solver outputs some statistics on each duality gap computation
-add_definitions(-DVERBOSE_DUALITY_GAP)
-
-#------------------------------------------------------------------------------
 # Compiler flags
 #------------------------------------------------------------------------------
 # Select a build type

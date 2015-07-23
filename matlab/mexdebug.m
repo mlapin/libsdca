@@ -22,8 +22,22 @@ end
 
 if 1
   load('data/sun397-cnn.mat');
+  
+  classes = unique(Ytrn);
+  n = size(Xtrn,2);
+  T = numel(classes);
+  C = 1/n;
+  A0 = repmat(-C/(T-1)/2,T,n);
+  for c = 1:T
+    A0(c, Ytrn == classes(c)) = C/2;
+  end
+  A0 = randn(T,n);
 
+  opts.W = single(Xtrn * A0');
+  opts.A = single(A0);
+  opts.check_on_start = 1;
   opts.objective = 'l2_hinge_topk';
+  opts.C = C;
   opts.k = 10;
   opts.gamma = 0;
   opts.epsilon = 1e-5;
