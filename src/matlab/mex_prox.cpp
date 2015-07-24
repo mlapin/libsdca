@@ -4,6 +4,9 @@
 #ifndef MEX_PROX
 #define MEX_PROX "mex_prox"
 #endif
+#ifndef LIBSDCA_VERSION
+#define LIBSDCA_VERSION "0.0.0"
+#endif
 
 using namespace sdca;
 

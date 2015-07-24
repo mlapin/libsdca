@@ -34,10 +34,11 @@ public:
       N(static_cast<blas_int>(__problem.num_examples)),
       T(static_cast<blas_int>(__problem.num_tasks))
   {
-    LOG_INFO << "solver: dual" << std::endl
+    LOG_INFO << "solver: " << base::name() << " (dual)" << std::endl
       << "problem: " << __problem.to_string() << std::endl
       << "objective: " << __objective.to_string() << std::endl
       << "stopping criteria: " << __criteria.to_string() << std::endl;
+    LOG_DEBUG << "precision: " << __objective.precision_string()  << std::endl;
   }
 
 protected:

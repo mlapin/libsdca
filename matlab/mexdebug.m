@@ -30,6 +30,7 @@ if 1
   opts.epsilon = 1e-5;
   opts.check_epoch = 5;
   opts.max_epoch = 100;
+  opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';
   opts.log_format = 'long_e';

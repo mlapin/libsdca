@@ -31,6 +31,9 @@ public:
       gap_(0)
   {}
 
+  constexpr const char*
+  name() const { return "stochastic dual coordinate ascent"; }
+
   void solve() {
     initialize();
     begin_solve();

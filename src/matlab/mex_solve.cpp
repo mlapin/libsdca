@@ -4,6 +4,10 @@
 #ifndef MEX_SOLVE
 #define MEX_SOLVE "mex_solve"
 #endif
+#ifndef LIBSDCA_VERSION
+#define LIBSDCA_VERSION "0.0.0"
+#endif
+#define COPYRIGHT_NOTICE "libsdca version " LIBSDCA_VERSION "."
 
 using namespace sdca;
 
@@ -301,9 +305,11 @@ mex_main(
     ) {
   solution<Data, Result> model;
   set_problem_data(prhs[0], prhs[1], opts, model);
+  set_logging_options(opts, model);
   set_precision_options(sum, model);
   set_stopping_criteria(opts, model);
-  set_logging_options(opts, model);
+
+  LOG_INFO << COPYRIGHT_NOTICE << std::endl;
 
   std::string objective = mxGetFieldValueOrDefault(
     opts, "objective", std::string("l2_topk_hinge"));

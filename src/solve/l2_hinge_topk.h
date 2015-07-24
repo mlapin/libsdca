@@ -34,6 +34,14 @@ struct l2_hinge_topk {
     return str.str();
   }
 
+  inline std::string precision_string() const {
+    std::ostringstream str;
+    str << "summation = " << sum.name() << ", "
+      "precision = " << type_traits<Result>::name() << ", "
+      "data = " << type_traits<Data>::name();
+    return str.str();
+  }
+
   void update_variables(
       const blas_int num_tasks,
       const size_type label,
@@ -140,7 +148,15 @@ struct l2_hinge_topk_smooth {
   inline std::string to_string() const {
     std::ostringstream str;
     str << "l2_hinge_topk (k = " << k << ", C = " << c << ", "
-           "gamma = " << gamma << ")";
+      "gamma = " << gamma << ")";
+    return str.str();
+  }
+
+  inline std::string precision_string() const {
+    std::ostringstream str;
+    str << "summation = " << sum.name() << ", "
+      "precision = " << type_traits<Result>::name() << ", "
+      "data = " << type_traits<Data>::name();
     return str.str();
   }
 
