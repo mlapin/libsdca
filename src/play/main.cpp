@@ -26,8 +26,8 @@ int main() {
   using SizeType = std::vector<RealType>::size_type;
   using IteratorType = std::vector<RealType>::iterator;
 
-  SizeType dim = 10000;
-  SizeType repeat = 100000;
+  SizeType dim = 10;
+  SizeType repeat = 10;
 
   std::mt19937 gen(0);
   std::uniform_int_distribution<SizeType> dice(1, 3);
@@ -101,6 +101,16 @@ int main() {
   std::cout << "time (work 4) = " << et4 << std::endl;
   std::cout << "time (work 5) = " << et5 << std::endl;
   std::cout << "time (work 6) = " << et6 << std::endl;
+
+  std::cout << std::exp(709.0) << std::endl;
+  std::cout << std::exp(710.0) << std::endl;
+  std::cout << std::exp(-708.0) << std::endl;
+  std::cout << std::exp(-709.0) << std::endl;
+
+  std::cout << std::exp(88.0f) << std::endl;
+  std::cout << std::exp(89.0f) << std::endl;
+  std::cout << std::exp(-88.0f) << std::endl;
+  std::cout << std::exp(-89.0f) << std::endl;
 
 //  std::cout << "sizeof(int) = " << sizeof(int) << std::endl;
 //  std::cout << "sizeof(long int) = " << sizeof(long int) << std::endl;
