@@ -22,6 +22,7 @@ end
 
 if 1
   load('data/sun397-cnn.mat');
+  
 
   opts.objective = 'l2_hinge_topk';
   opts.c = 1;
@@ -37,15 +38,32 @@ if 1
   opts.is_dual = 1;
 
   if opts.is_dual
-    model = libsdca_solve(single(Xtrn)'*single(Xtrn), Ytrn, opts);
+    model = libsdca_solve(Xtrn'*Xtrn, Ytrn, opts);
     disp(model);
     [~,pred] = max(model.A*Xtrn'*Xtrn);
     fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
   else
-    model = libsdca_solve(single(Xtrn), Ytrn, opts);
+    model = libsdca_solve(Xtrn, Ytrn, opts);
     disp(model);
     [~,pred] = max(model.W'*Xtrn);
     fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
+  end
+  
+  if 0
+    opts2 = model;
+    opts2.gamma = 0;
+    opts2.check_on_start = true;
+    if opts2.is_dual
+      model2 = libsdca_solve(Xtrn'*Xtrn, Ytrn, opts2);
+      disp(model2);
+      [~,pred] = max(model2.A*Xtrn'*Xtrn);
+      fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
+    else
+      model2 = libsdca_solve(Xtrn, Ytrn, opts2);
+      disp(model2);
+      [~,pred] = max(model2.W'*Xtrn);
+      fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
+    end
   end
   
   if 0
