@@ -1,6 +1,6 @@
 #ifndef SDCA_UTIL_LAMBERT_H
 #define SDCA_UTIL_LAMBERT_H
-
+#include <iostream>
 #include <cmath>
 #include <limits>
 
@@ -56,24 +56,28 @@ lambert_w_exp(
     const Type x
   ) {
   Type w, y, w1(0);
-  if (x > std::numeric_limits<Type>::epsilon()) {
-    // x > 0, w \approx x, w_0 = x, y_0 = exp(x - x) = 1
+  if (x > static_cast<Type>(50)) {
+    // x > 0, w \approx x, w_0 = x, y_0 = exp(x - w_0) = 1
+    w = x - std::log(x);
+  } else if (x > static_cast<Type>(0.1)) {
+    // x > 0, w \approx x, w_0 = x, y_0 = exp(x - w_0) = 1
     w = x;
-    y = 1;
-  } else if (x < - std::numeric_limits<Type>::epsilon()) {
-    // x < 0, ln(w) \approx x, w_0 = exp(x), y_0 = exp(x - w_1)
-    if (x < static_cast<Type>(500)) return static_cast<Type>(0);
+  } else if (x < - static_cast<Type>(1)) {
+    // x < 0, ln(w) \approx x, w_0 = exp(x), y_0 = exp(x - w_0)
+    if (x < static_cast<Type>(-500)) return static_cast<Type>(0);
     w = std::exp(x);
-    y = std::exp(x - w);
   } else {
     // x = 0, w = Omega
-    return static_cast<Type>(kOmega);
+    w = static_cast<Type>(kOmega);
   }
-  for (;;) {
-    w1 = lambert_w_householder_4(w, y);
-    if (w1 == w) break;
-    w = w1;
+  int count = 0;
+  while (w != w1 && count < 40) {
+    w1 = w;
     y = std::exp(x - w);
+    w = lambert_w_householder_4(w, y);
+    if (++count > 40) {
+      std::cout << x << ", " << count << std::endl;
+    }
   }
   return w;
 }

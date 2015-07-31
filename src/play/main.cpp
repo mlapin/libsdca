@@ -113,10 +113,18 @@ int main() {
   std::cout << std::exp(-88.0f) << std::endl;
   std::cout << std::exp(-89.0f) << std::endl;
 
-  for (double x = -10000; x <= 100000; x += 100) {
-    double w = lambert_w_exp(x);
-    double err = w + std::log(w) - x;
-    std::cout << x << ", " << w << ", " << err << std::endl;
+  using Type = double;
+  Type err = 0;
+  for (Type x = 100; x <= 200; x += 0.01) {
+    Type w = lambert_w_exp(x);
+    if (x >= 0) {
+      err = w + std::log(w) - x;
+    } else {
+      err = w * std::exp(w) - std::exp(x);
+    }
+    if (std::abs(err) > 10*std::numeric_limits<Type>::epsilon()) {
+      std::cout << x << ", " << w << ", " << err << std::endl;
+    }
   }
 
 //  std::cout << "sizeof(int) = " << sizeof(int) << std::endl;
