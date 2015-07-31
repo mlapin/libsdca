@@ -29,8 +29,9 @@ set(SOLVE_SRCS
 set(UTIL_SRCS
   util/util.h
   util/blas.h
-  util/numeric.h
+  util/lambert.h
   util/logging.h
+  util/numeric.h
   )
 
 # Matlab interface
