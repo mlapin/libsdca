@@ -115,13 +115,14 @@ int main() {
 
   using Type = double;
   Type err = 0;
-  for (Type x = 100; x <= 200; x += 0.01) {
+  for (Type x = -100; x <= 200; x += 0.1) {
     Type w = lambert_w_exp(x);
-    if (x >= 0) {
-      err = w + std::log(w) - x;
-    } else {
-      err = w * std::exp(w) - std::exp(x);
-    }
+//    if (x >= 0) {
+//      err = w + std::log(w) - x;
+//    } else {
+//      err = w * std::exp(w) - std::exp(x);
+//    }
+    err = w - std::exp(x-w);
     if (std::abs(err) > 10*std::numeric_limits<Type>::epsilon()) {
       std::cout << x << ", " << w << ", " << err << std::endl;
     }

@@ -55,28 +55,29 @@ inline Type
 lambert_w_exp(
     const Type x
   ) {
-  Type w, y, w1(0);
-  if (x > static_cast<Type>(50)) {
-    // x > 0, w \approx x, w_0 = x, y_0 = exp(x - w_0) = 1
-    w = x - std::log(x);
-  } else if (x > static_cast<Type>(0.1)) {
-    // x > 0, w \approx x, w_0 = x, y_0 = exp(x - w_0) = 1
+  Type w, y, w_old(0);
+  if (x > static_cast<Type>(0.1)) {
     w = x;
-  } else if (x < - static_cast<Type>(1)) {
-    // x < 0, ln(w) \approx x, w_0 = exp(x), y_0 = exp(x - w_0)
-    if (x < static_cast<Type>(-500)) return static_cast<Type>(0);
+    if (x > static_cast<Type>(10)) {
+      w -= std::log(x);
+    }
+  } else if (x < static_cast<Type>(-1)) {
+    if (x < static_cast<Type>(-256)) {
+      return static_cast<Type>(0);
+    }
     w = std::exp(x);
   } else {
-    // x = 0, w = Omega
     w = static_cast<Type>(kOmega);
   }
   int count = 0;
-  while (w != w1 && count < 40) {
-    w1 = w;
+  while (w != w_old) {
+    w_old = w;
     y = std::exp(x - w);
     w = lambert_w_householder_4(w, y);
-    if (++count > 40) {
-      std::cout << x << ", " << count << std::endl;
+    if (++count > 2) {
+//      std::cout << x << ", " << w << ", " << w_old << ", "
+//        << w - w_old << ", " << count << std::endl;
+      break;
     }
   }
   return w;
