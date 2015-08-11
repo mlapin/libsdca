@@ -422,11 +422,11 @@ namespace fmath {
     }
     
     int r = _mm_cvtss_si32(_mm_mul_ss(x1, _mm_load_ss(expVar.a)));
-    unsigned int v = r & mask(expVar.s);
+    unsigned int v = (unsigned int)r & mask(expVar.s);
     float t = _mm_cvtss_f32(x1) - (float)r * expVar.b[0];
     int u = r >> expVar.s;
     fi fi;
-    fi.i = ((u + 127) << 23) | expVar.tbl[v];
+    fi.i = (unsigned int)(((u + 127) << 23)) | expVar.tbl[v];
     return (1 + t) * fi.f;
     #else
     x = std::min(x, expVar.maxX[0]);
@@ -456,7 +456,7 @@ namespace fmath {
     __m128d b = _mm_load_sd(&_b);
     __m128d xx = _mm_load_sd(&x);
     __m128d d = _mm_add_sd(_mm_mul_sd(xx, _mm_load_sd(&c.a)), b);
-    uint64_t di = _mm_cvtsi128_si32(_mm_castpd_si128(d));
+    uint64_t di = (uint64_t)_mm_cvtsi128_si32(_mm_castpd_si128(d));
     uint64_t iax = c.tbl[di & mask(c.sbit)];
     __m128d _t = _mm_sub_sd(_mm_mul_sd(_mm_sub_sd(d, b), _mm_load_sd(&c.ra)), xx);
     uint64_t u = ((di + c.adj) >> c.sbit) << 52;
@@ -583,8 +583,8 @@ inline void expd_v(double *px, size_t n)
     
     __m128d d = _mm_mul_pd(x, ma);
     d = _mm_add_pd(d, _mm_set1_pd(b));
-    int adr0 = _mm_cvtsi128_si32(_mm_castpd_si128(d)) & mask(c.sbit);
-    int adr1 = _mm_cvtsi128_si32(_mm_srli_si128(_mm_castpd_si128(d), 8)) & mask(c.sbit);
+    int adr0 = _mm_cvtsi128_si32(_mm_castpd_si128(d)) & (int)mask(c.sbit);
+    int adr1 = _mm_cvtsi128_si32(_mm_srli_si128(_mm_castpd_si128(d), 8)) & (int)mask(c.sbit);
     
     __m128i iaxL = _mm_castpd_si128(_mm_load_sd((const double*)&c.tbl[adr0]));
     __m128i iax = _mm_castpd_si128(_mm_load_sd((const double*)&c.tbl[adr1]));
@@ -635,17 +635,17 @@ inline __m128 exp_ps(__m128 x)
   __m128 t0 = _mm_castsi128_ps(ti);
   #else
   unsigned int v0, v1, v2, v3;
-  v0 = _mm_cvtsi128_si32(v4);
-  v1 = _mm_extract_epi16(v4, 2);
-  v2 = _mm_extract_epi16(v4, 4);
-  v3 = _mm_extract_epi16(v4, 6);
+  v0 = (unsigned int)_mm_cvtsi128_si32(v4);
+  v1 = (unsigned int)_mm_extract_epi16(v4, 2);
+  v2 = (unsigned int)_mm_extract_epi16(v4, 4);
+  v3 = (unsigned int)_mm_extract_epi16(v4, 6);
   #if 1
   __m128 t0, t1, t2, t3;
   
-  t0 = _mm_castsi128_ps(_mm_set1_epi32(expVar.tbl[v0]));
-  t1 = _mm_castsi128_ps(_mm_set1_epi32(expVar.tbl[v1]));
-  t2 = _mm_castsi128_ps(_mm_set1_epi32(expVar.tbl[v2]));
-  t3 = _mm_castsi128_ps(_mm_set1_epi32(expVar.tbl[v3]));
+  t0 = _mm_castsi128_ps(_mm_set1_epi32((int)expVar.tbl[v0]));
+  t1 = _mm_castsi128_ps(_mm_set1_epi32((int)expVar.tbl[v1]));
+  t2 = _mm_castsi128_ps(_mm_set1_epi32((int)expVar.tbl[v2]));
+  t3 = _mm_castsi128_ps(_mm_set1_epi32((int)expVar.tbl[v3]));
   
   t1 = _mm_movelh_ps(t1, t3);
   t1 = _mm_castsi128_ps(_mm_slli_epi64(_mm_castps_si128(t1), 32));
@@ -721,7 +721,7 @@ inline float log(float x)
   
   fi fi;
   fi.f = x;
-  int a = fi.i & (mask(8) << 23);
+  int a = (int)(fi.i & (mask(8) << 23));
   unsigned int b1 = fi.i & (mask(logLen) << (23 - logLen));
   unsigned int b2 = fi.i & mask(23 - logLen);
   int idx = b1 >> (23 - logLen);
@@ -741,12 +741,12 @@ inline __m128 log_ps(__m128 x)
   
   a = _mm_mul_ps(a, *cast_to<__m128>(logVar.m4)); // c_log2
   
-  unsigned int i0 = _mm_cvtsi128_si32(idx);
+  unsigned int i0 = (unsigned int)_mm_cvtsi128_si32(idx);
   
   #if 1
-  unsigned int i1 = _mm_extract_epi16(idx, 2);
-  unsigned int i2 = _mm_extract_epi16(idx, 4);
-  unsigned int i3 = _mm_extract_epi16(idx, 6);
+  unsigned int i1 = (unsigned int)_mm_extract_epi16(idx, 2);
+  unsigned int i2 = (unsigned int)_mm_extract_epi16(idx, 4);
+  unsigned int i3 = (unsigned int)_mm_extract_epi16(idx, 6);
   #else
   idx = _mm_srli_si128(idx, 4);
   unsigned int i1 = _mm_cvtsi128_si32(idx);

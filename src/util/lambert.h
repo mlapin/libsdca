@@ -49,8 +49,7 @@ lambert_w_householder_5(
 
 /**
  * Fast approximation of the exponential function: (1 + x/1024)^1024.
- * For double, it is about 2 times faster than fmath::expd,
- * which in turn is about 4 times faster than std::exp.
+ * It is faster than fmath::expd, which is faster than std::exp.
  * Not accurate for x > 1; accuracy increases for x < -5 as x -> -Inf;
  * for x <= -36, the difference to std::exp is below 2^(-52);
  * for x in [-5, 1], it is accurate to about 1e-3 (more around 0).

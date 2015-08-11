@@ -29,7 +29,7 @@ int main() {
   using IteratorType = std::vector<RealType>::iterator;
 
   SizeType dim = 1000000;
-  SizeType repeat = 10;
+  SizeType repeat = 100;
 
   std::mt19937 gen(0);
   std::uniform_int_distribution<SizeType> dice(1, 8);
