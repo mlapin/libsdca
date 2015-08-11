@@ -32,6 +32,7 @@ set(UTIL_SRCS
   util/lambert.h
   util/logging.h
   util/numeric.h
+  util/fmath.h
   )
 
 # Matlab interface

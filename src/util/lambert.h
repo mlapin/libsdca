@@ -1,8 +1,11 @@
 #ifndef SDCA_UTIL_LAMBERT_H
 #define SDCA_UTIL_LAMBERT_H
+
 #include <iostream>
 #include <cmath>
 #include <limits>
+
+#include "util/fmath.h"
 
 namespace sdca {
 
@@ -15,9 +18,9 @@ const long double kOmega =
 0.5671432904097838729999686622103555497538157871865125081351310792230457930866L;
 
 /**
- * Schroeder's / Householder's iteration of order 4 for the equation
- *    w - z * exp(-w) = 0.
- * Expected convergence rate of order 5, see
+ * Schroeder's / Householder's iteration for the equation
+ *    w - z * exp(-w) = 0
+ * with expected convergence rate of order 5; see
  * [1] A. Householder, The numerical treatment of a single nonlinear equation.
  *     McGraw-Hill, 1970.
  * [2] T. Fukushima, Precise and fast computation of Lambert W-functions
@@ -29,7 +32,7 @@ const long double kOmega =
  **/
 template <typename Type>
 inline Type
-lambert_w_householder_4(
+lambert_w_householder_5(
     const Type w,
     const Type y
   ) {
@@ -45,42 +48,72 @@ lambert_w_householder_4(
 }
 
 /**
+ * Fast approximation of the exponential function: (1 + x/1024)^1024.
+ * For double, it is about 2 times faster than fmath::expd,
+ * which in turn is about 4 times faster than std::exp.
+ * Not accurate for x > 1; accuracy increases for x < -5 as x -> -Inf;
+ * for x <= -36, the difference to std::exp is below 2^(-52);
+ * for x in [-5, 1], it is accurate to about 1e-3 (more around 0).
+ **/
+template <typename Type>
+inline Type
+exp_approx(
+    const Type x
+  ) {
+  Type y = static_cast<Type>(1) + x / static_cast<Type>(1024);
+  y *= y; y *= y; y *= y; y *= y; y *= y;
+  y *= y; y *= y; y *= y; y *= y; y *= y;
+  return y;
+}
+
+/**
  * Lambert W function of exp(x),
  *    w = W_0(exp(x)).
  * Computed w satisfies the equation
  *    w + ln(w) = x.
  **/
-template <typename Type>
-inline Type
+inline double
 lambert_w_exp(
-    const Type x
+    const double x
   ) {
-  Type w, y, w_old(0);
-  if (x > static_cast<Type>(0.1)) {
-    w = x;
-    if (x > static_cast<Type>(10)) {
-      w -= std::log(x);
+  /* Initialize w for the Householder's iteration; consider intervals:
+   * (-Inf, -700], (-700, -36], (-36, -20], (-20, -1],
+   * (-1, 0.5], (0.5, 2], (2, 5.7647e+17], (5.7647e+17, +Inf)
+   */
+  double w;
+  if (x > -1) { // (-1, +Inf)
+    if (x <= 2.0) { // (-1, 2]
+      if (x <= 0.5) { // (-1, 0.5]
+        w = static_cast<double>(kOmega);
+        w = lambert_w_householder_5(w, exp_approx(x - w));
+      } else { // (0.5, 2]
+        w = lambert_w_householder_5(x, 1.0);
+      }
+    } else { // (2, +Inf)
+      if (x <= 5.7647e+17) { // (2, 5.7647e+17]
+        w = x - static_cast<double>(fmath::log(static_cast<float>(x)));
+        w = lambert_w_householder_5(w, x);
+      } else { // (5.7647e+17, +Inf)
+        return x;
+      }
     }
-  } else if (x < static_cast<Type>(-1)) {
-    if (x < static_cast<Type>(-256)) {
-      return static_cast<Type>(0);
+  } else { // (-Inf, -1]
+    if (x > -36.0) { // (-36, -1]
+      if (x > -20.0) { // (-20, -1]
+        w = exp_approx(x);
+        w = lambert_w_householder_5(w, exp_approx(x - w));
+      } else { // (-36, -20]
+        w = exp_approx(x);
+      }
+    } else { // (-Inf, -36]
+      if (x > -700.0) { // (-700, -36]
+        return exp_approx(x);
+      } else { // (-Inf, -700]
+        return 0.0;
+      }
     }
-    w = std::exp(x);
-  } else {
-    w = static_cast<Type>(kOmega);
   }
-  int count = 0;
-  while (w != w_old) {
-    w_old = w;
-    y = std::exp(x - w);
-    w = lambert_w_householder_4(w, y);
-    if (++count > 2) {
-//      std::cout << x << ", " << w << ", " << w_old << ", "
-//        << w - w_old << ", " << count << std::endl;
-      break;
-    }
-  }
-  return w;
+  return lambert_w_householder_5(w, fmath::expd(x - w));
 }
 
 }

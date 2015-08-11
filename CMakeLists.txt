@@ -52,7 +52,7 @@ endif()
 
 # Build specific flags
 set(CMAKE_CXX_FLAGS
-  "${CMAKE_CXX_FLAGS} -std=c++11 -m64 ${WARN_FLAGS}")
+  "${CMAKE_CXX_FLAGS} -std=c++11 -march=native ${WARN_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG
   "${CMAKE_CXX_FLAGS_DEBUG} ${DEBUG_FLAGS}")
 set(CMAKE_CXX_FLAGS_RELEASE
