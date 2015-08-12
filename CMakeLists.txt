@@ -23,6 +23,9 @@ set(USE_ILP64 TRUE)
 # Whether to use sequential or multi-threaded Intel MKL layer (default: FALSE)
 set(USE_SEQUENTIAL FALSE)
 
+# Whether to use the fast math functions from https://github.com/herumi/fmath
+add_definitions(-DUSE_FMATH_HERUMI=1)
+
 #------------------------------------------------------------------------------
 # Compiler flags
 #------------------------------------------------------------------------------
@@ -48,6 +51,7 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fuse-linker-plugin")
+  set(RELEASE_FLAGS "${RELEASE_FLAGS} -Wl,-rpath,\\\$ORIGIN")
 endif()
 
 # Build specific flags
@@ -68,7 +72,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 # Install prefix
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set (CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/bin" CACHE PATH
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/bin" CACHE PATH
     "Install directory used by install." FORCE)
 endif()
 

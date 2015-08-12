@@ -5,7 +5,9 @@
 #include <cmath>
 #include <limits>
 
+#ifdef USE_FMATH_HERUMI
 #include "util/fmath.h"
+#endif
 
 namespace sdca {
 
@@ -32,7 +34,7 @@ const long double kOmega =
  **/
 template <typename Type>
 inline Type
-lambert_w_householder_5(
+lambert_w_iter_5(
     const Type w,
     const Type y
   ) {
@@ -69,50 +71,101 @@ exp_approx(
  * Lambert W function of exp(x),
  *    w = W_0(exp(x)).
  * Computed w satisfies the equation
- *    w + ln(w) = x.
+ *    w + ln(w) = x
+ * with relative error
+ *    (w + ln(w) - x) <= 4 * eps * max(1, x),
+ * where eps = 2^(-52).
  **/
 inline double
 lambert_w_exp(
     const double x
   ) {
   /* Initialize w for the Householder's iteration; consider intervals:
-   * (-Inf, -700], (-700, -36], (-36, -20], (-20, -1],
-   * (-1, 0.5], (0.5, 2], (2, 5.7647e+17], (5.7647e+17, +Inf)
+   * (-Inf, -715]                 - exp underflows (log(exp(x))!=x), return 0
+   * (-715, -36]                  - w = exp(x), return exp(x)
+   * (-36, -20]                   - w_0 = exp(x), return w_1
+   * (-20, 0]                     - w_0 = exp(x), return w_2
+   * (0, 4]                       - w_0 = x, return w_2
+   * (4, 576460752303423488]      - w_0 = x - log(x), return w_2
+   * (576460752303423488, +Inf)   - (x + log(x)) = x, return x
    */
   double w;
-  if (x > -1) { // (-1, +Inf)
-    if (x <= 2.0) { // (-1, 2]
-      if (x <= 0.5) { // (-1, 0.5]
-        w = static_cast<double>(kOmega);
-        w = lambert_w_householder_5(w, exp_approx(x - w));
-      } else { // (0.5, 2]
-        w = lambert_w_householder_5(x, 1.0);
-      }
-    } else { // (2, +Inf)
-      if (x <= 5.7647e+17) { // (2, 5.7647e+17]
+  if (x > 0) { // (0, +Inf)
+    if (x <= 4.0) { // (0, 4]
+      w = lambert_w_iter_5(x, 1.0);
+    } else { // (4, +Inf)
+      if (x <= 576460752303423488.0) { // (4, 576460752303423488]
+#ifdef USE_FMATH_HERUMI
         w = x - static_cast<double>(fmath::log(static_cast<float>(x)));
-        w = lambert_w_householder_5(w, x);
-      } else { // (5.7647e+17, +Inf)
+#else
+        w = x - static_cast<double>(std::log(static_cast<float>(x)));
+#endif
+        w = lambert_w_iter_5(w, x);
+      } else { // (576460752303423488, +Inf)
         return x;
       }
     }
-  } else { // (-Inf, -1]
-    if (x > -36.0) { // (-36, -1]
-      if (x > -20.0) { // (-20, -1]
-        w = exp_approx(x);
-        w = lambert_w_householder_5(w, exp_approx(x - w));
-      } else { // (-36, -20]
-        w = exp_approx(x);
+  } else { // (-Inf, 0]
+    if (x > -36.0) { // (-36, 0]
+      w = exp_approx(x);
+      if (x > -20.0) { // (-20, 0]
+        w = lambert_w_iter_5(w, exp_approx(x - w));
       }
     } else { // (-Inf, -36]
-      if (x > -700.0) { // (-700, -36]
-        return exp_approx(x);
-      } else { // (-Inf, -700]
-        return 0.0;
-      }
+      return (x > -715.0) ? exp_approx(x) : 0.0;
     }
   }
-  return lambert_w_householder_5(w, fmath::expd(x - w));
+#ifdef USE_FMATH_HERUMI
+  return lambert_w_iter_5(w, fmath::expd(x - w));
+#else
+  return lambert_w_iter_5(w, std::exp(x - w));
+#endif
+}
+
+/**
+ * Lambert W function of exp(x),
+ *    w = W_0(exp(x)).
+ * Computed w satisfies the equation
+ *    w + ln(w) = x
+ * with relative error
+ *    (w + ln(w) - x) <= 4 * eps * max(1, x),
+ * where eps = 2^(-23).
+ **/
+inline float
+lambert_w_exp(
+    const float x
+  ) {
+  /* Initialize w for the Householder's iteration; consider intervals:
+   * (-Inf, -91]          - exp underflows (log(exp(x))!=x), return 0
+   * (-91, -18]           - w = exp(x), return exp(x)
+   * (-18, -1]            - w_0 = exp(x), return w_1
+   * (-1, 8]              - w_0 = x, return w_2
+   * (8, 536870912]       - w_0 = x - log(x), return w_1
+   * (536870912, +Inf)    - (x + log(x)) = x, return x
+   */
+  float w;
+  if (x > -1.0f) { // (-1, +Inf)
+    if (x <= 8.0f) { // (-1, 8]
+      w = lambert_w_iter_5(x, 1.0f);
+    } else { // (8, +Inf)
+#ifdef USE_FMATH_HERUMI
+      return (x <= 536870912.0f) ? lambert_w_iter_5(x - fmath::log(x), x) : x;
+#else
+      return (x <= 536870912.0f) ? lambert_w_iter_5(x - std::log(x), x) : x;
+#endif
+    }
+  } else { // (-Inf, -1]
+    if (x > -18.0f) { // (-18, -1]
+      w = exp_approx(x);
+    } else { // (-Inf, -18]
+      return (x > -91.0f) ? exp_approx(x) : 0.0f;
+    }
+  }
+#ifdef USE_FMATH_HERUMI
+  return lambert_w_iter_5(w, fmath::exp(x - w));
+#else
+  return lambert_w_iter_5(w, std::exp(x - w));
+#endif
 }
 
 }
