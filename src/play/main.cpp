@@ -232,9 +232,11 @@ void test_lambert_double(std::size_t dim, std::size_t repeat) {
 int main() {
 
   std::cout << "test_lambert_float" << std::endl;
-  test_lambert_float(1000000, 10000);
+//  test_lambert_float(1000000, 10000);
+  test_lambert_float(100000, 100);
   std::cout << "test_lambert_double" << std::endl;
-  test_lambert_double(1000000, 10000);
+//  test_lambert_double(1000000, 10000);
+  test_lambert_double(100000, 100);
 
 //  using RealType = float;
 //  using ResultType = RealType;

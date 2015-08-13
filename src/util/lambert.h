@@ -72,8 +72,8 @@ exp_approx(
  *    w = W_0(exp(x)).
  * Computed w satisfies the equation
  *    w + ln(w) = x
- * with relative error
- *    (w + ln(w) - x) <= 4 * eps * max(1, x),
+ * with a relative error
+ *    (w + ln(w) - x) < 4 * eps * max(1, x),
  * where eps = 2^(-52).
  **/
 inline double
@@ -127,8 +127,8 @@ lambert_w_exp(
  *    w = W_0(exp(x)).
  * Computed w satisfies the equation
  *    w + ln(w) = x
- * with relative error
- *    (w + ln(w) - x) <= 4 * eps * max(1, x),
+ * with a relative error
+ *    (w + ln(w) - x) < 4 * eps * max(1, x),
  * where eps = 2^(-23).
  **/
 inline float
