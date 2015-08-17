@@ -20,9 +20,9 @@ const long double kOmega =
 0.5671432904097838729999686622103555497538157871865125081351310792230457930866L;
 
 /**
- * Schroeder's / Householder's iteration for the equation
+ * Householder's iteration for the equation
  *    w - z * exp(-w) = 0
- * with expected convergence rate of order 5; see
+ * with convergence rate of order 5; see
  * [1] A. Householder, The numerical treatment of a single nonlinear equation.
  *     McGraw-Hill, 1970.
  * [2] T. Fukushima, Precise and fast computation of Lambert W-functions
@@ -38,15 +38,11 @@ lambert_w_iter_5(
     const Type w,
     const Type y
   ) {
-  Type f0 = w - y, f1 = static_cast<Type>(1) + y;
+  Type f0 = w - y, f1 = 1 + y;
   Type f11 = f1 * f1, f0y = f0 * y;
   Type f00y = f0 * f0y;
-  return w - static_cast<Type>(4) * f0 * (
-      static_cast<Type>(6) * f1 * (f11 + f0y) + f00y
-    ) / (
-      f11 * (static_cast<Type>(24) * f11 + static_cast<Type>(36) * f0y) +
-      f00y * (static_cast<Type>(14) * y + f0 + static_cast<Type>(8))
-    );
+  return w - 4 * f0 * (6 * f1 * (f11 + f0y) + f00y)
+    / (f11 * (24 * f11 + 36 * f0y) + f00y * (14 * y + f0 + 8));
 }
 
 /**
@@ -61,7 +57,7 @@ inline Type
 exp_approx(
     const Type x
   ) {
-  Type y = static_cast<Type>(1) + x / static_cast<Type>(1024);
+  Type y = 1 + x / static_cast<Type>(1024);
   y *= y; y *= y; y *= y; y *= y; y *= y;
   y *= y; y *= y; y *= y; y *= y; y *= y;
   return y;
@@ -81,8 +77,8 @@ lambert_w_exp(
     const double x
   ) {
   /* Initialize w for the Householder's iteration; consider intervals:
-   * (-Inf, -715]                 - exp underflows (log(exp(x))!=x), return 0
-   * (-715, -36]                  - w = exp(x), return exp(x)
+   * (-Inf, -746]                 - exp underflows (exp(x)=0), return 0
+   * (-746, -36]                  - w = exp(x), return exp(x)
    * (-36, -20]                   - w_0 = exp(x), return w_1
    * (-20, 0]                     - w_0 = exp(x), return w_2
    * (0, 4]                       - w_0 = x, return w_2
@@ -112,7 +108,7 @@ lambert_w_exp(
         w = lambert_w_iter_5(w, exp_approx(x - w));
       }
     } else { // (-Inf, -36]
-      return (x > -715.0) ? exp_approx(x) : 0.0;
+      return (x > -746.0) ? std::exp(x) : 0.0;
     }
   }
 #ifdef USE_FMATH_HERUMI
@@ -136,8 +132,8 @@ lambert_w_exp(
     const float x
   ) {
   /* Initialize w for the Householder's iteration; consider intervals:
-   * (-Inf, -91]          - exp underflows (log(exp(x))!=x), return 0
-   * (-91, -18]           - w = exp(x), return exp(x)
+   * (-Inf, -104]         - exp underflows (exp(x)=0), return 0
+   * (-104, -18]          - w = exp(x), return exp(x)
    * (-18, -1]            - w_0 = exp(x), return w_1
    * (-1, 8]              - w_0 = x, return w_2
    * (8, 536870912]       - w_0 = x - log(x), return w_1
@@ -158,7 +154,7 @@ lambert_w_exp(
     if (x > -18.0f) { // (-18, -1]
       w = exp_approx(x);
     } else { // (-Inf, -18]
-      return (x > -91.0f) ? exp_approx(x) : 0.0f;
+      return (x > -104.0f) ? std::exp(x) : 0.0f;
     }
   }
 #ifdef USE_FMATH_HERUMI

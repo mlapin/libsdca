@@ -10,6 +10,7 @@
 #include "util/lambert.h"
 #include "util/numeric.h"
 #include "util/fmath.h"
+#include "prox/entropy.h"
 
 using namespace sdca;
 
@@ -19,6 +20,128 @@ void display(const std::vector<T> &v) {
     std::copy(v.begin(), v.end(), std::ostream_iterator<T>(std::cout, " "));
     std::cout << std::endl;
   }
+}
+
+void test_solve_sum_w_exp(std::size_t dim, std::size_t repeat = 1) {
+  using RealType = double;
+  using ResultType = RealType;
+  using IndexType = std::vector<RealType>::difference_type;
+  using SizeType = std::vector<RealType>::size_type;
+  using IteratorType = std::vector<RealType>::iterator;
+
+  std::mt19937 gen(0);
+//  std::uniform_real_distribution<RealType> dist1(1, 10);
+
+  for (std::size_t iter = 0; iter < repeat; ++iter) {
+
+    for (RealType mu = 1e-10; mu <= 1e+10; mu *= 10) {
+    for (RealType sigma = 1e-10; sigma <= 1e+10; sigma *= 10) {
+    for (int sgn = -1; sgn <= 1; sgn += 2) {
+
+    std::normal_distribution<RealType> dist1(sgn * mu, sigma);
+
+    std::vector<RealType> v;
+    v.reserve(dim);
+    for (SizeType i = 0; i < dim; ++i) {
+      v.push_back(dist1(gen));
+    }
+
+    {
+    ResultType rhs = 1;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+    {
+    ResultType rhs = 1e3;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+    {
+    ResultType rhs = 1e-3;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+    {
+    ResultType rhs = 1e6;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+    {
+    ResultType rhs = 1e-6;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+    {
+    ResultType rhs = 1e9;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+    {
+    ResultType rhs = 1e-9;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+    {
+    ResultType rhs = 1e12;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+    {
+    ResultType rhs = 1e-12;
+    ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
+    ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
+      [=](const ResultType a, const ResultType b)
+      { return a + lambert_w_exp(b + t); });
+    ResultType err = f - rhs;
+    ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
+    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    }
+
+    }
+    }
+    }
+  }
+
 }
 
 void test_lambert_float(std::size_t dim, std::size_t repeat) {
@@ -231,12 +354,14 @@ void test_lambert_double(std::size_t dim, std::size_t repeat) {
 
 int main() {
 
-  std::cout << "test_lambert_float" << std::endl;
-//  test_lambert_float(1000000, 10000);
-  test_lambert_float(100000, 100);
-  std::cout << "test_lambert_double" << std::endl;
-//  test_lambert_double(1000000, 10000);
-  test_lambert_double(100000, 100);
+  test_solve_sum_w_exp(10000);
+
+//  std::cout << "test_lambert_float" << std::endl;
+////  test_lambert_float(1000000, 10000);
+//  test_lambert_float(100000, 100);
+//  std::cout << "test_lambert_double" << std::endl;
+////  test_lambert_double(1000000, 10000);
+//  test_lambert_double(100000, 100);
 
 //  using RealType = float;
 //  using ResultType = RealType;

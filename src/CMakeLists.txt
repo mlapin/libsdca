@@ -14,6 +14,7 @@ set(PROX_SRCS
   prox/topk_cone_biased.h
   prox/topk_simplex.h
   prox/topk_simplex_biased.h
+  prox/entropy.h
   )
 
 set(SOLVE_SRCS
