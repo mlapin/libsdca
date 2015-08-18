@@ -70,6 +70,52 @@ exp_approx(
  *    w + ln(w) = x
  * with a relative error
  *    (w + ln(w) - x) < 4 * eps * max(1, x),
+ * where eps = 2^(-23).
+ **/
+inline float
+lambert_w_exp(
+    const float x
+  ) {
+  /* Initialize w for the Householder's iteration; consider intervals:
+   * (-Inf, -104]         - exp underflows (exp(x)=0), return 0
+   * (-104, -18]          - w = exp(x), return exp(x)
+   * (-18, -1]            - w_0 = exp(x), return w_1
+   * (-1, 8]              - w_0 = x, return w_2
+   * (8, 536870912]       - w_0 = x - log(x), return w_1
+   * (536870912, +Inf)    - (x + log(x)) = x, return x
+   */
+  float w;
+  if (x > -1.0f) { // (-1, +Inf)
+    if (x <= 8.0f) { // (-1, 8]
+      w = lambert_w_iter_5(x, 1.0f);
+    } else { // (8, +Inf)
+#ifdef USE_FMATH_HERUMI
+      return (x <= 536870912.0f) ? lambert_w_iter_5(x - fmath::log(x), x) : x;
+#else
+      return (x <= 536870912.0f) ? lambert_w_iter_5(x - std::log(x), x) : x;
+#endif
+    }
+  } else { // (-Inf, -1]
+    if (x > -18.0f) { // (-18, -1]
+      w = exp_approx(x);
+    } else { // (-Inf, -18]
+      return (x > -104.0f) ? std::exp(x) : 0.0f;
+    }
+  }
+#ifdef USE_FMATH_HERUMI
+  return lambert_w_iter_5(w, fmath::exp(x - w));
+#else
+  return lambert_w_iter_5(w, std::exp(x - w));
+#endif
+}
+
+/**
+ * Lambert W function of exp(x),
+ *    w = W_0(exp(x)).
+ * Computed w satisfies the equation
+ *    w + ln(w) = x
+ * with a relative error
+ *    (w + ln(w) - x) < 4 * eps * max(1, x),
  * where eps = 2^(-52).
  **/
 inline double
@@ -113,52 +159,6 @@ lambert_w_exp(
   }
 #ifdef USE_FMATH_HERUMI
   return lambert_w_iter_5(w, fmath::expd(x - w));
-#else
-  return lambert_w_iter_5(w, std::exp(x - w));
-#endif
-}
-
-/**
- * Lambert W function of exp(x),
- *    w = W_0(exp(x)).
- * Computed w satisfies the equation
- *    w + ln(w) = x
- * with a relative error
- *    (w + ln(w) - x) < 4 * eps * max(1, x),
- * where eps = 2^(-23).
- **/
-inline float
-lambert_w_exp(
-    const float x
-  ) {
-  /* Initialize w for the Householder's iteration; consider intervals:
-   * (-Inf, -104]         - exp underflows (exp(x)=0), return 0
-   * (-104, -18]          - w = exp(x), return exp(x)
-   * (-18, -1]            - w_0 = exp(x), return w_1
-   * (-1, 8]              - w_0 = x, return w_2
-   * (8, 536870912]       - w_0 = x - log(x), return w_1
-   * (536870912, +Inf)    - (x + log(x)) = x, return x
-   */
-  float w;
-  if (x > -1.0f) { // (-1, +Inf)
-    if (x <= 8.0f) { // (-1, 8]
-      w = lambert_w_iter_5(x, 1.0f);
-    } else { // (8, +Inf)
-#ifdef USE_FMATH_HERUMI
-      return (x <= 536870912.0f) ? lambert_w_iter_5(x - fmath::log(x), x) : x;
-#else
-      return (x <= 536870912.0f) ? lambert_w_iter_5(x - std::log(x), x) : x;
-#endif
-    }
-  } else { // (-Inf, -1]
-    if (x > -18.0f) { // (-18, -1]
-      w = exp_approx(x);
-    } else { // (-Inf, -18]
-      return (x > -104.0f) ? std::exp(x) : 0.0f;
-    }
-  }
-#ifdef USE_FMATH_HERUMI
-  return lambert_w_iter_5(w, fmath::exp(x - w));
 #else
   return lambert_w_iter_5(w, std::exp(x - w));
 #endif

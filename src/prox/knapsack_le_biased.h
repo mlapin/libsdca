@@ -18,7 +18,7 @@ thresholds_knapsack_le_biased_search(
     const Result hi,
     const Result rhs,
     const Result rho,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   // At this point, rho must be positive
   assert(rho > 0);
@@ -102,7 +102,7 @@ thresholds_knapsack_le_biased(
     const Result hi = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   assert(rho >= 0);
   if (rho == 0) {
@@ -134,7 +134,7 @@ project_knapsack_le_biased(
     const Result hi = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last,
     thresholds_knapsack_le_biased<Iterator, Result, Summation>,
@@ -154,7 +154,7 @@ project_knapsack_le_biased(
     const Result hi = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
     thresholds_knapsack_le_biased<Iterator, Result, Summation>,
@@ -175,7 +175,7 @@ project_knapsack_le_biased(
     const Result hi = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
     thresholds_knapsack_le_biased<Iterator, Result, Summation>,

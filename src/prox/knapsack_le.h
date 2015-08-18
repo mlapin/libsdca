@@ -15,7 +15,7 @@ thresholds_knapsack_le(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   Result eps = std::numeric_limits<Result>::epsilon()
     * std::max(static_cast<Result>(1), std::abs(rhs));
@@ -46,7 +46,7 @@ project_knapsack_le(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last,
     thresholds_knapsack_le<Iterator, Result, Summation>, lo, hi, rhs, sum);
@@ -64,7 +64,7 @@ project_knapsack_le(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
     thresholds_knapsack_le<Iterator, Result, Summation>, lo, hi, rhs, sum);
@@ -83,7 +83,7 @@ project_knapsack_le(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
     thresholds_knapsack_le<Iterator, Result, Summation>, lo, hi, rhs, sum);

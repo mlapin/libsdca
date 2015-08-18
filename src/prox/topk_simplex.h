@@ -17,7 +17,7 @@ is_topk_simplex_lt(
     const Result k,
     const Result rhs,
     const Result eps,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   if (u_first == u_last) {
     return t < -eps;
@@ -37,7 +37,7 @@ thresholds_topk_simplex(
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   Result K = static_cast<Result>(k), lo(0);
   Result eps = std::numeric_limits<Result>::epsilon()
@@ -71,7 +71,7 @@ project_topk_simplex(
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last,
     thresholds_topk_simplex<Iterator, Result, Summation>, k, rhs, sum);
@@ -88,7 +88,7 @@ project_topk_simplex(
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
     thresholds_topk_simplex<Iterator, Result, Summation>, k, rhs, sum);
@@ -106,7 +106,7 @@ project_topk_simplex(
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
     thresholds_topk_simplex<Iterator, Result, Summation>, k, rhs, sum);

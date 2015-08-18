@@ -22,7 +22,7 @@ topk_cone_special_cases(
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k,
     const Result div_const,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   // Partially sort data around the kth element
   auto k_last = std::next(first, k);
@@ -62,7 +62,7 @@ thresholds_topk_cone_search(
     Iterator first,
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   // Sort data to search efficiently
   typedef typename std::iterator_traits<Iterator>::value_type Data;
@@ -142,7 +142,7 @@ thresholds_topk_cone(
     Iterator first,
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   auto proj = topk_cone_special_cases(
     first, last, k, static_cast<Result>(k), sum);
@@ -162,7 +162,7 @@ project_topk_cone(
     Iterator first,
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last,
     thresholds_topk_cone<Iterator, Result, Summation>, k, sum);
@@ -178,7 +178,7 @@ project_topk_cone(
     Iterator aux_first,
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
     thresholds_topk_cone<Iterator, Result, Summation>, k, sum);
@@ -195,7 +195,7 @@ project_topk_cone(
     Iterator aux_first,
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
     thresholds_topk_cone<Iterator, Result, Summation>, k, sum);

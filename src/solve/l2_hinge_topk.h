@@ -15,12 +15,12 @@ struct l2_hinge_topk {
   const difference_type k;
   const Result c;
   const Result c_div_k;
-  Summation sum;
+  const Summation sum;
 
   l2_hinge_topk(
       const size_type __k,
       const Result __c,
-      Summation __sum
+      const Summation __sum
     ) :
       k(static_cast<difference_type>(__k)),
       c(__c),
@@ -129,13 +129,13 @@ struct l2_hinge_topk_smooth {
   const Result gamma;
   const Result c_div_gamma;
   const Result gamma_div_c;
-  Summation sum;
+  const Summation sum;
 
   l2_hinge_topk_smooth(
       const size_type __k,
       const Result __c,
       const Result __gamma,
-      Summation __sum
+      const Summation __sum
     ) :
       k(static_cast<difference_type>(__k)),
       c(__c),

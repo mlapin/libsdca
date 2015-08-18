@@ -18,7 +18,7 @@ is_topk_simplex_biased_lt(
     const Result rhs,
     const Result rho,
     const Result eps,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   if (u_first == u_last) {
     return t < rho * rhs - eps;
@@ -39,7 +39,7 @@ thresholds_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   assert(rho >= 0);
   Result K = static_cast<Result>(k), lo(0);
@@ -75,7 +75,7 @@ project_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last,
     thresholds_topk_simplex_biased<Iterator, Result, Summation>,
@@ -94,7 +94,7 @@ project_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
     thresholds_topk_simplex_biased<Iterator, Result, Summation>,
@@ -114,7 +114,7 @@ project_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
     thresholds_topk_simplex_biased<Iterator, Result, Summation>,

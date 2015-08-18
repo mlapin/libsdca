@@ -125,7 +125,7 @@ norm2(
     const thresholds<Iterator, Result> t,
     Iterator first,
     Iterator last,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   typedef typename std::iterator_traits<Iterator>::value_type Data;
   Result num_hi = static_cast<Result>(std::distance(first, t.first));
@@ -147,7 +147,7 @@ correlation(
     const thresholds<Iterator, Result> t,
     Iterator first,
     Iterator last,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   typedef typename std::iterator_traits<Iterator>::value_type Data;
   Result sum_hi = sum(first, t.first, static_cast<Result>(0));

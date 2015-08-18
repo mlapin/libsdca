@@ -14,7 +14,7 @@ thresholds_topk_cone_biased_search(
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k,
     const Result rho,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   // Sort data to search efficiently
   typedef typename std::iterator_traits<Iterator>::value_type Data;
@@ -97,7 +97,7 @@ thresholds_topk_cone_biased(
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   assert(rho >= 0);
   Result K = static_cast<Result>(k);
@@ -118,7 +118,7 @@ project_topk_cone_biased(
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last,
     thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);
@@ -135,7 +135,7 @@ project_topk_cone_biased(
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
     thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);
@@ -153,7 +153,7 @@ project_topk_cone_biased(
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
     thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);

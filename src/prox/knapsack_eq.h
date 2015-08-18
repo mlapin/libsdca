@@ -23,7 +23,7 @@ thresholds_knapsack_eq(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   // Initialization
   Result eps = std::numeric_limits<Result>::epsilon()
@@ -94,7 +94,7 @@ project_knapsack_eq(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last,
     thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
@@ -112,7 +112,7 @@ project_knapsack_eq(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(first, last, aux_first, aux_last,
     thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
@@ -131,7 +131,7 @@ project_knapsack_eq(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    Summation sum = Summation()
+    const Summation sum = Summation()
     ) {
   project(dim, first, last, aux_first, aux_last,
     thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
