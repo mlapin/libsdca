@@ -13,7 +13,37 @@ using namespace sdca;
 inline void
 printUsage() {
   mexPrintf("Usage: X = %s(A);\n"
-            "       X = %s(A, opts);\n", MEX_PROX, MEX_PROX);
+            "       X = %s(A, OPTS);\n"
+            "  See %s('version') and %s('help') for more information.\n",
+            MEX_PROX, MEX_PROX, MEX_PROX, MEX_PROX);
+}
+
+inline void
+printVersion() {
+  mexPrintf("%s version %s.\n", MEX_PROX, LIBSDCA_VERSION);
+}
+
+inline void
+printHelp() {
+  mexPrintf("Usage: X = %s(A);\n"
+            "       X = %s(A, OPTS);\n"
+            "       %s(A, OPTS); %% A is modified in-place\n"
+            "  OPTS is a struct with the following fields:\n"
+            "  (default values in [brackets], synonyms in (parenthesis))\n"
+            "    'prox' : 'entropy', ['knapsack'] ('knapsack_eq'),\n"
+            "             'knapsack_le', 'knapsack_le_biased',\n"
+            "             'topk_simplex', 'topk_simplex_biased',\n"
+            "             'topk_cone', 'topk_cone_biased';\n"
+            "    'lo'  : [0], prox: knapsack*;\n"
+            "    'hi'  : [1], prox: entropy, knapsack*;\n"
+            "    'rhs' : [1], prox: entropy, knapsack*, topk_simplex*;\n"
+            "    'rho' : [1], prox: *_biased;\n"
+            "    'k'   : [1], prox: topk_*.\n"
+            "  Options that influence the accuracy of computations:\n"
+            "    'precision' : 'single' ('float'), ['double'],\n"
+            "                  'long double' ('long_double');\n"
+            "    'summation' : ['standard'] ('default'), 'kahan'.\n",
+            MEX_PROX, MEX_PROX, MEX_PROX);
 }
 
 template <typename Data,
@@ -25,7 +55,7 @@ mex_main(
     mxArray* plhs[],
     const mxArray* prhs[],
     const mxArray* opts,
-    Summation sum
+    const Summation sum
     ) {
 
   mxArray* mxX;
@@ -56,8 +86,11 @@ mex_main(
   Data* aux_last = aux_first + m;
 
   std::string prox = mxGetFieldValueOrDefault(
-    opts, "prox", std::string("knapsack_eq"));
-  if (prox == "knapsack_eq") {
+    opts, "prox", std::string("knapsack"));
+  if (prox == "entropy") {
+    project_entropy<Data*, Result, Summation>(
+      m, first, last, aux_first, aux_last, hi, rhs, sum);
+  } else if (prox == "knapsack" || prox == "knapsack_eq") {
     project_knapsack_eq<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
   } else if (prox == "knapsack_le") {
@@ -142,13 +175,26 @@ mexFunction(
     ) {
   mxCheckArgNum(nrhs, 1, 2, printUsage);
   mxCheckArgNum(nlhs, 0, 1, printUsage);
-  mxCheckNotSparse(prhs[0], "A");
-  mxCheckNotEmpty(prhs[0], "A");
-  mxCheckReal(prhs[0], "A");
 
-  if (mxIsDouble(prhs[0])) {
-     mex_main<double>(nlhs, plhs, nrhs, prhs);
-  } else if (mxIsSingle(prhs[0])) {
-     mex_main<float>(nlhs, plhs, nrhs, prhs);
+  if (mxIsChar(prhs[0])) {
+    std::string command = mxGetString(prhs[0], "command");
+    if (command == "help" || command == "--help" || command == "-h") {
+      printHelp();
+    } else if (command == "version" || command == "--version") {
+      printVersion();
+    } else {
+      mexErrMsgIdAndTxt(
+        err_id[err_command], err_msg[err_command], command.c_str());
+    }
+  } else {
+    mxCheckNotSparse(prhs[0], "A");
+    mxCheckNotEmpty(prhs[0], "A");
+    mxCheckReal(prhs[0], "A");
+
+    if (mxIsDouble(prhs[0])) {
+       mex_main<double>(nlhs, plhs, nrhs, prhs);
+    } else if (mxIsSingle(prhs[0])) {
+       mex_main<float>(nlhs, plhs, nrhs, prhs);
+    }
   }
 }

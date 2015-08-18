@@ -5,6 +5,7 @@
 #include <iterator>
 #include <limits>
 
+#include "util/lambert.h"
 #include "util/numeric.h"
 
 namespace sdca {
@@ -55,6 +56,21 @@ struct thresholds {
 
 };
 
+template <typename Iterator,
+          typename Result>
+struct lambert_thresholds : thresholds<Iterator, Result> {
+  typedef thresholds<Iterator, Result> base;
+
+  lambert_thresholds() : base() {}
+
+  lambert_thresholds(const Result __t, const Result __lo, const Result __hi) :
+    base(__t, __lo, __hi) {}
+
+  lambert_thresholds(const Result __t, const Result __lo, const Result __hi,
+    const Iterator __first, const Iterator __last) :
+    base(__t, __lo, __hi, __first, __last) {}
+};
+
 template <typename Result>
 inline thresholds<Result*, Result>
 make_thresholds(
@@ -76,6 +92,29 @@ make_thresholds(
     const Iterator last
   ) {
   return thresholds<Iterator, Result>(t, lo, hi, first, last);
+}
+
+template <typename Result>
+inline lambert_thresholds<Result*, Result>
+make_lambert_thresholds(
+    const Result t,
+    const Result lo,
+    const Result hi
+  ) {
+  return lambert_thresholds<Result*, Result>(t, lo, hi);
+}
+
+template <typename Iterator,
+          typename Result>
+inline lambert_thresholds<Iterator, Result>
+make_lambert_thresholds(
+    const Result t,
+    const Result lo,
+    const Result hi,
+    const Iterator first,
+    const Iterator last
+  ) {
+  return lambert_thresholds<Iterator, Result>(t, lo, hi, first, last);
 }
 
 template <typename Iterator,
@@ -134,6 +173,22 @@ project(
   Data hi(static_cast<Data>(thresholds.hi));
   std::for_each(first, last,
     [=](Data& x){ x = std::max(lo, std::min(x - t, hi)); });
+}
+
+template <typename Iterator,
+          typename Result>
+inline void
+project(
+    const sdca::lambert_thresholds<Iterator, Result> thresholds,
+    Iterator first,
+    Iterator last
+    ) {
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  Data t(static_cast<Data>(thresholds.t));
+  Data lo(static_cast<Data>(thresholds.lo));
+  Data hi(static_cast<Data>(thresholds.hi));
+  std::for_each(first, last,
+    [=](Data& x){ x = std::max(lo, std::min(lambert_w_exp(x - t), hi)); });
 }
 
 template <typename Iterator,

@@ -164,6 +164,55 @@ lambert_w_exp(
 #endif
 }
 
+/**
+ * Lambert W function of exp(x),
+ *    w = W_0(exp(x)).
+ * Computed w satisfies the equation
+ *    w + ln(w) = x
+ * with a relative error
+ *    (w + ln(w) - x) < 4 * eps * max(1, x),
+ * where eps = 2^(-52).
+ * Note: this implementation was optimized for double, not for long double.
+ **/
+inline long double
+lambert_w_exp(
+    const long double x
+  ) {
+  /* Initialize w for the Householder's iteration; consider intervals:
+   * (-Inf, -11400]               - exp underflows (exp(x)=0), return 0
+   * (-746, -36]                  - w = exp(x), return exp(x)
+   * (-36, -20]                   - w_0 = exp(x), return w_1
+   * (-20, 0]                     - w_0 = exp(x), return w_2
+   * (0, 4]                       - w_0 = x, return w_2
+   * (4, 576460752303423488]      - w_0 = x - log(x), return w_2
+   * (576460752303423488, +Inf)   - (x + log(x)) = x, return x
+   */
+  long double w;
+  if (x > 0) { // (0, +Inf)
+    if (x <= 4) { // (0, 4]
+      w = lambert_w_iter_5(x, 1.0L);
+    } else { // (4, +Inf)
+      if (x <= 576460752303423488.0L) { // (4, 576460752303423488]
+        w = x - std::log(x);
+        w = lambert_w_iter_5(w, x);
+      } else { // (576460752303423488, +Inf)
+        return x;
+      }
+    }
+  } else { // (-Inf, 0]
+    if (x > -36) { // (-36, 0]
+      w = exp_approx(x);
+      if (x > -20) { // (-20, 0]
+        w = lambert_w_iter_5(w, exp_approx(x - w));
+      }
+    } else { // (-Inf, -36]
+      return (x > -11400) ? std::exp(x) : 0.0;
+    }
+  }
+  w = lambert_w_iter_5(w, std::exp(x - w));
+  return lambert_w_iter_5(w, std::exp(x - w));
+}
+
 }
 
 #endif

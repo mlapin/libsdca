@@ -51,90 +51,90 @@ void test_solve_sum_w_exp(std::size_t dim, std::size_t repeat = 1) {
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
     {
     ResultType rhs = 1e3;
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
     {
     ResultType rhs = 1e-3;
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
     {
     ResultType rhs = 1e6;
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
     {
     ResultType rhs = 1e-6;
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
     {
     ResultType rhs = 1e9;
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
     {
     ResultType rhs = 1e-9;
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
     {
     ResultType rhs = 1e12;
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
     {
     ResultType rhs = 1e-12;
     ResultType t = solve_sum_w_exp(v.begin(), v.end(), rhs);
     ResultType f = std::accumulate(v.begin(), v.end(), 0.0,
       [=](const ResultType a, const ResultType b)
-      { return a + lambert_w_exp(b + t); });
+      { return a + lambert_w_exp(b - t); });
     ResultType err = f - rhs;
     ResultType rel = err / std::max(static_cast<ResultType>(1), std::max(rhs, std::abs(t)));
-    if (rel > std::numeric_limits<ResultType>::epsilon()) std::cout << "t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
+    if (rel > 10*std::numeric_limits<ResultType>::epsilon()) std::cout << "rhs: " << rhs << ", t: " << t << ", f: " << f << ", err: " << err << ", rel: " << rel << std::endl << std::endl;
     }
 
     }

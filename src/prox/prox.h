@@ -2,6 +2,7 @@
 #define SDCA_PROX_PROX_H
 
 #include "proxdef.h"
+#include "entropy.h"
 #include "knapsack_eq.h"
 #include "knapsack_le.h"
 #include "knapsack_le_biased.h"

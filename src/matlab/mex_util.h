@@ -24,6 +24,7 @@ enum err_index {
   err_out_of_memory,
   err_read_failed,
   err_labels_range,
+  err_command,
   err_prox,
   err_objective,
   err_summation,
@@ -48,6 +49,7 @@ static const char* err_id[] = {
   "LIBSDCA:out_of_memory",
   "LIBSDCA:read_failed",
   "LIBSDCA:labels_range",
+  "LIBSDCA:command",
   "LIBSDCA:prox",
   "LIBSDCA:objective",
   "LIBSDCA:summation",
@@ -72,6 +74,7 @@ static const char* err_msg[] = {
   "Out of memory (cannot allocate memory for '%s').",
   "Failed to read the value of '%s'.",
   "Invalid labels range (must be 1:T or 0:T-1).",
+  "Unknown command '%s'.",
   "Unknown prox '%s'.",
   "Unknown objective '%s'.",
   "Unknown summation '%s'.",
@@ -266,6 +269,21 @@ mxGetFieldValueOrDefault(
   return value;
 }
 
+inline const std::string
+mxGetString(
+    const mxArray* pa,
+    const char* name
+    ) {
+  mwSize buflen = mxGetNumberOfElements(pa) + 1;
+  char* buf = static_cast<char*>(mxCalloc(buflen, sizeof(char)));
+  if (mxGetString(pa, buf, buflen) == 0) {
+    return std::string(buf);
+  }
+  mexErrMsgIdAndTxt(
+    err_id[err_read_failed], err_msg[err_read_failed], name);
+  return nullptr;
+}
+
 template <>
 inline const std::string
 mxGetFieldValueOrDefault(
@@ -276,13 +294,7 @@ mxGetFieldValueOrDefault(
   if (pa != nullptr) {
     mxArray* field = mxGetField(pa, 0, name);
     if (field != nullptr) {
-      mwSize buflen = mxGetNumberOfElements(field) + 1;
-      char* buf = static_cast<char*>(mxCalloc(buflen, sizeof(char)));
-      if (mxGetString(field, buf, buflen) == 0) {
-        return std::string(buf);
-      }
-      mexErrMsgIdAndTxt(
-        err_id[err_read_failed], err_msg[err_read_failed], name);
+      return mxGetString(field, name);
     }
   }
   return value;

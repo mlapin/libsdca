@@ -1,18 +1,25 @@
 clear;
 close all;
-addpath('libsdca-release');
+addpath('libsdca-debug');
+rng(0);
 
-if 0
-  d = 10;
-  n = 5;
+if 1
+  d = 100;
+  n = 100;
 
-  opts.proj = 'topk_simplex';
-  opts.rhs = .75;
-  opts.rho = 1.5;
-  opts.k = 3;
+  opts.prox = 'entropy';
+%   opts.prox = 'knapsack';
+  opts.rhs = 100;
+  opts.hi = 10;
 
-  A = randn(d,n);
+  A = 1000*randn(d,n);
   B = libsdca_prox(A, opts);
+%   disp(sum(B));
+  
+%   [X,mu,nu] = prox_entropy_cvx(A, opts.hi, opts.rhs);
+%   
+%   loss = @(X) 0.5*sum(sum((A - X).^2)) - sum(sum(entr(X)));
+%   disp(loss(X)-loss(B));
 end
 
 if 0
@@ -20,7 +27,7 @@ if 0
   runtestcases_2
 end
 
-if 1
+if 0
   load('data/sun397-cnn.mat');
   
 
