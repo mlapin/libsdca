@@ -88,7 +88,7 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_knapsack_eq(
+prox_knapsack_eq(
     Iterator first,
     Iterator last,
     const Result lo = 0,
@@ -96,7 +96,7 @@ project_knapsack_eq(
     const Result rhs = 1,
     const Summation sum = Summation()
     ) {
-  project(first, last,
+  prox(first, last,
     thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
 }
 
@@ -104,7 +104,7 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_knapsack_eq(
+prox_knapsack_eq(
     Iterator first,
     Iterator last,
     Iterator aux_first,
@@ -114,7 +114,7 @@ project_knapsack_eq(
     const Result rhs = 1,
     const Summation sum = Summation()
     ) {
-  project(first, last, aux_first, aux_last,
+  prox(first, last, aux_first, aux_last,
     thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
 }
 
@@ -122,7 +122,7 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_knapsack_eq(
+prox_knapsack_eq(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
@@ -133,7 +133,7 @@ project_knapsack_eq(
     const Result rhs = 1,
     const Summation sum = Summation()
     ) {
-  project(dim, first, last, aux_first, aux_last,
+  prox(dim, first, last, aux_first, aux_last,
     thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
 }
 

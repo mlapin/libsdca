@@ -210,14 +210,14 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_entropy(
+prox_entropy(
     Iterator first,
     Iterator last,
     const Result hi = 1,
     const Result rhs = 1,
     const Summation sum = Summation()
     ) {
-  project(first, last,
+  prox(first, last,
     thresholds_entropy<Iterator, Result, Summation>, hi, rhs, sum);
 }
 
@@ -225,7 +225,7 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_entropy(
+prox_entropy(
     Iterator first,
     Iterator last,
     Iterator aux_first,
@@ -234,7 +234,7 @@ project_entropy(
     const Result rhs = 1,
     const Summation sum = Summation()
     ) {
-  project(first, last, aux_first, aux_last,
+  prox(first, last, aux_first, aux_last,
     thresholds_entropy<Iterator, Result, Summation>, hi, rhs, sum);
 }
 
@@ -242,7 +242,7 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_entropy(
+prox_entropy(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
@@ -252,7 +252,7 @@ project_entropy(
     const Result rhs = 1,
     const Summation sum = Summation()
     ) {
-  project(dim, first, last, aux_first, aux_last,
+  prox(dim, first, last, aux_first, aux_last,
     thresholds_entropy<Iterator, Result, Summation>, hi, rhs, sum);
 }
 

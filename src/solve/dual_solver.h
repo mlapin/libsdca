@@ -30,7 +30,6 @@ public:
       dual_variables_(__problem.dual_variables),
       norm_inv_(__problem.num_examples),
       scores_(__problem.num_tasks),
-      diff_tolerance_(std::numeric_limits<data_type>::epsilon()),
       N(static_cast<blas_int>(__problem.num_examples)),
       T(static_cast<blas_int>(__problem.num_tasks))
   {
@@ -58,7 +57,6 @@ protected:
   // Other
   std::vector<data_type> norm_inv_;
   std::vector<data_type> scores_;
-  const data_type diff_tolerance_;
 
   // BLAS (avoid static casts)
   const blas_int N;

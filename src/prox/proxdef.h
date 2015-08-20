@@ -117,11 +117,15 @@ make_lambert_thresholds(
   return lambert_thresholds<Iterator, Result>(t, lo, hi, first, last);
 }
 
+/**
+ * Compute <prox(x),prox(x)> given the thresholds for prox(x) and x
+ * without actually computing prox(x).
+ **/
 template <typename Iterator,
           typename Result,
           typename Summation = std_sum<Iterator, Result>>
 inline Result
-norm2(
+dot_prox_prox(
     const thresholds<Iterator, Result> t,
     Iterator first,
     Iterator last,
@@ -139,11 +143,15 @@ norm2(
     + dot_mi - static_cast<Result>(2) * t.t * sum_mi ;
 }
 
+/**
+ * Compute <x,prox(x)> given the thresholds for prox(x) and x
+ * without actually computing prox(x).
+ **/
 template <typename Iterator,
           typename Result,
           typename Summation = std_sum<Iterator, Result>>
 inline Result
-correlation(
+dot_prox(
     const thresholds<Iterator, Result> t,
     Iterator first,
     Iterator last,
@@ -162,7 +170,7 @@ correlation(
 template <typename Iterator,
           typename Result>
 inline void
-project(
+prox(
     const sdca::thresholds<Iterator, Result> thresholds,
     Iterator first,
     Iterator last
@@ -178,7 +186,7 @@ project(
 template <typename Iterator,
           typename Result>
 inline void
-project(
+prox(
     const sdca::lambert_thresholds<Iterator, Result> thresholds,
     Iterator first,
     Iterator last
@@ -195,7 +203,7 @@ template <typename Iterator,
           typename Algorithm,
           typename... Types>
 inline void
-project(
+prox(
     Iterator first,
     Iterator last,
     Algorithm compute,
@@ -204,14 +212,14 @@ project(
   typedef typename std::iterator_traits<Iterator>::value_type Data;
   std::vector<Data> aux(first, last);
   auto thresholds = compute(aux.begin(), aux.end(), params...);
-  project(thresholds, first, last);
+  prox(thresholds, first, last);
 }
 
 template <typename Iterator,
           typename Algorithm,
           typename... Types>
 inline void
-project(
+prox(
     Iterator first,
     Iterator last,
     Iterator aux_first,
@@ -222,14 +230,14 @@ project(
   typedef typename std::iterator_traits<Iterator>::value_type Data;
   std::copy(first, last, aux_first);
   auto thresholds = compute(aux_first, aux_last, params...);
-  project(thresholds, first, last);
+  prox(thresholds, first, last);
 }
 
 template <typename Iterator,
           typename Algorithm,
           typename... Types>
 inline void
-project(
+prox(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
@@ -243,7 +251,7 @@ project(
   for (; first != last; vec_last += dim) {
     std::copy(first, vec_last, aux_first);
     auto thresholds = compute(aux_first, aux_last, params...);
-    project(thresholds, first, vec_last);
+    prox(thresholds, first, vec_last);
     first = vec_last;
   }
 }

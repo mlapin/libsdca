@@ -48,7 +48,13 @@ struct l2_topk_hinge {
       Data* variables,
       Data* scores
       ) const {
+    // Variables update proceeds in 3 steps:
+    // 1. Prepare a vector to project in 'variables'.
+    // 2. Perform the proximal step (projection onto the feasible set).
+    // 3. Recover the updated dual variables.
     Result lo = 0, hi = c_div_k, rhs = c, rho = 1;
+
+    // 1. Prepare a vector to project in 'variables'.
     Data a = norm2_inv;
     sdca_blas_axpby(num_tasks, a, scores, -1, variables);
 
@@ -58,19 +64,17 @@ struct l2_topk_hinge {
     std::swap(*scores_back, scores[label]);
     std::swap(*variables_back, variables[label]);
 
-    // Update variables
+    // Complete step 1.
     a -= *variables_back;
     std::for_each(variables, variables_back, [&](Data &x){ x += a; });
 
-    // Project onto the feasible set
-    project_knapsack_le_biased(variables, variables_back,
+    // 2. Proximal step (project 'variables', use 'scores' as scratch space)
+    prox_knapsack_le_biased(variables, variables_back,
       scores, scores_back, lo, hi, rhs, rho, sum);
 
-    // The last one is the sum
+    // 3. Recover the updated variables
     *variables_back = static_cast<Data>(std::min(rhs,
       sum(variables, variables_back, static_cast<Result>(0)) ));
-
-    // Change the sign of all but last one
     std::for_each(variables, variables_back, [](Data &x){ x = -x; });
 
     // Put back the ground truth variable
@@ -170,9 +174,15 @@ struct l2_topk_hinge_smooth {
       Data* variables,
       Data* scores
       ) const {
+    // Variables update proceeds in 3 steps:
+    // 1. Prepare a vector to project in 'variables'.
+    // 2. Perform the proximal step (projection onto the feasible set).
+    // 3. Recover the updated dual variables.
     Result lo = 0, hi = c_div_k, rhs = c;
     Result rho = static_cast<Result>(1) /
       (static_cast<Result>(1) + gamma_div_c * static_cast<Result>(norm2_inv));
+
+    // 1. Prepare a vector to project in 'variables'.
     Data a = norm2_inv * static_cast<Data>(rho);
     sdca_blas_axpby(num_tasks, a, scores, -static_cast<Data>(rho), variables);
 
@@ -182,19 +192,17 @@ struct l2_topk_hinge_smooth {
     std::swap(*scores_back, scores[label]);
     std::swap(*variables_back, variables[label]);
 
-    // Update variables
+    // Complete step 1.
     a -= *variables_back;
     std::for_each(variables, variables_back, [&](Data &x){ x += a; });
 
-    // Project onto the feasible set
-    project_knapsack_le_biased(variables, variables_back,
+    // 2. Proximal step (project 'variables', use 'scores' as scratch space)
+    prox_knapsack_le_biased(variables, variables_back,
       scores, scores_back, lo, hi, rhs, rho, sum);
 
-    // The last one is the sum
+    // 3. Recover the updated variables
     *variables_back = static_cast<Data>(std::min(rhs,
       sum(variables, variables_back, static_cast<Result>(0)) ));
-
-    // Change the sign of all but last one
     std::for_each(variables, variables_back, [](Data &x){ x = -x; });
 
     // Put back the ground truth variable
@@ -222,12 +230,12 @@ struct l2_topk_hinge_smooth {
     std::for_each(scores, scores + num_tasks, [&](Data &x){ x += a; });
     scores[label] = static_cast<Data>(0);
 
-    // loss = 1/gamma (<p,h> - 1/2 <p,p>), p =proj_{k,gamma}(h), h = c + a
+    // loss = 1/gamma (<p,h> - 1/2 <p,p>), p =prox_{k,gamma}(h), h = c + a
     Result lo = 0, hi = gamma_div_k, rhs = gamma;
     auto t = thresholds_knapsack_le(
       scores, scores + num_tasks, lo, hi, rhs, sum);
-    Result ph = correlation(t, scores, scores + num_tasks, sum);
-    Result pp = norm2(t, scores, scores + num_tasks, sum);
+    Result ph = dot_prox(t, scores, scores + num_tasks, sum);
+    Result pp = dot_prox_prox(t, scores, scores + num_tasks, sum);
 
     // (division by gamma happens later)
     primal_loss = ph - static_cast<Result>(0.5) * pp;

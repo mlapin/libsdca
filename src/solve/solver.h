@@ -168,8 +168,12 @@ protected:
     compute_objectives();
     result_type max = std::max(std::abs(primal_), std::abs(dual_));
     if (gap_ <= static_cast<result_type>(criteria_.epsilon) * max) {
-      status_ = (gap_ > -std::numeric_limits<result_type>::epsilon())
-        ? solver_status::solved : solver_status::failed;
+      status_ = solver_status::solved;
+      if (gap_ < -std::numeric_limits<result_type>::epsilon()) {
+        status_ = solver_status::failed;
+        LOG_DEBUG << "  (warning) "
+          "failed due to negative duality gap: " << gap_ << std::endl;
+      }
     } else if (dual_ < sufficient_increase * dual_before) {
       status_ = solver_status::no_progress;
       LOG_DEBUG << "  (warning) "

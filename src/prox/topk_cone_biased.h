@@ -113,14 +113,14 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_topk_cone_biased(
+prox_topk_cone_biased(
     Iterator first,
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1,
     const Summation sum = Summation()
     ) {
-  project(first, last,
+  prox(first, last,
     thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);
 }
 
@@ -128,7 +128,7 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_topk_cone_biased(
+prox_topk_cone_biased(
     Iterator first,
     Iterator last,
     Iterator aux_first,
@@ -137,7 +137,7 @@ project_topk_cone_biased(
     const Result rho = 1,
     const Summation sum = Summation()
     ) {
-  project(first, last, aux_first, aux_last,
+  prox(first, last, aux_first, aux_last,
     thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);
 }
 
@@ -145,7 +145,7 @@ template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
 inline void
-project_topk_cone_biased(
+prox_topk_cone_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
@@ -155,7 +155,7 @@ project_topk_cone_biased(
     const Result rho = 1,
     const Summation sum = Summation()
     ) {
-  project(dim, first, last, aux_first, aux_last,
+  prox(dim, first, last, aux_first, aux_last,
     thresholds_topk_cone_biased<Iterator, Result, Summation>, k, rho, sum);
 }
 

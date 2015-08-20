@@ -88,28 +88,28 @@ mex_main(
   std::string prox = mxGetFieldValueOrDefault(
     opts, "prox", std::string("knapsack"));
   if (prox == "entropy") {
-    project_entropy<Data*, Result, Summation>(
+    prox_entropy<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, hi, rhs, sum);
   } else if (prox == "knapsack" || prox == "knapsack_eq") {
-    project_knapsack_eq<Data*, Result, Summation>(
+    prox_knapsack_eq<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
   } else if (prox == "knapsack_le") {
-    project_knapsack_le<Data*, Result, Summation>(
+    prox_knapsack_le<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
   } else if (prox == "knapsack_le_biased") {
-    project_knapsack_le_biased<Data*, Result, Summation>(
+    prox_knapsack_le_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, rho, sum);
   } else if (prox == "topk_simplex") {
-    project_topk_simplex<Data*, Result, Summation>(
+    prox_topk_simplex<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rhs, sum);
   } else if (prox == "topk_simplex_biased") {
-    project_topk_simplex_biased<Data*, Result, Summation>(
+    prox_topk_simplex_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rhs, rho, sum);
   } else if (prox == "topk_cone") {
-    project_topk_cone<Data*, Result, Summation>(
+    prox_topk_cone<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, sum);
   } else if (prox == "topk_cone_biased") {
-    project_topk_cone_biased<Data*, Result, Summation>(
+    prox_topk_cone_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rho, sum);
   } else {
     mexErrMsgIdAndTxt(
