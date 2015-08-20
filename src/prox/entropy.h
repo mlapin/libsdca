@@ -143,7 +143,7 @@ solve_sum_w_exp(
     const Result rhs = 1,
     const Summation sum = Summation()
     ) {
-  // Initial guess based on W_0(exp(a_i - t)) \approx a_i + t (for a_i - t > 0)
+  // Initial guess based on W_0(exp(a_i - t)) \approx a_i - t (for a_i - t > 0)
   Result t = (sum(first, last, static_cast<Result>(0)) - rhs) /
     static_cast<Result>(std::distance(first, last));
 
@@ -196,8 +196,8 @@ thresholds_entropy(
     u_last = it;
     if (it == last) break;
     if (r <= eps) {
-      t = type_traits<Result>::min_exp_arg() - 1
-        - static_cast<Result>(*std::max_element(first, last));
+      t = static_cast<Result>(*std::max_element(u_last, last))
+        - type_traits<Result>::min_exp_arg() + 1;
       break;
     }
     t = solve_sum_w_exp(u_last, last, r, sum);

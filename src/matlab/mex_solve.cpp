@@ -13,10 +13,76 @@ using namespace sdca;
 
 inline void
 printUsage() {
-  mexPrintf("Usage: model = %s(X, Y);\n"
-            "       model = %s(data, labels, opts);\n"
-            , MEX_SOLVE, MEX_SOLVE);
+  mexPrintf("Usage: MODEL = %s(X, Y);\n"
+            "       MODEL = %s(DATA, LABELS, OPTS);\n"
+            "  See %s('version') and %s('help') for more information.\n",
+            MEX_SOLVE, MEX_SOLVE, MEX_SOLVE, MEX_SOLVE);
 }
+
+inline void
+printVersion() {
+  mexPrintf("%s version %s.\n", MEX_SOLVE, LIBSDCA_VERSION);
+}
+
+inline void
+printHelp() {
+  mexPrintf("Usage: MODEL = %s(X, Y);\n"
+            "       MODEL = %s(DATA, LABELS, OPTS);\n"
+            "  DATA is either a d-by-n feature matrix (default)\n"
+            "              or a n-by-n Gram matrix (requires is_dual=true).\n"
+            "  LABELS is a n-by-1 or a 1-by-n vector of class labels.\n"
+            "    If m is the number of classes (tasks),\n"
+            "    then LABELS must be in the range 0:(m-1) or 1:m.\n"
+            "  DATA can be single or double; LABELS must be double.\n"
+            "\n"
+            "  OPTS is a struct with the following fields:\n"
+            "  (default values in [brackets], synonyms in (parenthesis))\n"
+            "    'objective' :\n"
+            "      ['l2_topk_hinge'] : L2-regularized top-k-of-hinge loss;\n"
+            "       'l2_hinge_topk'  : L2-regularized hinge-of-top-k loss.\n"
+            "  Regularization parameter (standard SVM C parameter):\n"
+            "    'c' : [1], divided by n in the objective;\n"
+            "    'C' : [c/n], used directly in the objective.\n"
+            "  Loss smoothing parameter:\n"
+            "    'gamma' : [0], use gamma > 0 for a smooth version of\n"
+            "                   l2_topk_hinge and l2_hinge_topk.\n"
+            "  Top-k loss parameter:\n"
+            "    'k' : [1], note that for k=1 and gamma=0 both\n"
+            "               l2_topk_hinge and l2_hinge_topk coincide\n"
+            "               with the multiclass SVM of Crammer and Singer.\n"
+            "  Training in the dual:\n"
+            "    'is_dual' : [false], if DATA is the Gram matrix,\n"
+            "                         set is_dual=true.\n"
+            "    No primal variables (W) are maintained if is_dual=true.\n"
+            "    Moreover, training in the dual is faster for d>=n.\n"
+            "  Stopping criteria:\n"
+            "    'check_on_start' : [false], check duality gap on start;\n"
+            "    'check_epoch'    : [1], how often to check the gap;\n"
+            "    'max_epoch'      : [1000], epochs limit;\n"
+            "    'max_cpu_time'   : [0], CPU time limit (0: no limit);\n"
+            "    'max_wall_time'  : [0], wall time limit (0: no limit);\n"
+            "    'epsilon'        : [1e-3], relative duality gap bound:\n"
+            "      (primal - dual) <= epsilon * max(abs(primal), abs(dual)).\n"
+            "  Warm restart (resume training):\n"
+            "    'W' : initial primal variables (if is_dual=false);\n"
+            "    'A' : initial dual variables such that W = X*A'.\n"
+            "    If only A is available, use check_on_start=true.\n"
+            "    Note that one can simply pass a computed MODEL as OPTS.\n"
+            "  Logging options:\n"
+            "    'log_level'  : 'none', ['info'], 'verbose', 'debug'.\n"
+            "    'log_format' : ['short_f'], 'short_e', 'long_f', 'long_e'.\n"
+            "                   short/long: 4/15 digits; f/e: float/exp fmt.\n"
+            "  Options that influence the accuracy of computations:\n"
+            "    'precision' : 'single' ('float'), ['double'],\n"
+            "                  'long double' ('long_double');\n"
+            "    'summation' : ['standard'] ('default'), 'kahan'.\n"
+            "\n"
+            "  Prediction scores can be computed as:\n"
+            "    scores = model.W' * X;\n"
+            "    scores = model.A * Xtrn' * Xtst.\n",
+            MEX_SOLVE, MEX_SOLVE);
+}
+
 
 template <typename Data,
           typename Result>
@@ -410,24 +476,38 @@ mexFunction(
     const int nrhs,
     const mxArray* prhs[]
     ) {
-  mxCheckArgNum(nrhs, 2, 3, printUsage);
+  mxCheckArgNum(nrhs, 1, 3, printUsage);
   mxCheckArgNum(nlhs, 0, 1, printUsage);
 
-  mxCheckNotSparse(prhs[0], "data");
-  mxCheckNotEmpty(prhs[0], "data");
-  mxCheckReal(prhs[0], "data");
+  if (mxIsChar(prhs[0])) {
+    std::string command = mxGetString(prhs[0], "command");
+    if (command == "help" || command == "--help" || command == "-h") {
+      printHelp();
+    } else if (command == "version" || command == "--version") {
+      printVersion();
+    } else {
+      mexErrMsgIdAndTxt(
+        err_id[err_command], err_msg[err_command], command.c_str());
+    }
+  } else {
+    mxCheckArgNum(nrhs, 2, 3, printUsage);
 
-  mxCheckNotSparse(prhs[1], "labels");
-  mxCheckNotEmpty(prhs[1], "labels");
-  mxCheckDouble(prhs[1], "labels");
+    mxCheckNotSparse(prhs[0], "data");
+    mxCheckNotEmpty(prhs[0], "data");
+    mxCheckReal(prhs[0], "data");
 
-  logging::format_push();
-  mat_cout_hijack mat_cout;
-  if (mxIsDouble(prhs[0])) {
-     mex_main<double>(plhs, nrhs, prhs);
-  } else if (mxIsSingle(prhs[0])) {
-     mex_main<float>(plhs, nrhs, prhs);
+    mxCheckNotSparse(prhs[1], "labels");
+    mxCheckNotEmpty(prhs[1], "labels");
+    mxCheckDouble(prhs[1], "labels");
+
+    logging::format_push();
+    mat_cout_hijack mat_cout;
+    if (mxIsDouble(prhs[0])) {
+       mex_main<double>(plhs, nrhs, prhs);
+    } else if (mxIsSingle(prhs[0])) {
+       mex_main<float>(plhs, nrhs, prhs);
+    }
+    mat_cout.release();
+    logging::format_pop();
   }
-  mat_cout.release();
-  logging::format_pop();
 }

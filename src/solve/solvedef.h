@@ -59,7 +59,7 @@ struct problem_data {
 struct stopping_criteria {
   bool check_on_start = false;
   size_type check_epoch = 1;
-  size_type max_epoch = 0;
+  size_type max_epoch = 1000;
   double max_cpu_time = 0;
   double max_wall_time = 0;
   double epsilon = 1e-3;

@@ -14,8 +14,8 @@ data{end+1} = 1;
 data{end+1} = -1;
 data{end+1} = eps;
 data{end+1} = 1/eps;
-data{end+1} = eps('single');
-data{end+1} = 1/eps('single');
+data{end+1} = double(eps('single'));
+data{end+1} = double(1/eps('single'));
 
 % Id
 data{end+1} = eye(2);
@@ -40,7 +40,7 @@ end
 N = 100;
 
 % Random -1,0,1
-for d = [2 5 10 100 1000 5000]
+for d = [2 5 10 100 1000]
   x = 3*rand(d,N);
   x(x<1) = -1;
   x(1<=x & x<=2) = 0;
@@ -50,7 +50,7 @@ for d = [2 5 10 100 1000 5000]
 end
 
 % Uniform
-for d = [2 5 10 100 1000]
+for d = [10 100 1000]
   for a = [-10 0 10 100]
     for w = [1e-5 1 100 1e5]
       data{end+1} = a + w*rand(d,N);
@@ -59,7 +59,7 @@ for d = [2 5 10 100 1000]
 end
 
 % Gaussian
-for d = [2 5 10 100 1000 5000]
+for d = [10 100 1000]
   for a = [-10 0 10 100]
     for w = [1e-5 1 100 1e5]
       data{end+1} = a + w*randn(d,N);
@@ -69,8 +69,8 @@ end
 
 % Exponential
 for d = [100 1000]
-  for a = [-10 0 10 100]
-    for w = [1e-3 1 10 1e3]
+  for a = [0 100]
+    for w = [1e-3 1 1e3]
       data{end+1} = a + exprnd(w,d,N);
     end
   end
@@ -80,7 +80,7 @@ end
 for d = [100 500]
   for a = [-100 1 100]
     for w = [1e-2 1 1e2]
-      for s = -1:.5:1
+      for s = [-1 0 1]
         data{end+1} = gevrnd(s,w,a,d,N);
       end
     end

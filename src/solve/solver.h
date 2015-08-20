@@ -144,8 +144,7 @@ protected:
       compute_duality_gap();
     }
     if (status_ == solver_status::solving) {
-      if (criteria_.max_epoch > 0 &&
-          epoch() >= criteria_.max_epoch) {
+      if (epoch() >= criteria_.max_epoch) {
         status_ = solver_status::max_epoch;
         LOG_DEBUG << "  (warning) "
           "epoch limit: " << epoch() << std::endl;
