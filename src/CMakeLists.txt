@@ -7,6 +7,7 @@ set(PLAY_SRCS
 set(PROX_SRCS
   prox/prox.h
   prox/proxdef.h
+  prox/entropy.h
   prox/knapsack_eq.h
   prox/knapsack_le.h
   prox/knapsack_le_biased.h
@@ -14,7 +15,6 @@ set(PROX_SRCS
   prox/topk_cone_biased.h
   prox/topk_simplex.h
   prox/topk_simplex_biased.h
-  prox/entropy.h
   )
 
 set(SOLVE_SRCS
@@ -23,6 +23,7 @@ set(SOLVE_SRCS
   solve/solver.h
   solve/dual_solver.h
   solve/primal_solver.h
+  solve/l2_entropy.h
   solve/l2_hinge_topk.h
   solve/l2_topk_hinge.h
   )
@@ -30,10 +31,10 @@ set(SOLVE_SRCS
 set(UTIL_SRCS
   util/util.h
   util/blas.h
+  util/fmath.h
   util/lambert.h
   util/logging.h
   util/numeric.h
-  util/fmath.h
   )
 
 # Matlab interface
