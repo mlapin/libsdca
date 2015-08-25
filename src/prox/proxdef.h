@@ -58,6 +58,21 @@ struct thresholds {
 
 template <typename Iterator,
           typename Result>
+struct exp_thresholds : thresholds<Iterator, Result> {
+  typedef thresholds<Iterator, Result> base;
+
+  exp_thresholds() : base() {}
+
+  exp_thresholds(const Result __t, const Result __lo, const Result __hi) :
+    base(__t, __lo, __hi) {}
+
+  exp_thresholds(const Result __t, const Result __lo, const Result __hi,
+    const Iterator __first, const Iterator __last) :
+    base(__t, __lo, __hi, __first, __last) {}
+};
+
+template <typename Iterator,
+          typename Result>
 struct lambert_thresholds : thresholds<Iterator, Result> {
   typedef thresholds<Iterator, Result> base;
 
@@ -92,6 +107,29 @@ make_thresholds(
     const Iterator last
   ) {
   return thresholds<Iterator, Result>(t, lo, hi, first, last);
+}
+
+template <typename Result>
+inline exp_thresholds<Result*, Result>
+make_exp_thresholds(
+    const Result t,
+    const Result lo,
+    const Result hi
+  ) {
+  return exp_thresholds<Result*, Result>(t, lo, hi);
+}
+
+template <typename Iterator,
+          typename Result>
+inline exp_thresholds<Iterator, Result>
+make_exp_thresholds(
+    const Result t,
+    const Result lo,
+    const Result hi,
+    const Iterator first,
+    const Iterator last
+  ) {
+  return exp_thresholds<Iterator, Result>(t, lo, hi, first, last);
 }
 
 template <typename Result>
@@ -187,6 +225,22 @@ template <typename Iterator,
           typename Result>
 inline void
 prox(
+    const sdca::exp_thresholds<Iterator, Result> thresholds,
+    Iterator first,
+    Iterator last
+    ) {
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  Data t(static_cast<Data>(thresholds.t));
+  Data lo(static_cast<Data>(thresholds.lo));
+  Data hi(static_cast<Data>(thresholds.hi));
+  std::for_each(first, last,
+    [=](Data& x){ x = std::max(lo, std::min(std::exp(x - t), hi)); });
+}
+
+template <typename Iterator,
+          typename Result>
+inline void
+prox(
     const sdca::lambert_thresholds<Iterator, Result> thresholds,
     Iterator first,
     Iterator last
@@ -252,6 +306,35 @@ prox(
     std::copy(first, vec_last, aux_first);
     auto thresholds = compute(aux_first, aux_last, params...);
     prox(thresholds, first, vec_last);
+    first = vec_last;
+  }
+}
+
+template <typename Iterator,
+          typename Functor>
+inline void
+apply(
+    Iterator first,
+    Iterator last,
+    Functor functor
+    ) {
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  std::for_each(first, last, [=](Data& x){ x = functor(x); });
+}
+
+template <typename Iterator,
+          typename Functor>
+inline void
+apply(
+    const typename std::iterator_traits<Iterator>::difference_type dim,
+    Iterator first,
+    Iterator last,
+    Functor functor
+    ) {
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  Iterator vec_last = first + dim;
+  for (; first != last; vec_last += dim) {
+    apply(first, vec_last, functor);
     first = vec_last;
   }
 }

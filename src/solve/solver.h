@@ -99,7 +99,9 @@ protected:
 
   // Initialization
   virtual void initialize() {
-    status_ = solver_status::solving;
+    status_ = (criteria_.max_epoch > 0)
+      ? solver_status::solving
+      : solver_status::max_epoch;
     epoch_ = 0;
     cpu_start_ = std::clock();
     wall_start_ = wall_clock::now();

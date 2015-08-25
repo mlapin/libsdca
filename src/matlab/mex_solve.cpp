@@ -7,7 +7,6 @@
 #ifndef LIBSDCA_VERSION
 #define LIBSDCA_VERSION "0.0.0"
 #endif
-#define COPYRIGHT_NOTICE "libsdca version " LIBSDCA_VERSION "."
 
 using namespace sdca;
 
@@ -375,8 +374,6 @@ mex_main(
   set_precision_options(sum, model);
   set_stopping_criteria(opts, model);
 
-  LOG_INFO << COPYRIGHT_NOTICE << std::endl;
-
   std::string objective = mxGetFieldValueOrDefault(
     opts, "objective", std::string("l2_topk_hinge"));
   add_field("objective", mxCreateString(objective.c_str()), model);
@@ -396,7 +393,11 @@ mex_main(
   auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
   mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
 
-  if (objective == "l2_topk_hinge") {
+  if (objective == "l2_entropy") {
+    add_field_scalar("k", k, model);
+    make_solver_solve(model,
+      l2_entropy<Data, Result, Summation>(k, C, sum));
+  } else if (objective == "l2_topk_hinge") {
     add_field_scalar("k", k, model);
     add_field_scalar("gamma", gamma, model);
     if (gamma > 0) {

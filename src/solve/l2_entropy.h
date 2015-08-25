@@ -14,6 +14,10 @@ struct l2_entropy {
   const difference_type k;
   const Result c;
   const Result c_div_k;
+  const Result log_c;
+  const Result c_log_c;
+  const Result k_inv;
+  const Result log_k;
   const Summation sum;
 
   l2_entropy(
@@ -24,6 +28,10 @@ struct l2_entropy {
       k(static_cast<difference_type>(__k)),
       c(__c),
       c_div_k(__c / static_cast<Result>(__k)),
+      log_c(std::log(__c)),
+      c_log_c(__c * std::log(__c)),
+      k_inv(1 / static_cast<Result>(__k)),
+      log_k(std::log(static_cast<Result>(__k))),
       sum(__sum)
   {}
 
@@ -72,7 +80,7 @@ struct l2_entropy {
     // 3. Recover the updated variables
     *variables_back = static_cast<Data>(c);
     std::for_each(variables, variables_back,
-      [](Data &x){ x = -norm2_inv * x; });
+      [=](Data &x){ x *= -norm2_inv; });
 
     // Put back the ground truth variable
     std::swap(*variables_back, variables[label]);
@@ -89,19 +97,23 @@ struct l2_entropy {
     ) const {
     regularizer = static_cast<Result>(
       sdca_blas_dot(num_tasks, scores, variables));
-    dual_loss = static_cast<Result>(variables[label]);
 
-    Data a = static_cast<Data>(1) - scores[label];
-    std::for_each(scores, scores + num_tasks, [&](Data &x){ x += a; });
-    scores[label] = static_cast<Data>(0);
+    Result comp(0), zero(0);
+    dual_loss = c_log_c;
+    std::for_each(variables, variables + num_tasks, [&](const Result a){
+      sum.add((a < zero) ? a * std::log(-a) : zero, dual_loss, comp); });
 
-    // Find k largest elements
-    std::nth_element(scores, scores + k - 1, scores + num_tasks,
-      std::greater<Data>());
-
-    // max{0, sum_k_largest} (division by k happens later)
-    primal_loss = std::max(static_cast<Result>(0),
-      sum(scores, scores + k, static_cast<Result>(0)));
+    Data a = scores[label];
+    std::for_each(scores, scores + num_tasks, [=](Data &x){ x -= a; });
+    Result hi(k_inv), rhs(1);
+    auto t = thresholds_entropy_norm(scores, scores + num_tasks, hi, rhs, sum);
+    if (t.first == scores) {
+      primal_loss = t.t; // equals to log_sum_exp(scores) since rhs = 1;
+    } else {
+      Result num_hi = static_cast<Result>(std::distance(scores, t.first));
+      Result sum_hi = sum(scores, t.first, static_cast<Result>(0));
+      primal_loss = t.t + hi * (sum_hi - num_hi * (t.t - log_k));
+    }
   }
 
   inline void primal_dual_gap(
@@ -112,7 +124,7 @@ struct l2_entropy {
       Result &dual_objective,
       Result &duality_gap
     ) const {
-    primal_objective = c_div_k * primal_loss;
+    primal_objective = c * primal_loss;
     dual_objective = dual_loss;
     duality_gap = primal_objective - dual_objective + regularizer;
     primal_objective += static_cast<Result>(0.5) * regularizer;

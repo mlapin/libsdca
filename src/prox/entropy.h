@@ -162,6 +162,10 @@ solve_sum_w_exp(
 }
 
 /**
+ * Thresholds for the proximal operator of the negative entropy:
+ *    prox_{f}(a),
+ *    f(x) = <x, ln(x)> + iota_C,
+ *    C: <1, x> = rhs, 0 <= x_i <= hi.
  * Partition 'a' and compute the threshold 't'
  * such that the solution to the optimization problem
  *    min_x 0.5 * <x, x> - <a, x> + <x, ln(x)>
@@ -204,6 +208,55 @@ thresholds_entropy(
   }
 
   return make_lambert_thresholds(t, lo, hi, u_last, u_last);
+}
+
+/**
+ * Thresholds for the proximal operator of the negative entropy minus norm:
+ *    prox_{f}(a),
+ *    f(x) = <x, ln(x)> - 0.5 * <x, x> + iota_C,
+ *    C: <1, x> = rhs, 0 <= x_i <= hi.
+ * Partition 'a' and compute the threshold 't'
+ * such that the solution to the optimization problem
+ *    min_x <x, ln(x)> - <a, x>
+ *    s.t.  <1, x> = rhs, 0 <= x_i <= hi,
+ * can be computed as
+ *    x_i = hi, if i in U;
+ *    x_i = exp(a_i - t), otherwise.
+ **/
+template <typename Iterator,
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
+exp_thresholds<Iterator, Result>
+thresholds_entropy_norm(
+    Iterator first,
+    Iterator last,
+    const Result hi = 1,
+    const Result rhs = 1,
+    const Summation sum = Summation()
+    ) {
+  // Initialization
+  Result eps = 16 * std::numeric_limits<Result>::epsilon();
+  Result lo(0), r(rhs), u = std::log(hi) + eps;
+
+  Result t = log_sum_exp<Iterator, Result>(first, last, sum) - std::log(rhs);
+
+  Iterator u_last = first;
+  for (;;) {
+    Result tt = t + u;
+    auto it = std::partition(u_last, last, [=](Result a){ return a > tt; });
+    if (it == u_last) break;
+    r -= hi * static_cast<Result>(std::distance(u_last, it));
+    u_last = it;
+    if (it == last) break;
+    if (r <= eps) {
+      t = static_cast<Result>(*std::max_element(u_last, last))
+        - type_traits<Result>::min_exp_arg() + 1;
+      break;
+    }
+    t = log_sum_exp<Iterator, Result>(u_last, last, sum) - std::log(r);
+  }
+
+  return make_exp_thresholds(t, lo, hi, u_last, u_last);
 }
 
 template <typename Iterator,
@@ -254,6 +307,56 @@ prox_entropy(
     ) {
   prox(dim, first, last, aux_first, aux_last,
     thresholds_entropy<Iterator, Result, Summation>, hi, rhs, sum);
+}
+
+template <typename Iterator,
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
+inline void
+prox_entropy_norm(
+    Iterator first,
+    Iterator last,
+    const Result hi = 1,
+    const Result rhs = 1,
+    const Summation sum = Summation()
+    ) {
+  prox(first, last,
+    thresholds_entropy_norm<Iterator, Result, Summation>, hi, rhs, sum);
+}
+
+template <typename Iterator,
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
+inline void
+prox_entropy_norm(
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
+    const Result hi = 1,
+    const Result rhs = 1,
+    const Summation sum = Summation()
+    ) {
+  prox(first, last, aux_first, aux_last,
+    thresholds_entropy_norm<Iterator, Result, Summation>, hi, rhs, sum);
+}
+
+template <typename Iterator,
+          typename Result = double,
+          typename Summation = std_sum<Iterator, Result>>
+inline void
+prox_entropy_norm(
+    const typename std::iterator_traits<Iterator>::difference_type dim,
+    Iterator first,
+    Iterator last,
+    Iterator aux_first,
+    Iterator aux_last,
+    const Result hi = 1,
+    const Result rhs = 1,
+    const Summation sum = Summation()
+    ) {
+  prox(dim, first, last, aux_first, aux_last,
+    thresholds_entropy_norm<Iterator, Result, Summation>, hi, rhs, sum);
 }
 
 }

@@ -111,6 +111,8 @@ mex_main(
   } else if (prox == "topk_cone_biased") {
     prox_topk_cone_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rho, sum);
+  } else if (prox == "lambert_w_exp") {
+    apply(m, first, last, lambert_w_exp_functor<Data, Result>());
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_prox], err_msg[err_prox], prox.c_str());

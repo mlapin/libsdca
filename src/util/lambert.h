@@ -213,6 +213,15 @@ lambert_w_exp(
   return lambert_w_iter_5(w, std::exp(x - w));
 }
 
+template <typename Data,
+          typename Result = double>
+struct lambert_w_exp_functor {
+  inline Data
+  operator()(Data x) const {
+    return static_cast<Data>(lambert_w_exp(static_cast<Result>(x)));
+  }
+};
+
 }
 
 #endif

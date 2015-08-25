@@ -1,19 +1,24 @@
-clear;
+% clear;
 close all;
 addpath('libsdca-debug');
 rng(0);
 
-if 1
-  d = 100;
-  n = 100;
 
-  opts.prox = 'entropy';
+
+if 1
+  d = 10;
+  n = 10;
+
+%   opts.prox = 'entropy';
 %   opts.prox = 'knapsack';
+  opts.prox = 'lambert_w_exp';
   opts.rhs = 100;
   opts.hi = 10;
 
-  A = 1000*randn(d,n);
+%   A = 1000*randn(d,n);
+  A = -10:0.01:10;
   B = libsdca_prox(A, opts);
+  plot(B)
 %   disp(sum(B));
   
 %   [X,mu,nu] = prox_entropy_cvx(A, opts.hi, opts.rhs);
@@ -28,16 +33,23 @@ if 0
 end
 
 if 0
-  load('data/sun397-cnn.mat');
+  load('data/sun397-fv.mat');
+  Ktrn = Ktrn-1;
+  
+  ix = 1:5*3;
+  Ktrn = Ktrn(ix,ix);
+  Ytrn = Ytrn(ix);
   
 
-  opts.objective = 'l2_hinge_topk';
-  opts.c = 1;
-  opts.k = 10;
+%   opts.objective = 'l2_entropy';
+  opts.objective = 'l2_topk_hinge';
+  opts.C = 1;
+  opts.k = 1;
   opts.gamma = 0;
   opts.epsilon = 1e-5;
-  opts.check_epoch = 5;
-  opts.max_epoch = 100;
+  opts.check_on_start = 0;
+  opts.check_epoch = 1;
+  opts.max_epoch = 10;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';
@@ -45,9 +57,12 @@ if 0
   opts.is_dual = 1;
 
   if opts.is_dual
-    model = libsdca_solve(Xtrn'*Xtrn, Ytrn, opts);
+    if ~exist('Ktrn', 'var')
+      Ktrn = Xtrn'*Xtrn;
+    end
+    model = libsdca_solve(Ktrn, Ytrn, opts);
     disp(model);
-    [~,pred] = max(model.A*Xtrn'*Xtrn);
+    [~,pred] = max(model.A*Ktrn);
     fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
   else
     model = libsdca_solve(Xtrn, Ytrn, opts);

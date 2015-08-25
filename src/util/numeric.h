@@ -144,8 +144,7 @@ log_sum_exp(
   for (first = max + 1; first != last; ++first) {
     sum.add(std::exp(static_cast<Result>(*first - *max)), s, c);
   }
-  typedef typename std::iterator_traits<Iterator>::value_type Data;
-  return *max + static_cast<Data>(std::log1p(s));
+  return static_cast<Result>(*max) + std::log1p(s);
 }
 
 template <typename Iterator,
@@ -160,7 +159,7 @@ log_sum_exp(
   typedef typename std::iterator_traits<Iterator>::value_type Data;
   if (first == last) return 0;
   auto max = std::max_element(first, last);
-  return log_sum_exp(first, last, max, sum);
+  return log_sum_exp<Iterator, Result>(first, last, max, sum);
 }
 
 
