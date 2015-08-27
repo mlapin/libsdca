@@ -164,11 +164,11 @@ solve_sum_w_exp(
 /**
  * Thresholds for the proximal operator of the negative entropy:
  *    prox_{f}(a),
- *    f(x) = <x, ln(x)> + iota_C,
+ *    f(x) = <x, log(x)> + iota_C,
  *    C: <1, x> = rhs, 0 <= x_i <= hi.
  * Partition 'a' and compute the threshold 't'
  * such that the solution to the optimization problem
- *    min_x 0.5 * <x, x> - <a, x> + <x, ln(x)>
+ *    min_x 0.5 * <x, x> - <a, x> + <x, log(x)>
  *    s.t.  <1, x> = rhs, 0 <= x_i <= hi,
  * can be computed as
  *    x_i = hi, if i in U;
@@ -213,11 +213,11 @@ thresholds_entropy(
 /**
  * Thresholds for the proximal operator of the negative entropy minus norm:
  *    prox_{f}(a),
- *    f(x) = <x, ln(x)> - 0.5 * <x, x> + iota_C,
+ *    f(x) = <x, log(x)> - 0.5 * <x, x> + iota_C,
  *    C: <1, x> = rhs, 0 <= x_i <= hi.
  * Partition 'a' and compute the threshold 't'
  * such that the solution to the optimization problem
- *    min_x <x, ln(x)> - <a, x>
+ *    min_x <x, log(x)> - <a, x>
  *    s.t.  <1, x> = rhs, 0 <= x_i <= hi,
  * can be computed as
  *    x_i = hi, if i in U;

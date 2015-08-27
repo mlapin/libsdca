@@ -6,19 +6,22 @@ rng(0);
 
 
 if 1
-  d = 10;
-  n = 10;
+  d = 100;
+  n = 100;
 
 %   opts.prox = 'entropy';
 %   opts.prox = 'knapsack';
-  opts.prox = 'lambert_w_exp';
-  opts.rhs = 100;
-  opts.hi = 10;
+%   opts.prox = 'lambert_w_exp';
+  opts.prox = 'topk_entropy_biased';
+  opts.alpha = 1e-3;
+  opts.k = 10;
+%   opts.rhs = 10;
+%   opts.hi = 10;
 
-%   A = 1000*randn(d,n);
-  A = -10:0.01:10;
+  A = randn(d,n);
+%   A = -10:0.01:10;
   B = libsdca_prox(A, opts);
-  plot(B)
+%   plot(B)
 %   disp(sum(B));
   
 %   [X,mu,nu] = prox_entropy_cvx(A, opts.hi, opts.rhs);

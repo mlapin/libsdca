@@ -67,9 +67,9 @@ exp_approx(
  * Lambert W function of exp(x),
  *    w = W_0(exp(x)).
  * Computed w satisfies the equation
- *    w + ln(w) = x
+ *    w + log(w) = x
  * with a relative error
- *    (w + ln(w) - x) < 4 * eps * max(1, x),
+ *    (w + log(w) - x) < 4 * eps * max(1, x),
  * where eps = 2^(-23).
  **/
 inline float
@@ -113,9 +113,9 @@ lambert_w_exp(
  * Lambert W function of exp(x),
  *    w = W_0(exp(x)).
  * Computed w satisfies the equation
- *    w + ln(w) = x
+ *    w + log(w) = x
  * with a relative error
- *    (w + ln(w) - x) < 4 * eps * max(1, x),
+ *    (w + log(w) - x) < 4 * eps * max(1, x),
  * where eps = 2^(-52).
  **/
 inline double
@@ -168,9 +168,9 @@ lambert_w_exp(
  * Lambert W function of exp(x),
  *    w = W_0(exp(x)).
  * Computed w satisfies the equation
- *    w + ln(w) = x
+ *    w + log(w) = x
  * with a relative error
- *    (w + ln(w) - x) < 4 * eps * max(1, x),
+ *    (w + log(w) - x) < 4 * eps * max(1, x),
  * where eps = 2^(-52).
  * Note: this implementation was optimized for double, not for long double.
  **/

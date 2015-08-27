@@ -70,6 +70,7 @@ mex_main(
   auto hi = mxGetFieldValueOrDefault<Result>(opts, "hi", 1);
   auto rhs = mxGetFieldValueOrDefault<Result>(opts, "rhs", 1);
   auto rho = mxGetFieldValueOrDefault<Result>(opts, "rho", 1);
+  auto alpha = mxGetFieldValueOrDefault<Result>(opts, "alpha", 1);
   auto k = mxGetFieldValueOrDefault<std::ptrdiff_t>(opts, "k", 1);
 
   std::ptrdiff_t m = static_cast<std::ptrdiff_t>(mxGetM(mxX));
@@ -77,6 +78,7 @@ mex_main(
 
   mxCheck<Result>(std::greater_equal<Result>(), rhs, 0, "rhs");
   mxCheck<Result>(std::greater_equal<Result>(), rho, 0, "rho");
+  mxCheck<Result>(std::greater<Result>(), alpha, 0, "alpha");
   mxCheckRange<std::ptrdiff_t>(k, 1, m, "k");
 
   std::vector<Data> aux(static_cast<std::size_t>(m));
@@ -87,10 +89,7 @@ mex_main(
 
   std::string prox = mxGetFieldValueOrDefault(
     opts, "prox", std::string("knapsack"));
-  if (prox == "entropy") {
-    prox_entropy<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, hi, rhs, sum);
-  } else if (prox == "knapsack" || prox == "knapsack_eq") {
+  if (prox == "knapsack" || prox == "knapsack_eq") {
     prox_knapsack_eq<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
   } else if (prox == "knapsack_le") {
@@ -105,6 +104,12 @@ mex_main(
   } else if (prox == "topk_simplex_biased") {
     prox_topk_simplex_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rhs, rho, sum);
+  } else if (prox == "topk_entropy_biased") {
+    prox_topk_entropy_biased<Data*, Result, Summation>(
+      m, first, last, aux_first, aux_last, k, alpha, sum);
+  } else if (prox == "entropy") {
+    prox_entropy<Data*, Result, Summation>(
+      m, first, last, aux_first, aux_last, hi, rhs, sum);
   } else if (prox == "topk_cone") {
     prox_topk_cone<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, sum);

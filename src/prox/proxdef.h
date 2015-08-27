@@ -67,7 +67,7 @@ struct exp_thresholds : thresholds<Iterator, Result> {
     base(__t, __lo, __hi) {}
 
   exp_thresholds(const Result __t, const Result __lo, const Result __hi,
-    const Iterator __first, const Iterator __last) :
+                 const Iterator __first, const Iterator __last) :
     base(__t, __lo, __hi, __first, __last) {}
 };
 
@@ -82,8 +82,26 @@ struct lambert_thresholds : thresholds<Iterator, Result> {
     base(__t, __lo, __hi) {}
 
   lambert_thresholds(const Result __t, const Result __lo, const Result __hi,
-    const Iterator __first, const Iterator __last) :
+                     const Iterator __first, const Iterator __last) :
     base(__t, __lo, __hi, __first, __last) {}
+};
+
+template <typename Iterator,
+          typename Result>
+struct lambert_a_thresholds : lambert_thresholds<Iterator, Result> {
+  typedef lambert_thresholds<Iterator, Result> base;
+  Result a;
+
+  lambert_a_thresholds() : base(), a(1) {}
+
+  lambert_a_thresholds(const Result __a,
+                       const Result __t, const Result __lo, const Result __hi) :
+    base(__t, __lo, __hi), a(__a) {}
+
+  lambert_a_thresholds(const Result __a,
+                       const Result __t, const Result __lo, const Result __hi,
+                       const Iterator __first, const Iterator __last) :
+    base(__t, __lo, __hi, __first, __last), a(__a) {}
 };
 
 template <typename Result>
@@ -153,6 +171,31 @@ make_lambert_thresholds(
     const Iterator last
   ) {
   return lambert_thresholds<Iterator, Result>(t, lo, hi, first, last);
+}
+
+template <typename Result>
+inline lambert_a_thresholds<Result*, Result>
+make_lambert_a_thresholds(
+    const Result a,
+    const Result t,
+    const Result lo,
+    const Result hi
+  ) {
+  return lambert_a_thresholds<Result*, Result>(a, t, lo, hi);
+}
+
+template <typename Iterator,
+          typename Result>
+inline lambert_a_thresholds<Iterator, Result>
+make_lambert_a_thresholds(
+    const Result a,
+    const Result t,
+    const Result lo,
+    const Result hi,
+    const Iterator first,
+    const Iterator last
+  ) {
+  return lambert_a_thresholds<Iterator, Result>(a, t, lo, hi, first, last);
 }
 
 /**
@@ -251,6 +294,23 @@ prox(
   Data hi(static_cast<Data>(thresholds.hi));
   std::for_each(first, last,
     [=](Data& x){ x = std::max(lo, std::min(lambert_w_exp(x - t), hi)); });
+}
+
+template <typename Iterator,
+          typename Result>
+inline void
+prox(
+    const sdca::lambert_a_thresholds<Iterator, Result> thresholds,
+    Iterator first,
+    Iterator last
+    ) {
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  Data a(static_cast<Data>(thresholds.a));
+  Data t(static_cast<Data>(thresholds.t));
+  Data lo(static_cast<Data>(thresholds.lo));
+  Data hi(static_cast<Data>(thresholds.hi));
+  std::for_each(first, last,
+    [=](Data& x){ x = std::max(lo, std::min(a * lambert_w_exp(x - t), hi)); });
 }
 
 template <typename Iterator,
