@@ -222,6 +222,17 @@ struct lambert_w_exp_functor {
   }
 };
 
+/**
+ * Inverse of the Lambert W function of exp(x).
+ * Given w, computes
+ *    x = w + log(w).
+ **/
+template <typename Type>
+inline Type
+lambert_w_exp_inverse(const Type w) {
+  return w + std::log(w);
+}
+
 }
 
 #endif

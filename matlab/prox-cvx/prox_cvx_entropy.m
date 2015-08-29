@@ -9,7 +9,7 @@ rhs = opts.rhs;
 
 [d,n] = size(A);
 
-cvx_begin quiet
+cvx_begin %quiet
   cvx_expert true;
   cvx_precision high;
   variable X(d,n);
