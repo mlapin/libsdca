@@ -112,7 +112,7 @@ solve_sum_w_exp_iterate(
     const Result rhs,
     const Result t0,
     const Summation sum = Summation(),
-    const std::size_t max_num_iter = 32
+    const std::size_t max_num_iter = 16
     ) {
   // A guard to prevent exp underflow which results in division by zero
   Result guard = static_cast<Result>(*std::max_element(first, last))

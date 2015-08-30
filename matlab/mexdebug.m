@@ -1,39 +1,43 @@
 % clear;
 close all;
-addpath('libsdca-debug');
-% addpath('libsdca-release');
+% addpath('libsdca-debug');
+addpath('libsdca-release');
 rng(0);
 
-if usejava('jvm')
+if usejava('jvm') && ~exist('cvx_begin', 'file')
   addpath('prox-cvx');
   run(fullfile('cvx', 'cvx_startup.m'));
+  % SeDuMi is faster, but not as accurate as SDPT3
+  cvx_solver sedumi
 end
 
 
 
 if 1
-  d = 20;
+  d = 10;
   n = 5;
 
-%   opts.prox = 'entropy';
+%   opts.prox = 'entropy';c
 %   opts.prox = 'topk_cone_biased';
 %   opts.prox = 'knapsack';
 %   opts.prox = 'lambert_w_exp';
   opts.prox = 'topk_entropy_biased';
 %   opts.prox = 'topk_simplex_biased';
-  opts.k = 5;
-  opts.alpha = 1e-3;
+  opts.k = 10;
+  opts.alpha = 1e+3;
 %   opts.summation = 'kahan';
 %   opts.rhs = 1;
 %   opts.hi = 1;
 
 %   A = bsxfun(@times, ones(d,n), randn(1,n));
-  A = randn(d,n);
+  A = randn(d,n) + 10*randn(d,n) + 100*randn(d,n) + 1000*randn(d,n);
 %   A = -10:0.01:10;
   B = libsdca_prox(A, opts);
+  
+if exist('cvx_begin', 'file')
   [X,lambda,nu,mu] = prox_cvx_topk_entropy_biased(A, opts);
   loss = @(A,X) 0.5*opts.alpha*(sum(X(:).^2) + sum(sum(X,1).^2)) ...
-    - A(:)'*X(:) - sum(entr(X(:))) - sum(entr(1 - sum(X,1)));
+    - A(:)'*X(:) - sum(entr(X(:))) - sum(entr(1 - min(1,sum(X,1))));
 
 % [X,mu,nu] = prox_cvx_entropy(A, opts);
 % loss = @(A,X) 0.5*sum(sum((A - X).^2)) - sum(sum(entr(X)));
@@ -47,7 +51,7 @@ if 1
   fprintf('     RMSD = %+.16e\n', norm(B-X,'fro')/sqrt(numel(B)));
   sum(B)
   sum(X)
-  
+end  
 %   T = zeros(100,1);
 %   for k=1:100
 %     opts.k = k;
