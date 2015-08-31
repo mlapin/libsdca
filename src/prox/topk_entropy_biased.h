@@ -1,7 +1,7 @@
 #ifndef SDCA_PROX_TOPK_ENTROPY_BIASED_H
 #define SDCA_PROX_TOPK_ENTROPY_BIASED_H
 
-#include "entropy.h"
+#include "util/lambert.h"
 
 namespace sdca {
 
@@ -87,12 +87,12 @@ topk_entropy_biased_kkt_iterate(
     const Summation sum = Summation(),
     const std::size_t max_num_iter = 16
     ) {
-  Result eps = 8 * std::numeric_limits<Result>::epsilon()
+  Result eps = 16 * std::numeric_limits<Result>::epsilon()
       * std::max(static_cast<Result>(1), std::abs(t));
 
   // Guard bounds on s
-  Result lb = 8 * std::numeric_limits<Result>::epsilon();
-  Result ub = 1 - 8 * std::numeric_limits<Result>::epsilon();
+  Result lb = 16 * std::numeric_limits<Result>::epsilon();
+  Result ub = 1 - 16 * std::numeric_limits<Result>::epsilon();
 
   for (std::size_t iter = 0; iter < max_num_iter; ++iter) {
     Result t1(t), s1(s);
@@ -132,7 +132,7 @@ thresholds_topk_entropy_biased(
   Result alpha_k(alpha / K);
 
   Iterator max_el = std::max_element(first, last);
-  Result eps = 8 * std::numeric_limits<Result>::epsilon()
+  Result eps = 16 * std::numeric_limits<Result>::epsilon()
     * std::max(static_cast<Result>(1), static_cast<Result>(*max_el));
 
   // Grow U starting with empty
@@ -144,11 +144,12 @@ thresholds_topk_entropy_biased(
   for (diff_t num_U = 0; num_U < k;) {
     std::swap(*m_first, *max_el);
 
-    // Initial guess
+    // Compute t and s
     t = static_cast<Result>(*m_first); s = static_cast<Result>(0.9);
     topk_entropy_biased_kkt_iterate(m_first, last,
       sum_U_k_alpha, alpha, alpha_k, rho, 1 - rho, t, s, sum);
 
+    // Check feasibility
     Result tt = lambert_w_exp_inverse(alpha_k * s) + t;
     if (static_cast<Result>(*m_first) - eps <= tt && tt <= min_U + eps) {
       break;

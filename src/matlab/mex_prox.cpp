@@ -104,6 +104,9 @@ mex_main(
   } else if (prox == "topk_simplex_biased") {
     prox_topk_simplex_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, rhs, rho, sum);
+  } else if (prox == "topk_entropy") {
+    prox_topk_entropy<Data*, Result, Summation>(
+      m, first, last, aux_first, aux_last, k, sum);
   } else if (prox == "topk_entropy_biased") {
     prox_topk_entropy_biased<Data*, Result, Summation>(
       m, first, last, aux_first, aux_last, k, alpha, sum);

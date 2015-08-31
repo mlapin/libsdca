@@ -207,7 +207,7 @@ thresholds_entropy(
     t = solve_sum_w_exp(u_last, last, r, sum);
   }
 
-  return make_lambert_thresholds(t, lo, hi, u_last, u_last);
+  return make_lambert_thresholds(t, lo, hi, u_last, last);
 }
 
 /**
@@ -256,7 +256,7 @@ thresholds_entropy_norm(
     t = log_sum_exp<Iterator, Result>(u_last, last, sum) - std::log(r);
   }
 
-  return make_exp_thresholds(t, lo, hi, u_last, u_last);
+  return make_exp_thresholds(t, lo, hi, u_last, last);
 }
 
 template <typename Iterator,

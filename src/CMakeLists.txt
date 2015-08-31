@@ -13,6 +13,7 @@ set(PROX_SRCS
   prox/knapsack_le_biased.h
   prox/topk_cone.h
   prox/topk_cone_biased.h
+  prox/topk_entropy.h
   prox/topk_entropy_biased.h
   prox/topk_simplex.h
   prox/topk_simplex_biased.h

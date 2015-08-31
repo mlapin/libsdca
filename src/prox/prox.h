@@ -8,6 +8,7 @@
 #include "knapsack_le_biased.h"
 #include "topk_cone.h"
 #include "topk_cone_biased.h"
+#include "topk_entropy.h"
 #include "topk_entropy_biased.h"
 #include "topk_simplex.h"
 #include "topk_simplex_biased.h"

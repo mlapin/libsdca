@@ -1,30 +1,32 @@
 % clear;
 close all;
-% addpath('libsdca-debug');
-addpath('libsdca-release');
+addpath('libsdca-debug');
+% addpath('libsdca-release');
 rng(0);
 
 if usejava('jvm') && ~exist('cvx_begin', 'file')
   addpath('prox-cvx');
   run(fullfile('cvx', 'cvx_startup.m'));
-  % SeDuMi is faster, but not as accurate as SDPT3
+  % SeDuMi is usually faster, but SDPT3 may be more accurate
   cvx_solver sedumi
+%   cvx_solver sdpt3;
 end
 
 
 
 if 1
   d = 10;
-  n = 5;
+  n = 10;
 
 %   opts.prox = 'entropy';c
 %   opts.prox = 'topk_cone_biased';
 %   opts.prox = 'knapsack';
 %   opts.prox = 'lambert_w_exp';
-  opts.prox = 'topk_entropy_biased';
+  opts.prox = 'topk_entropy';
+%   opts.prox = 'topk_entropy_biased';
 %   opts.prox = 'topk_simplex_biased';
-  opts.k = 10;
-  opts.alpha = 1e+3;
+  opts.k = 5;
+%   opts.alpha = 1e+3;
 %   opts.summation = 'kahan';
 %   opts.rhs = 1;
 %   opts.hi = 1;
@@ -35,9 +37,7 @@ if 1
   B = libsdca_prox(A, opts);
   
 if exist('cvx_begin', 'file')
-  [X,lambda,nu,mu] = prox_cvx_topk_entropy_biased(A, opts);
-  loss = @(A,X) 0.5*opts.alpha*(sum(X(:).^2) + sum(sum(X,1).^2)) ...
-    - A(:)'*X(:) - sum(entr(X(:))) - sum(entr(1 - min(1,sum(X,1))));
+  [X,loss] = prox_cvx(A, opts);
 
 % [X,mu,nu] = prox_cvx_entropy(A, opts);
 % loss = @(A,X) 0.5*sum(sum((A - X).^2)) - sum(sum(entr(X)));
