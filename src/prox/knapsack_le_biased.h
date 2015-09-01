@@ -1,7 +1,5 @@
 #ifndef SDCA_PROX_KNAPSACK_LE_BIASED_H
 #define SDCA_PROX_KNAPSACK_LE_BIASED_H
-#include <iostream>
-#include <functional>
 
 #include "knapsack_le.h"
 

@@ -172,7 +172,7 @@ log_sum_exp(
  * Compute log(\sum_i exp(a_i))
  * given a max, an iterator to the maximum over a_i.
  * Store result in lse;
- * return \sum_i exp(a_i - *max).
+ * return \sum_i exp(a_i - *max) over i \neq *max.
  **/
 template <typename Iterator,
           typename Result,
@@ -199,7 +199,7 @@ log_sum_exp(
 /**
  * Compute log(\sum_i exp(a_i)).
  * Store result in lse;
- * return \sum_i exp(a_i - *max).
+ * return \sum_i exp(a_i - *max) over i \neq *max.
  **/
 template <typename Iterator,
           typename Result,
@@ -265,7 +265,7 @@ log_1_sum_exp(
  * in a single pass over a_i
  * given a max, an iterator to the maximum over a_i.
  * Store results in lse and lse1;
- * return \sum_i exp(a_i - *max).
+ * return \sum_i exp(a_i - *max) over i \neq *max.
  **/
 template <typename Iterator,
           typename Result,
@@ -299,7 +299,7 @@ log_sum_exp_1(
  *    log(1 + \sum_i exp(a_i))
  * in a single pass over a_i.
  * Store results in lse and lse1;
- * return \sum_i exp(a_i - *max).
+ * return \sum_i exp(a_i - *max) over i \neq *max.
  **/
 template <typename Iterator,
           typename Result,

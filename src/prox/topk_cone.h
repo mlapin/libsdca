@@ -1,7 +1,6 @@
 #ifndef SDCA_PROX_TOPK_CONE_H
 #define SDCA_PROX_TOPK_CONE_H
 
-#include <iostream>
 #include "proxdef.h"
 
 namespace sdca {

@@ -1,6 +1,7 @@
 #ifndef SDCA_PROX_TOPK_ENTROPY_BIASED_H
 #define SDCA_PROX_TOPK_ENTROPY_BIASED_H
 
+#include "proxdef.h"
 #include "util/lambert.h"
 
 namespace sdca {

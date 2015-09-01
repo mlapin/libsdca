@@ -1,4 +1,4 @@
-% clear;
+clear;
 close all;
 addpath('libsdca-debug');
 % addpath('libsdca-release');
@@ -18,14 +18,14 @@ if 1
   d = 10;
   n = 10;
 
-%   opts.prox = 'entropy';c
+%   opts.prox = 'entropy';
 %   opts.prox = 'topk_cone_biased';
 %   opts.prox = 'knapsack';
 %   opts.prox = 'lambert_w_exp';
   opts.prox = 'topk_entropy';
 %   opts.prox = 'topk_entropy_biased';
 %   opts.prox = 'topk_simplex_biased';
-  opts.k = 5;
+  opts.k = 10;
 %   opts.alpha = 1e+3;
 %   opts.summation = 'kahan';
 %   opts.rhs = 1;
@@ -37,12 +37,13 @@ if 1
   B = libsdca_prox(A, opts);
   
 if exist('cvx_begin', 'file')
-  [X,loss] = prox_cvx(A, opts);
+  [X,info] = prox_cvx(A, opts);
 
 % [X,mu,nu] = prox_cvx_entropy(A, opts);
 % loss = @(A,X) 0.5*sum(sum((A - X).^2)) - sum(sum(entr(X)));
   
   disp(opts);
+  loss = info.loss;
   fprintf('Loss (lower is better):\n');
   fprintf('      lib = %+.16e\n', loss(A,B));
   fprintf('      cvx = %+.16e\n', loss(A,X));
@@ -51,6 +52,8 @@ if exist('cvx_begin', 'file')
   fprintf('     RMSD = %+.16e\n', norm(B-X,'fro')/sqrt(numel(B)));
   sum(B)
   sum(X)
+  k=opts.k;
+  
 end  
 %   T = zeros(100,1);
 %   for k=1:100

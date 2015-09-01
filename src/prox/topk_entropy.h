@@ -1,6 +1,7 @@
 #ifndef SDCA_PROX_TOPK_ENTROPY_H
 #define SDCA_PROX_TOPK_ENTROPY_H
 
+#include "proxdef.h"
 #include "util/lambert.h"
 #include "util/numeric.h"
 
@@ -39,7 +40,7 @@ thresholds_topk_entropy(
   }
 
   // k > 1 and U is not empty
-  Result min_U(0), sum_U(0), sum_U_comp(0), k_u(K), z(1);
+  Result min_U(0), sum_U(0), sum_U_comp(0), k_u(K), z(0);
   Iterator m_first = first;
   typedef typename std::iterator_traits<Iterator>::difference_type diff_t;
   for (diff_t num_U = 1; num_U < k; ++num_U) {
@@ -50,7 +51,6 @@ thresholds_topk_entropy(
     max_el = std::max_element(m_first, last);
 
     z = log_sum_exp(m_first, last, max_el, log_z, sum);
-    z *= std::exp(static_cast<Result>(*max_el)); // may overflow -> +Inf
 
     // Check feasibility
     Result tt = log_z - std::log(k_u);
@@ -59,12 +59,11 @@ thresholds_topk_entropy(
     }
   }
 
-  Result rho_1 = k_u / K;
-  Result A = k_u / z; // may underflow -> 0
-  A = std::pow(A, rho_1) * std::exp(-sum_U / K) / K;
+  Result tmp = ((K - k_u) * log_z + k_u * std::log(k_u) - sum_U) / K;
+  Result B = std::exp(tmp - static_cast<Result>(*max_el)) / K;
+  t = static_cast<Result>(*max_el) + std::log1p(z + B) - std::log(k_u / K);
+  hi = (1 + z) / ((1 + z + B) * K);
 
-  t = log_z + std::log1p(A) - std::log(rho_1);
-  hi = 1 / (1 + A) / K;
   return make_exp_thresholds(t, lo, hi, m_first, last);
 }
 
