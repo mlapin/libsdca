@@ -393,10 +393,10 @@ mex_main(
   auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
   mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
 
-  if (objective == "l2_entropy") {
+  if (objective == "l2_entropy_topk") {
     add_field_scalar("k", k, model);
     make_solver_solve(model,
-      l2_entropy<Data, Result, Summation>(k, C, sum));
+      l2_entropy_topk<Data, Result, Summation>(k, C, sum));
   } else if (objective == "l2_topk_hinge") {
     add_field_scalar("k", k, model);
     add_field_scalar("gamma", gamma, model);

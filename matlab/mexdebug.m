@@ -15,7 +15,7 @@ end
 
 
 
-if 1
+if 0
   d = 10;
   n = 10;
 
@@ -78,21 +78,21 @@ if 0
   runtestcases_2
 end
 
-if 0
+if 1
   load('data/sun397-fv.mat');
   Ktrn = Ktrn-1;
   
-  ix = 1:5*3;
-  Ktrn = Ktrn(ix,ix);
-  Ytrn = Ytrn(ix);
+%   ix = 1:5*3;
+%   Ktrn = Ktrn(ix,ix);
+%   Ytrn = Ytrn(ix);
   
 
-%   opts.objective = 'l2_entropy';
-  opts.objective = 'l2_topk_hinge';
+  opts.objective = 'l2_entropy_topk';
+%   opts.objective = 'l2_topk_hinge';
   opts.C = 1;
-  opts.k = 1;
+  opts.k = 10;
   opts.gamma = 0;
-  opts.epsilon = 1e-5;
+  opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
   opts.max_epoch = 10;
