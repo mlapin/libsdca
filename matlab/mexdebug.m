@@ -4,7 +4,8 @@ addpath('libsdca-debug');
 % addpath('libsdca-release');
 rng(0);
 
-if usejava('jvm') && ~exist('cvx_begin', 'file')
+if usejava('jvm') && ~exist('cvx_begin', 'file') ...
+    && exist(fullfile('cvx', 'cvx_startup.m'), 'file')
   addpath('prox-cvx');
   run(fullfile('cvx', 'cvx_startup.m'));
   % SeDuMi is usually faster, but SDPT3 may be more accurate
