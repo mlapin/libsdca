@@ -59,7 +59,6 @@ struct l2_topk_hinge {
     sdca_blas_axpby(num_tasks, a, scores, -1, variables);
 
     // Place ground truth at 0
-    std::swap(*scores, scores[label]);
     std::swap(*variables, variables[label]);
     Data *first = variables + 1, *last = variables + num_tasks;
 
@@ -186,7 +185,6 @@ struct l2_topk_hinge_smooth {
     sdca_blas_axpby(num_tasks, a, scores, -static_cast<Data>(rho), variables);
 
     // Place ground truth at 0
-    std::swap(*scores, scores[label]);
     std::swap(*variables, variables[label]);
     Data *first = variables + 1, *last = variables + num_tasks;
 
@@ -226,6 +224,8 @@ struct l2_topk_hinge_smooth {
 
     Data a = static_cast<Data>(1) - scores[label];
     std::for_each(scores, scores + num_tasks, [=](Data &x){ x += a; });
+
+    // "half swap" ground truth with 0 (gt itself is 0 and is discarded)
     scores[label] = scores[0];
     Data *first = scores + 1, *last = scores + num_tasks;
 

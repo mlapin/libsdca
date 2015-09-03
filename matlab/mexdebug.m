@@ -88,16 +88,16 @@ if 1
 %   Ytrn = Ytrn(ix);
   
 
-%   opts.objective = 'l2_entropy_topk';
+  opts.objective = 'l2_entropy_topk';
 %   opts.objective = 'l2_topk_hinge';
-  opts.objective = 'l2_hinge_topk';
+%   opts.objective = 'l2_hinge_topk';
   opts.C = 1;
-  opts.k = 396;
+  opts.k = 20;
   opts.gamma = 2;
   opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
-  opts.max_epoch = 10;
+  opts.max_epoch = 50;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';
