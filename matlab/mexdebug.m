@@ -79,8 +79,8 @@ if 0
 end
 
 if 1
-  load('data/sun397-cnn.mat');
-%   load('data/sun397-fv.mat');
+%   load('data/sun397-cnn.mat');
+  load('data/sun397-fv.mat');
 %   Ktrn = Ktrn-1;
   
 %   ix = 1:5*3;
@@ -92,12 +92,12 @@ if 1
 %   opts.objective = 'l2_topk_hinge';
   opts.objective = 'l2_hinge_topk';
   opts.C = 1;
-  opts.k = 1;
-  opts.gamma = 1;
-  opts.epsilon = 1e-3;
+  opts.k = 396;
+  opts.gamma = 2;
+  opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
-  opts.max_epoch = 20;
+  opts.max_epoch = 10;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';

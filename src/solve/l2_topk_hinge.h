@@ -50,7 +50,7 @@ struct l2_topk_hinge {
       ) const {
     // Variables update proceeds in 3 steps:
     // 1. Prepare a vector to project in 'variables'.
-    // 2. Perform the proximal step (projection onto the feasible set).
+    // 2. Perform the proximal step.
     // 3. Recover the updated dual variables.
     Result lo = 0, hi = c_div_k, rhs = c, rho = 1;
 
@@ -58,27 +58,26 @@ struct l2_topk_hinge {
     Data a = norm2_inv;
     sdca_blas_axpby(num_tasks, a, scores, -1, variables);
 
-    // Place ground truth at the back
-    Data *scores_back = scores + num_tasks - 1;
-    Data *variables_back = variables + num_tasks - 1;
-    std::swap(*scores_back, scores[label]);
-    std::swap(*variables_back, variables[label]);
+    // Place ground truth at 0
+    std::swap(*scores, scores[label]);
+    std::swap(*variables, variables[label]);
+    Data *first = variables + 1, *last = variables + num_tasks;
 
     // Complete step 1.
-    a -= *variables_back;
-    std::for_each(variables, variables_back, [&](Data &x){ x += a; });
+    a -= *variables;
+    std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    prox_knapsack_le_biased(variables, variables_back,
-      scores, scores_back, lo, hi, rhs, rho, sum);
+    prox_knapsack_le_biased(first, last,
+      scores + 1, scores + num_tasks, lo, hi, rhs, rho, sum);
 
     // 3. Recover the updated variables
-    *variables_back = static_cast<Data>(std::min(rhs,
-      sum(variables, variables_back, static_cast<Result>(0)) ));
-    std::for_each(variables, variables_back, [](Data &x){ x = -x; });
+    *variables = static_cast<Data>(std::min(rhs,
+      sum(first, last, static_cast<Result>(0)) ));
+    std::for_each(first, last, [](Data &x){ x = -x; });
 
     // Put back the ground truth variable
-    std::swap(*variables_back, variables[label]);
+    std::swap(*variables, variables[label]);
   }
 
   void regularized_loss(
@@ -95,7 +94,7 @@ struct l2_topk_hinge {
     dual_loss = static_cast<Result>(variables[label]);
 
     Data a = static_cast<Data>(1) - scores[label];
-    std::for_each(scores, scores + num_tasks, [&](Data &x){ x += a; });
+    std::for_each(scores, scores + num_tasks, [=](Data &x){ x += a; });
     scores[label] = static_cast<Data>(0);
 
     // Find k largest elements
@@ -176,7 +175,7 @@ struct l2_topk_hinge_smooth {
       ) const {
     // Variables update proceeds in 3 steps:
     // 1. Prepare a vector to project in 'variables'.
-    // 2. Perform the proximal step (projection onto the feasible set).
+    // 2. Perform the proximal step.
     // 3. Recover the updated dual variables.
     Result lo = 0, hi = c_div_k, rhs = c;
     Result rho = static_cast<Result>(1) /
@@ -186,27 +185,26 @@ struct l2_topk_hinge_smooth {
     Data a = norm2_inv * static_cast<Data>(rho);
     sdca_blas_axpby(num_tasks, a, scores, -static_cast<Data>(rho), variables);
 
-    // Place ground truth at the back
-    Data *scores_back = scores + num_tasks - 1;
-    Data *variables_back = variables + num_tasks - 1;
-    std::swap(*scores_back, scores[label]);
-    std::swap(*variables_back, variables[label]);
+    // Place ground truth at 0
+    std::swap(*scores, scores[label]);
+    std::swap(*variables, variables[label]);
+    Data *first = variables + 1, *last = variables + num_tasks;
 
     // Complete step 1.
-    a -= *variables_back;
-    std::for_each(variables, variables_back, [&](Data &x){ x += a; });
+    a -= *variables;
+    std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    prox_knapsack_le_biased(variables, variables_back,
-      scores, scores_back, lo, hi, rhs, rho, sum);
+    prox_knapsack_le_biased(first, last,
+      scores + 1, scores + num_tasks, lo, hi, rhs, rho, sum);
 
     // 3. Recover the updated variables
-    *variables_back = static_cast<Data>(std::min(rhs,
-      sum(variables, variables_back, static_cast<Result>(0)) ));
-    std::for_each(variables, variables_back, [](Data &x){ x = -x; });
+    *variables = static_cast<Data>(std::min(rhs,
+      sum(first, last, static_cast<Result>(0)) ));
+    std::for_each(first, last, [](Data &x){ x = -x; });
 
     // Put back the ground truth variable
-    std::swap(*variables_back, variables[label]);
+    std::swap(*variables, variables[label]);
   }
 
   void regularized_loss(
@@ -227,15 +225,15 @@ struct l2_topk_hinge_smooth {
       sdca_blas_dot(num_tasks, variables, variables)));
 
     Data a = static_cast<Data>(1) - scores[label];
-    std::for_each(scores, scores + num_tasks, [&](Data &x){ x += a; });
-    scores[label] = static_cast<Data>(0);
+    std::for_each(scores, scores + num_tasks, [=](Data &x){ x += a; });
+    scores[label] = scores[0];
+    Data *first = scores + 1, *last = scores + num_tasks;
 
     // loss = 1/gamma (<p,h> - 1/2 <p,p>), p =prox_{k,gamma}(h), h = c + a
     Result lo = 0, hi = gamma_div_k, rhs = gamma;
-    auto t = thresholds_knapsack_le(
-      scores, scores + num_tasks, lo, hi, rhs, sum);
-    Result ph = dot_prox(t, scores, scores + num_tasks, sum);
-    Result pp = dot_prox_prox(t, scores, scores + num_tasks, sum);
+    auto t = thresholds_knapsack_le(first, last, lo, hi, rhs, sum);
+    Result ph = dot_prox(t, first, last, sum);
+    Result pp = dot_prox_prox(t, first, last, sum);
 
     // (division by gamma happens later)
     primal_loss = ph - static_cast<Result>(0.5) * pp;
