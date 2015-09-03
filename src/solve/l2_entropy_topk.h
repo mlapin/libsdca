@@ -40,7 +40,7 @@ struct l2_entropy_topk {
     std::ostringstream str;
     str << "summation = " << sum.name() << ", "
       "precision = " << type_traits<Result>::name() << ", "
-      "data = " << type_traits<Data>::name();
+      "data_precision = " << type_traits<Data>::name();
     return str.str();
   }
 
@@ -97,7 +97,7 @@ struct l2_entropy_topk {
       sdca_blas_dot(num_tasks, scores, variables));
 
     Result comp(0), zero(0), aj(static_cast<Result>(variables[label]));
-    dual_loss = (aj < c) ? - (c - aj) * std::log(c - aj) : zero;
+    dual_loss = (aj < c) ? - (c - aj) * std::log(1 - aj / c) : zero;
     std::for_each(variables, variables + num_tasks, [&](const Result a){
       sum.add((a < zero) ? a * std::log(-a) : zero, dual_loss, comp); });
     sum.add(aj * log_c, dual_loss, comp);
@@ -110,8 +110,6 @@ struct l2_entropy_topk {
       scores, scores + num_tasks - 1, k, sum);
     if (t.first == scores) {
       primal_loss = t.t; // equals to log(1 + \sum exp scores)
-    } else if (t.hi < std::numeric_limits<Result>::epsilon()) {
-      primal_loss = 0;
     } else {
       Result num_hi = static_cast<Result>(std::distance(scores, t.first));
       Result sum_hi = sum(scores, t.first, static_cast<Result>(0));

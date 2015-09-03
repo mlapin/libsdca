@@ -37,7 +37,7 @@ public:
       << "problem: " << __problem.to_string() << std::endl
       << "objective: " << __objective.to_string() << std::endl
       << "stopping criteria: " << __criteria.to_string() << std::endl;
-    LOG_DEBUG << "precision: " << __objective.precision_string()  << std::endl;
+    LOG_DEBUG << __objective.precision_string()  << std::endl;
   }
 
 protected:

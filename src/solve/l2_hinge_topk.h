@@ -38,7 +38,7 @@ struct l2_hinge_topk {
     std::ostringstream str;
     str << "summation = " << sum.name() << ", "
       "precision = " << type_traits<Result>::name() << ", "
-      "data = " << type_traits<Data>::name();
+      "data_precision = " << type_traits<Data>::name();
     return str.str();
   }
 
@@ -160,7 +160,7 @@ struct l2_hinge_topk_smooth {
     std::ostringstream str;
     str << "summation = " << sum.name() << ", "
       "precision = " << type_traits<Result>::name() << ", "
-      "data = " << type_traits<Data>::name();
+      "data_precision = " << type_traits<Data>::name();
     return str.str();
   }
 

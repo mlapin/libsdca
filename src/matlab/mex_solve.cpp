@@ -380,11 +380,15 @@ mex_main(
 
   auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
   mxCheck<Result>(std::greater<Result>(), c, 0, "c");
-  add_field_scalar("c", c, model);
 
   auto C = mxGetFieldValueOrDefault<Result>(opts, "C",
-    c/static_cast<Result>(model.problem.num_examples));
+    c / static_cast<Result>(model.problem.num_examples));
   mxCheck<Result>(std::greater<Result>(), C, 0, "C");
+
+  if (C != c / static_cast<Result>(model.problem.num_examples)) {
+    c = C * static_cast<Result>(model.problem.num_examples);
+  }
+  add_field_scalar("c", c, model);
   add_field_scalar("C", C, model);
 
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);

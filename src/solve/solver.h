@@ -169,9 +169,9 @@ protected:
     result_type dual_before = dual_;
     compute_objectives();
     result_type max = std::max(std::abs(primal_), std::abs(dual_));
-    if (gap_ <= static_cast<result_type>(criteria_.epsilon) * max) {
+    if (gap_ <= max * static_cast<result_type>(criteria_.epsilon)) {
       status_ = solver_status::solved;
-      if (gap_ < -std::numeric_limits<result_type>::epsilon()) {
+      if (gap_ < - max * std::numeric_limits<result_type>::epsilon()) {
         status_ = solver_status::failed;
         LOG_DEBUG << "  (warning) "
           "failed due to negative duality gap: " << gap_ << std::endl;
