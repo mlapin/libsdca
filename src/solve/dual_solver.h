@@ -28,7 +28,6 @@ public:
       labels_(__problem.labels),
       gram_matrix_(__problem.data),
       dual_variables_(__problem.dual_variables),
-      norm_inv_(__problem.num_examples),
       scores_(__problem.num_tasks),
       N(static_cast<blas_int>(__problem.num_examples)),
       T(static_cast<blas_int>(__problem.num_tasks))
@@ -55,27 +54,17 @@ protected:
   data_type* dual_variables_;
 
   // Other
-  std::vector<data_type> norm_inv_;
   std::vector<data_type> scores_;
 
   // BLAS (avoid static casts)
   const blas_int N;
   const blas_int T;
 
-  // Initialization
-  void initialize() override {
-    base::initialize();
-    for (size_type i = 0; i < num_examples_; ++i) {
-      const data_type* K_i = gram_matrix_ + num_examples_ * i;
-      norm_inv_[i] = (K_i[i] > 0) ? static_cast<data_type>(1) / K_i[i] : 0;
-    }
-  }
-
   void solve_example(const size_type i) override {
-    if (norm_inv_[i] <= 0) return;
-
     // Let K_i = i'th column of the Gram matrix
     const data_type* K_i = gram_matrix_ + num_examples_ * i;
+
+    if (K_i[i] <= 0) return;
 
     // Let scores = A * K_i = W' * x_i
     sdca_blas_gemv(T, N, dual_variables_, K_i, &scores_[0]);
@@ -86,7 +75,7 @@ protected:
     std::swap(scores_[0], scores_[labels_[i]]);
 
     // Update dual variables
-    objective_.update_variables(T, norm_inv_[i], variables, &scores_[0]);
+    objective_.update_variables(T, K_i[i], variables, &scores_[0]);
 
     // Put back the ground truth variable
     std::swap(variables[0], variables[labels_[i]]);
@@ -104,10 +93,10 @@ protected:
     result_type d_loss_comp = 0;
 
     for (size_type i = 0; i < num_examples_; ++i) {
-      if (norm_inv_[i] <= 0) continue;
-
       // Let K_i = i'th column of the Gram matrix
       const data_type* K_i = gram_matrix_ + num_examples_ * i;
+
+      if (K_i[i] <= 0) return;
 
       // Let scores = A * K_i = W' * x_i
       sdca_blas_gemv(T, N, dual_variables_, K_i, &scores_[0]);

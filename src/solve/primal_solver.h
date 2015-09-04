@@ -30,7 +30,7 @@ public:
       features_(__problem.data),
       primal_variables_(__problem.primal_variables),
       dual_variables_(__problem.dual_variables),
-      norm_inv_(__problem.num_examples),
+      norm2_(__problem.num_examples),
       scores_(__problem.num_tasks),
       vars_before_(__problem.num_tasks),
       diff_tolerance_(std::numeric_limits<data_type>::epsilon()),
@@ -62,7 +62,7 @@ protected:
   data_type* dual_variables_;
 
   // Other
-  std::vector<data_type> norm_inv_;
+  std::vector<data_type> norm2_;
   std::vector<data_type> scores_;
   std::vector<data_type> vars_before_;
   const data_type diff_tolerance_;
@@ -77,13 +77,12 @@ protected:
     base::initialize();
     for (size_type i = 0; i < num_examples_; ++i) {
       const data_type* x_i = features_ + num_dimensions_ * i;
-      data_type a = sdca_blas_dot(D, x_i, x_i);
-      norm_inv_[i] = (a > 0) ? static_cast<data_type>(1) / a : 0;
+      norm2_[i] = sdca_blas_dot(D, x_i, x_i);
     }
   }
 
   void solve_example(const size_type i) override {
-    if (norm_inv_[i] <= 0) return;
+    if (norm2_[i] <= 0) return;
 
     // Let x_i = i'th feature vector
     const data_type* x_i = features_ + num_dimensions_ * i;
@@ -98,7 +97,7 @@ protected:
     std::swap(scores_[0], scores_[labels_[i]]);
 
     // Update dual variables
-    objective_.update_variables(T, norm_inv_[i], variables, &scores_[0]);
+    objective_.update_variables(T, norm2_[i], variables, &scores_[0]);
 
     // Put back the ground truth variable
     std::swap(variables[0], variables[labels_[i]]);
@@ -128,7 +127,7 @@ protected:
     result_type d_loss_comp = 0;
 
     for (size_type i = 0; i < num_examples_; ++i) {
-      if (norm_inv_[i] <= 0) continue;
+      if (norm2_[i] <= 0) continue;
 
       // Let x_i = i'th feature vector
       const data_type* x_i = features_ + num_dimensions_ * i;

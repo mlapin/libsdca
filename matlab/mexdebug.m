@@ -93,11 +93,11 @@ if 1
 %   opts.objective = 'l2_hinge_topk';
   opts.C = 1;
   opts.k = 2;
-  opts.gamma = 1;
+  opts.gamma = 2;
   opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
-  opts.max_epoch = 50;
+  opts.max_epoch = 30;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';

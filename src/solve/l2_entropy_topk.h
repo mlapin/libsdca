@@ -46,16 +46,15 @@ struct l2_entropy_topk {
 
   void update_variables(
       const blas_int num_tasks,
-      const Data norm2_inv,
+      const Data norm2,
       Data* variables,
       Data* scores
       ) const {
     Data *first(variables + 1), *last(variables + num_tasks);
-    Result norm2(1 / static_cast<Result>(norm2_inv));
-    Result alpha(c / static_cast<Result>(norm2_inv));
+    Result alpha(c * static_cast<Result>(norm2));
 
     // 1. Prepare a vector to project in 'variables'.
-    sdca_blas_axpby(num_tasks, 1, scores, -static_cast<Data>(norm2), variables);
+    sdca_blas_axpby(num_tasks, 1, scores, -norm2, variables);
     Data a(-variables[0]);
     std::for_each(first, last, [=](Data &x){ x += a; });
 

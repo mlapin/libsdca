@@ -43,7 +43,7 @@ struct l2_topk_hinge {
 
   void update_variables(
       const blas_int num_tasks,
-      const Data norm2_inv,
+      const Data norm2,
       Data* variables,
       Data* scores
       ) const {
@@ -51,7 +51,7 @@ struct l2_topk_hinge {
     Result lo(0), hi(c_div_k), rhs(c), rho(1);
 
     // 1. Prepare a vector to project in 'variables'.
-    Data a(norm2_inv);
+    Data a(1 / norm2);
     sdca_blas_axpby(num_tasks, a, scores, -1, variables);
     a -= variables[0];
     std::for_each(first, last, [=](Data &x){ x += a; });
@@ -152,16 +152,16 @@ struct l2_topk_hinge_smooth {
 
   void update_variables(
       const blas_int num_tasks,
-      const Data norm2_inv,
+      const Data norm2,
       Data* variables,
       Data* scores
       ) const {
     Data *first(variables + 1), *last(variables + num_tasks);
-    Result lo(0), hi(c_div_k), rhs(c);
-    Result rho(1 / (1 + gamma_div_c * static_cast<Result>(norm2_inv)));
+    Result lo(0), hi(c_div_k), rhs(c), rho(static_cast<Result>(norm2) /
+      (static_cast<Result>(norm2) + gamma_div_c));
 
     // 1. Prepare a vector to project in 'variables'.
-    Data a(norm2_inv * static_cast<Data>(rho));
+    Data a(static_cast<Data>(rho) / norm2);
     sdca_blas_axpby(num_tasks, a, scores, -static_cast<Data>(rho), variables);
     a -= variables[0];
     std::for_each(first, last, [=](Data &x){ x += a; });
