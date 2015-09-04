@@ -97,12 +97,12 @@ if 1
   opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
-  opts.max_epoch = 30;
+  opts.max_epoch = 1;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';
   opts.log_format = 'long_e';
-  opts.is_dual = 0;
+  opts.is_dual = 1;
 
   if opts.is_dual
     if ~exist('Ktrn', 'var')

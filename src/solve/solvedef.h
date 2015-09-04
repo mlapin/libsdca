@@ -4,6 +4,7 @@
 #include <chrono>
 #include <limits>
 #include <sstream>
+#include <vector>
 
 namespace sdca {
 
@@ -36,12 +37,12 @@ typedef typename std::size_t size_type;
 typedef typename std::ptrdiff_t difference_type;
 
 template <typename Data>
-struct problem_data {
+struct dataset {
   typedef Data data_type;
   size_type num_dimensions = 0;
   size_type num_examples = 0;
   size_type num_tasks = 0;
-  size_type* labels = nullptr;
+  std::vector<size_type> labels;
   data_type* data = nullptr;
   data_type* primal_variables = nullptr;
   data_type* dual_variables = nullptr;

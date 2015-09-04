@@ -85,13 +85,12 @@ printHelp() {
 
 template <typename Data,
           typename Result>
-struct solution {
+struct solver_context {
   typedef Data data_type;
   typedef Result result_type;
   bool is_dual = false;
-  problem_data<Data> problem;
   stopping_criteria criteria;
-  std::vector<size_type> labels;
+  std::vector<dataset<Data>> datasets;
   std::vector<std::pair<const char*, const mxArray*>> fields;
 };
 
@@ -101,9 +100,9 @@ inline void
 add_field(
     const char* name,
     const mxArray* value,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
-  model.fields.emplace_back(std::make_pair(name, value));
+  context.fields.emplace_back(std::make_pair(name, value));
 }
 
 template <typename Data,
@@ -113,9 +112,9 @@ inline void
 add_field_scalar(
     const char* name,
     const Type value,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
-  model.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
+  context.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
 }
 
 template <typename Data,
@@ -126,10 +125,10 @@ add_field_opts_value(
     const mxArray* opts,
     const char* name,
     Type& value,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
   mxSetFieldValue(opts, name, value);
-  model.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
+  context.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
 }
 
 template <typename Data,
@@ -141,7 +140,7 @@ add_field_opts_matrix(
     const size_type m,
     const size_type n,
     const mxClassID class_id,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
   mxArray *pa = mxGetField(opts, 0, name);
   if (pa != nullptr) {
@@ -151,7 +150,7 @@ add_field_opts_matrix(
     pa = mxCreateNumericMatrix(m, n, class_id, mxREAL);
   }
   mxCheckCreated(pa, name);
-  add_field(name, pa, model);
+  add_field(name, pa, context);
   return pa;
 }
 
@@ -160,7 +159,7 @@ template <typename Data,
 inline void
 add_states(
     const std::vector<state<Result>>& states,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
   const char* names[] =
     {"epoch", "cpu_time", "wall_time", "primal", "dual", "gap"};
@@ -176,7 +175,7 @@ add_states(
     mxSetFieldByNumber(pa, i, 5, mxCreateScalar(state.gap));
     ++i;
   }
-  model.fields.emplace_back(
+  context.fields.emplace_back(
     std::make_pair("states", const_cast<const mxArray*>(pa)));
 }
 
@@ -186,18 +185,18 @@ template <typename Solver,
 inline void
 solve_model(
     Solver solver,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
   solver.solve();
-  add_field("status", mxCreateString(solver.status_name().c_str()), model);
-  add_field_scalar("primal", solver.primal(), model);
-  add_field_scalar("dual", solver.dual(), model);
-  add_field_scalar("absolute_gap", solver.absolute_gap(), model);
-  add_field_scalar("relative_gap", solver.relative_gap(), model);
-  add_field_scalar("epoch", solver.epoch(), model);
-  add_field_scalar("cpu_time", solver.cpu_time(), model);
-  add_field_scalar("wall_time", solver.wall_time(), model);
-  add_states(solver.states(), model);
+  add_field("status", mxCreateString(solver.status_name().c_str()), context);
+  add_field_scalar("primal", solver.primal(), context);
+  add_field_scalar("dual", solver.dual(), context);
+  add_field_scalar("absolute_gap", solver.absolute_gap(), context);
+  add_field_scalar("relative_gap", solver.relative_gap(), context);
+  add_field_scalar("epoch", solver.epoch(), context);
+  add_field_scalar("cpu_time", solver.cpu_time(), context);
+  add_field_scalar("wall_time", solver.wall_time(), context);
+  add_states(solver.states(), context);
 }
 
 template <typename Objective,
@@ -205,15 +204,15 @@ template <typename Objective,
           typename Result>
 inline void
 make_solver_solve(
-    solution<Data, Result>& model,
-    Objective objective
+    solver_context<Data, Result>& context,
+    const Objective& objective
   ) {
-  if (model.is_dual) {
+  if (context.is_dual) {
     solve_model(dual_solver<Objective, Data, Result>(
-      model.problem, model.criteria, objective), model);
+      context.datasets.front(), context.criteria, objective), context);
   } else {
     solve_model(primal_solver<Objective, Data, Result>(
-      model.problem, model.criteria, objective), model);
+      context.datasets.front(), context.criteria, objective), context);
   }
 }
 
@@ -222,7 +221,7 @@ template <typename Data,
 inline void
 set_logging_options(
     const mxArray* opts,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
   std::string log_level = mxGetFieldValueOrDefault(
     opts, "log_level", std::string("info"));
@@ -254,8 +253,8 @@ set_logging_options(
       err_id[err_log_format], err_msg[err_log_format], log_format.c_str());
   }
 
-  add_field("log_level", mxCreateString(log_level.c_str()), model);
-  add_field("log_format", mxCreateString(log_format.c_str()), model);
+  add_field("log_level", mxCreateString(log_level.c_str()), context);
+  add_field("log_format", mxCreateString(log_format.c_str()), context);
 }
 
 template <typename Data,
@@ -263,15 +262,15 @@ template <typename Data,
 inline void
 set_stopping_criteria(
     const mxArray* opts,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
-  auto c = &model.criteria;
-  add_field_opts_value(opts, "check_on_start", c->check_on_start, model);
-  add_field_opts_value(opts, "check_epoch", c->check_epoch, model);
-  add_field_opts_value(opts, "max_epoch", c->max_epoch, model);
-  add_field_opts_value(opts, "max_cpu_time", c->max_cpu_time, model);
-  add_field_opts_value(opts, "max_wall_time", c->max_wall_time, model);
-  add_field_opts_value(opts, "epsilon", c->epsilon, model);
+  auto c = &context.criteria;
+  add_field_opts_value(opts, "check_on_start", c->check_on_start, context);
+  add_field_opts_value(opts, "check_epoch", c->check_epoch, context);
+  add_field_opts_value(opts, "max_epoch", c->max_epoch, context);
+  add_field_opts_value(opts, "max_cpu_time", c->max_cpu_time, context);
+  add_field_opts_value(opts, "max_wall_time", c->max_wall_time, context);
+  add_field_opts_value(opts, "epsilon", c->epsilon, context);
   mxCheck<size_type>(std::greater_equal<size_type>(),
     c->check_epoch, 0, "check_epoch");
   mxCheck<size_type>(std::greater_equal<size_type>(),
@@ -289,22 +288,22 @@ template <typename Data,
           typename Summation>
 inline void
 set_precision_options(
-    Summation sum,
-    solution<Data, Result>& model
+    Summation& sum,
+    solver_context<Data, Result>& context
   ) {
-  add_field("summation", mxCreateString(sum.name()), model);
-  add_field("precision", mxCreateString(type_traits<Result>::name()), model);
-  add_field("data_precision", mxCreateString(type_traits<Data>::name()), model);
+  add_field("summation", mxCreateString(sum.name()), context);
+  add_field("precision", mxCreateString(type_traits<Result>::name()), context);
+  add_field("data_precision",
+    mxCreateString(type_traits<Data>::name()), context);
 }
 
-template <typename Data,
-          typename Result>
+template <typename Data>
 inline void
 set_labels(
     const mxArray* labels,
-    solution<Data, Result>& model
+    dataset<Data>& data_set
   ) {
-  auto n = model.problem.num_examples;
+  auto n = data_set.num_examples;
   mxCheckVector(labels, "labels", n);
 
   std::vector<size_type> vec(mxGetPr(labels), mxGetPr(labels) + n);
@@ -315,47 +314,46 @@ set_labels(
     mexErrMsgIdAndTxt(err_id[err_labels_range], err_msg[err_labels_range]);
   }
 
-  model.labels = std::move(vec);
-  model.problem.labels = &model.labels[0];
-  model.problem.num_tasks = static_cast<size_type>(*minmax.second) + 1;
+  data_set.labels = std::move(vec);
+  data_set.num_tasks = static_cast<size_type>(*minmax.second) + 1;
 }
 
 template <typename Data,
           typename Result>
 inline void
-set_problem_data(
+set_datasets(
     const mxArray* data,
     const mxArray* labels,
     const mxArray* opts,
-    solution<Data, Result>& model
+    solver_context<Data, Result>& context
   ) {
-  model.problem.data = static_cast<Data*>(mxGetData(data));
-  model.problem.num_examples = mxGetN(data);
-  set_labels(labels, model);
+  dataset<Data> trn_data;
+  trn_data.data = static_cast<Data*>(mxGetData(data));
+  trn_data.num_examples = mxGetN(data);
+  set_labels(labels, trn_data);
 
-  model.is_dual = mxGetFieldValueOrDefault(opts, "is_dual", false);
-  if (model.is_dual) {
+  context.is_dual = mxGetFieldValueOrDefault(opts, "is_dual", false);
+  if (context.is_dual) {
     // Work in the dual
-    model.problem.num_dimensions = 0;
+    trn_data.num_dimensions = 0;
     mxCheckSquare(data, "data");
   } else {
     // Work in the primal
-    model.problem.num_dimensions = mxGetM(data);
+    trn_data.num_dimensions = mxGetM(data);
     mxArray *mxW = add_field_opts_matrix(opts, "W",
-      model.problem.num_dimensions, model.problem.num_tasks,
-      mxGetClassID(data), model);
-    model.problem.primal_variables = static_cast<Data*>(mxGetData(mxW));
+      trn_data.num_dimensions, trn_data.num_tasks, mxGetClassID(data), context);
+    trn_data.primal_variables = static_cast<Data*>(mxGetData(mxW));
   }
 
   mxArray *mxA = add_field_opts_matrix(opts, "A",
-    model.problem.num_tasks, model.problem.num_examples,
-    mxGetClassID(data), model);
-  model.problem.dual_variables = static_cast<Data*>(mxGetData(mxA));
+    trn_data.num_tasks, trn_data.num_examples, mxGetClassID(data), context);
+  trn_data.dual_variables = static_cast<Data*>(mxGetData(mxA));
 
-  add_field_scalar("num_dimensions", model.problem.num_dimensions, model);
-  add_field_scalar("num_examples", model.problem.num_examples, model);
-  add_field_scalar("num_tasks", model.problem.num_tasks, model);
-  add_field_scalar("is_dual", model.is_dual, model);
+  add_field_scalar("num_dimensions", trn_data.num_dimensions, context);
+  add_field_scalar("num_examples", trn_data.num_examples, context);
+  add_field_scalar("num_tasks", trn_data.num_tasks, context);
+  add_field_scalar("is_dual", context.is_dual, context);
+  context.datasets.emplace_back(trn_data);
 }
 
 template <typename Data,
@@ -366,59 +364,59 @@ mex_main(
     mxArray* plhs[],
     const mxArray* prhs[],
     const mxArray* opts,
-    Summation sum
+    Summation& sum
     ) {
-  solution<Data, Result> model;
-  set_problem_data(prhs[0], prhs[1], opts, model);
-  set_logging_options(opts, model);
-  set_precision_options(sum, model);
-  set_stopping_criteria(opts, model);
+  solver_context<Data, Result> context;
+  set_datasets(prhs[0], prhs[1], opts, context);
+  set_logging_options(opts, context);
+  set_precision_options(sum, context);
+  set_stopping_criteria(opts, context);
+
+  auto trn_data = context.datasets.front();
 
   std::string objective = mxGetFieldValueOrDefault(
     opts, "objective", std::string("l2_topk_hinge"));
-  add_field("objective", mxCreateString(objective.c_str()), model);
+  add_field("objective", mxCreateString(objective.c_str()), context);
 
   auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
   mxCheck<Result>(std::greater<Result>(), c, 0, "c");
 
-  auto C = mxGetFieldValueOrDefault<Result>(opts, "C",
-    c / static_cast<Result>(model.problem.num_examples));
+  Result num_examples(static_cast<Result>(trn_data.num_examples));
+  auto C = mxGetFieldValueOrDefault<Result>(opts, "C", c / num_examples);
   mxCheck<Result>(std::greater<Result>(), C, 0, "C");
 
-  if (C != c / static_cast<Result>(model.problem.num_examples)) {
-    c = C * static_cast<Result>(model.problem.num_examples);
-  }
-  add_field_scalar("c", c, model);
-  add_field_scalar("C", C, model);
+  c = (C != c / num_examples) ? C * num_examples : c;
+  add_field_scalar("c", c, context);
+  add_field_scalar("C", C, context);
 
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
-  mxCheckRange<size_type>(k, 1, model.problem.num_tasks - 1, "k");
+  mxCheckRange<size_type>(k, 1, trn_data.num_tasks - 1, "k");
 
   auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
   mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
 
   if (objective == "l2_entropy_topk") {
-    add_field_scalar("k", k, model);
-    make_solver_solve(model,
+    add_field_scalar("k", k, context);
+    make_solver_solve(context,
       l2_entropy_topk<Data, Result, Summation>(k, C, sum));
   } else if (objective == "l2_topk_hinge") {
-    add_field_scalar("k", k, model);
-    add_field_scalar("gamma", gamma, model);
+    add_field_scalar("k", k, context);
+    add_field_scalar("gamma", gamma, context);
     if (gamma > 0) {
-      make_solver_solve(model,
+      make_solver_solve(context,
         l2_topk_hinge_smooth<Data, Result, Summation>(k, C, gamma, sum));
     } else {
-      make_solver_solve(model,
+      make_solver_solve(context,
         l2_topk_hinge<Data, Result, Summation>(k, C, sum));
     }
   } else if (objective == "l2_hinge_topk") {
-    add_field_scalar("k", k, model);
-    add_field_scalar("gamma", gamma, model);
+    add_field_scalar("k", k, context);
+    add_field_scalar("gamma", gamma, context);
     if (gamma > 0) {
-      make_solver_solve(model,
+      make_solver_solve(context,
         l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum));
     } else {
-      make_solver_solve(model,
+      make_solver_solve(context,
         l2_hinge_topk<Data, Result, Summation>(k, C, sum));
     }
   } else {
@@ -426,7 +424,7 @@ mex_main(
       err_id[err_objective], err_msg[err_objective], objective.c_str());
   }
 
-  plhs[0] = mxCreateStruct(model.fields, "model");
+  plhs[0] = mxCreateStruct(context.fields, "model");
 }
 
 template <typename Data,

@@ -12,34 +12,34 @@ template <typename Objective,
 class primal_solver : public solver_base<Result> {
 public:
   typedef solver_base<Result> base;
-  typedef problem_data<Data> problem_type;
+  typedef dataset<Data> dataset_type;
   typedef Objective objective_type;
   typedef Data data_type;
   typedef Result result_type;
 
   primal_solver(
-      const problem_type& __problem,
+      const dataset_type& __dataset,
       const stopping_criteria& __criteria,
       const objective_type& __objective
     ) :
-      base::solver_base(__criteria, __problem.num_examples),
+      base::solver_base(__criteria, __dataset.num_examples),
       objective_(__objective),
-      num_dimensions_(__problem.num_dimensions),
-      num_tasks_(__problem.num_tasks),
-      labels_(__problem.labels),
-      features_(__problem.data),
-      primal_variables_(__problem.primal_variables),
-      dual_variables_(__problem.dual_variables),
-      norm2_(__problem.num_examples),
-      scores_(__problem.num_tasks),
-      vars_before_(__problem.num_tasks),
+      num_dimensions_(__dataset.num_dimensions),
+      num_tasks_(__dataset.num_tasks),
+      labels_(&__dataset.labels[0]),
+      features_(__dataset.data),
+      primal_variables_(__dataset.primal_variables),
+      dual_variables_(__dataset.dual_variables),
+      norm2_(__dataset.num_examples),
+      scores_(__dataset.num_tasks),
+      vars_before_(__dataset.num_tasks),
       diff_tolerance_(std::numeric_limits<data_type>::epsilon()),
-      D(static_cast<blas_int>(__problem.num_dimensions)),
-      N(static_cast<blas_int>(__problem.num_examples)),
-      T(static_cast<blas_int>(__problem.num_tasks))
+      D(static_cast<blas_int>(__dataset.num_dimensions)),
+      N(static_cast<blas_int>(__dataset.num_examples)),
+      T(static_cast<blas_int>(__dataset.num_tasks))
   {
     LOG_INFO << "solver: " << base::name() << " (primal)" << std::endl
-      << "problem: " << __problem.to_string() << std::endl
+      << "dataset: " << __dataset.to_string() << std::endl
       << "objective: " << __objective.to_string() << std::endl
       << "stopping criteria: " << __criteria.to_string() << std::endl;
     LOG_DEBUG << __objective.precision_string()  << std::endl;
