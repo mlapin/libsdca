@@ -44,27 +44,17 @@ struct l2_hinge_topk {
 
   void update_variables(
       const blas_int num_tasks,
-      const size_type label,
       const Data norm2_inv,
       Data* variables,
       Data* scores
       ) const {
-    // Variables update proceeds in 3 steps:
-    // 1. Prepare a vector to project in 'variables'.
-    // 2. Perform the proximal step.
-    // 3. Recover the updated dual variables.
-    Result rhs = c, rho = 1;
+    Data *first(variables + 1), *last(variables + num_tasks);
+    Result rhs(c), rho(1);
 
     // 1. Prepare a vector to project in 'variables'.
-    Data a = norm2_inv;
+    Data a(norm2_inv);
     sdca_blas_axpby(num_tasks, a, scores, -1, variables);
-
-    // Place ground truth at 0
-    std::swap(*variables, variables[label]);
-    Data *first = variables + 1, *last = variables + num_tasks;
-
-    // Complete step 1.
-    a -= *variables;
+    a -= variables[0];
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
@@ -75,14 +65,10 @@ struct l2_hinge_topk {
     *variables = static_cast<Data>(std::min(rhs,
       sum(first, last, static_cast<Result>(0)) ));
     std::for_each(first, last, [](Data &x){ x = -x; });
-
-    // Put back the ground truth variable
-    std::swap(*variables, variables[label]);
   }
 
   void regularized_loss(
       const blas_int num_tasks,
-      const size_type label,
       const Data* variables,
       Data* scores,
       Result &regularizer,
@@ -91,14 +77,11 @@ struct l2_hinge_topk {
     ) const {
     regularizer = static_cast<Result>(
       sdca_blas_dot(num_tasks, scores, variables));
-    dual_loss = static_cast<Result>(variables[label]);
+    dual_loss = static_cast<Result>(variables[0]);
 
-    Data a = static_cast<Data>(1) - scores[label];
+    Data *first(scores + 1), *last(scores + num_tasks);
+    Data a(1 - scores[0]);
     std::for_each(scores, scores + num_tasks, [=](Data &x){ x += a; });
-
-    // "half swap" ground truth with 0 (gt itself is 0 and is discarded)
-    scores[label] = scores[0];
-    Data *first = scores + 1, *last = scores + num_tasks;
 
     // Find k largest elements
     std::nth_element(first, first + k - 1, last, std::greater<Data>());
@@ -166,28 +149,17 @@ struct l2_hinge_topk_smooth {
 
   void update_variables(
       const blas_int num_tasks,
-      const size_type label,
       const Data norm2_inv,
       Data* variables,
       Data* scores
       ) const {
-    // Variables update proceeds in 3 steps:
-    // 1. Prepare a vector to project in 'variables'.
-    // 2. Perform the proximal step.
-    // 3. Recover the updated dual variables.
-    Result rhs = c, rho = static_cast<Result>(1) /
-      (static_cast<Result>(1) + gamma_div_c * static_cast<Result>(norm2_inv));
+    Data *first(variables + 1), *last(variables + num_tasks);
+    Result rhs(c), rho(1 / (1 + gamma_div_c * static_cast<Result>(norm2_inv)));
 
     // 1. Prepare a vector to project in 'variables'.
-    Data a = norm2_inv * static_cast<Data>(rho);
+    Data a(norm2_inv * static_cast<Data>(rho));
     sdca_blas_axpby(num_tasks, a, scores, -static_cast<Data>(rho), variables);
-
-    // Place ground truth at 0
-    std::swap(*variables, variables[label]);
-    Data *first = variables + 1, *last = variables + num_tasks;
-
-    // Complete step 1.
-    a -= *variables;
+    a -= variables[0];
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
@@ -198,14 +170,10 @@ struct l2_hinge_topk_smooth {
     *variables = static_cast<Data>(std::min(rhs,
       sum(first, last, static_cast<Result>(0)) ));
     std::for_each(first, last, [](Data &x){ x = -x; });
-
-    // Put back the ground truth variable
-    std::swap(*variables, variables[label]);
   }
 
   void regularized_loss(
       const blas_int num_tasks,
-      const size_type label,
       const Data* variables,
       Data* scores,
       Result &regularizer,
@@ -215,17 +183,14 @@ struct l2_hinge_topk_smooth {
     regularizer = static_cast<Result>(
       sdca_blas_dot(num_tasks, scores, variables));
 
-    dual_loss = static_cast<Result>(variables[label]);
+    dual_loss = static_cast<Result>(variables[0]);
     dual_loss += static_cast<Result>(0.5) * gamma_div_c * (
       dual_loss * dual_loss - static_cast<Result>(
       sdca_blas_dot(num_tasks, variables, variables)));
 
-    Data a = static_cast<Data>(1) - scores[label];
-    std::for_each(scores, scores + num_tasks, [=](Data &x){ x += a; });
-
-    // "half swap" ground truth with 0 (gt itself is 0 and is discarded)
-    scores[label] = scores[0];
-    Data *first = scores + 1, *last = scores + num_tasks;
+    Data *first(scores + 1), *last(scores + num_tasks);
+    Data a(1 - scores[0]);
+    std::for_each(first, last, [=](Data &x){ x += a; });
 
     // loss = 1/gamma (<p,h> - 1/2 <p,p>), p =prox_{k,gamma}(h), h = c + a
     auto t = thresholds_topk_simplex(first, last, k, gamma, sum);

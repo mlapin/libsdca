@@ -46,27 +46,17 @@ struct l2_entropy_topk {
 
   void update_variables(
       const blas_int num_tasks,
-      const size_type label,
       const Data norm2_inv,
       Data* variables,
       Data* scores
       ) const {
-    // Variables update proceeds in 3 steps:
-    // 1. Prepare a vector to project in 'variables'.
-    // 2. Perform the proximal step.
-    // 3. Recover the updated dual variables.
-    Result norm2 = 1 / static_cast<Result>(norm2_inv);
-    Result alpha = c / static_cast<Result>(norm2_inv);
+    Data *first(variables + 1), *last(variables + num_tasks);
+    Result norm2(1 / static_cast<Result>(norm2_inv));
+    Result alpha(c / static_cast<Result>(norm2_inv));
 
     // 1. Prepare a vector to project in 'variables'.
     sdca_blas_axpby(num_tasks, 1, scores, -static_cast<Data>(norm2), variables);
-
-    // Place ground truth at 0
-    std::swap(*variables, variables[label]);
-    Data *first = variables + 1, *last = variables + num_tasks;
-
-    // Complete step 1.
-    Data a = -*variables;
+    Data a(-variables[0]);
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
@@ -77,14 +67,10 @@ struct l2_entropy_topk {
     *variables = static_cast<Data>(c * std::min(static_cast<Result>(1),
       sum(first, last, static_cast<Result>(0)) ));
     std::for_each(first, last, [=](Data &x){ x *= coeff; });
-
-    // Put back the ground truth variable
-    std::swap(*variables, variables[label]);
   }
 
   void regularized_loss(
       const blas_int num_tasks,
-      const size_type label,
       const Data* variables,
       Data* scores,
       Result &regularizer,
@@ -94,18 +80,15 @@ struct l2_entropy_topk {
     regularizer = static_cast<Result>(
       sdca_blas_dot(num_tasks, scores, variables));
 
-    Result comp(0), zero(0), aj(static_cast<Result>(variables[label]));
+    Result comp(0), zero(0), aj(static_cast<Result>(variables[0]));
     dual_loss = (aj < c) ? - (c - aj) * std::log(1 - aj / c) : zero;
-    std::for_each(variables, variables + num_tasks, [&](const Result a){
+    std::for_each(variables + 1, variables + num_tasks, [&](const Result a){
       sum.add((a < zero) ? a * std::log(-a) : zero, dual_loss, comp); });
     sum.add(aj * log_c, dual_loss, comp);
 
-    Data a = scores[label];
-    std::for_each(scores, scores + num_tasks, [=](Data &x){ x -= a; });
-
-    // "half swap" ground truth with 0 (gt itself is 0 and is discarded)
-    scores[label] = scores[0];
-    Data *first = scores + 1, *last = scores + num_tasks;
+    Data *first(scores + 1), *last(scores + num_tasks);
+    Data a(-scores[0]);
+    std::for_each(first, last, [=](Data &x){ x += a; });
 
     auto t = thresholds_topk_entropy<Data*, Result>(first, last, k, sum);
     if (t.first == first) {

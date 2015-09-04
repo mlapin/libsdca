@@ -80,9 +80,16 @@ protected:
     // Let scores = A * K_i = W' * x_i
     sdca_blas_gemv(T, N, dual_variables_, K_i, &scores_[0]);
 
+    // Put ground truth at 0
+    data_type* variables = dual_variables_ + num_tasks_ * i;
+    std::swap(variables[0], variables[labels_[i]]);
+    std::swap(scores_[0], scores_[labels_[i]]);
+
     // Update dual variables
-    data_type* vars = dual_variables_ + num_tasks_ * i;
-    objective_.update_variables(T, labels_[i], norm_inv_[i], vars, &scores_[0]);
+    objective_.update_variables(T, norm_inv_[i], variables, &scores_[0]);
+
+    // Put back the ground truth variable
+    std::swap(variables[0], variables[labels_[i]]);
   }
 
   void compute_objectives() override {
@@ -105,16 +112,23 @@ protected:
       // Let scores = A * K_i = W' * x_i
       sdca_blas_gemv(T, N, dual_variables_, K_i, &scores_[0]);
 
+      // Put ground truth at 0
+      data_type* variables = dual_variables_ + num_tasks_ * i;
+      std::swap(variables[0], variables[labels_[i]]);
+      std::swap(scores_[0], scores_[labels_[i]]);
+
       // Compute the regularization term and primal/dual losses
       result_type regul(0), p_loss(0), d_loss(0);
-      data_type* vars = dual_variables_ + num_tasks_ * i;
-      objective_.regularized_loss(T, labels_[i], vars, &scores_[0],
+      objective_.regularized_loss(T, variables, &scores_[0],
         regul, p_loss, d_loss);
 
       // Increment the sums
       kahan_add(regul, regul_sum, regul_comp);
       kahan_add(p_loss, p_loss_sum, p_loss_comp);
       kahan_add(d_loss, d_loss_sum, d_loss_comp);
+
+      // Put back the ground truth variable
+      std::swap(variables[0], variables[labels_[i]]);
     }
 
     // Compute the overall primal/dual objectives and the duality gap

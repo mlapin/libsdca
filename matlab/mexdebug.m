@@ -79,30 +79,30 @@ if 0
 end
 
 if 1
-%   load('data/sun397-cnn.mat');
-  load('data/sun397-fv.mat');
+  load('data/sun397-cnn.mat');
+%   load('data/sun397-fv.mat');
 %   Ktrn = Ktrn-1;
   
-  ix = 1:5*2;
-  Ktrn = Ktrn(ix,ix);
-  Ytrn = Ytrn(ix);
+%   ix = 1:5*2;
+%   Ktrn = Ktrn(ix,ix);
+%   Ytrn = Ytrn(ix);
   
 
-  opts.objective = 'l2_entropy_topk';
-%   opts.objective = 'l2_topk_hinge';
+%   opts.objective = 'l2_entropy_topk';
+  opts.objective = 'l2_topk_hinge';
 %   opts.objective = 'l2_hinge_topk';
   opts.C = 1;
-  opts.k = 1;
+  opts.k = 2;
   opts.gamma = 1;
   opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
-  opts.max_epoch = 100;
+  opts.max_epoch = 50;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';
   opts.log_format = 'long_e';
-  opts.is_dual = 1;
+  opts.is_dual = 0;
 
   if opts.is_dual
     if ~exist('Ktrn', 'var')
