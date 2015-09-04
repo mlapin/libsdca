@@ -95,15 +95,17 @@ struct l2_hinge_topk {
 
     Data a = static_cast<Data>(1) - scores[label];
     std::for_each(scores, scores + num_tasks, [=](Data &x){ x += a; });
-    scores[label] = static_cast<Data>(0);
+
+    // "half swap" ground truth with 0 (gt itself is 0 and is discarded)
+    scores[label] = scores[0];
+    Data *first = scores + 1, *last = scores + num_tasks;
 
     // Find k largest elements
-    std::nth_element(scores, scores + k - 1, scores + num_tasks,
-      std::greater<Data>());
+    std::nth_element(first, first + k - 1, last, std::greater<Data>());
 
     // max{0, sum_k_largest} (division by k happens later)
     primal_loss = std::max(static_cast<Result>(0),
-      sum(scores, scores + k, static_cast<Result>(0)));
+      sum(first, first + k, static_cast<Result>(0)));
   }
 
   inline void primal_dual_gap(
