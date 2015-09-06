@@ -136,6 +136,15 @@ struct state {
     {}
 };
 
+template <typename Result>
+struct statistic {
+  typedef Result result_type;
+  result_type primal;
+  result_type dual;
+  result_type gap;
+  std::vector<result_type> performance;
+};
+
 }
 
 #endif

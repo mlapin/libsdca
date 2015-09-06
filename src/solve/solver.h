@@ -74,7 +74,7 @@ public:
       : static_cast<result_type>(0);
   }
 
-  const std::vector<state<result_type>>& states() const { return states_; }
+//  const std::vector<state<result_type>>& states() const { return states_; }
 
 protected:
   const stopping_criteria criteria_;
@@ -90,7 +90,7 @@ protected:
   result_type primal_;
   result_type dual_;
   result_type gap_;
-  std::vector<state<result_type>> states_;
+//  std::vector<state<result_type>> states_;
 
   // Other
   bool recompute_gap_;
@@ -167,7 +167,7 @@ protected:
   virtual void compute_duality_gap() {
     recompute_gap_ = false;
     result_type dual_before = dual_;
-    compute_objectives();
+    evaluate_solution();
     result_type max = std::max(std::abs(primal_), std::abs(dual_));
     if (gap_ <= max * static_cast<result_type>(criteria_.epsilon)) {
       status_ = solver_status::solved;
@@ -182,8 +182,8 @@ protected:
         "no progress due to insufficient dual objective increase: "
         << (dual_ - dual_before) << std::endl;
     }
-    states_.emplace_back(
-      epoch(), cpu_time_now(), wall_time_now(), primal_, dual_, gap_);
+//    states_.emplace_back(
+//      epoch(), cpu_time_now(), wall_time_now(), primal_, dual_, gap_);
     LOG_VERBOSE << "  "
       "epoch: " << std::setw(3) << epoch() << std::setw(0) << ", "
       "primal: " << primal() << ", "
@@ -205,7 +205,7 @@ protected:
 
   virtual void solve_example(const size_type i) = 0;
 
-  virtual void compute_objectives() = 0;
+  virtual void evaluate_solution() = 0;
 
 };
 

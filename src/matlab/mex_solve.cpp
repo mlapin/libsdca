@@ -120,7 +120,7 @@ solve_objective_add_info(
   info.add("epoch", mxCreateScalar(solver.epoch()));
   info.add("cpu_time", mxCreateScalar(solver.cpu_time()));
   info.add("wall_time", mxCreateScalar(solver.wall_time()));
-  add_states(solver.states(), info);
+//  add_states(solver.states(), info);
 }
 
 template <typename Objective,
