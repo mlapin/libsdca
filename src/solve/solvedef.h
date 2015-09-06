@@ -36,27 +36,6 @@ typedef typename std::clock_t cpu_time_point;
 typedef typename std::size_t size_type;
 typedef typename std::ptrdiff_t difference_type;
 
-template <typename Data>
-struct dataset {
-  typedef Data data_type;
-  size_type num_dimensions = 0;
-  size_type num_examples = 0;
-  size_type num_tasks = 0;
-  std::vector<size_type> labels;
-  data_type* data = nullptr;
-  data_type* primal_variables = nullptr;
-  data_type* dual_variables = nullptr;
-
-  inline std::string
-  to_string() const {
-    std::ostringstream str;
-    str << "num_dimensions = " << num_dimensions << ", "
-           "num_examples = " << num_examples << ", "
-           "num_tasks = " << num_tasks;
-    return str.str();
-  }
-};
-
 struct stopping_criteria {
   bool check_on_start = false;
   size_type check_epoch = 1;
@@ -75,6 +54,49 @@ struct stopping_criteria {
            "max_cpu_time = " << max_cpu_time << ", "
            "max_wall_time = " << max_wall_time;
     return str.str();
+  }
+};
+
+template <typename Data>
+struct dataset {
+  typedef Data data_type;
+  size_type num_dimensions = 0;
+  size_type num_examples = 0;
+  size_type num_tasks = 0;
+  std::vector<size_type> labels;
+  data_type* data = nullptr;
+
+  inline std::string
+  to_string() const {
+    std::ostringstream str;
+    str << "num_dimensions = " << num_dimensions << ", "
+           "num_examples = " << num_examples << ", "
+           "num_tasks = " << num_tasks;
+    return str.str();
+  }
+};
+
+template <typename Data,
+          typename Result>
+struct solver_context {
+  typedef Data data_type;
+  typedef Result result_type;
+  bool is_dual = false;
+  stopping_criteria criteria;
+  std::vector<dataset<Data>> datasets;
+  data_type* primal_variables = nullptr;
+  data_type* dual_variables = nullptr;
+};
+
+template <typename Field>
+struct model_info {
+  typedef Field field_type;
+  std::vector<std::pair<const char*, field_type>> fields;
+
+  inline void add(
+      const char* name,
+      const field_type value) {
+    fields.emplace_back(std::make_pair(name, value));
   }
 };
 

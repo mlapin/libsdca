@@ -82,89 +82,16 @@ printHelp() {
             MEX_SOLVE, MEX_SOLVE);
 }
 
-
-template <typename Data,
-          typename Result>
-struct solver_context {
-  typedef Data data_type;
-  typedef Result result_type;
-  bool is_dual = false;
-  stopping_criteria criteria;
-  std::vector<dataset<Data>> datasets;
-  std::vector<std::pair<const char*, const mxArray*>> fields;
-};
-
-template <typename Data,
-          typename Result>
-inline void
-add_field(
-    const char* name,
-    const mxArray* value,
-    solver_context<Data, Result>& context
-  ) {
-  context.fields.emplace_back(std::make_pair(name, value));
-}
-
-template <typename Data,
-          typename Result,
-          typename Type>
-inline void
-add_field_scalar(
-    const char* name,
-    const Type value,
-    solver_context<Data, Result>& context
-  ) {
-  context.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
-}
-
-template <typename Data,
-          typename Result,
-          typename Type>
-inline void
-add_field_opts_value(
-    const mxArray* opts,
-    const char* name,
-    Type& value,
-    solver_context<Data, Result>& context
-  ) {
-  mxSetFieldValue(opts, name, value);
-  context.fields.emplace_back(std::make_pair(name, mxCreateScalar(value)));
-}
-
-template <typename Data,
-          typename Result>
-inline mxArray*
-add_field_opts_matrix(
-    const mxArray* opts,
-    const char* name,
-    const size_type m,
-    const size_type n,
-    const mxClassID class_id,
-    solver_context<Data, Result>& context
-  ) {
-  mxArray *pa = mxGetField(opts, 0, name);
-  if (pa != nullptr) {
-    mxCheckMatrix(pa, name, m, n, class_id);
-    pa = mxDuplicateArray(pa);
-  } else {
-    pa = mxCreateNumericMatrix(m, n, class_id, mxREAL);
-  }
-  mxCheckCreated(pa, name);
-  add_field(name, pa, context);
-  return pa;
-}
-
-template <typename Data,
-          typename Result>
+template <typename Result>
 inline void
 add_states(
     const std::vector<state<Result>>& states,
-    solver_context<Data, Result>& context
+    model_info<mxArray*>& info
   ) {
   const char* names[] =
     {"epoch", "cpu_time", "wall_time", "primal", "dual", "gap"};
   mxArray* pa = mxCreateStructMatrix(states.size(), 1, 6, names);
-  mxCheckCreated(pa, "states");
+  mxCheckCreated(pa, "stats");
   size_type i = 0;
   for (auto& state : states) {
     mxSetFieldByNumber(pa, i, 0, mxCreateScalar(state.epoch));
@@ -175,28 +102,25 @@ add_states(
     mxSetFieldByNumber(pa, i, 5, mxCreateScalar(state.gap));
     ++i;
   }
-  context.fields.emplace_back(
-    std::make_pair("states", const_cast<const mxArray*>(pa)));
+  info.add("states", pa);
 }
 
-template <typename Solver,
-          typename Data,
-          typename Result>
+template <typename Solver>
 inline void
-solve_model(
+solve_objective_add_info(
     Solver solver,
-    solver_context<Data, Result>& context
+    model_info<mxArray*>& info
   ) {
   solver.solve();
-  add_field("status", mxCreateString(solver.status_name().c_str()), context);
-  add_field_scalar("primal", solver.primal(), context);
-  add_field_scalar("dual", solver.dual(), context);
-  add_field_scalar("absolute_gap", solver.absolute_gap(), context);
-  add_field_scalar("relative_gap", solver.relative_gap(), context);
-  add_field_scalar("epoch", solver.epoch(), context);
-  add_field_scalar("cpu_time", solver.cpu_time(), context);
-  add_field_scalar("wall_time", solver.wall_time(), context);
-  add_states(solver.states(), context);
+  info.add("status", mxCreateString(solver.status_name().c_str()));
+  info.add("primal", mxCreateScalar(solver.primal()));
+  info.add("dual", mxCreateScalar(solver.dual()));
+  info.add("absolute_gap", mxCreateScalar(solver.absolute_gap()));
+  info.add("relative_gap", mxCreateScalar(solver.relative_gap()));
+  info.add("epoch", mxCreateScalar(solver.epoch()));
+  info.add("cpu_time", mxCreateScalar(solver.cpu_time()));
+  info.add("wall_time", mxCreateScalar(solver.wall_time()));
+  add_states(solver.states(), info);
 }
 
 template <typename Objective,
@@ -205,23 +129,225 @@ template <typename Objective,
 inline void
 make_solver_solve(
     solver_context<Data, Result>& context,
+    model_info<mxArray*>& info,
     const Objective& objective
   ) {
   if (context.is_dual) {
-    solve_model(dual_solver<Objective, Data, Result>(
-      context.datasets.front(), context.criteria, objective), context);
+    solve_objective_add_info(
+      dual_solver<Objective, Data, Result>(objective, context), info);
   } else {
-    solve_model(primal_solver<Objective, Data, Result>(
-      context.datasets.front(), context.criteria, objective), context);
+    solve_objective_add_info(
+      primal_solver<Objective, Data, Result>(objective, context), info);
   }
 }
 
 template <typename Data,
           typename Result>
 inline void
-set_logging_options(
+set_variables(
+    const dataset<Data>& trn_data,
+    const mxArray* opts,
+    solver_context<Data, Result>& context,
+    model_info<mxArray*>& info
+  ) {
+  mxArray *mxA = mxDuplicateFieldOrCreateMatrix(opts, "A",
+    trn_data.num_tasks, trn_data.num_examples, mex_class<Data>::id());
+  context.dual_variables = static_cast<Data*>(mxGetData(mxA));
+  info.add("A", mxA);
+
+  if (!context.is_dual) {
+    mxArray *mxW = mxDuplicateFieldOrCreateMatrix(opts, "W",
+      trn_data.num_dimensions, trn_data.num_tasks, mex_class<Data>::id());
+    context.primal_variables = static_cast<Data*>(mxGetData(mxW));
+    info.add("W", mxW);
+  }
+}
+
+template <typename Data,
+          typename Result>
+inline void
+set_stopping_criteria(
     const mxArray* opts,
     solver_context<Data, Result>& context
+  ) {
+  auto c = &context.criteria;
+  mxSetFieldValue(opts, "check_on_start", c->check_on_start);
+  mxSetFieldValue(opts, "check_epoch", c->check_epoch);
+  mxSetFieldValue(opts, "max_epoch", c->max_epoch);
+  mxSetFieldValue(opts, "max_cpu_time", c->max_cpu_time);
+  mxSetFieldValue(opts, "max_wall_time", c->max_wall_time);
+  mxSetFieldValue(opts, "epsilon", c->epsilon);
+  mxCheck<size_type>(std::greater_equal<size_type>(),
+    c->check_epoch, 0, "check_epoch");
+  mxCheck<size_type>(std::greater_equal<size_type>(),
+    c->max_epoch, 0, "max_epoch");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->max_cpu_time, 0, "max_cpu_time");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->max_wall_time, 0, "max_wall_time");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->epsilon, 0, "epsilon");
+}
+
+template <typename Data>
+inline void
+set_labels(
+    const mxArray* labels,
+    dataset<Data>& data_set
+  ) {
+  size_type n = data_set.num_examples;
+  mxCheckVector(labels, "labels", n);
+
+  std::vector<size_type> vec(mxGetPr(labels), mxGetPr(labels) + n);
+  auto minmax = std::minmax_element(vec.begin(), vec.end());
+  if (*minmax.first == 1) {
+    std::for_each(vec.begin(), vec.end(), [](size_type &x){ x -= 1; });
+  } else if (*minmax.first != 0) {
+    mexErrMsgIdAndTxt(err_id[err_labels_range], err_msg[err_labels_range]);
+  }
+
+  data_set.labels = std::move(vec);
+  data_set.num_tasks = static_cast<size_type>(*minmax.second) + 1;
+}
+
+template <typename Data,
+          typename Result>
+inline void
+set_datasets(
+    const mxArray* data,
+    const mxArray* labels,
+    solver_context<Data, Result>& context
+  ) {
+  dataset<Data> data_set;
+  data_set.data = static_cast<Data*>(mxGetData(data));
+  data_set.num_examples = mxGetN(data);
+  set_labels(labels, data_set);
+
+  if (context.is_dual) {
+    data_set.num_dimensions = 0;
+    mxCheckSquare(data, "data");
+  } else {
+    data_set.num_dimensions = mxGetM(data);
+  }
+  context.datasets.emplace_back(data_set);
+}
+
+template <typename Data,
+          typename Result,
+          typename Summation>
+void
+mex_main(
+    mxArray* plhs[],
+    const mxArray* prhs[],
+    const mxArray* opts,
+    Summation& sum
+    ) {
+  solver_context<Data, Result> context;
+  context.is_dual = mxGetFieldValueOrDefault(opts, "is_dual", false);
+  set_datasets(prhs[0], prhs[1], context);
+  set_stopping_criteria(opts, context);
+
+  model_info<mxArray*> info;
+  auto trn_data = context.datasets.front();
+  set_variables(trn_data, opts, context, info);
+
+  info.add("is_dual", mxCreateScalar(context.is_dual));
+  if (!context.is_dual) {
+    info.add("num_dimensions", mxCreateScalar(trn_data.num_dimensions));
+  }
+  info.add("num_examples", mxCreateScalar(trn_data.num_examples));
+  info.add("num_tasks", mxCreateScalar(trn_data.num_tasks));
+
+  std::string objective = mxGetFieldValueOrDefault(
+    opts, "objective", std::string("l2_topk_hinge"));
+  info.add("objective", mxCreateString(objective.c_str()));
+
+  auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
+  mxCheck<Result>(std::greater<Result>(), c, 0, "c");
+
+  Result num_examples(static_cast<Result>(trn_data.num_examples));
+  auto C = mxGetFieldValueOrDefault<Result>(opts, "C", c / num_examples);
+  mxCheck<Result>(std::greater<Result>(), C, 0, "C");
+
+  c = (C != c / num_examples) ? C * num_examples : c;
+  info.add("c", mxCreateScalar(c));
+  info.add("C", mxCreateScalar(C));
+
+  auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
+  mxCheckRange<size_type>(k, 1, trn_data.num_tasks - 1, "k");
+
+  auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
+  mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
+
+  if (objective == "l2_entropy_topk") {
+    info.add("k", mxCreateScalar(k));
+    make_solver_solve(context, info,
+      l2_entropy_topk<Data, Result, Summation>(k, C, sum));
+  } else if (objective == "l2_topk_hinge") {
+    info.add("k", mxCreateScalar(k));
+    info.add("gamma", mxCreateScalar(gamma));
+    if (gamma > 0) {
+      make_solver_solve(context, info,
+        l2_topk_hinge_smooth<Data, Result, Summation>(k, C, gamma, sum));
+    } else {
+      make_solver_solve(context, info,
+        l2_topk_hinge<Data, Result, Summation>(k, C, sum));
+    }
+  } else if (objective == "l2_hinge_topk") {
+    info.add("k", mxCreateScalar(k));
+    info.add("gamma", mxCreateScalar(gamma));
+    if (gamma > 0) {
+      make_solver_solve(context, info,
+        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum));
+    } else {
+      make_solver_solve(context, info,
+        l2_hinge_topk<Data, Result, Summation>(k, C, sum));
+    }
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_objective], err_msg[err_objective], objective.c_str());
+  }
+
+  info.add("check_on_start", mxCreateScalar(context.criteria.check_on_start));
+  info.add("check_epoch", mxCreateScalar(context.criteria.check_epoch));
+  info.add("max_epoch", mxCreateScalar(context.criteria.max_epoch));
+  info.add("max_cpu_time", mxCreateScalar(context.criteria.max_cpu_time));
+  info.add("max_wall_time", mxCreateScalar(context.criteria.max_wall_time));
+  info.add("epsilon", mxCreateScalar(context.criteria.epsilon));
+  info.add("log_level", mxCreateString(logging::get_level_name()));
+  info.add("log_format", mxCreateString(logging::get_format_name()));
+  info.add("summation", mxCreateString(sum.name()));
+  info.add("precision", mxCreateString(type_traits<Result>::name()));
+  info.add("data_precision", mxCreateString(type_traits<Data>::name()));
+
+  plhs[0] = mxCreateStruct(info.fields, "model");
+}
+
+template <typename Data,
+          typename Result>
+inline void
+mex_main(
+    mxArray* plhs[],
+    const mxArray* prhs[],
+    const mxArray* opts
+    ) {
+  std::string summation = mxGetFieldValueOrDefault(
+    opts, "summation", std::string("standard"));
+  if (summation == "standard" || summation == "default") {
+    std_sum<Data*, Result> sum;
+    mex_main<Data, Result, std_sum<Data*, Result>>(plhs, prhs, opts, sum);
+  } else if (summation == "kahan") {
+    kahan_sum<Data*, Result> sum;
+    mex_main<Data, Result, kahan_sum<Data*, Result>>(plhs, prhs, opts, sum);
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_summation], err_msg[err_summation], summation.c_str());
+  }
+}
+
+inline void
+set_logging_options(
+    const mxArray* opts
   ) {
   std::string log_level = mxGetFieldValueOrDefault(
     opts, "log_level", std::string("info"));
@@ -252,201 +378,6 @@ set_logging_options(
     mexErrMsgIdAndTxt(
       err_id[err_log_format], err_msg[err_log_format], log_format.c_str());
   }
-
-  add_field("log_level", mxCreateString(log_level.c_str()), context);
-  add_field("log_format", mxCreateString(log_format.c_str()), context);
-}
-
-template <typename Data,
-          typename Result>
-inline void
-set_stopping_criteria(
-    const mxArray* opts,
-    solver_context<Data, Result>& context
-  ) {
-  auto c = &context.criteria;
-  add_field_opts_value(opts, "check_on_start", c->check_on_start, context);
-  add_field_opts_value(opts, "check_epoch", c->check_epoch, context);
-  add_field_opts_value(opts, "max_epoch", c->max_epoch, context);
-  add_field_opts_value(opts, "max_cpu_time", c->max_cpu_time, context);
-  add_field_opts_value(opts, "max_wall_time", c->max_wall_time, context);
-  add_field_opts_value(opts, "epsilon", c->epsilon, context);
-  mxCheck<size_type>(std::greater_equal<size_type>(),
-    c->check_epoch, 0, "check_epoch");
-  mxCheck<size_type>(std::greater_equal<size_type>(),
-    c->max_epoch, 0, "max_epoch");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->max_cpu_time, 0, "max_cpu_time");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->max_wall_time, 0, "max_wall_time");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->epsilon, 0, "epsilon");
-}
-
-template <typename Data,
-          typename Result,
-          typename Summation>
-inline void
-set_precision_options(
-    Summation& sum,
-    solver_context<Data, Result>& context
-  ) {
-  add_field("summation", mxCreateString(sum.name()), context);
-  add_field("precision", mxCreateString(type_traits<Result>::name()), context);
-  add_field("data_precision",
-    mxCreateString(type_traits<Data>::name()), context);
-}
-
-template <typename Data>
-inline void
-set_labels(
-    const mxArray* labels,
-    dataset<Data>& data_set
-  ) {
-  auto n = data_set.num_examples;
-  mxCheckVector(labels, "labels", n);
-
-  std::vector<size_type> vec(mxGetPr(labels), mxGetPr(labels) + n);
-  auto minmax = std::minmax_element(vec.begin(), vec.end());
-  if (*minmax.first == 1) {
-    std::for_each(vec.begin(), vec.end(), [](size_type &x){ x -= 1; });
-  } else if (*minmax.first != 0) {
-    mexErrMsgIdAndTxt(err_id[err_labels_range], err_msg[err_labels_range]);
-  }
-
-  data_set.labels = std::move(vec);
-  data_set.num_tasks = static_cast<size_type>(*minmax.second) + 1;
-}
-
-template <typename Data,
-          typename Result>
-inline void
-set_datasets(
-    const mxArray* data,
-    const mxArray* labels,
-    const mxArray* opts,
-    solver_context<Data, Result>& context
-  ) {
-  dataset<Data> trn_data;
-  trn_data.data = static_cast<Data*>(mxGetData(data));
-  trn_data.num_examples = mxGetN(data);
-  set_labels(labels, trn_data);
-
-  context.is_dual = mxGetFieldValueOrDefault(opts, "is_dual", false);
-  if (context.is_dual) {
-    // Work in the dual
-    trn_data.num_dimensions = 0;
-    mxCheckSquare(data, "data");
-  } else {
-    // Work in the primal
-    trn_data.num_dimensions = mxGetM(data);
-    mxArray *mxW = add_field_opts_matrix(opts, "W",
-      trn_data.num_dimensions, trn_data.num_tasks, mxGetClassID(data), context);
-    trn_data.primal_variables = static_cast<Data*>(mxGetData(mxW));
-  }
-
-  mxArray *mxA = add_field_opts_matrix(opts, "A",
-    trn_data.num_tasks, trn_data.num_examples, mxGetClassID(data), context);
-  trn_data.dual_variables = static_cast<Data*>(mxGetData(mxA));
-
-  add_field_scalar("num_dimensions", trn_data.num_dimensions, context);
-  add_field_scalar("num_examples", trn_data.num_examples, context);
-  add_field_scalar("num_tasks", trn_data.num_tasks, context);
-  add_field_scalar("is_dual", context.is_dual, context);
-  context.datasets.emplace_back(trn_data);
-}
-
-template <typename Data,
-          typename Result,
-          typename Summation>
-void
-mex_main(
-    mxArray* plhs[],
-    const mxArray* prhs[],
-    const mxArray* opts,
-    Summation& sum
-    ) {
-  solver_context<Data, Result> context;
-  set_datasets(prhs[0], prhs[1], opts, context);
-  set_logging_options(opts, context);
-  set_precision_options(sum, context);
-  set_stopping_criteria(opts, context);
-
-  auto trn_data = context.datasets.front();
-
-  std::string objective = mxGetFieldValueOrDefault(
-    opts, "objective", std::string("l2_topk_hinge"));
-  add_field("objective", mxCreateString(objective.c_str()), context);
-
-  auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
-  mxCheck<Result>(std::greater<Result>(), c, 0, "c");
-
-  Result num_examples(static_cast<Result>(trn_data.num_examples));
-  auto C = mxGetFieldValueOrDefault<Result>(opts, "C", c / num_examples);
-  mxCheck<Result>(std::greater<Result>(), C, 0, "C");
-
-  c = (C != c / num_examples) ? C * num_examples : c;
-  add_field_scalar("c", c, context);
-  add_field_scalar("C", C, context);
-
-  auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
-  mxCheckRange<size_type>(k, 1, trn_data.num_tasks - 1, "k");
-
-  auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
-  mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
-
-  if (objective == "l2_entropy_topk") {
-    add_field_scalar("k", k, context);
-    make_solver_solve(context,
-      l2_entropy_topk<Data, Result, Summation>(k, C, sum));
-  } else if (objective == "l2_topk_hinge") {
-    add_field_scalar("k", k, context);
-    add_field_scalar("gamma", gamma, context);
-    if (gamma > 0) {
-      make_solver_solve(context,
-        l2_topk_hinge_smooth<Data, Result, Summation>(k, C, gamma, sum));
-    } else {
-      make_solver_solve(context,
-        l2_topk_hinge<Data, Result, Summation>(k, C, sum));
-    }
-  } else if (objective == "l2_hinge_topk") {
-    add_field_scalar("k", k, context);
-    add_field_scalar("gamma", gamma, context);
-    if (gamma > 0) {
-      make_solver_solve(context,
-        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum));
-    } else {
-      make_solver_solve(context,
-        l2_hinge_topk<Data, Result, Summation>(k, C, sum));
-    }
-  } else {
-    mexErrMsgIdAndTxt(
-      err_id[err_objective], err_msg[err_objective], objective.c_str());
-  }
-
-  plhs[0] = mxCreateStruct(context.fields, "model");
-}
-
-template <typename Data,
-          typename Result>
-inline void
-mex_main(
-    mxArray* plhs[],
-    const mxArray* prhs[],
-    const mxArray* opts
-    ) {
-  std::string summation = mxGetFieldValueOrDefault(
-    opts, "summation", std::string("standard"));
-  if (summation == "standard" || summation == "default") {
-    std_sum<Data*, Result> sum;
-    mex_main<Data, Result, std_sum<Data*, Result>>(plhs, prhs, opts, sum);
-  } else if (summation == "kahan") {
-    kahan_sum<Data*, Result> sum;
-    mex_main<Data, Result, kahan_sum<Data*, Result>>(plhs, prhs, opts, sum);
-  } else {
-    mexErrMsgIdAndTxt(
-      err_id[err_summation], err_msg[err_summation], summation.c_str());
-  }
 }
 
 template <typename Data>
@@ -458,6 +389,7 @@ mex_main(
     ) {
   const mxArray* opts = (nrhs > 2) ? prhs[2] : nullptr;
   mxCheckStruct(opts, "opts");
+  set_logging_options(opts);
   std::string precision = mxGetFieldValueOrDefault(
     opts, "precision", std::string("double"));
   if (precision == "double") {

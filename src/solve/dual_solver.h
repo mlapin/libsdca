@@ -12,31 +12,33 @@ template <typename Objective,
 class dual_solver : public solver_base<Result> {
 public:
   typedef solver_base<Result> base;
-  typedef dataset<Data> dataset_type;
   typedef Objective objective_type;
+  typedef solver_context<Data, Result> context_type;
+  typedef dataset<Data> dataset_type;
   typedef Data data_type;
   typedef Result result_type;
 
   dual_solver(
-      const dataset_type& __dataset,
-      const stopping_criteria& __criteria,
-      const objective_type& __objective
+      const objective_type& __objective,
+      const context_type& __ctx
     ) :
-      base::solver_base(__criteria, __dataset.num_examples),
+      base::solver_base(__ctx.criteria, __ctx.datasets[0].num_examples),
       objective_(__objective),
-      num_tasks_(__dataset.num_tasks),
-      labels_(&__dataset.labels[0]),
-      gram_matrix_(__dataset.data),
-      dual_variables_(__dataset.dual_variables),
-      scores_(__dataset.num_tasks),
-      N(static_cast<blas_int>(__dataset.num_examples)),
-      T(static_cast<blas_int>(__dataset.num_tasks))
+      num_tasks_(__ctx.datasets[0].num_tasks),
+      labels_(&(__ctx.datasets[0].labels[0])),
+      gram_matrix_(__ctx.datasets[0].data),
+      dual_variables_(__ctx.dual_variables),
+      scores_(__ctx.datasets[0].num_tasks),
+      N(static_cast<blas_int>(__ctx.datasets[0].num_examples)),
+      T(static_cast<blas_int>(__ctx.datasets[0].num_tasks))
   {
     LOG_INFO << "solver: " << base::name() << " (dual)" << std::endl
-      << "dataset: " << __dataset.to_string() << std::endl
       << "objective: " << __objective.to_string() << std::endl
-      << "stopping criteria: " << __criteria.to_string() << std::endl;
+      << "stopping criteria: " << __ctx.criteria.to_string() << std::endl;
     LOG_DEBUG << __objective.precision_string()  << std::endl;
+    for (auto d : __ctx.datasets) {
+      LOG_INFO << "dataset: " << d.to_string() << std::endl;
+    }
   }
 
 protected:

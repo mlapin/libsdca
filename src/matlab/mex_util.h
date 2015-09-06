@@ -93,6 +93,24 @@ to_string(mxClassID class_id) {
   }
 }
 
+template <typename Type>
+struct mex_class {
+  static constexpr mxClassID
+  id() { return mxUNKNOWN_CLASS; }
+};
+
+template <>
+struct mex_class<float> {
+  static constexpr mxClassID
+  id() { return mxSINGLE_CLASS; }
+};
+
+template <>
+struct mex_class<double> {
+  static constexpr mxClassID
+  id() { return mxDOUBLE_CLASS; }
+};
+
 template <typename Usage>
 inline void
 mxCheckArgNum(
@@ -325,7 +343,7 @@ mxCreateScalar(
 
 inline mxArray*
 mxCreateStruct(
-    const std::vector<std::pair<const char*, const mxArray*>>& fields,
+    const std::vector<std::pair<const char*, mxArray*>>& fields,
     const char* name
   ) {
   std::vector<const char*> names;
@@ -337,9 +355,27 @@ mxCreateStruct(
     static_cast<int>(fields.size()), &names[0]);
   mxCheckCreated(pa, name);
   for (std::size_t i = 0; i < fields.size(); ++i) {
-    mxSetFieldByNumber(pa, 0, static_cast<int>(i),
-      const_cast<mxArray*>(fields[i].second));
+    mxSetFieldByNumber(pa, 0, static_cast<int>(i), fields[i].second);
   }
+  return pa;
+}
+
+inline mxArray*
+mxDuplicateFieldOrCreateMatrix(
+    const mxArray* structure,
+    const char* field,
+    const std::size_t m,
+    const std::size_t n,
+    const mxClassID id
+  ) {
+  mxArray *pa = mxGetField(structure, 0, field);
+  if (pa != nullptr) {
+    mxCheckMatrix(pa, field, m, n, id);
+    pa = mxDuplicateArray(pa);
+  } else {
+    pa = mxCreateNumericMatrix(m, n, id, mxREAL);
+  }
+  mxCheckCreated(pa, field);
   return pa;
 }
 
