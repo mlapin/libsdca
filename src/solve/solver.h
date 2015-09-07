@@ -209,6 +209,43 @@ protected:
 
 };
 
+template <typename Data,
+          typename Result>
+class multiset_solver : public solver_base<Result> {
+public:
+  typedef solver_base<Result> base;
+  typedef solver_context<Data, Result> context_type;
+  typedef dataset<Data> dataset_type;
+  typedef Data data_type;
+  typedef Result result_type;
+
+  multiset_solver(
+      const context_type& __ctx
+    ) :
+      base::solver_base(__ctx.criteria, __ctx.datasets[0].num_examples),
+      context_(__ctx),
+      stats_(__ctx.datasets.size())
+  {}
+
+protected:
+  const context_type& context_;
+  std::vector<std::vector<statistic<result_type>>> stats_;
+
+  void evaluate_solution() override {
+    auto datasets = context_.datasets;
+    for (size_type i = 0; i < stats_.size(); ++i) {
+      stats_[i].push_back(compute_statistic(datasets[i]));
+    }
+    auto stat = stats_[0].back();
+    base::primal_ = stat.primal;
+    base::dual_ = stat.dual;
+    base::gap_ = stat.gap;
+  }
+
+  inline statistic<result_type>
+  compute_statistic(const dataset<data_type>& set) = 0;
+};
+
 }
 
 #endif
