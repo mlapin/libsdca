@@ -79,8 +79,9 @@ if 0
 end
 
 if 1
-  load('data/sun397-cnn.mat');
-%   load('data/sun397-fv.mat');
+%   load('data/sun397-cnn.mat');
+  load('data/sun397-fv-trn.mat');
+  load('data/sun397-fv-tst.mat');
 %   Ktrn = Ktrn-1;
   
 %   ix = 1:5*2;
@@ -88,8 +89,8 @@ if 1
 %   Ytrn = Ytrn(ix);
   
 
-  opts.objective = 'l2_entropy_topk';
-%   opts.objective = 'l2_topk_hinge';
+%   opts.objective = 'l2_entropy_topk';
+  opts.objective = 'l2_topk_hinge';
 %   opts.objective = 'l2_hinge_topk';
   opts.C = 1;
   opts.k = 2;
@@ -97,7 +98,7 @@ if 1
   opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
-  opts.max_epoch = 3;
+  opts.max_epoch = 2;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';
@@ -108,7 +109,7 @@ if 1
     if ~exist('Ktrn', 'var')
       Ktrn = Xtrn'*Xtrn;
     end
-    model = libsdca_solve(Ktrn, Ytrn, opts);
+    model = libsdca_solve({Ktrn, Ktrn, Ktst}, {Ytrn, Ytrn, Ytst}, opts);
     disp(model);
     [~,pred] = max(model.A*Ktrn);
     fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
@@ -120,6 +121,9 @@ if 1
   end
   disp(model.time);
   disp(model.eval);
+  size([model.time.epoch])
+  size([model.eval.primal])
+  size([model.eval.accuracy])
   
   if 0
     opts2 = model;

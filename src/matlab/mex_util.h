@@ -10,7 +10,8 @@
 namespace sdca {
 
 enum err_index {
-  err_arg_count = 0,
+  err_arg = 0,
+  err_arg_count,
   err_arg_single,
   err_arg_double,
   err_arg_real,
@@ -19,11 +20,16 @@ enum err_index {
   err_arg_not_sparse,
   err_arg_not_empty,
   err_arg_range,
+  err_arg_class,
   err_vec_dim_class,
   err_mat_dim_class,
   err_out_of_memory,
   err_read_failed,
   err_labels_range,
+  err_cell_arrays,
+  err_num_dim,
+  err_num_tasks,
+  err_num_ex,
   err_command,
   err_prox,
   err_objective,
@@ -35,6 +41,7 @@ enum err_index {
 };
 
 static const char* err_id[] = {
+  "LIBSDCA:arg",
   "LIBSDCA:arg_count",
   "LIBSDCA:arg_single",
   "LIBSDCA:arg_double",
@@ -44,11 +51,16 @@ static const char* err_id[] = {
   "LIBSDCA:arg_not_sparse",
   "LIBSDCA:arg_not_empty",
   "LIBSDCA:arg_range",
+  "LIBSDCA:arg_class",
   "LIBSDCA:vec_dim_class",
   "LIBSDCA:mat_dim_class",
   "LIBSDCA:out_of_memory",
   "LIBSDCA:read_failed",
   "LIBSDCA:labels_range",
+  "LIBSDCA:cell_arrays",
+  "LIBSDCA:num_dim",
+  "LIBSDCA:num_tasks",
+  "LIBSDCA:num_examples",
   "LIBSDCA:command",
   "LIBSDCA:prox",
   "LIBSDCA:objective",
@@ -60,6 +72,7 @@ static const char* err_id[] = {
 };
 
 static const char* err_msg[] = {
+  "Invalid input.",
   "Invalid number of input/output arguments.",
   "'%s' must be single.",
   "'%s' must be double.",
@@ -69,11 +82,16 @@ static const char* err_msg[] = {
   "'%s' must be not sparse.",
   "'%s' must be not empty.",
   "'%s' is out of range.",
+  "'%s' must be of class %s.",
   "'%s' must be a %u dimensional vector of class %s.",
   "'%s' must be a %u-by-%u dimensional matrix of class %s.",
   "Out of memory (cannot allocate memory for '%s').",
   "Failed to read the value of '%s'.",
   "Invalid labels range (must be 1:T or 0:T-1).",
+  "Invalid cell arrays (must be non-empty and have the same size).",
+  "Invalid number of dimensions in features #%d.",
+  "Invalid number of tasks in labels #%d.",
+  "Invalid number of training examples (first dimension) in kernel #%d.",
   "Unknown command '%s'.",
   "Unknown prox '%s'.",
   "Unknown objective '%s'.",
@@ -172,6 +190,18 @@ mxCheckDouble(
 }
 
 inline void
+mxCheckClass(
+    const mxArray* pa,
+    const char* name,
+    const mxClassID class_id
+    ) {
+  if (pa != nullptr && mxGetClassID(pa) != class_id) {
+    mexErrMsgIdAndTxt(err_id[err_arg_class], err_msg[err_arg_class], name,
+      to_string(class_id));
+  }
+}
+
+inline void
 mxCheckReal(
     const mxArray* pa,
     const char* name
@@ -189,6 +219,19 @@ mxCheckSquare(
     ) {
   if (pa != nullptr && (mxGetM(pa) != mxGetN(pa))) {
     mexErrMsgIdAndTxt(err_id[err_arg_square], err_msg[err_arg_square], name);
+  }
+}
+
+inline void
+mxCheckCellArrays(
+    const mxArray* pa,
+    const mxArray* pb
+    ) {
+  if (pa == nullptr || pb == nullptr
+      || mxIsEmpty(pa) || mxIsEmpty(pb)
+      || !mxIsCell(pa) || !mxIsCell(pb)
+      || mxGetNumberOfElements(pa) != mxGetNumberOfElements(pb)) {
+    mexErrMsgIdAndTxt(err_id[err_cell_arrays], err_msg[err_cell_arrays]);
   }
 }
 

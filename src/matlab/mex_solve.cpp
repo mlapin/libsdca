@@ -88,7 +88,7 @@ add_timings(
     model_info<mxArray*>& info
   ) {
   const char* names[] = {"epoch", "cpu_time", "wall_time"};
-  mxArray* pa = mxCreateStructMatrix(timings.size(), 1, 3, names);
+  mxArray* pa = mxCreateStructMatrix(1, timings.size(), 3, names);
   mxCheckCreated(pa, "time");
   size_type i = 0;
   for (auto& timing : timings) {
@@ -107,7 +107,7 @@ add_evaluations(
     model_info<mxArray*>& info
   ) {
   const char* names[] = {"primal", "dual", "gap", "accuracy"};
-  mxArray* pa = mxCreateStructMatrix(evals[0].size(), evals.size(), 4, names);
+  mxArray* pa = mxCreateStructMatrix(evals.size(), evals[0].size(), 4, names);
   mxCheckCreated(pa, "eval");
   size_type i = 0;
   for (auto& dataset_evals : evals) {
@@ -228,23 +228,64 @@ set_labels(
 
 template <typename Data>
 inline void
+set_dataset(
+    const mxArray* data,
+    const mxArray* labels,
+    solver_context<Data>& context
+  ) {
+  mxCheckNotSparse(data, "data");
+  mxCheckNotEmpty(data, "data");
+  mxCheckReal(data, "data");
+  mxCheckClass(data, "data", mex_class<Data>::id());
+
+  mxCheckNotSparse(labels, "labels");
+  mxCheckNotEmpty(labels, "labels");
+  mxCheckDouble(labels, "labels");
+
+  dataset<Data> data_set;
+  data_set.data = static_cast<Data*>(mxGetData(data));
+  data_set.num_dimensions = (context.is_dual) ? 0 : mxGetM(data);
+  data_set.num_examples = mxGetN(data);
+  set_labels(labels, data_set);
+
+  context.datasets.emplace_back(data_set);
+}
+
+template <typename Data>
+inline void
 set_datasets(
     const mxArray* data,
     const mxArray* labels,
     solver_context<Data>& context
   ) {
-  dataset<Data> data_set;
-  data_set.data = static_cast<Data*>(mxGetData(data));
-  data_set.num_examples = mxGetN(data);
-  set_labels(labels, data_set);
-
-  if (context.is_dual) {
-    data_set.num_dimensions = 0;
+  if (mxIsNumeric(data)) {
+    set_dataset(data, labels, context);
     mxCheckSquare(data, "data");
   } else {
-    data_set.num_dimensions = mxGetM(data);
+    mxCheckCellArrays(data, labels);
+
+    // Training dataset
+    set_dataset(mxGetCell(data, 0), mxGetCell(labels, 0), context);
+    mxCheckSquare(mxGetCell(data, 0), "data");
+    size_type num_dimensions = context.datasets[0].num_dimensions;
+    size_type num_examples = context.datasets[0].num_examples;
+    size_type num_tasks = context.datasets[0].num_tasks;
+
+    // Evaluation datasets
+    size_type num_datasets = mxGetNumberOfElements(data);
+    for (size_type i = 1; i < num_datasets; ++i) {
+      set_dataset(mxGetCell(data, i), mxGetCell(labels, i), context);
+      if (num_dimensions != context.datasets[i].num_dimensions) {
+        mexErrMsgIdAndTxt(err_id[err_num_dim], err_msg[err_num_dim], i + 1);
+      }
+      if (num_tasks != context.datasets[i].num_tasks) {
+        mexErrMsgIdAndTxt(err_id[err_num_tasks], err_msg[err_num_tasks], i + 1);
+      }
+      if (context.is_dual && num_examples != mxGetM(mxGetCell(data, i))) {
+        mexErrMsgIdAndTxt(err_id[err_num_ex], err_msg[err_num_ex], i + 1);
+      }
+    }
   }
-  context.datasets.emplace_back(data_set);
 }
 
 template <typename Data,
@@ -442,20 +483,16 @@ mexFunction(
   } else {
     mxCheckArgNum(nrhs, 2, 3, printUsage);
 
-    mxCheckNotSparse(prhs[0], "data");
-    mxCheckNotEmpty(prhs[0], "data");
-    mxCheckReal(prhs[0], "data");
-
-    mxCheckNotSparse(prhs[1], "labels");
-    mxCheckNotEmpty(prhs[1], "labels");
-    mxCheckDouble(prhs[1], "labels");
-
     logging::format_push();
     mat_cout_hijack mat_cout;
-    if (mxIsDouble(prhs[0])) {
+    if (mxIsDouble(prhs[0]) || (mxIsCell(prhs[0]) && !mxIsEmpty(prhs[0])
+        && mxIsDouble(mxGetCell(prhs[0], 0)))) {
        mex_main<double>(plhs, nrhs, prhs);
-    } else if (mxIsSingle(prhs[0])) {
+    } else if (mxIsSingle(prhs[0]) || (mxIsCell(prhs[0]) && !mxIsEmpty(prhs[0])
+        && mxIsSingle(mxGetCell(prhs[0], 0)))) {
        mex_main<float>(plhs, nrhs, prhs);
+    } else {
+      mexErrMsgIdAndTxt(err_id[err_arg], err_msg[err_arg]);
     }
     mat_cout.release();
     logging::format_pop();

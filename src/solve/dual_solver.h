@@ -92,7 +92,7 @@ protected:
     size_type num_examples = set.num_examples;
     for (size_type i = 0; i < num_examples; ++i) {
       // Let K_i = i'th column of the Gram matrix
-      const data_type* K_i = set.data + num_examples * i;
+      const data_type* K_i = set.data + num_examples_ * i;
 
       data_type* variables = dual_variables_ + num_tasks_ * i;
       compute_scores_swap_gt(set.labels[i], K_i, variables);
