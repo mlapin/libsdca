@@ -25,6 +25,7 @@ set(SOLVE_SRCS
   solve/solver.h
   solve/dual_solver.h
   solve/primal_solver.h
+  solve/objective_base.h
   solve/l2_entropy_topk.h
   solve/l2_hinge_topk.h
   solve/l2_topk_hinge.h

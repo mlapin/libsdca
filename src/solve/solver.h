@@ -13,6 +13,7 @@ template <typename Result>
 class solver_base {
 public:
   typedef Result result_type;
+  typedef train_point<result_type> record_type;
   static constexpr result_type sufficient_increase = static_cast<Result>(1)
     + std::numeric_limits<result_type>::epsilon();
 
@@ -74,7 +75,7 @@ public:
       : static_cast<result_type>(0);
   }
 
-  const std::vector<time_point>& timings() const { return timings_; }
+  const std::vector<record_type>& records() const { return records_; }
 
 protected:
   const stopping_criteria criteria_;
@@ -87,6 +88,9 @@ protected:
   wall_time_point wall_start_;
   double cpu_time_;
   double wall_time_;
+  result_type primal_loss_;
+  result_type dual_loss_;
+  result_type regularizer_;
   result_type primal_;
   result_type dual_;
   result_type gap_;
@@ -95,7 +99,7 @@ protected:
   bool recompute_gap_;
   std::minstd_rand generator_;
   std::vector<size_type> examples_;
-  std::vector<time_point> timings_;
+  std::vector<record_type> records_;
 
   // Initialization
   virtual void initialize() {
@@ -165,7 +169,6 @@ protected:
   }
 
   virtual void compute_duality_gap() {
-    time_point timing(epoch_);
     recompute_gap_ = false;
     result_type dual_before = dual_;
     evaluate_solution();
@@ -183,9 +186,9 @@ protected:
         "no progress due to insufficient dual objective increase: "
         << (dual_ - dual_before) << std::endl;
     }
-    timing.cpu_time = cpu_time_now();
-    timing.wall_time = wall_time_now();
-    timings_.push_back(timing);
+    records_.emplace_back(
+      primal_, dual_, gap_, primal_loss_, dual_loss_, regularizer_,
+      epoch_, cpu_time_now(), wall_time_now());
     LOG_VERBOSE << "  "
       "epoch: " << std::setw(3) << epoch() << std::setw(0) << ", "
       "primal: " << primal() << ", "
@@ -218,7 +221,7 @@ public:
   typedef solver_base<Result> base;
   typedef solver_context<Data> context_type;
   typedef dataset<Data> dataset_type;
-  typedef evaluation_point<Result> evaluation_type;
+  typedef test_point<Result> evaluation_type;
   typedef std::vector<evaluation_type> evaluations_type;
 
   multiset_solver(
@@ -226,28 +229,28 @@ public:
     ) :
       base::solver_base(__ctx.criteria, __ctx.datasets[0].num_examples),
       context_(__ctx),
-      stats_(__ctx.datasets.size())
+      evals_(__ctx.datasets.size())
   {}
 
-  const std::vector<evaluations_type>& evaluations() const { return stats_; }
+  const std::vector<evaluations_type>& evaluations() const { return evals_; }
 
 protected:
   const context_type& context_;
-  std::vector<evaluations_type> stats_;
+  std::vector<evaluations_type> evals_;
 
   void evaluate_solution() override {
     auto datasets = context_.datasets;
-    for (size_type i = 0; i < stats_.size(); ++i) {
-      stats_[i].push_back(evaluate_dataset(datasets[i]));
+    evals_[0].push_back(evaluate_train());
+    for (size_type i = 1; i < evals_.size(); ++i) {
+      evals_[i].push_back(evaluate_test(datasets[i]));
     }
-    auto stat = stats_[0].back();
-    base::primal_ = stat.primal;
-    base::dual_ = stat.dual;
-    base::gap_ = stat.gap;
   }
 
   virtual evaluation_type
-  evaluate_dataset(const dataset_type& set) = 0;
+  evaluate_train() = 0;
+
+  virtual evaluation_type
+  evaluate_test(const dataset_type& set) = 0;
 };
 
 }

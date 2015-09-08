@@ -82,44 +82,50 @@ printHelp() {
             MEX_SOLVE, MEX_SOLVE);
 }
 
+template <typename Result>
 inline void
-add_timings(
-    const std::vector<time_point>& timings,
+add_records(
+    const std::vector<train_point<Result>>& records,
     model_info<mxArray*>& info
   ) {
-  const char* names[] = {"epoch", "cpu_time", "wall_time"};
-  mxArray* pa = mxCreateStructMatrix(1, timings.size(), 3, names);
-  mxCheckCreated(pa, "time");
+  const char* names[] = {"epoch", "primal", "dual", "gap",
+    "loss", "dual_loss", "regularizer", "cpu_time", "wall_time"};
+  mxArray* pa = mxCreateStructMatrix(records.size(), 1, 9, names);
+  mxCheckCreated(pa, "records");
   size_type i = 0;
-  for (auto& timing : timings) {
-    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(timing.epoch));
-    mxSetFieldByNumber(pa, i, 1, mxCreateScalar(timing.cpu_time));
-    mxSetFieldByNumber(pa, i, 2, mxCreateScalar(timing.wall_time));
+  for (auto& a : records) {
+    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.epoch));
+    mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.primal));
+    mxSetFieldByNumber(pa, i, 2, mxCreateScalar(a.dual));
+    mxSetFieldByNumber(pa, i, 3, mxCreateScalar(a.gap));
+    mxSetFieldByNumber(pa, i, 4, mxCreateScalar(a.primal_loss));
+    mxSetFieldByNumber(pa, i, 5, mxCreateScalar(a.dual_loss));
+    mxSetFieldByNumber(pa, i, 6, mxCreateScalar(a.regularizer));
+    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.cpu_time));
+    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.wall_time));
     ++i;
   }
-  info.add("time", pa);
+  info.add("records", pa);
 }
 
 template <typename Result>
 inline void
 add_evaluations(
-    const std::vector<std::vector<evaluation_point<Result>>>& evals,
+    const std::vector<std::vector<test_point<Result>>>& evals,
     model_info<mxArray*>& info
   ) {
-  const char* names[] = {"primal", "dual", "gap", "accuracy"};
-  mxArray* pa = mxCreateStructMatrix(evals.size(), evals[0].size(), 4, names);
-  mxCheckCreated(pa, "eval");
+  const char* names[] = {"loss", "accuracy"};
+  mxArray* pa = mxCreateStructMatrix(evals[0].size(), evals.size(), 2, names);
+  mxCheckCreated(pa, "evals");
   size_type i = 0;
   for (auto& dataset_evals : evals) {
-    for (auto& eval : dataset_evals) {
-      mxSetFieldByNumber(pa, i, 0, mxCreateScalar(eval.primal));
-      mxSetFieldByNumber(pa, i, 1, mxCreateScalar(eval.dual));
-      mxSetFieldByNumber(pa, i, 2, mxCreateScalar(eval.gap));
-      mxSetFieldByNumber(pa, i, 3, mxCreateVector(eval.accuracy, "accuracy"));
+    for (auto& a : dataset_evals) {
+      mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.loss));
+      mxSetFieldByNumber(pa, i, 1, mxCreateVector(a.accuracy, "accuracy"));
       ++i;
     }
   }
-  info.add("eval", pa);
+  info.add("evals", pa);
 }
 
 template <typename Solver>
@@ -137,7 +143,7 @@ solve_objective_add_info(
   info.add("epoch", mxCreateScalar(solver.epoch()));
   info.add("cpu_time", mxCreateScalar(solver.cpu_time()));
   info.add("wall_time", mxCreateScalar(solver.wall_time()));
-  add_timings(solver.timings(), info);
+  add_records(solver.records(), info);
   add_evaluations(solver.evaluations(), info);
 }
 
@@ -271,7 +277,7 @@ set_datasets(
     size_type num_examples = context.datasets[0].num_examples;
     size_type num_tasks = context.datasets[0].num_tasks;
 
-    // Evaluation datasets
+    // Testing datasets
     size_type num_datasets = mxGetNumberOfElements(data);
     for (size_type i = 1; i < num_datasets; ++i) {
       set_dataset(mxGetCell(data, i), mxGetCell(labels, i), context);

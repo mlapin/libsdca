@@ -70,8 +70,8 @@ struct dataset {
   to_string() const {
     std::ostringstream str;
     str << "num_dimensions = " << num_dimensions << ", "
-           "num_examples = " << num_examples << ", "
-           "num_tasks = " << num_tasks;
+           "num_tasks = " << num_tasks << ", "
+           "num_examples = " << num_examples;
     return str.str();
   }
 };
@@ -86,19 +86,40 @@ struct solver_context {
   data_type* dual_variables = nullptr;
 };
 
-struct time_point {
-  size_type epoch;
-  double cpu_time;
-  double wall_time;
-  time_point(size_type __epoch) : epoch(__epoch) {}
-};
-
 template <typename Result>
-struct evaluation_point {
+struct train_point {
   typedef Result result_type;
   result_type primal;
   result_type dual;
   result_type gap;
+  result_type primal_loss;
+  result_type dual_loss;
+  result_type regularizer;
+  size_type epoch;
+  double cpu_time;
+  double wall_time;
+
+  train_point(
+      const result_type __primal,
+      const result_type __dual,
+      const result_type __gap,
+      const result_type __p_loss,
+      const result_type __d_loss,
+      const result_type __regul,
+      const size_type __epoch,
+      const double __cpu_time,
+      const double __wall_time
+  ) :
+    primal(__primal), dual(__dual), gap(__gap),
+    primal_loss(__p_loss), dual_loss(__d_loss), regularizer(__regul),
+    epoch(__epoch), cpu_time(__cpu_time), wall_time(__wall_time)
+  {}
+};
+
+template <typename Result>
+struct test_point {
+  typedef Result result_type;
+  result_type loss;
   std::vector<result_type> accuracy;
 };
 

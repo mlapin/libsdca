@@ -51,6 +51,12 @@ public:
 protected:
   // Protected members of the base class
   using base::num_examples_;
+  using base::primal_loss_;
+  using base::dual_loss_;
+  using base::regularizer_;
+  using base::primal_;
+  using base::dual_;
+  using base::gap_;
 
   // Main variables
   const objective_type& objective_;
@@ -110,57 +116,90 @@ protected:
   }
 
   inline evaluation_type
-  evaluate_dataset(const dataset_type& set) override {
+  evaluate_train() override {
     evaluation_type stats;
     stats.accuracy.resize(num_tasks_);
     auto acc_first = stats.accuracy.begin();
     auto acc_last = stats.accuracy.end();
 
-    // Compute the three sums independently over all training examples
-    result_type regul_sum = 0;
-    result_type p_loss_sum = 0;
-    result_type d_loss_sum = 0;
+    // Compute the three sums independently using Kahan summation
+    primal_loss_ = 0; dual_loss_ = 0; regularizer_ = 0;
+    result_type p_loss_comp(0), d_loss_comp(0), regul_comp(0);
 
-    // Compensation variables for the Kahan summation
-    result_type regul_comp = 0;
-    result_type p_loss_comp = 0;
-    result_type d_loss_comp = 0;
-
-    size_type num_examples = set.num_examples;
-    for (size_type i = 0; i < num_examples; ++i) {
+    for (size_type i = 0; i < num_examples_; ++i) {
       // Let x_i = i'th feature vector
-      const data_type* x_i = set.data + num_dimensions_ * i;
+      const data_type* x_i = features_ + num_dimensions_ * i;
 
       data_type* variables = dual_variables_ + num_tasks_ * i;
-      compute_scores_swap_gt(set.labels[i], x_i, variables);
+      compute_scores_swap_gt(labels_[i], x_i, variables);
 
       // Count correct predictions
       auto it = std::partition(scores_.begin() + 1, scores_.end(),
         [=](const data_type x){ return x > scores_[0]; });
       acc_first[std::distance(scores_.begin() + 1, it)] += 1;
 
-      // Compute the regularization term and primal/dual losses
-      result_type regul, p_loss, d_loss;
-      objective_.regularized_loss(T, variables, &scores_[0],
-        regul, p_loss, d_loss);
-
-      // Increment the sums
-      kahan_add(regul, regul_sum, regul_comp);
-      kahan_add(p_loss, p_loss_sum, p_loss_comp);
-      kahan_add(d_loss, d_loss_sum, d_loss_comp);
+      // Increment the loss and regularization terms
+      kahan_add(objective_.regularizer(T, variables, &scores_[0]),
+        regularizer_, regul_comp);
+      kahan_add(objective_.dual_loss(T, variables),
+        dual_loss_, d_loss_comp);
+      kahan_add(objective_.primal_loss(T, &scores_[0]),
+        primal_loss_, p_loss_comp); // may re-order scores
 
       // Put back the ground truth variable
-      std::swap(variables[0], variables[set.labels[i]]);
+      std::swap(variables[0], variables[labels_[i]]);
     }
 
     // Compute the overall primal/dual objectives and the duality gap
-    objective_.primal_dual_gap(regul_sum, p_loss_sum, d_loss_sum,
-      stats.primal, stats.dual, stats.gap);
+    objective_.update_all(
+      primal_loss_, dual_loss_, regularizer_, primal_, dual_, gap_);
+    stats.loss = primal_loss_;
 
     // Top-k accuracies for all k
     std::partial_sum(acc_first, acc_last, acc_first);
-    std::for_each(acc_first, acc_last,
-      [=](result_type &x){ x /= static_cast<result_type>(num_examples); });
+    result_type coeff(1 / static_cast<result_type>(num_examples_));
+    std::for_each(acc_first, acc_last, [=](result_type &x){ x *= coeff; });
+
+    return stats;
+  }
+
+  inline evaluation_type
+  evaluate_test(const dataset_type& set) override {
+    evaluation_type stats;
+    stats.accuracy.resize(num_tasks_);
+    auto acc_first = stats.accuracy.begin();
+    auto acc_last = stats.accuracy.end();
+
+    // Compute the primal loss using Kahan summation
+    result_type p_loss(0), p_loss_comp(0);
+
+    size_type num_examples = set.num_examples;
+    for (size_type i = 0; i < num_examples; ++i) {
+      // Let x_i = i'th feature vector
+      const data_type* x_i = set.data + num_dimensions_ * i;
+
+      // Let scores = A * K_i = W' * x_i
+      sdca_blas_gemv(D, T, primal_variables_, x_i, &scores_[0], CblasTrans);
+      std::swap(scores_[0], scores_[set.labels[i]]);
+
+      // Count correct predictions
+      auto it = std::partition(scores_.begin() + 1, scores_.end(),
+        [=](const data_type x){ return x > scores_[0]; });
+      acc_first[std::distance(scores_.begin() + 1, it)] += 1;
+
+      // Compute the primal loss
+      kahan_add(objective_.primal_loss(T, &scores_[0]),
+        p_loss, p_loss_comp); // may re-order scores
+    }
+
+    // The loss term may need an update (e.g. rescaling with C)
+    objective_.update_loss(p_loss);
+    stats.loss = p_loss;
+
+    // Top-k accuracies for all k
+    std::partial_sum(acc_first, acc_last, acc_first);
+    result_type coeff(1 / static_cast<result_type>(num_examples));
+    std::for_each(acc_first, acc_last, [=](result_type &x){ x *= coeff; });
 
     return stats;
   }
