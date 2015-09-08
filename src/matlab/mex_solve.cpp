@@ -82,27 +82,44 @@ printHelp() {
             MEX_SOLVE, MEX_SOLVE);
 }
 
-template <typename Result>
 inline void
-add_states(
-    const std::vector<state<Result>>& states,
+add_timings(
+    const std::vector<time_point>& timings,
     model_info<mxArray*>& info
   ) {
-  const char* names[] =
-    {"epoch", "cpu_time", "wall_time", "primal", "dual", "gap"};
-  mxArray* pa = mxCreateStructMatrix(states.size(), 1, 6, names);
-  mxCheckCreated(pa, "stats");
+  const char* names[] = {"epoch", "cpu_time", "wall_time"};
+  mxArray* pa = mxCreateStructMatrix(timings.size(), 1, 3, names);
+  mxCheckCreated(pa, "time");
   size_type i = 0;
-  for (auto& state : states) {
-    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(state.epoch));
-    mxSetFieldByNumber(pa, i, 1, mxCreateScalar(state.cpu_time));
-    mxSetFieldByNumber(pa, i, 2, mxCreateScalar(state.wall_time));
-    mxSetFieldByNumber(pa, i, 3, mxCreateScalar(state.primal));
-    mxSetFieldByNumber(pa, i, 4, mxCreateScalar(state.dual));
-    mxSetFieldByNumber(pa, i, 5, mxCreateScalar(state.gap));
+  for (auto& timing : timings) {
+    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(timing.epoch));
+    mxSetFieldByNumber(pa, i, 1, mxCreateScalar(timing.cpu_time));
+    mxSetFieldByNumber(pa, i, 2, mxCreateScalar(timing.wall_time));
     ++i;
   }
-  info.add("states", pa);
+  info.add("time", pa);
+}
+
+template <typename Result>
+inline void
+add_evaluations(
+    const std::vector<std::vector<evaluation_point<Result>>>& evals,
+    model_info<mxArray*>& info
+  ) {
+  const char* names[] = {"primal", "dual", "gap", "accuracy"};
+  mxArray* pa = mxCreateStructMatrix(evals[0].size(), evals.size(), 4, names);
+  mxCheckCreated(pa, "eval");
+  size_type i = 0;
+  for (auto& dataset_evals : evals) {
+    for (auto& eval : dataset_evals) {
+      mxSetFieldByNumber(pa, i, 0, mxCreateScalar(eval.primal));
+      mxSetFieldByNumber(pa, i, 1, mxCreateScalar(eval.dual));
+      mxSetFieldByNumber(pa, i, 2, mxCreateScalar(eval.gap));
+      mxSetFieldByNumber(pa, i, 3, mxCreateVector(eval.accuracy, "accuracy"));
+      ++i;
+    }
+  }
+  info.add("eval", pa);
 }
 
 template <typename Solver>
@@ -120,18 +137,19 @@ solve_objective_add_info(
   info.add("epoch", mxCreateScalar(solver.epoch()));
   info.add("cpu_time", mxCreateScalar(solver.cpu_time()));
   info.add("wall_time", mxCreateScalar(solver.wall_time()));
-//  add_states(solver.states(), info);
+  add_timings(solver.timings(), info);
+  add_evaluations(solver.evaluations(), info);
 }
 
 template <typename Objective,
-          typename Data,
-          typename Result>
+          typename Data>
 inline void
 make_solver_solve(
-    solver_context<Data, Result>& context,
+    solver_context<Data>& context,
     model_info<mxArray*>& info,
     const Objective& objective
   ) {
+  typedef typename Objective::result_type Result;
   if (context.is_dual) {
     solve_objective_add_info(
       dual_solver<Objective, Data, Result>(objective, context), info);
@@ -141,13 +159,12 @@ make_solver_solve(
   }
 }
 
-template <typename Data,
-          typename Result>
+template <typename Data>
 inline void
 set_variables(
     const dataset<Data>& trn_data,
     const mxArray* opts,
-    solver_context<Data, Result>& context,
+    solver_context<Data>& context,
     model_info<mxArray*>& info
   ) {
   mxArray *mxA = mxDuplicateFieldOrCreateMatrix(opts, "A",
@@ -163,12 +180,11 @@ set_variables(
   }
 }
 
-template <typename Data,
-          typename Result>
+template <typename Data>
 inline void
 set_stopping_criteria(
     const mxArray* opts,
-    solver_context<Data, Result>& context
+    solver_context<Data>& context
   ) {
   auto c = &context.criteria;
   mxSetFieldValue(opts, "check_on_start", c->check_on_start);
@@ -210,13 +226,12 @@ set_labels(
   data_set.num_tasks = static_cast<size_type>(*minmax.second) + 1;
 }
 
-template <typename Data,
-          typename Result>
+template <typename Data>
 inline void
 set_datasets(
     const mxArray* data,
     const mxArray* labels,
-    solver_context<Data, Result>& context
+    solver_context<Data>& context
   ) {
   dataset<Data> data_set;
   data_set.data = static_cast<Data*>(mxGetData(data));
@@ -242,7 +257,7 @@ mex_main(
     const mxArray* opts,
     Summation& sum
     ) {
-  solver_context<Data, Result> context;
+  solver_context<Data> context;
   context.is_dual = mxGetFieldValueOrDefault(opts, "is_dual", false);
   set_datasets(prhs[0], prhs[1], context);
   set_stopping_criteria(opts, context);

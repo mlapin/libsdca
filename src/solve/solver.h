@@ -74,7 +74,7 @@ public:
       : static_cast<result_type>(0);
   }
 
-//  const std::vector<state<result_type>>& states() const { return states_; }
+  const std::vector<time_point>& timings() const { return timings_; }
 
 protected:
   const stopping_criteria criteria_;
@@ -90,12 +90,12 @@ protected:
   result_type primal_;
   result_type dual_;
   result_type gap_;
-//  std::vector<state<result_type>> states_;
 
   // Other
   bool recompute_gap_;
   std::minstd_rand generator_;
   std::vector<size_type> examples_;
+  std::vector<time_point> timings_;
 
   // Initialization
   virtual void initialize() {
@@ -165,6 +165,7 @@ protected:
   }
 
   virtual void compute_duality_gap() {
+    time_point timing(epoch_);
     recompute_gap_ = false;
     result_type dual_before = dual_;
     evaluate_solution();
@@ -182,8 +183,9 @@ protected:
         "no progress due to insufficient dual objective increase: "
         << (dual_ - dual_before) << std::endl;
     }
-//    states_.emplace_back(
-//      epoch(), cpu_time_now(), wall_time_now(), primal_, dual_, gap_);
+    timing.cpu_time = cpu_time_now();
+    timing.wall_time = wall_time_now();
+    timings_.push_back(timing);
     LOG_VERBOSE << "  "
       "epoch: " << std::setw(3) << epoch() << std::setw(0) << ", "
       "primal: " << primal() << ", "
@@ -214,10 +216,10 @@ template <typename Data,
 class multiset_solver : public solver_base<Result> {
 public:
   typedef solver_base<Result> base;
-  typedef solver_context<Data, Result> context_type;
+  typedef solver_context<Data> context_type;
   typedef dataset<Data> dataset_type;
-  typedef Data data_type;
-  typedef Result result_type;
+  typedef evaluation_point<Result> evaluation_type;
+  typedef std::vector<evaluation_type> evaluations_type;
 
   multiset_solver(
       const context_type& __ctx
@@ -227,14 +229,16 @@ public:
       stats_(__ctx.datasets.size())
   {}
 
+  const std::vector<evaluations_type>& evaluations() const { return stats_; }
+
 protected:
   const context_type& context_;
-  std::vector<std::vector<statistic<result_type>>> stats_;
+  std::vector<evaluations_type> stats_;
 
   void evaluate_solution() override {
     auto datasets = context_.datasets;
     for (size_type i = 0; i < stats_.size(); ++i) {
-      stats_[i].push_back(compute_statistic(datasets[i]));
+      stats_[i].push_back(evaluate_dataset(datasets[i]));
     }
     auto stat = stats_[0].back();
     base::primal_ = stat.primal;
@@ -242,8 +246,8 @@ protected:
     base::gap_ = stat.gap;
   }
 
-  inline statistic<result_type>
-  compute_statistic(const dataset<data_type>& set) = 0;
+  virtual evaluation_type
+  evaluate_dataset(const dataset_type& set) = 0;
 };
 
 }

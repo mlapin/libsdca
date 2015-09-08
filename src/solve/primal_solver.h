@@ -9,21 +9,22 @@ namespace sdca {
 template <typename Objective,
           typename Data,
           typename Result>
-class primal_solver : public solver_base<Result> {
+class primal_solver : public multiset_solver<Data, Result> {
 public:
-  typedef solver_base<Result> base;
+  typedef multiset_solver<Data, Result> base;
+  typedef typename base::context_type context_type;
+  typedef typename base::dataset_type dataset_type;
+  typedef typename base::evaluation_type evaluation_type;
   typedef Objective objective_type;
-  typedef solver_context<Data, Result> context_type;
-  typedef dataset<Data> dataset_type;
   typedef Data data_type;
   typedef Result result_type;
 
   primal_solver(
-      const objective_type& __objective,
+      const objective_type& __obj,
       const context_type& __ctx
     ) :
-      base::solver_base(__ctx.criteria, __ctx.datasets[0].num_examples),
-      objective_(__objective),
+      base::multiset_solver(__ctx),
+      objective_(__obj),
       num_dimensions_(__ctx.datasets[0].num_dimensions),
       num_tasks_(__ctx.datasets[0].num_tasks),
       labels_(&(__ctx.datasets[0].labels[0])),
@@ -39,9 +40,9 @@ public:
       T(static_cast<blas_int>(__ctx.datasets[0].num_tasks))
   {
     LOG_INFO << "solver: " << base::name() << " (primal)" << std::endl
-      << "objective: " << __objective.to_string() << std::endl
+      << "objective: " << __obj.to_string() << std::endl
       << "stopping criteria: " << __ctx.criteria.to_string() << std::endl;
-    LOG_DEBUG << __objective.precision_string()  << std::endl;
+    LOG_DEBUG << "precision options: " << __obj.precision_string() << std::endl;
     for (auto d : __ctx.datasets) {
       LOG_INFO << "dataset: " << d.to_string() << std::endl;
     }
@@ -50,12 +51,9 @@ public:
 protected:
   // Protected members of the base class
   using base::num_examples_;
-  using base::primal_;
-  using base::dual_;
-  using base::gap_;
 
   // Main variables
-  const objective_type objective_;
+  const objective_type& objective_;
   const size_type num_dimensions_;
   const size_type num_tasks_;
   const size_type* labels_;
@@ -84,24 +82,15 @@ protected:
   }
 
   void solve_example(const size_type i) override {
-    if (norm2_[i] <= 0) return;
-
     // Let x_i = i'th feature vector
+    if (norm2_[i] <= 0) return;
     const data_type* x_i = features_ + num_dimensions_ * i;
 
-    // Let scores = A * K_i = W' * x_i
-    sdca_blas_gemv(D, T, primal_variables_, x_i, &scores_[0], CblasTrans);
-
-    // Put ground truth at 0
+    // Update dual variables
     data_type* variables = dual_variables_ + num_tasks_ * i;
     std::copy_n(variables, num_tasks_, &vars_before_[0]);
-    std::swap(variables[0], variables[labels_[i]]);
-    std::swap(scores_[0], scores_[labels_[i]]);
-
-    // Update dual variables
+    compute_scores_swap_gt(labels_[i], x_i, variables);
     objective_.update_variables(T, norm2_[i], variables, &scores_[0]);
-
-    // Put back the ground truth variable
     std::swap(variables[0], variables[labels_[i]]);
 
     // Update primal variables
@@ -112,11 +101,20 @@ protected:
     }
   }
 
-  void compute_objectives() override {
+  void evaluate_solution() override {
     // Let W = X * A'
     // (recompute W from scratch to minimize the accumulated numerical error)
     sdca_blas_gemm(D, T, N, features_, D, dual_variables_, T,
       primal_variables_, CblasNoTrans, CblasTrans);
+    base::evaluate_solution();
+  }
+
+  inline evaluation_type
+  evaluate_dataset(const dataset_type& set) override {
+    evaluation_type stats;
+    stats.accuracy.resize(num_tasks_);
+    auto acc_first = stats.accuracy.begin();
+    auto acc_last = stats.accuracy.end();
 
     // Compute the three sums independently over all training examples
     result_type regul_sum = 0;
@@ -128,22 +126,21 @@ protected:
     result_type p_loss_comp = 0;
     result_type d_loss_comp = 0;
 
-    for (size_type i = 0; i < num_examples_; ++i) {
-      if (norm2_[i] <= 0) continue;
-
+    size_type num_examples = set.num_examples;
+    for (size_type i = 0; i < num_examples; ++i) {
       // Let x_i = i'th feature vector
-      const data_type* x_i = features_ + num_dimensions_ * i;
+      const data_type* x_i = set.data + num_dimensions_ * i;
 
-      // Let scores = A * K_i = W' * x_i
-      sdca_blas_gemv(D, T, primal_variables_, x_i, &scores_[0], CblasTrans);
-
-      // Put ground truth at 0
       data_type* variables = dual_variables_ + num_tasks_ * i;
-      std::swap(variables[0], variables[labels_[i]]);
-      std::swap(scores_[0], scores_[labels_[i]]);
+      compute_scores_swap_gt(set.labels[i], x_i, variables);
+
+      // Count correct predictions
+      auto it = std::partition(scores_.begin() + 1, scores_.end(),
+        [=](const data_type x){ return x > scores_[0]; });
+      acc_first[std::distance(scores_.begin() + 1, it)] += 1;
 
       // Compute the regularization term and primal/dual losses
-      result_type regul(0), p_loss(0), d_loss(0);
+      result_type regul, p_loss, d_loss;
       objective_.regularized_loss(T, variables, &scores_[0],
         regul, p_loss, d_loss);
 
@@ -153,12 +150,33 @@ protected:
       kahan_add(d_loss, d_loss_sum, d_loss_comp);
 
       // Put back the ground truth variable
-      std::swap(variables[0], variables[labels_[i]]);
+      std::swap(variables[0], variables[set.labels[i]]);
     }
 
     // Compute the overall primal/dual objectives and the duality gap
     objective_.primal_dual_gap(regul_sum, p_loss_sum, d_loss_sum,
-      primal_, dual_, gap_);
+      stats.primal, stats.dual, stats.gap);
+
+    // Top-k accuracies for all k
+    std::partial_sum(acc_first, acc_last, acc_first);
+    std::for_each(acc_first, acc_last,
+      [=](result_type &x){ x /= static_cast<result_type>(num_examples); });
+
+    return stats;
+  }
+
+  inline void
+  compute_scores_swap_gt(
+      const size_type label,
+      const data_type* x_i,
+      data_type* variables
+    ) {
+    // Let scores = A * K_i = W' * x_i
+    sdca_blas_gemv(D, T, primal_variables_, x_i, &scores_[0], CblasTrans);
+
+    // Put ground truth at 0
+    std::swap(variables[0], variables[label]);
+    std::swap(scores_[0], scores_[label]);
   }
 
 };

@@ -76,16 +76,30 @@ struct dataset {
   }
 };
 
-template <typename Data,
-          typename Result>
+template <typename Data>
 struct solver_context {
   typedef Data data_type;
-  typedef Result result_type;
   bool is_dual = false;
   stopping_criteria criteria;
-  std::vector<dataset<Data>> datasets;
+  std::vector<dataset<data_type>> datasets;
   data_type* primal_variables = nullptr;
   data_type* dual_variables = nullptr;
+};
+
+struct time_point {
+  size_type epoch;
+  double cpu_time;
+  double wall_time;
+  time_point(size_type __epoch) : epoch(__epoch) {}
+};
+
+template <typename Result>
+struct evaluation_point {
+  typedef Result result_type;
+  result_type primal;
+  result_type dual;
+  result_type gap;
+  std::vector<result_type> accuracy;
 };
 
 template <typename Field>
@@ -98,51 +112,6 @@ struct model_info {
       const field_type value) {
     fields.emplace_back(std::make_pair(name, value));
   }
-};
-
-template <typename Result>
-struct state {
-  typedef Result result_type;
-  size_type epoch;
-  double cpu_time;
-  double wall_time;
-  result_type primal;
-  result_type dual;
-  result_type gap;
-
-  state() :
-      epoch(0),
-      cpu_time(0),
-      wall_time(0),
-      primal(std::numeric_limits<result_type>::infinity()),
-      dual(-std::numeric_limits<result_type>::infinity()),
-      gap(std::numeric_limits<result_type>::infinity())
-    {}
-
-  state(
-      const size_type __epoch,
-      const double __cpu_time,
-      const double __wall_time,
-      const result_type __primal,
-      const result_type __dual,
-      const result_type __gap
-    ) :
-      epoch(__epoch),
-      cpu_time(__cpu_time),
-      wall_time(__wall_time),
-      primal(__primal),
-      dual(__dual),
-      gap(__gap)
-    {}
-};
-
-template <typename Result>
-struct statistic {
-  typedef Result result_type;
-  result_type primal;
-  result_type dual;
-  result_type gap;
-  std::vector<result_type> performance;
 };
 
 }

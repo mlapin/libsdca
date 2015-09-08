@@ -88,8 +88,8 @@ if 1
 %   Ytrn = Ytrn(ix);
   
 
-%   opts.objective = 'l2_entropy_topk';
-  opts.objective = 'l2_topk_hinge';
+  opts.objective = 'l2_entropy_topk';
+%   opts.objective = 'l2_topk_hinge';
 %   opts.objective = 'l2_hinge_topk';
   opts.C = 1;
   opts.k = 2;
@@ -97,7 +97,7 @@ if 1
   opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
-  opts.max_epoch = 1;
+  opts.max_epoch = 3;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';
@@ -118,6 +118,8 @@ if 1
     [~,pred] = max(model.W'*Xtrn);
     fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
   end
+  disp(model.time);
+  disp(model.eval);
   
   if 0
     opts2 = model;

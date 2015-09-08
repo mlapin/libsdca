@@ -341,6 +341,21 @@ mxCreateScalar(
   return mxCreateDoubleScalar(static_cast<double>(value));
 }
 
+template <typename Type>
+inline mxArray*
+mxCreateVector(
+    const std::vector<Type> vec,
+    const char* name
+  ) {
+  mxArray* pa = mxCreateDoubleMatrix(vec.size(), 1, mxREAL);
+  mxCheckCreated(pa, name);
+  double* data = mxGetPr(pa);
+  for (Type v : vec) {
+    *data++ = static_cast<double>(v);
+  }
+  return pa;
+}
+
 inline mxArray*
 mxCreateStruct(
     const std::vector<std::pair<const char*, mxArray*>>& fields,

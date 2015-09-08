@@ -12,6 +12,9 @@ template <typename Data,
           typename Result,
           typename Summation>
 struct l2_hinge_topk {
+  typedef Data data_type;
+  typedef Result result_type;
+  typedef Summation summation_type;
   const difference_type k;
   const Result c;
   const Result c_div_k;
@@ -111,6 +114,9 @@ template <typename Data,
           typename Result,
           typename Summation>
 struct l2_hinge_topk_smooth {
+  typedef Data data_type;
+  typedef Result result_type;
+  typedef Summation summation_type;
   const difference_type k;
   const Result c;
   const Result gamma;
