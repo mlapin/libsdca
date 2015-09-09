@@ -37,8 +37,9 @@ public:
       << "objective: " << __obj.to_string() << std::endl
       << "stopping criteria: " << __ctx.criteria.to_string() << std::endl;
     LOG_DEBUG << "precision options: " << __obj.precision_string() << std::endl;
+    size_type i = 0;
     for (auto d : __ctx.datasets) {
-      LOG_INFO << "dataset: " << d.to_string() << std::endl;
+      LOG_VERBOSE << "dataset " << ++i << ": " << d.to_string() << std::endl;
     }
   }
 

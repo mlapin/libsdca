@@ -80,8 +80,12 @@ end
 
 if 1
 %   load('data/sun397-cnn.mat');
+%   load('data/sun397-cnn-trn.mat');
+%   load('data/sun397-cnn-tst.mat');
   load('data/sun397-fv-trn.mat');
   load('data/sun397-fv-tst.mat');
+%   Ktrn = double(Ktrn);
+%   Ktrn = double(Ktrn);
 %   Ktrn = Ktrn-1;
   
 %   ix = 1:5*2;
@@ -89,16 +93,16 @@ if 1
 %   Ytrn = Ytrn(ix);
   
 
-  opts.objective = 'l2_entropy_topk';
-%   opts.objective = 'l2_topk_hinge';
+%   opts.objective = 'l2_entropy_topk';
+  opts.objective = 'l2_topk_hinge';
 %   opts.objective = 'l2_hinge_topk';
   opts.C = 1;
-  opts.k = 2;
-  opts.gamma = 0;
+  opts.k = 5;
+  opts.gamma = 1;
   opts.epsilon = 1e-15;
   opts.check_on_start = 0;
   opts.check_epoch = 1;
-  opts.max_epoch = 50;
+  opts.max_epoch = 3;
   opts.summation = 'standard';
   opts.precision = 'double';
   opts.log_level = 'debug';
@@ -109,7 +113,11 @@ if 1
     if ~exist('Ktrn', 'var')
       Ktrn = Xtrn'*Xtrn;
     end
+    if ~exist('Ktst', 'var')
+      Ktst = Xtrn'*Xtst;
+    end
     model = libsdca_solve({Ktrn, Ktst}, {Ytrn, Ytst}, opts);
+%     model = libsdca_solve(Ktrn, Ytrn, opts);
     disp(model);
     [~,pred] = max(model.A*Ktrn);
     fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
@@ -119,11 +127,6 @@ if 1
     [~,pred] = max(model.W'*Xtrn);
     fprintf('accuracy: %g\n', 100*mean(pred(:) == Ytrn(:)));
   end
-  disp(model.records);
-  disp(model.evals);
-  size([model.records.epoch])
-  size([model.evals.loss])
-  size([model.evals.accuracy])
   
   if 0
     opts2 = model;

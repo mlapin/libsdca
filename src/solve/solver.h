@@ -241,9 +241,20 @@ protected:
   void evaluate_solution() override {
     auto datasets = context_.datasets;
     evals_[0].push_back(evaluate_train());
+    log_eval(0, evals_[0].back());
     for (size_type i = 1; i < evals_.size(); ++i) {
       evals_[i].push_back(evaluate_test(datasets[i]));
+      log_eval(i, evals_[i].back());
     }
+  }
+
+  inline void
+  log_eval(size_type id, evaluation_type& eval) {
+    LOG_VERBOSE << "  "
+      "eval " << id + 1 << ": "
+      << eval.to_string() <<
+      "cpu_time = " << this->cpu_time_now() << ", "
+      "wall_time = " << this->wall_time_now() << std::endl;
   }
 
   virtual evaluation_type

@@ -2,6 +2,8 @@
 #define SDCA_SOLVE_SOLVEDEF_H
 
 #include <chrono>
+#include <iterator>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <vector>
@@ -121,6 +123,16 @@ struct test_point {
   typedef Result result_type;
   result_type loss;
   std::vector<result_type> accuracy;
+
+  inline std::string
+  to_string() const {
+    std::ostringstream str;
+    str << "loss = " << std::setprecision(4) << loss << ", accuracy = ";
+    size_type offset = std::min(static_cast<size_type>(5), accuracy.size());
+    std::copy(accuracy.begin(), accuracy.begin() + offset,
+      std::ostream_iterator<result_type>(str, ", "));
+    return str.str();
+  }
 };
 
 template <typename Field>
