@@ -38,6 +38,7 @@ set(UTIL_SRCS
   util/lambert.h
   util/logging.h
   util/numeric.h
+  util/stopwatch.h
   )
 
 # Matlab interface

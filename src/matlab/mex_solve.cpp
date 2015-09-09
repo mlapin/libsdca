@@ -89,8 +89,9 @@ add_records(
     model_info<mxArray*>& info
   ) {
   const char* names[] = {"epoch", "primal", "dual", "gap",
-    "loss", "dual_loss", "regularizer", "cpu_time", "wall_time"};
-  mxArray* pa = mxCreateStructMatrix(records.size(), 1, 9, names);
+    "loss", "dual_loss", "regularizer", "wall_time", "cpu_time",
+    "solve_wall_time", "solve_cpu_time", "eval_wall_time", "eval_cpu_time"};
+  mxArray* pa = mxCreateStructMatrix(records.size(), 1, 13, names);
   mxCheckCreated(pa, "records");
   size_type i = 0;
   for (auto& a : records) {
@@ -101,8 +102,12 @@ add_records(
     mxSetFieldByNumber(pa, i, 4, mxCreateScalar(a.primal_loss));
     mxSetFieldByNumber(pa, i, 5, mxCreateScalar(a.dual_loss));
     mxSetFieldByNumber(pa, i, 6, mxCreateScalar(a.regularizer));
-    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.cpu_time));
-    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.wall_time));
+    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.wall_time));
+    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.cpu_time));
+    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_wall_time));
+    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.solve_cpu_time));
+    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_wall_time));
+    mxSetFieldByNumber(pa, i, 12, mxCreateScalar(a.eval_cpu_time));
     ++i;
   }
   info.add("records", pa);
@@ -141,8 +146,12 @@ solve_objective_add_info(
   info.add("absolute_gap", mxCreateScalar(solver.absolute_gap()));
   info.add("relative_gap", mxCreateScalar(solver.relative_gap()));
   info.add("epoch", mxCreateScalar(solver.epoch()));
-  info.add("cpu_time", mxCreateScalar(solver.cpu_time()));
   info.add("wall_time", mxCreateScalar(solver.wall_time()));
+  info.add("cpu_time", mxCreateScalar(solver.cpu_time()));
+  info.add("solve_wall_time", mxCreateScalar(solver.solve_wall_time()));
+  info.add("solve_cpu_time", mxCreateScalar(solver.solve_cpu_time()));
+  info.add("eval_wall_time", mxCreateScalar(solver.eval_wall_time()));
+  info.add("eval_cpu_time", mxCreateScalar(solver.eval_cpu_time()));
   add_records(solver.records(), info);
   add_evaluations(solver.evaluations(), info);
 }

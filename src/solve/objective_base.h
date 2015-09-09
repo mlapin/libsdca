@@ -26,9 +26,9 @@ struct objective_base {
 
   inline std::string precision_string() const {
     std::ostringstream str;
-    str << "summation = " << sum.name() << ", "
-      "precision = " << type_traits<Result>::name() << ", "
-      "data_precision = " << type_traits<Data>::name();
+    str << "precision = " << type_traits<Result>::name() << ", "
+      "data_precision = " << type_traits<Data>::name() << ", "
+      "summation = " << sum.name();
     return str.str();
   }
 

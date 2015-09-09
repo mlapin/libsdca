@@ -5,5 +5,6 @@
 #include "lambert.h"
 #include "logging.h"
 #include "numeric.h"
+#include "stopwatch.h"
 
 #endif

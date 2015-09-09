@@ -2,9 +2,11 @@
 #define SDCA_SOLVE_SOLVER_H
 
 #include <algorithm>
+#include <limits>
 #include <random>
 
 #include "util/logging.h"
+#include "util/stopwatch.h"
 #include "solvedef.h"
 
 namespace sdca {
@@ -25,8 +27,9 @@ public:
       num_examples_(__num_examples),
       status_(solver_status::none),
       epoch_(0),
-      cpu_time_(0),
-      wall_time_(0),
+      primal_loss_(0),
+      dual_loss_(0),
+      regularizer_(0),
       primal_(0),
       dual_(0),
       gap_(0)
@@ -56,9 +59,29 @@ public:
 
   size_type epoch() const { return epoch_; }
 
-  double cpu_time() const { return cpu_time_; }
+  double solve_cpu_time() const {
+    return solve_cpu_.elapsed;
+  }
 
-  double wall_time() const { return wall_time_; }
+  double solve_wall_time() const {
+    return solve_wall_.elapsed;
+  }
+
+  double eval_cpu_time() const {
+    return eval_cpu_.elapsed;
+  }
+
+  double eval_wall_time() const {
+    return eval_wall_.elapsed;
+  }
+
+  double cpu_time() const {
+    return solve_cpu_.elapsed + eval_cpu_.elapsed;
+  }
+
+  double wall_time() const {
+    return solve_wall_.elapsed + eval_wall_.elapsed;
+  }
 
   const result_type primal() const { return primal_; }
 
@@ -83,11 +106,11 @@ protected:
 
   // Current progress
   solver_status status_;
+  stopwatch_cpu solve_cpu_;
+  stopwatch_wall solve_wall_;
+  stopwatch_cpu eval_cpu_;
+  stopwatch_wall eval_wall_;
   size_type epoch_;
-  cpu_time_point cpu_start_;
-  wall_time_point wall_start_;
-  double cpu_time_;
-  double wall_time_;
   result_type primal_loss_;
   result_type dual_loss_;
   result_type regularizer_;
@@ -107,9 +130,15 @@ protected:
       ? solver_status::solving
       : solver_status::max_epoch;
     epoch_ = 0;
-    cpu_start_ = std::clock();
-    wall_start_ = wall_clock::now();
 
+    solve_cpu_.start();
+    solve_wall_.start();
+    eval_cpu_.reset();
+    eval_wall_.reset();
+
+    primal_loss_ = 0;
+    dual_loss_ = 0;
+    regularizer_ = 0;
     primal_ = std::numeric_limits<result_type>::infinity();
     dual_ = -std::numeric_limits<result_type>::infinity();
     gap_ = std::numeric_limits<result_type>::infinity();
@@ -130,13 +159,15 @@ protected:
     if (recompute_gap_) {
       compute_duality_gap();
     }
-    cpu_time_ += cpu_time_now();
-    wall_time_ += wall_time_now();
+    solve_cpu_.stop();
+    solve_wall_.stop();
     LOG_INFO << "status: " << status_name() << " ("
       "epoch = " << epoch() << ", "
       "relative_gap = " << relative_gap() << ", "
-      "cpu_time = " << cpu_time_now() << ", "
-      "wall_time = " << wall_time_now() << ")" << std::endl;
+      "solve_time: " << solve_wall_.elapsed << ", "
+      "eval_time: " << eval_wall_.elapsed << ", "
+      "wall_time: " << wall_time() << ", "
+      "cpu_time: " << cpu_time() << ")" << std::endl;
   }
 
   virtual void begin_epoch() {
@@ -155,15 +186,15 @@ protected:
         LOG_DEBUG << "  (warning) "
           "epoch limit: " << epoch() << std::endl;
       } else if (criteria_.max_cpu_time > 0 &&
-          cpu_time_now() >= criteria_.max_cpu_time) {
+          cpu_time() >= criteria_.max_cpu_time) {
         status_ = solver_status::max_cpu_time;
         LOG_DEBUG << "  (warning) "
-          "cpu time limit: " << cpu_time_now() << std::endl;
+          "cpu time limit: " << cpu_time() << std::endl;
       } else if (criteria_.max_wall_time > 0 &&
-          wall_time_now() >= criteria_.max_wall_time) {
+          wall_time() >= criteria_.max_wall_time) {
         status_ = solver_status::max_wall_time;
         LOG_DEBUG << "  (warning) "
-          "wall time limit: " << wall_time_now() << std::endl;
+          "wall time limit: " << wall_time() << std::endl;
       }
     }
   }
@@ -171,7 +202,11 @@ protected:
   virtual void compute_duality_gap() {
     recompute_gap_ = false;
     result_type dual_before = dual_;
+    solve_cpu_.stop(); solve_wall_.stop();
+    eval_cpu_.resume(); eval_wall_.resume();
     evaluate_solution();
+    eval_cpu_.stop(); eval_wall_.stop();
+    solve_cpu_.resume(); solve_wall_.resume();
     result_type max = std::max(std::abs(primal_), std::abs(dual_));
     if (gap_ <= max * static_cast<result_type>(criteria_.epsilon)) {
       status_ = solver_status::solved;
@@ -188,24 +223,18 @@ protected:
     }
     records_.emplace_back(
       primal_, dual_, gap_, primal_loss_, dual_loss_, regularizer_,
-      epoch_, cpu_time_now(), wall_time_now());
+      epoch_, cpu_time(), wall_time(), solve_cpu_.elapsed, solve_wall_.elapsed,
+      eval_cpu_.elapsed, eval_wall_.elapsed);
     LOG_VERBOSE << "  "
       "epoch: " << std::setw(3) << epoch() << std::setw(0) << ", "
       "primal: " << primal() << ", "
       "dual: " << dual() << ", "
       "absolute_gap: " << absolute_gap() << ", "
       "relative_gap: " << relative_gap() << ", "
-      "cpu_time: " << cpu_time_now() << ", "
-      "wall_time: " << wall_time_now() << std::endl;
-  }
-
-  double cpu_time_now() const {
-    return static_cast<double>(std::clock() - cpu_start_) / CLOCKS_PER_SEC;
-  }
-
-  double wall_time_now() const {
-    return std::chrono::duration<double>(
-      std::chrono::high_resolution_clock::now() - wall_start_).count();
+      "solve_time: " << solve_wall_.elapsed << ", "
+      "eval_time: " << eval_wall_.elapsed << ", "
+      "wall_time: " << wall_time() << ", "
+      "cpu_time: " << cpu_time() << std::endl;
   }
 
   virtual void solve_example(const size_type i) = 0;
@@ -253,8 +282,8 @@ protected:
     LOG_VERBOSE << "  "
       "eval " << id + 1 << ": "
       << eval.to_string() <<
-      "cpu_time = " << this->cpu_time_now() << ", "
-      "wall_time = " << this->wall_time_now() << std::endl;
+      "wall_time = " << this->eval_wall_.elapsed_now() << ", "
+      "cpu_time = " << this->eval_cpu_.elapsed_now() << std::endl;
   }
 
   virtual evaluation_type

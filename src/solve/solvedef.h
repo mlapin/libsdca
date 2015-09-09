@@ -1,10 +1,8 @@
 #ifndef SDCA_SOLVE_SOLVEDEF_H
 #define SDCA_SOLVE_SOLVEDEF_H
 
-#include <chrono>
 #include <iterator>
 #include <iomanip>
-#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -32,9 +30,6 @@ static const char* solver_status_name[] = {
   "failed"
 };
 
-using wall_clock = std::chrono::high_resolution_clock;
-typedef typename std::chrono::time_point<wall_clock> wall_time_point;
-typedef typename std::clock_t cpu_time_point;
 typedef typename std::size_t size_type;
 typedef typename std::ptrdiff_t difference_type;
 
@@ -100,6 +95,10 @@ struct train_point {
   size_type epoch;
   double cpu_time;
   double wall_time;
+  double solve_cpu_time;
+  double solve_wall_time;
+  double eval_cpu_time;
+  double eval_wall_time;
 
   train_point(
       const result_type __primal,
@@ -110,11 +109,17 @@ struct train_point {
       const result_type __regul,
       const size_type __epoch,
       const double __cpu_time,
-      const double __wall_time
+      const double __wall_time,
+      const double __solve_cpu,
+      const double __solve_wall,
+      const double __eval_cpu,
+      const double __eval_wall
   ) :
     primal(__primal), dual(__dual), gap(__gap),
     primal_loss(__p_loss), dual_loss(__d_loss), regularizer(__regul),
-    epoch(__epoch), cpu_time(__cpu_time), wall_time(__wall_time)
+    epoch(__epoch), cpu_time(__cpu_time), wall_time(__wall_time),
+    solve_cpu_time(__solve_cpu), solve_wall_time(__solve_wall),
+    eval_cpu_time(__eval_cpu), eval_wall_time(__eval_wall)
   {}
 };
 
