@@ -1,4 +1,4 @@
-function [X,loss,lambda,nu,mu] = prox_cvx_topk_entropy_biased(A, opts)
+function [X,info] = prox_cvx_topk_entropy_biased(A, opts)
 %#ok<*ASGLU>
 %#ok<*EQEFF>
 %#ok<*STOUT>
@@ -24,5 +24,11 @@ cvx_begin %quiet
   lambda: sum(X,1) <= 1;
 cvx_end
 
-loss = @(A,X) 0.5*opts.alpha*(sum(X(:).^2) + sum(sum(X,1).^2)) ...
+info.loss = @(A,X) 0.5*opts.alpha*(sum(X(:).^2) + sum(sum(X,1).^2)) ...
   -A(:)'*X(:) - sum(entr(max(0,X(:)))) - sum(entr( 1 - min(1,sum(X,1)) ));
+
+info.k = k;
+info.alpha = alpha;
+info.mu = mu;
+info.nu = nu;
+info.lambda = lambda;

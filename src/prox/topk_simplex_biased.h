@@ -1,10 +1,6 @@
 #ifndef SDCA_PROX_TOPK_SIMPLEX_BIASED_H
 #define SDCA_PROX_TOPK_SIMPLEX_BIASED_H
 
-#include <iostream>
-#include <iomanip>
-#include <fstream>
-
 #include "knapsack_eq.h"
 #include "topk_cone_biased.h"
 
@@ -100,43 +96,9 @@ prox_topk_simplex_biased(
     const Result rho = 1,
     const Summation sum = Summation()
     ) {
-  static int i(0);
-  int epoch = (i / 6700) + 1;
-  if (i % 6700 == 0) {
-    std::cout << "i: " << i << ", epoch: " << epoch << std::endl;
-  }
-  ++i;
-  if (epoch == 50) {
-    std::ofstream file;
-    file.open("prox_topk_simplex_biased-params.txt",
-      std::ios::out | std::ios::app);
-    file << std::setprecision(15) << std::scientific;
-    file << k << "," << rhs << "," << rho << std::endl;
-    file.flush();
-    file.close();
-    typedef typename std::iterator_traits<Iterator>::value_type Data;
-    file.open("prox_topk_simplex_biased-in.txt",
-      std::ios::out | std::ios::app);
-    file << std::setprecision(15) << std::scientific;
-    std::copy(first, last, std::ostream_iterator<Data>(file, ","));
-    file << std::endl;
-    file.flush();
-    file.close();
-  }
   prox(first, last, aux_first, aux_last,
     thresholds_topk_simplex_biased<Iterator, Result, Summation>,
     k, rhs, rho, sum);
-  if (epoch == 50) {
-    std::ofstream file;
-    typedef typename std::iterator_traits<Iterator>::value_type Data;
-    file.open("prox_topk_simplex_biased-out.txt",
-      std::ios::out | std::ios::app);
-    file << std::setprecision(15) << std::scientific;
-    std::copy(first, last, std::ostream_iterator<Data>(file, ","));
-    file << std::endl;
-    file.flush();
-    file.close();
-  }
 }
 
 template <typename Iterator,

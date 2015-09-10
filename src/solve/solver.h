@@ -17,9 +17,7 @@ public:
   typedef Result result_type;
   typedef train_point<result_type> record_type;
   static constexpr result_type sufficient_increase = 1
-    + std::numeric_limits<result_type>::epsilon();
-//  static constexpr result_type decrease_tolerance = static_cast<result_type>(
-//    128 * std::numeric_limits<float>::epsilon()); // 2^(-16) = 1.5259e-05
+    - 16 * std::numeric_limits<result_type>::epsilon();
 
   solver_base(
       const stopping_criteria& __criteria,
@@ -179,8 +177,17 @@ protected:
 
   virtual void end_epoch() {
     ++epoch_;
+    solve_cpu_.stop();
+    solve_wall_.stop();
     if ((criteria_.check_epoch > 0) && (epoch_ % criteria_.check_epoch == 0)) {
       compute_duality_gap();
+    } else {
+      LOG_VERBOSE << "  "
+        "epoch: " << std::setw(3) << epoch() << std::setw(0) << ", "
+        "solve_time: " << solve_wall_.elapsed << ", "
+        "eval_time: " << eval_wall_.elapsed << ", "
+        "wall_time: " << wall_time() << ", "
+        "cpu_time: " << cpu_time() << std::endl;
     }
     if (status_ == solver_status::solving) {
       if (epoch() >= criteria_.max_epoch) {
@@ -199,16 +206,18 @@ protected:
           "wall time limit: " << wall_time() << std::endl;
       }
     }
+    solve_cpu_.resume();
+    solve_wall_.resume();
   }
 
   virtual void compute_duality_gap() {
     recompute_gap_ = false;
-//    result_type dual_before = dual_;
-    solve_cpu_.stop(); solve_wall_.stop();
-    eval_cpu_.resume(); eval_wall_.resume();
+    result_type dual_before = dual_;
+    eval_cpu_.resume();
+    eval_wall_.resume();
     evaluate_solution();
-    eval_cpu_.stop(); eval_wall_.stop();
-    solve_cpu_.resume(); solve_wall_.resume();
+    eval_cpu_.stop();
+    eval_wall_.stop();
     result_type max = std::max(std::abs(primal_), std::abs(dual_));
     if (gap_ <= max * static_cast<result_type>(criteria_.epsilon)) {
       status_ = solver_status::solved;
@@ -217,29 +226,21 @@ protected:
         LOG_DEBUG << "  (warning) "
           "failed due to negative duality gap: " << gap_ << std::endl;
       }
-    } /*else if (dual_ < sufficient_increase * dual_before) {
+    } else if (dual_ < sufficient_increase * dual_before) {
       status_ = solver_status::no_progress;
       LOG_DEBUG << "  (warning) "
         "no progress due to insufficient dual objective increase: "
         << (dual_ - dual_before) << std::endl;
-//      }
-//      max = std::max(static_cast<result_type>(1), dual_);
-//      if (dual_ - dual_before < - max * decrease_tolerance) {
-//        status_ = solver_status::no_progress;
-//        LOG_DEBUG << "  (warning) "
-//          "no progress due to significant dual objective decrease: "
-//          << (dual_ - dual_before) << std::endl;
-//      }
-    }*/
+    }
     records_.emplace_back(
       primal_, dual_, gap_, primal_loss_, dual_loss_, regularizer_,
       epoch_, cpu_time(), wall_time(), solve_cpu_.elapsed, solve_wall_.elapsed,
       eval_cpu_.elapsed, eval_wall_.elapsed);
     LOG_VERBOSE << "  "
       "epoch: " << std::setw(3) << epoch() << std::setw(0) << ", "
-      "primal: " << primal() << ", "
-      "dual: " << dual() << ", "
-      "absolute_gap: " << absolute_gap() << ", "
+      "primal: " << primal_ << ", "
+      "dual: " << dual_ << ", "
+      "absolute_gap: " << gap_ << ", "
       "relative_gap: " << relative_gap() << ", "
       "solve_time: " << solve_wall_.elapsed << ", "
       "eval_time: " << eval_wall_.elapsed << ", "

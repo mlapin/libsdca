@@ -1,8 +1,8 @@
-clc;
+% clc;
 clear;
 close all;
-addpath('libsdca-debug');
-% addpath('libsdca-release');
+% addpath('libsdca-debug');
+addpath('libsdca-release');
 rng(0);
 
 if usejava('jvm') && ~exist('cvx_begin', 'file') ...
@@ -17,22 +17,28 @@ end
 %%%
 %%% Test prox on real data
 %%%
-if 1
-  load('data/prox_topk_simplex_biased.mat');
-  ix = 1:20;
-  A = A(:,ix);
-  X1 = libsdca_prox(A, opts);
-  [X2,info] = prox_cvx(A, opts);
+if 0
+%   load('data/prox_topk_simplex_biased.mat');
+  load('data/prox_topk_entropy_biased.mat');
+  
+  A0 = A;
+  opts0 = opts;
+  for i = 8
+    opts.alpha = opts0.alpha(i);
+    A = A0(:,i);
+    X1 = libsdca_prox(A, opts);
+    [X2,info] = prox_cvx(A, opts);
 
-  disp(opts);
-  loss = info.loss;
-  fprintf('Loss (lower is better):\n');
-  fprintf('   solver = %+.16e\n', loss(A,X(:,ix)));
-  fprintf('      lib = %+.16e\n', loss(A,X1));
-  fprintf('      cvx = %+.16e\n', loss(A,X2));
-  fprintf('cvx - lib = %+.16e\n', loss(A,X2) - loss(A,X1));
-  fprintf('Solution difference:\n');
-  fprintf('     RMSD = %+.16e\n', norm(X1-X2,'fro')/sqrt(numel(X1)));
+    disp(opts);
+    loss = info.loss;
+    fprintf('Loss (lower is better):\n');
+    fprintf('   solver = %+.16e\n', loss(A,X(:,i)));
+    fprintf('      lib = %+.16e\n', loss(A,X1));
+    fprintf('      cvx = %+.16e\n', loss(A,X2));
+    fprintf('cvx - lib = %+.16e\n', loss(A,X2) - loss(A,X1));
+    fprintf('Solution difference:\n');
+    fprintf('     RMSD = %+.16e\n', norm(X1-X2,'fro')/sqrt(numel(X1)));
+  end
 end
 
 %%%
@@ -107,7 +113,7 @@ end
 %%%
 %%% Test solver
 %%%
-if 0
+if 1
 %   load('data/sun397-cnn.mat');
 %   load('data/sun397-cnn-trn.mat');
 %   load('data/sun397-cnn-tst.mat');
@@ -115,15 +121,15 @@ if 0
 %   load('data/sun397-fv-trn.mat');
 %   load('data/sun397-fv-tst.mat');
   load('data/indoor67-cnn-trn.mat'); % no convergence
-%   load('data/indoor67-cnn-tst.mat');
+  load('data/indoor67-cnn-tst.mat');
 % 
-%   Xc = mean(Xtrn,2);
-%   Xtrn = bsxfun(@minus, Xtrn, Xc);
-%   Xtst = bsxfun(@minus, Xtst, Xc);
+  Xc = mean(Xtrn,2);
+  Xtrn = bsxfun(@minus, Xtrn, Xc);
+  Xtst = bsxfun(@minus, Xtst, Xc);
 %   Xtrn = [Xtrn; ones(1, size(Xtrn,2))];
 %   Xtst = [Xtst; ones(1, size(Xtst,2))];
   Xtrn = double(Xtrn);
-%   Xtst = double(Xtst);
+  Xtst = double(Xtst);
 
 %  Ktrn = double(Ktrn);
 %   Ktrn = Ktrn-1;
@@ -132,15 +138,15 @@ if 0
 %   Ktrn = Ktrn(ix,ix);
 %   Ytrn = Ytrn(ix);
 
-%   opts.objective = 'l2_entropy_topk';
+  opts.objective = 'l2_entropy_topk';
 %   opts.objective = 'l2_topk_hinge';
-  opts.objective = 'l2_hinge_topk';
-  opts.C = 1;
-  opts.k = 1;
+%   opts.objective = 'l2_hinge_topk';
+  opts.C = 1e-1;
+  opts.k = 10;
   opts.gamma = 0;
   opts.epsilon = 1e-15;
   opts.check_on_start = 0;
-  opts.check_epoch = 10;
+  opts.check_epoch = 2;
   opts.max_epoch = 150;
   opts.summation = 'standard';
   opts.precision = 'double';
