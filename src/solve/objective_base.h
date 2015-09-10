@@ -66,7 +66,7 @@ struct objective_base {
       Result& duality_gap
     ) const {
     p_loss *= p_loss_coeff;
-    duality_gap = p_loss - d_loss + regul;
+    duality_gap = p_loss + regul - d_loss;
     regul *= static_cast<Result>(0.5);
     p_objective = p_loss + regul;
     d_objective = d_loss - regul;

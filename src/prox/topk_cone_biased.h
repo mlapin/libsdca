@@ -27,7 +27,7 @@ thresholds_topk_cone_biased_search(
     rho * static_cast<Result>(k) * static_cast<Result>(k);
   Result min_U = +std::numeric_limits<Result>::infinity();
   Result sum_U = 0, sum_U_comp = 0;
-  Result eps = static_cast<Result>(k) * std::numeric_limits<Result>::epsilon();
+  Result eps = 16 * std::numeric_limits<Result>::epsilon();
 
   // Grow U starting with empty
   for (auto m_first = first;;) {

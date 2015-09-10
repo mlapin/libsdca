@@ -16,8 +16,10 @@ class solver_base {
 public:
   typedef Result result_type;
   typedef train_point<result_type> record_type;
-  static constexpr result_type sufficient_increase = static_cast<Result>(1)
+  static constexpr result_type sufficient_increase = 1
     + std::numeric_limits<result_type>::epsilon();
+//  static constexpr result_type decrease_tolerance = static_cast<result_type>(
+//    128 * std::numeric_limits<float>::epsilon()); // 2^(-16) = 1.5259e-05
 
   solver_base(
       const stopping_criteria& __criteria,
@@ -201,7 +203,7 @@ protected:
 
   virtual void compute_duality_gap() {
     recompute_gap_ = false;
-    result_type dual_before = dual_;
+//    result_type dual_before = dual_;
     solve_cpu_.stop(); solve_wall_.stop();
     eval_cpu_.resume(); eval_wall_.resume();
     evaluate_solution();
@@ -215,12 +217,20 @@ protected:
         LOG_DEBUG << "  (warning) "
           "failed due to negative duality gap: " << gap_ << std::endl;
       }
-    } else if (dual_ < sufficient_increase * dual_before) {
+    } /*else if (dual_ < sufficient_increase * dual_before) {
       status_ = solver_status::no_progress;
       LOG_DEBUG << "  (warning) "
         "no progress due to insufficient dual objective increase: "
         << (dual_ - dual_before) << std::endl;
-    }
+//      }
+//      max = std::max(static_cast<result_type>(1), dual_);
+//      if (dual_ - dual_before < - max * decrease_tolerance) {
+//        status_ = solver_status::no_progress;
+//        LOG_DEBUG << "  (warning) "
+//          "no progress due to significant dual objective decrease: "
+//          << (dual_ - dual_before) << std::endl;
+//      }
+    }*/
     records_.emplace_back(
       primal_, dual_, gap_, primal_loss_, dual_loss_, regularizer_,
       epoch_, cpu_time(), wall_time(), solve_cpu_.elapsed, solve_wall_.elapsed,

@@ -85,6 +85,7 @@ struct l2_topk_hinge_smooth : public objective_base<Data, Result, Summation> {
   const Result c_div_k;
   const Result gamma_div_k;
   const Result gamma_div_c;
+  const Result gamma_div_2c;
 
   l2_topk_hinge_smooth(
       const size_type __k,
@@ -98,7 +99,8 @@ struct l2_topk_hinge_smooth : public objective_base<Data, Result, Summation> {
       gamma(__gamma),
       c_div_k(__c / static_cast<Result>(__k)),
       gamma_div_k(__gamma / static_cast<Result>(__k)),
-      gamma_div_c(__gamma / __c)
+      gamma_div_c(__gamma / __c),
+      gamma_div_2c(__gamma / (2 * __c))
   {}
 
   inline std::string to_string() const {
@@ -139,11 +141,9 @@ struct l2_topk_hinge_smooth : public objective_base<Data, Result, Summation> {
       const blas_int num_tasks,
       const Data* variables
     ) const {
-    Result d_loss(static_cast<Result>(variables[0]));
-    d_loss += static_cast<Result>(0.5) * gamma_div_c * (
-      d_loss * d_loss - static_cast<Result>(
-      sdca_blas_dot(num_tasks, variables, variables)));
-    return d_loss;
+    return static_cast<Result>(variables[0])
+      - gamma_div_2c * static_cast<Result>(
+      sdca_blas_dot(num_tasks - 1, variables + 1, variables + 1));
   }
 
   inline Result

@@ -274,14 +274,18 @@ set_datasets(
     solver_context<Data>& context
   ) {
   if (mxIsNumeric(data)) {
+    if (context.is_dual) {
+      mxCheckSquare(data, "data");
+    }
     set_dataset(data, labels, context);
-    mxCheckSquare(data, "data");
   } else {
     mxCheckCellArrays(data, labels);
+    if (context.is_dual) {
+      mxCheckSquare(mxGetCell(data, 0), "data");
+    }
 
     // Training dataset
     set_dataset(mxGetCell(data, 0), mxGetCell(labels, 0), context);
-    mxCheckSquare(mxGetCell(data, 0), "data");
     size_type num_dimensions = context.datasets[0].num_dimensions;
     size_type num_examples = context.datasets[0].num_examples;
     size_type num_tasks = context.datasets[0].num_tasks;

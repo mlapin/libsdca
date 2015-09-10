@@ -62,7 +62,7 @@ struct l2_hinge_topk : public objective_base<Data, Result, Summation> {
       Data* scores
     ) const {
     Data *first(scores + 1), *last(scores + num_tasks), a(1 - scores[0]);
-    std::for_each(scores, scores + num_tasks, [=](Data &x){ x += a; });
+    std::for_each(first, last, [=](Data &x){ x += a; });
 
     // Find k largest elements
     std::nth_element(first, first + k - 1, last, std::greater<Data>());
@@ -83,6 +83,7 @@ struct l2_hinge_topk_smooth : public objective_base<Data, Result, Summation> {
   const Result gamma;
   const Result c_div_gamma;
   const Result gamma_div_c;
+  const Result gamma_div_2c;
 
   l2_hinge_topk_smooth(
       const size_type __k,
@@ -95,7 +96,8 @@ struct l2_hinge_topk_smooth : public objective_base<Data, Result, Summation> {
       c(__c),
       gamma(__gamma),
       c_div_gamma(__c / __gamma),
-      gamma_div_c(__gamma / __c)
+      gamma_div_c(__gamma / __c),
+      gamma_div_2c(__gamma / (2 * __c))
   {}
 
   inline std::string to_string() const {
@@ -136,11 +138,9 @@ struct l2_hinge_topk_smooth : public objective_base<Data, Result, Summation> {
       const blas_int num_tasks,
       const Data* variables
     ) const {
-    Result d_loss(static_cast<Result>(variables[0]));
-    d_loss += static_cast<Result>(0.5) * gamma_div_c * (
-      d_loss * d_loss - static_cast<Result>(
-      sdca_blas_dot(num_tasks, variables, variables)));
-    return d_loss;
+    return static_cast<Result>(variables[0])
+      - gamma_div_2c * static_cast<Result>(
+      sdca_blas_dot(num_tasks - 1, variables + 1, variables + 1));
   }
 
   inline Result

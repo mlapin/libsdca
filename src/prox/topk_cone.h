@@ -31,7 +31,7 @@ topk_cone_special_cases(
   topk_cone_projection<Iterator, Result> proj;
 
   // Case 1: U empty, M empty, proj = 0
-  Result eps = static_cast<Result>(k) * std::numeric_limits<Result>::epsilon();
+  Result eps = 16 * std::numeric_limits<Result>::epsilon();
   Result sum_k_largest = sum(first, k_last, static_cast<Result>(0));
   if (sum_k_largest <= eps) {
     proj.projection = projection::zero;
@@ -72,7 +72,7 @@ thresholds_topk_cone_search(
   Result k_minus_num_U = static_cast<Result>(k);
   Result min_U = +std::numeric_limits<Result>::infinity();
   Result num_U = 0, sum_U = 0, sum_U_comp = 0;
-  Result eps = static_cast<Result>(k) * std::numeric_limits<Result>::epsilon();
+  Result eps = 16 * std::numeric_limits<Result>::epsilon();
 
   // Grow U starting with empty
   for (auto m_first = first;;) {
