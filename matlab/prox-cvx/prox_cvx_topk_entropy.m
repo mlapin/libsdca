@@ -28,7 +28,7 @@ cvx_end
 info.loss = @(A,X) - A(:)'*max(0,X(:)) - sum(entr(max(0,X(:)))) ...
   - sum(entr(1 - min(1,sum(max(0,X),1)) ));
 
-info.k = opts.k;
+info.k = k;
 info.s = s;
 info.t = t;
 info.mu = mu;

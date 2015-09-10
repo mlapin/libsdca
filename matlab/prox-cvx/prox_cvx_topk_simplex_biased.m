@@ -1,4 +1,4 @@
-function [X,lambda,nu,mu] = prox_cvx_topk_simplex_biased(A, opts)
+function [X,info] = prox_cvx_topk_simplex_biased(A, opts)
 %#ok<*ASGLU>
 %#ok<*EQEFF>
 %#ok<*STOUT>
@@ -10,7 +10,7 @@ rho = opts.rho;
 
 [d,n] = size(A);
 
-cvx_begin quiet
+cvx_begin %quiet
   cvx_precision high;
   variable X(d,n);
   dual variable mu;
@@ -21,3 +21,12 @@ cvx_begin quiet
   nu: X <= ones(d)*X/k;
   lambda: sum(X) <= rhs;
 cvx_end
+
+info.loss = @(A,X) 0.5*sum(sum((A - X).^2)) + 0.5*rho*sum(sum(X,1).^2);
+
+info.k = k;
+info.rhs = rhs;
+info.rho = rho;
+info.mu = mu;
+info.nu = nu;
+info.lambda = lambda;

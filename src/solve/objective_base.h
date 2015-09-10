@@ -38,7 +38,8 @@ struct objective_base {
       const Data* variables,
       const Data* scores
     ) const {
-    return static_cast<Result>(sdca_blas_dot(num_tasks, scores, variables));
+    return static_cast<Result>(scores[0] * variables[0]) + static_cast<Result>(
+      sdca_blas_dot(num_tasks - 1, scores + 1, variables + 1));
   }
 
   inline Result
