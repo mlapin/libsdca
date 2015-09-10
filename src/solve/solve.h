@@ -5,6 +5,7 @@
 #include "solver.h"
 #include "dual_solver.h"
 #include "primal_solver.h"
+#include "objective_base.h"
 #include "l2_entropy_topk.h"
 #include "l2_hinge_topk.h"
 #include "l2_topk_hinge.h"

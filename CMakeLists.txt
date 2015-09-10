@@ -23,6 +23,9 @@ set(USE_ILP64 TRUE)
 # Whether to use sequential or multi-threaded Intel MKL layer (default: FALSE)
 set(USE_SEQUENTIAL FALSE)
 
+# Whether to add a suffix (e.g. st/mt) for single-/multi-threaded versions
+set(USE_THREADING_SUFFIX TRUE)
+
 # Whether to use the fast math functions from https://github.com/herumi/fmath
 add_definitions(-DUSE_FMATH_HERUMI=1)
 

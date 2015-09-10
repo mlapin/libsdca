@@ -41,13 +41,24 @@ set(UTIL_SRCS
   util/stopwatch.h
   )
 
+if(${USE_THREADING_SUFFIX})
+  if(${USE_SEQUENTIAL})
+    set(MEX_PROX libsdca_prox_st)
+    set(MEX_SOLVE libsdca_solve_st)
+  else()
+    set(MEX_PROX libsdca_prox_mt)
+    set(MEX_SOLVE libsdca_solve_mt)
+  endif()
+else()
+  set(MEX_PROX libsdca_prox)
+  set(MEX_SOLVE libsdca_solve)
+endif()
+
 # Matlab interface
 if(${Matlab_FOUND})
   include_directories(matlab)
   include_directories(${Matlab_INCLUDE_DIRS})
 
-  set(MEX_PROX libsdca_prox)
-  set(MEX_SOLVE libsdca_solve)
   add_definitions(-DMEX_PROX="${MEX_PROX}" -DMEX_SOLVE="${MEX_SOLVE}")
 
   matlab_add_mex(
