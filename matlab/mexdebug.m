@@ -115,25 +115,26 @@ end
 %%%
 if 1
 %   load('data/sun397-cnn.mat');
-  load('data/sun397-cnn-trn.mat');
-  load('data/sun397-cnn-tst.mat');
+%   load('data/sun397-cnn-trn.mat');
+%   load('data/sun397-cnn-tst.mat');
 %   load('data/sun397-fv.mat'); % converges
-%   load('data/sun397-fv-trn.mat');
-%   load('data/sun397-fv-tst.mat');
+  load('data/sun397-fv-trn.mat');
+  load('data/sun397-fv-tst.mat');
 %   load('data/indoor67-cnn-trn.mat'); % no convergence
 %   load('data/indoor67-cnn-tst.mat');
 
-  Xtrn = double(Xtrn);
-	Xtst = double(Xtst);
-
-  Xc = mean(Xtrn,2);
-  Xtrn = bsxfun(@minus, Xtrn, Xc);
-  Xtst = bsxfun(@minus, Xtst, Xc);
+%   Xtrn = double(Xtrn);
+% 	Xtst = double(Xtst);
+% 
+%   Xc = mean(Xtrn,2);
+%   Xtrn = bsxfun(@minus, Xtrn, Xc);
+%   Xtst = bsxfun(@minus, Xtst, Xc);
 
 %   Xtrn = [Xtrn; ones(1, size(Xtrn,2))];
 %   Xtst = [Xtst; ones(1, size(Xtst,2))];
 
-%  Ktrn = double(Ktrn);
+ Ktrn = double(Ktrn);
+ Ktst = double(Ktst);
 %   Ktrn = Ktrn-1;
   
 %   ix = 1:5*2;
