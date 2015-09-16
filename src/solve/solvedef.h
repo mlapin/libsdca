@@ -133,7 +133,7 @@ struct test_point {
   to_string() const {
     std::ostringstream str;
     str << "loss = " << std::setprecision(4) << loss << ", accuracy = ";
-    size_type offset = std::min(static_cast<size_type>(5), accuracy.size());
+    long offset = std::min(5L, static_cast<long>(accuracy.size()));
     std::copy(accuracy.begin(), accuracy.begin() + offset,
       std::ostream_iterator<result_type>(str, ", "));
     return str.str();
