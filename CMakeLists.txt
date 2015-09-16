@@ -57,9 +57,9 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -Wl,-rpath,\\\$ORIGIN")
 endif()
 
-# Build specific flags
+# Build specific flags -march=native
 set(CMAKE_CXX_FLAGS
-  "${CMAKE_CXX_FLAGS} -std=c++11 -march=native ${WARN_FLAGS}")
+  "${CMAKE_CXX_FLAGS} -std=c++11 ${WARN_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG
   "${CMAKE_CXX_FLAGS_DEBUG} ${DEBUG_FLAGS}")
 set(CMAKE_CXX_FLAGS_RELEASE
