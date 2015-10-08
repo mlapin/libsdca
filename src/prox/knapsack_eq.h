@@ -37,16 +37,16 @@ thresholds_knapsack_eq(
     Result tt = lo + t;
     auto lo_it = std::partition(m_first, m_last,
       [=](const Result x){ return x > tt; });
-    Result infeas_lo =
+    Result infeas_lo = std::max(static_cast<Result>(0),
       + tt * static_cast<Result>(std::distance(lo_it, m_last))
-      - sum(lo_it, m_last, static_cast<Result>(0));
+      - sum(lo_it, m_last, static_cast<Result>(0)));
 
     tt = hi + t;
     auto hi_it = std::partition(m_first, lo_it,
       [=](const Result x){ return x > tt; });
-    Result infeas_hi =
+    Result infeas_hi = std::max(static_cast<Result>(0),
       - tt * static_cast<Result>(std::distance(m_first, hi_it))
-      + sum(m_first, hi_it, static_cast<Result>(0));
+      + sum(m_first, hi_it, static_cast<Result>(0)));
 
     // Variable fixing (using the incremental multiplier formula (23))
     if (std::abs(infeas_hi - infeas_lo) <= eps) {

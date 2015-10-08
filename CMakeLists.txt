@@ -48,8 +48,8 @@ endif()
 # Debug flags
 set(DEBUG_FLAGS "-O0 -DDEBUG -fstack-protector-all")
 
-# Release flags
-set(RELEASE_FLAGS "-O3 -DNDEBUG -fno-stack-protector -fno-exceptions")
+# Release flags: -fno-stack-protector -fno-exceptions
+set(RELEASE_FLAGS "-O3 -DNDEBUG")
 if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
@@ -57,7 +57,7 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -Wl,-rpath,\\\$ORIGIN")
 endif()
 
-# Build specific flags -march=native
+# Build specific flags: -march=native
 set(CMAKE_CXX_FLAGS
   "${CMAKE_CXX_FLAGS} -std=c++11 ${WARN_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG

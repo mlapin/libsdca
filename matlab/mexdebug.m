@@ -1,9 +1,21 @@
 % clc;
 % clear;
 % close all;
-% addpath('libsdca-debug');
-addpath('libsdca-release');
+addpath(fullfile(pwd, 'libsdca-debug'));
+% addpath('libsdca-release');
 rng(0);
+
+%%%
+%%% Test runtraining
+%%%
+p = pwd;
+cd /BS/mlapin-projects3/work/cvpr16/code/src
+myinit;
+cd ..
+runtraining('flowers/gaurav','l2_topk_hinge','gamma','0','k','15','C','0.1');
+cd(p);
+
+return;
 
 if usejava('jvm') && ~exist('cvx_begin', 'file') ...
     && exist(fullfile('cvx', 'cvx_startup.m'), 'file')
