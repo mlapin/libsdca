@@ -31,7 +31,7 @@ thresholds_topk_entropy(
   Result K = static_cast<Result>(k);
   Iterator max_el = std::max_element(first, last);
   Result log_z, log_z_1;
-  log_sum_exp_1(first, last, max_el, log_z, log_z_1, sum);
+  log_sum_exp_log_1_sum_exp(first, last, max_el, log_z, log_z_1, sum);
 
   // Check if t = log(1 + \sum_i exp a_i) is feasible
   Result t(log_z_1), lo(0), hi(1);
@@ -48,9 +48,9 @@ thresholds_topk_entropy(
     sum.add(min_U, sum_U, sum_U_comp);
     std::swap(*m_first, *max_el);
     ++m_first; --k_u;
-    max_el = std::max_element(m_first, last);
+    max_el = std::max_element(m_first, last); // pre-sorting might be faster
 
-    z = log_sum_exp(m_first, last, max_el, log_z, sum);
+    log_z = log_sum_exp(m_first, last, max_el, z, sum);
 
     // Check feasibility
     Result tt = log_z - std::log(k_u);

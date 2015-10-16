@@ -1,11 +1,16 @@
 #ifndef SDCA_MATLAB_MEX_UTIL_H
 #define SDCA_MATLAB_MEX_UTIL_H
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <utility>
+
 #include <mex.h>
+
+#include "solve/solvedef.h"
+#include "util/logging.h"
 
 namespace sdca {
 
@@ -435,6 +440,161 @@ mxDuplicateFieldOrCreateMatrix(
   }
   mxCheckCreated(pa, field);
   return pa;
+}
+
+/**
+ * Helper methods for solvers.
+ **/
+
+template <typename Data>
+inline void
+set_stopping_criteria(
+    const mxArray* opts,
+    solver_context<Data>& context
+  ) {
+  auto c = &context.criteria;
+  mxSetFieldValue(opts, "check_on_start", c->check_on_start);
+  mxSetFieldValue(opts, "check_epoch", c->check_epoch);
+  mxSetFieldValue(opts, "max_epoch", c->max_epoch);
+  mxSetFieldValue(opts, "max_cpu_time", c->max_cpu_time);
+  mxSetFieldValue(opts, "max_wall_time", c->max_wall_time);
+  mxSetFieldValue(opts, "epsilon", c->epsilon);
+  mxCheck<size_type>(std::greater_equal<size_type>(),
+    c->check_epoch, 0, "check_epoch");
+  mxCheck<size_type>(std::greater_equal<size_type>(),
+    c->max_epoch, 0, "max_epoch");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->max_cpu_time, 0, "max_cpu_time");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->max_wall_time, 0, "max_wall_time");
+  mxCheck<double>(std::greater_equal<double>(),
+    c->epsilon, 0, "epsilon");
+}
+
+template <typename Data>
+inline void
+set_labels(
+    const mxArray* labels,
+    dataset<Data>& data_set
+  ) {
+  size_type n = data_set.num_examples;
+  mxCheckVector(labels, "labels", n);
+
+  std::vector<size_type> vec(mxGetPr(labels), mxGetPr(labels) + n);
+  auto minmax = std::minmax_element(vec.begin(), vec.end());
+  if (*minmax.first == 1) {
+    std::for_each(vec.begin(), vec.end(), [](size_type &x){ x -= 1; });
+  } else if (*minmax.first != 0) {
+    mexErrMsgIdAndTxt(err_id[err_labels_range], err_msg[err_labels_range]);
+  }
+
+  data_set.labels = std::move(vec);
+  data_set.num_tasks = static_cast<size_type>(*minmax.second) + 1;
+}
+
+template <typename Data>
+inline void
+set_dataset(
+    const mxArray* data,
+    const mxArray* labels,
+    solver_context<Data>& context
+  ) {
+  mxCheckNotSparse(data, "data");
+  mxCheckNotEmpty(data, "data");
+  mxCheckReal(data, "data");
+  mxCheckClass(data, "data", mex_class<Data>::id());
+
+  mxCheckNotSparse(labels, "labels");
+  mxCheckNotEmpty(labels, "labels");
+  mxCheckDouble(labels, "labels");
+
+  dataset<Data> data_set;
+  data_set.data = static_cast<Data*>(mxGetData(data));
+  data_set.num_dimensions = (context.is_dual) ? 0 : mxGetM(data);
+  data_set.num_examples = mxGetN(data);
+  set_labels(labels, data_set);
+
+  context.datasets.emplace_back(data_set);
+}
+
+template <typename Data>
+inline void
+set_datasets(
+    const mxArray* data,
+    const mxArray* labels,
+    solver_context<Data>& context
+  ) {
+  if (mxIsNumeric(data)) {
+    if (context.is_dual) {
+      mxCheckSquare(data, "data");
+    }
+    set_dataset(data, labels, context);
+  } else {
+    mxCheckCellArrays(data, labels);
+    if (context.is_dual) {
+      mxCheckSquare(mxGetCell(data, 0), "data");
+    }
+
+    // Training dataset
+    set_dataset(mxGetCell(data, 0), mxGetCell(labels, 0), context);
+    size_type num_dimensions = context.datasets[0].num_dimensions;
+    size_type num_examples = context.datasets[0].num_examples;
+    size_type num_tasks = context.datasets[0].num_tasks;
+
+    // Testing datasets
+    size_type num_datasets = mxGetNumberOfElements(data);
+    for (size_type i = 1; i < num_datasets; ++i) {
+      set_dataset(mxGetCell(data, i), mxGetCell(labels, i), context);
+      if (num_dimensions != context.datasets[i].num_dimensions) {
+        mexErrMsgIdAndTxt(err_id[err_num_dim], err_msg[err_num_dim], i + 1);
+      }
+      if (num_tasks != context.datasets[i].num_tasks) {
+        mexErrMsgIdAndTxt(err_id[err_num_tasks], err_msg[err_num_tasks], i + 1);
+      }
+      if (context.is_dual && num_examples != mxGetM(mxGetCell(data, i))) {
+        mexErrMsgIdAndTxt(err_id[err_num_ex], err_msg[err_num_ex], i + 1);
+      }
+    }
+  }
+}
+
+/**
+ * Logging in Matlab.
+ **/
+
+inline void
+set_logging_options(
+    const mxArray* opts
+  ) {
+  std::string log_level = mxGetFieldValueOrDefault(
+    opts, "log_level", std::string("info"));
+  if (log_level == "none") {
+    logging::set_level(logging::none);
+  } else if (log_level == "info") {
+    logging::set_level(logging::info);
+  } else if (log_level == "verbose") {
+    logging::set_level(logging::verbose);
+  } else if (log_level == "debug") {
+    logging::set_level(logging::debug);
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_log_level], err_msg[err_log_level], log_level.c_str());
+  }
+
+  std::string log_format = mxGetFieldValueOrDefault(
+    opts, "log_format", std::string("short_e"));
+  if (log_format == "short_f") {
+    logging::set_format(logging::short_f);
+  } else if (log_format == "short_e") {
+    logging::set_format(logging::short_e);
+  } else if (log_format == "long_f") {
+    logging::set_format(logging::long_f);
+  } else if (log_format == "long_e") {
+    logging::set_format(logging::long_e);
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_log_format], err_msg[err_log_format], log_format.c_str());
+  }
 }
 
 // http://stackoverflow.com/questions/243696/correctly-over-loading-a-stringbuf-to-replace-cout-in-a-matlab-mex-file

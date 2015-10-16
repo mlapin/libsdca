@@ -140,6 +140,22 @@ sdca_blas_asum(
   return cblas_dasum(n, X, 1);
 }
 
+inline float
+sdca_blas_nrm2(
+    const blas_int n,
+    const float* X
+  ) {
+  return cblas_snrm2(n, X, 1);
+}
+
+inline double
+sdca_blas_nrm2(
+    const blas_int n,
+    const double* X
+  ) {
+  return cblas_dnrm2(n, X, 1);
+}
+
 inline void
 sdca_blas_gemv(
     const blas_int m,

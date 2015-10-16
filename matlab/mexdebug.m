@@ -1,21 +1,67 @@
-% clc;
-% clear;
-% close all;
-addpath(fullfile(pwd, 'libsdca-debug'));
-% addpath('libsdca-release');
+clc;
+clear;
+close all;
+% addpath(fullfile(pwd, 'libsdca-debug'));
+addpath(fullfile(pwd, 'libsdca-release'));
+% addpath('/BS/mlapin-projects3/work/cvpr16/code/src/utility');
 rng(0);
+
+load('/BS/mlapin-projects3/work/cvpr16/code/experiments/caltech101sil/original/data/trn.mat');
+tst = load('/BS/mlapin-projects3/work/cvpr16/code/experiments/caltech101sil/original/data/tst.mat');
+
+opts.k = 1;
+opts.C = 0.1;
+opts.log_level = 'debug';
+opts.log_format = 'long_e';
+opts.max_epoch = 1000;
+opts.epsilon = 1e-10;
+
+model = libsdca_solve_mt({X,tst.X},{Y,tst.Y},opts);
+
+if 0
+load('/BS/mlapin-projects3/work/cvpr16/code/experiments/caltech101sil/original/l2_entropy_topk/models/model-l2_entropy_topk-k-3-C-0.1.mat');
+
+m = model;
+
+d = size(X,1);
+n = size(X,2);
+T = numel(unique(Y));
+
+opts.k = m.k;
+opts.C = m.C; %1;
+opts.W = m.W; %zeros(d,T);
+opts.log_level = 'verbose';
+opts.log_format = 'long_e';
+opts.max_epoch = 50;
+
+model = libsdca_gd_mt(X,Y,opts);
+
+atrn0 = allaccuracies(opts.W'*X, Y);
+atrn1 = allaccuracies(model.W'*X, Y);
+atst0 = allaccuracies(opts.W'*tst.X, tst.Y);
+atst1 = allaccuracies(model.W'*tst.X, tst.Y);
+
+fprintf('trn:\n');
+fprintf('before: %.1f %.1f %.1f %.1f %.1f\n', 100*atrn0(1:5));
+fprintf('after : %.1f %.1f %.1f %.1f %.1f\n', 100*atrn1(1:5));
+fprintf('tst:\n');
+fprintf('before: %.1f %.1f %.1f %.1f %.1f\n', 100*atst0(1:5));
+fprintf('after : %.1f %.1f %.1f %.1f %.1f\n', 100*atst1(1:5));
+end
+
+return;
 
 %%%
 %%% Test runtraining
 %%%
-p = pwd;
-cd /BS/mlapin-projects3/work/cvpr16/code/src
-myinit;
-cd ..
-runtraining('flowers/gaurav','l2_topk_hinge','gamma','0','k','15','C','0.1');
-cd(p);
-
-return;
+% p = pwd;
+% cd /BS/mlapin-projects3/work/cvpr16/code/src
+% myinit;
+% cd ..
+% runtraining('flowers/gaurav','l2_topk_hinge','gamma','0','k','15','C','0.1');
+% cd(p);
+% 
+% return;
 
 if usejava('jvm') && ~exist('cvx_begin', 'file') ...
     && exist(fullfile('cvx', 'cvx_startup.m'), 'file')

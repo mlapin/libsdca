@@ -131,21 +131,24 @@ protected:
       // Let x_i = i'th feature vector
       const data_type* x_i = features_ + num_dimensions_ * i;
 
+      // Compute prediction scores on example i
       data_type* variables = dual_variables_ + num_tasks_ * i;
       compute_scores_swap_gt(labels_[i], x_i, variables);
 
-      // Count correct predictions
-      auto it = std::partition(scores_.begin() + 1, scores_.end(),
-        [=](const data_type x){ return x > scores_[0]; });
-      acc_first[std::distance(scores_.begin() + 1, it)] += 1;
-
-      // Increment the loss and regularization terms
+      // Increment the regularization term (before re-ordering scores)
       kahan_add(objective_.regularizer(T, variables, &scores_[0]),
         regularizer_, regul_comp);
+
+      // Count correct predictions - re-orders scores!
+      auto it = std::partition(scores_.begin() + 1, scores_.end(),
+        [=](const data_type x){ return x >= scores_[0]; });
+      acc_first[std::distance(scores_.begin() + 1, it)] += 1;
+
+      // Increment the primal-dual losses
+      kahan_add(objective_.primal_loss(T, &scores_[0]),
+        primal_loss_, p_loss_comp); // may re-order scores!
       kahan_add(objective_.dual_loss(T, variables),
         dual_loss_, d_loss_comp);
-      kahan_add(objective_.primal_loss(T, &scores_[0]),
-        primal_loss_, p_loss_comp); // may re-order scores
 
       // Put back the ground truth variable
       std::swap(variables[0], variables[labels_[i]]);
@@ -183,9 +186,9 @@ protected:
       sdca_blas_gemv(D, T, primal_variables_, x_i, &scores_[0], CblasTrans);
       std::swap(scores_[0], scores_[set.labels[i]]);
 
-      // Count correct predictions
+      // Count correct predictions - re-orders scores!
       auto it = std::partition(scores_.begin() + 1, scores_.end(),
-        [=](const data_type x){ return x > scores_[0]; });
+        [=](const data_type x){ return x >= scores_[0]; });
       acc_first[std::distance(scores_.begin() + 1, it)] += 1;
 
       // Compute the primal loss

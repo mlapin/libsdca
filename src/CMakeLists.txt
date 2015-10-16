@@ -45,13 +45,16 @@ if(${USE_THREADING_SUFFIX})
   if(${USE_SEQUENTIAL})
     set(MEX_PROX libsdca_prox_st)
     set(MEX_SOLVE libsdca_solve_st)
+    set(MEX_GD libsdca_gd_st)
   else()
     set(MEX_PROX libsdca_prox_mt)
     set(MEX_SOLVE libsdca_solve_mt)
+    set(MEX_GD libsdca_gd_mt)
   endif()
 else()
   set(MEX_PROX libsdca_prox)
   set(MEX_SOLVE libsdca_solve)
+  set(MEX_GD libsdca_gd)
 endif()
 
 # Matlab interface
@@ -59,7 +62,17 @@ if(${Matlab_FOUND})
   include_directories(matlab)
   include_directories(${Matlab_INCLUDE_DIRS})
 
-  add_definitions(-DMEX_PROX="${MEX_PROX}" -DMEX_SOLVE="${MEX_SOLVE}")
+  add_definitions(
+    -DMEX_GD="${MEX_GD}"
+    -DMEX_PROX="${MEX_PROX}"
+    -DMEX_SOLVE="${MEX_SOLVE}"
+    )
+
+  matlab_add_mex(
+    NAME ${MEX_GD}
+    SRC matlab/mex_gd.cpp matlab/mex_util.h ${SOLVE_SRCS} ${UTIL_SRCS}
+    LINK_TO ${BLAS_LIBRARIES}
+    )
 
   matlab_add_mex(
     NAME ${MEX_PROX}
@@ -78,7 +91,7 @@ if(${Matlab_FOUND})
 #    )
 
   install(
-    TARGETS ${MEX_PROX} ${MEX_SOLVE}
+    TARGETS ${MEX_GD} ${MEX_PROX} ${MEX_SOLVE}
     DESTINATION matlab
     )
 else()

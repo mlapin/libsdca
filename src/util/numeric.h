@@ -171,8 +171,7 @@ log_sum_exp(
 /**
  * Compute log(\sum_i exp(a_i))
  * given a max, an iterator to the maximum over a_i.
- * Store result in lse;
- * return \sum_i exp(a_i - *max) over i \neq *max.
+ * Let s = \sum_i exp(a_i - *max) over i \neq *max.
  **/
 template <typename Iterator,
           typename Result,
@@ -182,24 +181,23 @@ log_sum_exp(
     Iterator first,
     Iterator last,
     Iterator max,
-    Result& lse,
+    Result& s,
     Summation sum = Summation()
   ) {
-  Result s(0), c(0);
+  s = 0;
+  Result c(0);
   for (; first != max; ++first) {
     sum.add(std::exp(static_cast<Result>(*first - *max)), s, c);
   }
   for (first = max + 1; first != last; ++first) {
     sum.add(std::exp(static_cast<Result>(*first - *max)), s, c);
   }
-  lse = static_cast<Result>(*max) + std::log1p(s);
-  return s;
+  return static_cast<Result>(*max) + std::log1p(s);
 }
 
 /**
  * Compute log(\sum_i exp(a_i)).
- * Store result in lse;
- * return \sum_i exp(a_i - *max) over i \neq *max.
+ * Let s = \sum_i exp(a_i - *max) over i \neq *max.
  **/
 template <typename Iterator,
           typename Result,
@@ -208,12 +206,12 @@ inline Result
 log_sum_exp(
     Iterator first,
     Iterator last,
-    Result& lse,
+    Result& s,
     Summation sum = Summation()
   ) {
   if (first == last) return 0;
   auto max = std::max_element(first, last);
-  return log_sum_exp(first, last, max, lse, sum);
+  return log_sum_exp(first, last, max, s, sum);
 }
 
 /**
@@ -231,6 +229,7 @@ log_1_sum_exp(
     Summation sum = Summation()
   ) {
   Result s(std::exp(static_cast<Result>(-*max))), c(0);
+  if (!std::isfinite(s)) return 0;
   for (; first != max; ++first) {
     sum.add(std::exp(static_cast<Result>(*first - *max)), s, c);
   }
@@ -258,20 +257,66 @@ log_1_sum_exp(
 }
 
 /**
- * Compute both
- *    log(\sum_i exp(a_i))
- * and
- *    log(1 + \sum_i exp(a_i))
- * in a single pass over a_i
+ * Compute log(1 + \sum_i exp(a_i))
  * given a max, an iterator to the maximum over a_i.
- * Store results in lse and lse1;
- * return \sum_i exp(a_i - *max) over i \neq *max.
+ * Let s = exp(-*max) + \sum_i exp(a_i - *max) over i \neq *max.
  **/
 template <typename Iterator,
           typename Result,
           typename Summation = std_sum<Iterator, Result>>
 inline Result
-log_sum_exp_1(
+log_1_sum_exp(
+    Iterator first,
+    Iterator last,
+    Iterator max,
+    Result& s,
+    Summation sum = Summation()
+  ) {
+  s = std::exp(static_cast<Result>(-*max));
+  if (!std::isfinite(s)) return 0;
+  Result c(0);
+  for (; first != max; ++first) {
+    sum.add(std::exp(static_cast<Result>(*first - *max)), s, c);
+  }
+  for (first = max + 1; first != last; ++first) {
+    sum.add(std::exp(static_cast<Result>(*first - *max)), s, c);
+  }
+  return static_cast<Result>(*max) + std::log1p(s);
+}
+
+/**
+ * Compute log(1 + \sum_i exp(a_i)).
+ * Let s = exp(-*max) + \sum_i exp(a_i - *max) over i \neq *max.
+ **/
+template <typename Iterator,
+          typename Result,
+          typename Summation = std_sum<Iterator, Result>>
+inline Result
+log_1_sum_exp(
+    Iterator first,
+    Iterator last,
+    Result& s,
+    Summation sum = Summation()
+  ) {
+  if (first == last) return 0;
+  auto max = std::max_element(first, last);
+  return log_1_sum_exp(first, last, max, s, sum);
+}
+
+/**
+ * Compute both
+ *    lse = log(\sum_i exp(a_i))
+ * and
+ *    lse1 = log(1 + \sum_i exp(a_i))
+ * in a single pass over a_i and
+ * given a max, an iterator to the maximum over a_i.
+ * Return \sum_i exp(a_i - *max) over i \neq *max.
+ **/
+template <typename Iterator,
+          typename Result,
+          typename Summation = std_sum<Iterator, Result>>
+inline Result
+log_sum_exp_log_1_sum_exp(
     Iterator first,
     Iterator last,
     Iterator max,
@@ -287,25 +332,24 @@ log_sum_exp_1(
     sum.add(std::exp(static_cast<Result>(*first - *max)), s, c);
   }
   lse = static_cast<Result>(*max) + std::log1p(s);
-  lse1 = static_cast<Result>(*max)
-       + std::log1p(s + (std::exp(static_cast<Result>(-*max)) - c));
+  c = std::exp(static_cast<Result>(-*max)) - c;
+  lse1 = std::isfinite(c) ? static_cast<Result>(*max) + std::log1p(s + c) : 0;
   return s;
 }
 
 /**
  * Compute both
- *    log(\sum_i exp(a_i))
+ *    lse = log(\sum_i exp(a_i))
  * and
- *    log(1 + \sum_i exp(a_i))
+ *    lse1 = log(1 + \sum_i exp(a_i))
  * in a single pass over a_i.
- * Store results in lse and lse1;
- * return \sum_i exp(a_i - *max) over i \neq *max.
+ * Return \sum_i exp(a_i - *max) over i \neq *max.
  **/
 template <typename Iterator,
           typename Result,
           typename Summation = std_sum<Iterator, Result>>
 inline Result
-log_sum_exp_1(
+log_sum_exp_log_1_sum_exp(
     Iterator first,
     Iterator last,
     Result& lse,
@@ -317,7 +361,7 @@ log_sum_exp_1(
     return 0;
   }
   auto max = std::max_element(first, last);
-  return log_sum_exp_1(first, last, max, lse, lse1, sum);
+  return log_sum_exp_log_1_sum_exp(first, last, max, lse, lse1, sum);
 }
 
 }

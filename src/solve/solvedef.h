@@ -19,16 +19,6 @@ enum class solver_status {
   failed
 };
 typedef typename std::underlying_type<solver_status>::type solver_status_type;
-static const char* solver_status_name[] = {
-  "none",
-  "solving",
-  "solved",
-  "no_progress",
-  "max_epoch",
-  "max_cpu_time",
-  "max_wall_time",
-  "failed"
-};
 
 typedef typename std::size_t size_type;
 typedef typename std::ptrdiff_t difference_type;

@@ -56,7 +56,7 @@ topk_entropy_biased_kkt_iter_2(
 /**
  * The KKT conditions for the optimization problem in
  *    thresholds_topk_entropy_biased
- * lead to the following system of nonlinear equations:
+ * lead to the following system of nonlinear equations in two variables (s,t):
  *    f1: V^{-1}(alpha * (1 - s)) - rho * V^{-1}(alpha * s / k)
  *        + (1 - rho) * t - alpha + 1 / k * \sum_U a_i = 0,
  *    f2: alpha * (1 - rho) * s - \sum_M V(a_i - t) = 0,
@@ -161,7 +161,7 @@ thresholds_topk_entropy_biased(
     sum.add(static_cast<Result>(*m_first) / K, sum_U_k_alpha, sum_U_comp);
     ++m_first; ++num_U;
     rho = static_cast<Result>(num_U) / K;
-    max_el = std::max_element(m_first, last);
+    max_el = std::max_element(m_first, last); // pre-sorting might be faster
   }
 
   Result a(1 / alpha), lo(0), hi(s / K);
