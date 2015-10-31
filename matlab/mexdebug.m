@@ -6,6 +6,18 @@ addpath(fullfile(pwd, 'libsdca-release'));
 % addpath('/BS/mlapin-projects3/work/cvpr16/code/src/utility');
 rng(0);
 
+if 1
+W = randn(4096,200);
+X = randn(4096,50000);
+Y = randi(200,50000,1);
+opts.objective = 'l2_topk_softmax_nonconvex';
+opts.max_epoch = 5;
+opts.log_level = 'debug';
+opts.log_format = 'long_e';
+model = libsdca_gd(X, Y, opts);
+end
+
+if 0
 load('/BS/mlapin-projects3/work/cvpr16/code/experiments/caltech101sil/original/data/trn.mat');
 tst = load('/BS/mlapin-projects3/work/cvpr16/code/experiments/caltech101sil/original/data/tst.mat');
 
@@ -17,6 +29,7 @@ opts.max_epoch = 1000;
 opts.epsilon = 1e-10;
 
 model = libsdca_solve_mt({X,tst.X},{Y,tst.Y},opts);
+end
 
 if 0
 load('/BS/mlapin-projects3/work/cvpr16/code/experiments/caltech101sil/original/l2_entropy_topk/models/model-l2_entropy_topk-k-3-C-0.1.mat');
