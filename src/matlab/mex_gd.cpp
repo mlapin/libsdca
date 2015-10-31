@@ -266,10 +266,14 @@ min_topk_softmax_nonconvex(
   if (check_stopping_conditions(context, epoch, fun_evals, step_size,
         primal, optimality, wall, cpu)) return;
 
-  step_size = std::min(1.0, 1 / optimality);
+  double step_size_before(0);
+  step_size = std::max(min_step, std::min(1.0, 1 / optimality));
   for (;;) {
     ++epoch;
-    step_size = std::max(min_step, std::min(1.0, 2 * step_size));
+    if (step_size == step_size_before) {
+      step_size *= 2.0;
+    }
+    step_size_before = step_size;
 
     // Armijo line search
     double coeff = suff_decrease * optimality; // * optimality;
