@@ -211,7 +211,6 @@ dot_prox_prox(
     Iterator last,
     const Summation sum = Summation()
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type Data;
   Result num_hi = static_cast<Result>(std::distance(first, t.first));
   Result num_mi = static_cast<Result>(std::distance(t.first, t.last));
   Result num_lo = static_cast<Result>(std::distance(t.last, last));
@@ -237,7 +236,6 @@ dot_prox(
     Iterator last,
     const Summation sum = Summation()
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type Data;
   Result sum_hi = sum(first, t.first, static_cast<Result>(0));
   Result sum_mi = sum(t.first, t.last, static_cast<Result>(0));
   Result sum_lo = sum(t.last, last, static_cast<Result>(0));
@@ -340,7 +338,6 @@ prox(
     Algorithm compute,
     Types... params
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type Data;
   std::copy(first, last, aux_first);
   auto thresholds = compute(aux_first, aux_last, params...);
   prox(thresholds, first, last);
@@ -359,7 +356,6 @@ prox(
     Algorithm compute,
     Types... params
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type Data;
   Iterator vec_last = first + dim;
   for (; first != last; vec_last += dim) {
     std::copy(first, vec_last, aux_first);
@@ -390,7 +386,6 @@ apply(
     Iterator last,
     Functor functor
     ) {
-  typedef typename std::iterator_traits<Iterator>::value_type Data;
   Iterator vec_last = first + dim;
   for (; first != last; vec_last += dim) {
     apply(first, vec_last, functor);
