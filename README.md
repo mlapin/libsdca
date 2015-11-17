@@ -51,7 +51,7 @@ model = libsdca_solve(randn(2,15),randi(3,15,1),struct('objective','topk_svm','k
 
 Type `libsdca_prox('help')` and `libsdca_solve('help')` for further information.
 
-## License and Citation
+## License and citation
 
 libsdca is released under the [MIT license](https://github.com/mlapin/libsdca/blob/master/LICENSE).
 
