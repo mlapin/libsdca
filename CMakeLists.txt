@@ -86,9 +86,9 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 # Avoid a warning due to CMP0042
-#if(POLICY CMP0042 AND APPLE)
-#  set(CMAKE_MACOSX_RPATH ON)
-#endif()
+if(POLICY CMP0042 AND APPLE)
+  set(CMAKE_MACOSX_RPATH ON)
+endif()
 
 
 ###############################################################################
