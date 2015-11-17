@@ -18,10 +18,7 @@ The library is currently in active development and more features are planned.
 libsdca can be installed on Linux and OS X by an automatic CMake build.
 
 ```
-mkdir build
-cd build
-cmake ..
-make install -j2
+mkdir build && cd build && cmake .. && make install -j2
 ```
 
 libsdca requires [CMake](https://cmake.org) version >= 2.8.9.
