@@ -28,7 +28,7 @@ libsdca requires [CMake](https://cmake.org) version >= 2.8.9.
 
 ## Quick start
 
-By default, the Matlab interface is installed to `build/matlab`, which should then contain two mex files.
+The Matlab interface is installed to `build/matlab`, which should contain two mex files.
 
 - `libsdca_prox` provides proximal operators
 - `libsdca_solve` provides solvers for multiclass classification
@@ -37,14 +37,14 @@ To train the Multiclass SVM of Crammer and Singer on some random data, run
 ```
 model = libsdca_solve(randn(2,15),randi(3,15,1))
 ```
-(`libsdca_solve` should be in a folder on the Matlab search path).
+(note that `libsdca_solve` should be in a folder on the Matlab search path).
 
-To check the top-k training accuracy, see
+To check the top-k training accuracies, see
 ```
 model.evals(end).accuracy
 ```
 
-To train the Top-k Multiclass SVM, run
+To train the Top-k Multiclass SVM, specify the corresponding objective and the k
 ```
 model = libsdca_solve(randn(2,15),randi(3,15,1),struct('objective','topk_svm','k',2))
 ```
