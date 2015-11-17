@@ -28,10 +28,10 @@ libsdca requires [CMake](https://cmake.org) version >= 2.8.9.
 
 ## Quick start
 
-The Matlab interface is installed to `build/matlab`, which should contain two mex files.
+The Matlab interface is installed to `build/matlab`, which should contain two mex files:
 
-- `libsdca_prox` provides proximal operators
-- `libsdca_solve` provides solvers for multiclass classification
+- `libsdca_prox` provides proximal operators;
+- `libsdca_solve` provides solvers for multiclass classification.
 
 To train the Multiclass SVM of Crammer and Singer on some random data, run
 ```
