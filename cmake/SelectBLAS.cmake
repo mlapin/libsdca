@@ -60,7 +60,12 @@ elseif(BLAS_Accelerate_LIBRARY)
 
 elseif(BLAS_FOUND)
 
-  add_definitions(-DBLAS_DEFAULT)
+  find_file(CBLAS_HEADER cblas.h)
+  if(CBLAS_HEADER)
+    add_definitions(-DBLAS_DEFAULT)
+  else()
+    add_definitions(-DBLAS_DEFAULT_LOCAL_HEADER)
+  endif()
 
 endif()
 

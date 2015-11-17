@@ -8,6 +8,8 @@
   #include <Accelerate/Accelerate.h>
 #elif defined(BLAS_DEFAULT)
   #include <cblas.h>
+#elif defined(BLAS_DEFAULT_LOCAL_HEADER)
+  #include "cblas.h"
 #endif
 
 namespace sdca {
