@@ -60,7 +60,6 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fuse-linker-plugin")
-  #set(RELEASE_FLAGS "${RELEASE_FLAGS} -Wl,-rpath,\\\$ORIGIN")
 endif()
 
 # Build specific flags
