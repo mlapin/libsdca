@@ -32,7 +32,7 @@ libsdca is released under the [MIT license](https://github.com/mlapin/libsdca/bl
 
 Please cite libsdca in your publications if it helps your research:
 
-    @article{lapin2015topk,
+    @inproceedings{lapin2015topk,
       Author = {Lapin, Maksim and Hein, Matthias and Schiele, Bernt},
       Booktitle = {NIPS},
       Title = {Top-k Multiclass {SVM}},
