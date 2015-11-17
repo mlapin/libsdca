@@ -12,10 +12,9 @@ using namespace sdca;
 
 inline void
 printUsage() {
-  mexPrintf("Usage: MODEL = %s(X, Y);\n"
-            "       MODEL = %s(DATA, LABELS, OPTS);\n"
-            "  See %s('version') and %s('help') for more information.\n",
-            MEX_SOLVE, MEX_SOLVE, MEX_SOLVE, MEX_SOLVE);
+  mexPrintf("Usage: model = %s(data, labels, opts);\n"
+            "  See %s('help') and %s('version') for more information.\n",
+            MEX_SOLVE, MEX_SOLVE, MEX_SOLVE);
 }
 
 inline void
@@ -24,62 +23,95 @@ printVersion() {
 }
 
 inline void
-printHelp() {
-  mexPrintf("Usage: MODEL = %s(X, Y);\n"
-            "       MODEL = %s(DATA, LABELS, OPTS);\n"
-            "  DATA is either a d-by-n feature matrix (default)\n"
-            "              or a n-by-n Gram matrix (requires is_dual=true).\n"
-            "  LABELS is a n-by-1 or a 1-by-n vector of class labels.\n"
-            "    If m is the number of classes (tasks),\n"
-            "    then LABELS must be in the range 0:(m-1) or 1:m.\n"
-            "  DATA can be single or double; LABELS must be double.\n"
-            "\n"
-            "  OPTS is a struct with the following fields:\n"
-            "  (default values in [brackets], synonyms in (parenthesis))\n"
-            "    'objective' :\n"
-            "      ['l2_topk_hinge'] : L2-regularized top-k-of-hinge loss;\n"
-            "       'l2_hinge_topk'  : L2-regularized hinge-of-top-k loss.\n"
-            "  Regularization parameter (standard SVM C parameter):\n"
-            "    'c' : [1], divided by n in the objective;\n"
-            "    'C' : [c/n], used directly in the objective.\n"
-            "  Loss smoothing parameter:\n"
-            "    'gamma' : [0], use gamma > 0 for a smooth version of\n"
-            "                   l2_topk_hinge and l2_hinge_topk.\n"
-            "  Top-k loss parameter:\n"
-            "    'k' : [1], note that for k=1 and gamma=0 both\n"
-            "               l2_topk_hinge and l2_hinge_topk coincide\n"
-            "               with the multiclass SVM of Crammer and Singer.\n"
-            "  Training in the dual:\n"
-            "    'is_dual' : [false], if DATA is the Gram matrix,\n"
-            "                         set is_dual=true.\n"
-            "    No primal variables (W) are maintained if is_dual=true.\n"
-            "    Moreover, training in the dual is faster for d>=n.\n"
-            "  Stopping criteria:\n"
-            "    'check_on_start' : [false], check duality gap on start;\n"
-            "    'check_epoch'    : [1], how often to check the gap;\n"
-            "    'max_epoch'      : [1000], epochs limit;\n"
-            "    'max_cpu_time'   : [0], CPU time limit (0: no limit);\n"
-            "    'max_wall_time'  : [0], wall time limit (0: no limit);\n"
-            "    'epsilon'        : [1e-3], relative duality gap bound:\n"
-            "      (primal - dual) <= epsilon * max(abs(primal), abs(dual)).\n"
-            "  Warm restart (resume training):\n"
-            "    'W' : initial primal variables (if is_dual=false);\n"
-            "    'A' : initial dual variables such that W = X*A'.\n"
-            "    If only A is available, use check_on_start=true.\n"
-            "    Note that one can simply pass a computed MODEL as OPTS.\n"
-            "  Logging options:\n"
-            "    'log_level'  : 'none', ['info'], 'verbose', 'debug'.\n"
-            "    'log_format' : ['short_f'], 'short_e', 'long_f', 'long_e'.\n"
-            "                   short/long: 4/15 digits; f/e: float/exp fmt.\n"
-            "  Options that influence the accuracy of computations:\n"
-            "    'precision' : 'single' ('float'), ['double'],\n"
-            "                  'long double' ('long_double');\n"
-            "    'summation' : ['standard'] ('default'), 'kahan'.\n"
-            "\n"
-            "  Prediction scores can be computed as:\n"
-            "    scores = model.W' * X;\n"
-            "    scores = model.A * Xtrn' * Xtst.\n",
-            MEX_SOLVE, MEX_SOLVE);
+printHelp(const mxArray* opts) {
+  if (opts == nullptr) {
+    mexPrintf(
+"Usage: model = %s(data, labels, opts);\n"
+"  Optimizes an objective given in opts.objective using the data and labels.\n"
+"\n"
+"  opts is a struct with the following fields (defaults in [brackets]):\n"
+"\n"
+"    objective ['msvm']      - the objective to optimize;\n"
+"    C         [1]           - the regularization parameter;\n"
+"    k         [1]           - the k in top-k optimization;\n"
+"    is_dual   [false]       - whether data is given as Gram matrix;\n"
+"\n"
+"    check_on_start [false]  - whether to check the duality gap on start;\n"
+"    check_epoch    [10]     - how often to check the gap;\n"
+"    max_epoch      [1000]   - epochs limit;\n"
+"    max_cpu_time   [0]      - CPU time limit (0: no limit);\n"
+"    max_wall_time  [0]      - wall time limit (0: no limit);\n"
+"    epsilon        [1e-3]   - relative duality gap bound, stop if\n"
+"      (primal - dual) <= epsilon * max(abs(primal), abs(dual))\n"
+"\n"
+"    log_level  ['info']     - logging verbosity\n"
+"                              ('none', 'info', 'verbose', 'debug')\n"
+"    log_format ['short_e']  - numeric format (4/15 digits; float/exp format)\n"
+"                              ('short_f', 'short_e', 'long_f', 'long_e')\n"
+"    precision  ['double']   - intermediate floating-point precision;\n"
+"    summation  ['standard'] - summation method (Kahan or standard);\n"
+"\n"
+"    A [none] - initial dual variables for warm restart;\n"
+"    W [none] - initial primal variables (only if opts.is_dual=false);\n"
+"\n"
+"  Prediction scores can be computed as:\n"
+"    scores = model.W' * X;\n"
+"    scores = model.A * Xtrn' * Xtst;\n"
+"\n"
+"  See %s('help', 'data') for more information on\n"
+"  supported input data formats.\n"
+"  See %s('help', 'objective') for more information on\n"
+"  currently supported training objectives.\n",
+    MEX_SOLVE, MEX_SOLVE, MEX_SOLVE);
+    return;
+  }
+
+  std::string arg = mxGetString(opts, "help argument");
+  if (arg == "data" || arg == "labels" || arg == "input") {
+    mexPrintf(
+"Input data is given in the first two arguments, data and labels.\n"
+"\n"
+"  data can be:\n"
+"    - a d-by-n feature matrix,\n"
+"      where d is the number of features and n is the number of examples.\n"
+"    - a n-by-n Gram matrix (requires opts.is_dual=true),\n"
+"      where n is the number of training examples.\n"
+"    - a cell array containing either the feature or the Gram matrices,\n"
+"      but not a mixture of both.\n"
+"      In this case, the first matrix is used for training,\n"
+"      while the rest is used for evaluation only\n"
+"      (e.g., can be used to monitor performance on a validation set).\n"
+"      The Gram matrices for testing should be computed as\n"
+"        Ktst = Xtrn' * Xtst.\n"
+"\n"
+"  labels can be:\n"
+"    - a n-by-1 or a 1-by-n vector of class labels;\n"
+"      labels must be in the range 0:(m-1) or 1:m,\n"
+"      where m is the number of classes.\n"
+"    - a cell array with the same number of elements as in data\n"
+"      containing vectors of labels as above.\n"
+"\n"
+"  data must be a non-sparse matrix of type single or double\n"
+"\n"
+"  labels must be a non-sparse vector of type double\n"
+      );
+  } else if (arg == "obj" || arg == "objective") {
+    mexPrintf(
+"opts.objective - the training objective to optimize.\n"
+"  Possible values:\n"
+"    msvm (synonym: svm_multi)\n"
+"      - multiclass SVM of Crammer and Singer\n"
+"    l2_hinge_topk (synonym: topk_hinge_alpha)\n"
+"      - l2 regularized hinge-of-top-k loss (top-k hinge alpha)\n"
+"    l2_topk_hinge (synonym: topk_hinge_beta)\n"
+"      - l2 regularized top-k-of-hinge loss (top-k hinge beta)\n"
+"  Default value:\n"
+"    msvm\n"
+      );
+  } else {
+    mexErrMsgIdAndTxt(
+      err_id[err_help_arg], err_msg[err_help_arg], arg.c_str());
+  }
 }
 
 template <typename Result>
@@ -183,13 +215,13 @@ set_variables(
     model_info<mxArray*>& info
   ) {
   mxArray *mxA = mxDuplicateFieldOrCreateMatrix(opts, "A",
-    trn_data.num_tasks, trn_data.num_examples, mex_class<Data>::id());
+    trn_data.num_classes, trn_data.num_examples, mex_class<Data>::id());
   context.dual_variables = static_cast<Data*>(mxGetData(mxA));
   info.add("A", mxA);
 
   if (!context.is_dual) {
     mxArray *mxW = mxDuplicateFieldOrCreateMatrix(opts, "W",
-      trn_data.num_dimensions, trn_data.num_tasks, mex_class<Data>::id());
+      trn_data.num_dimensions, trn_data.num_classes, mex_class<Data>::id());
     context.primal_variables = static_cast<Data*>(mxGetData(mxW));
     info.add("W", mxW);
   }
@@ -219,53 +251,34 @@ mex_main(
     info.add("num_dimensions", mxCreateScalar(trn_data.num_dimensions));
   }
   info.add("num_examples", mxCreateScalar(trn_data.num_examples));
-  info.add("num_tasks", mxCreateScalar(trn_data.num_tasks));
+  info.add("num_classes", mxCreateScalar(trn_data.num_classes));
 
   std::string objective = mxGetFieldValueOrDefault(
-    opts, "objective", std::string("l2_topk_hinge"));
+    opts, "objective", std::string("msvm"));
   info.add("objective", mxCreateString(objective.c_str()));
 
-  auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
-  mxCheck<Result>(std::greater<Result>(), c, 0, "c");
-
-  Result num_examples(static_cast<Result>(trn_data.num_examples));
-  auto C = mxGetFieldValueOrDefault<Result>(opts, "C", c / num_examples);
+  auto C = mxGetFieldValueOrDefault<Result>(opts, "C", 1);
   mxCheck<Result>(std::greater<Result>(), C, 0, "C");
-
-  c = (C != c / num_examples) ? C * num_examples : c;
-  info.add("c", mxCreateScalar(c));
   info.add("C", mxCreateScalar(C));
 
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
-  mxCheckRange<size_type>(k, 1, trn_data.num_tasks - 1, "k");
+  mxCheckRange<size_type>(k, 1, trn_data.num_classes - 1, "k");
 
-  auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
-  mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
-
-  if (objective == "l2_entropy_topk") {
+  if (objective == "msvm" ||
+      objective == "svm_multi") {
+    mxCheckRange<size_type>(k, 1, 1, "k");
+    make_solver_solve(context, info,
+      l2_topk_hinge<Data, Result, Summation>(k, C, sum));
+  } else if (objective == "l2_hinge_topk" ||
+             objective == "topk_hinge_alpha") {
     info.add("k", mxCreateScalar(k));
     make_solver_solve(context, info,
-      l2_entropy_topk<Data, Result, Summation>(k, C, sum));
-  } else if (objective == "l2_topk_hinge") {
+      l2_hinge_topk<Data, Result, Summation>(k, C, sum));
+  } else if (objective == "l2_topk_hinge" ||
+             objective == "topk_hinge_beta") {
     info.add("k", mxCreateScalar(k));
-    info.add("gamma", mxCreateScalar(gamma));
-    if (gamma > 0) {
-      make_solver_solve(context, info,
-        l2_topk_hinge_smooth<Data, Result, Summation>(k, C, gamma, sum));
-    } else {
-      make_solver_solve(context, info,
-        l2_topk_hinge<Data, Result, Summation>(k, C, sum));
-    }
-  } else if (objective == "l2_hinge_topk") {
-    info.add("k", mxCreateScalar(k));
-    info.add("gamma", mxCreateScalar(gamma));
-    if (gamma > 0) {
-      make_solver_solve(context, info,
-        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum));
-    } else {
-      make_solver_solve(context, info,
-        l2_hinge_topk<Data, Result, Summation>(k, C, sum));
-    }
+    make_solver_solve(context, info,
+      l2_topk_hinge<Data, Result, Summation>(k, C, sum));
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_objective], err_msg[err_objective], objective.c_str());
@@ -344,9 +357,10 @@ mexFunction(
 
   if (mxIsChar(prhs[0])) {
     std::string command = mxGetString(prhs[0], "command");
-    if (command == "help" || command == "--help" || command == "-h") {
-      printHelp();
-    } else if (command == "version" || command == "--version") {
+    const mxArray* opts = (nrhs > 1) ? prhs[1] : nullptr;
+    if (command == "help") {
+      printHelp(opts);
+    } else if (command == "version") {
       printVersion();
     } else {
       mexErrMsgIdAndTxt(

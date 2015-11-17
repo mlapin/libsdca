@@ -175,8 +175,8 @@ protected:
     LOG_INFO << "status: " << status_name() << " ("
       "epoch = " << epoch() << ", "
       "relative_gap = " << relative_gap() << ", "
-      "solve_time: " << solve_wall_.elapsed << ", "
-      "eval_time: " << eval_wall_.elapsed << ", "
+      "solve_wall_time: " << solve_wall_.elapsed << ", "
+      "eval_wall_time: " << eval_wall_.elapsed << ", "
       "wall_time: " << wall_time() << ", "
       "cpu_time: " << cpu_time() << ")" << std::endl;
   }
@@ -193,10 +193,10 @@ protected:
     if ((criteria_.check_epoch > 0) && (epoch_ % criteria_.check_epoch == 0)) {
       compute_duality_gap();
     } else {
-      LOG_VERBOSE << "  "
+      LOG_DEBUG << "  "
         "epoch: " << std::setw(3) << epoch() << std::setw(0) << ", "
-        "solve_time: " << solve_wall_.elapsed << ", "
-        "eval_time: " << eval_wall_.elapsed << ", "
+        "solve_wall_time: " << solve_wall_.elapsed << ", "
+        "eval_wall_time: " << eval_wall_.elapsed << ", "
         "wall_time: " << wall_time() << ", "
         "cpu_time: " << cpu_time() << std::endl;
     }
@@ -253,8 +253,8 @@ protected:
       "dual: " << dual_ << ", "
       "absolute_gap: " << gap_ << ", "
       "relative_gap: " << relative_gap() << ", "
-      "solve_time: " << solve_wall_.elapsed << ", "
-      "eval_time: " << eval_wall_.elapsed << ", "
+      "solve_wall_time: " << solve_wall_.elapsed << ", "
+      "eval_wall_time: " << eval_wall_.elapsed << ", "
       "wall_time: " << wall_time() << ", "
       "cpu_time: " << cpu_time() << std::endl;
   }
@@ -302,10 +302,10 @@ protected:
   inline void
   log_eval(size_type id, evaluation_type& eval) {
     LOG_VERBOSE << "  "
-      "eval " << id + 1 << ": "
+      "dataset " << id + 1 << ": "
       << eval.to_string() <<
-      "wall_time = " << this->eval_wall_.elapsed_now() << ", "
-      "cpu_time = " << this->eval_cpu_.elapsed_now() << std::endl;
+      "eval_wall_time = " << this->eval_wall_.elapsed_now() << ", "
+      "eval_cpu_time = " << this->eval_cpu_.elapsed_now() << std::endl;
   }
 
   virtual evaluation_type

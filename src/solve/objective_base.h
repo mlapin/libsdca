@@ -34,12 +34,12 @@ struct objective_base {
 
   inline Result
   regularizer(
-      const blas_int num_tasks,
+      const blas_int num_classes,
       const Data* variables,
       const Data* scores
     ) const {
     return static_cast<Result>(scores[0] * variables[0]) + static_cast<Result>(
-      sdca_blas_dot(num_tasks - 1, scores + 1, variables + 1));
+      sdca_blas_dot(num_classes - 1, scores + 1, variables + 1));
   }
 
   inline Result

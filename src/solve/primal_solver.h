@@ -26,18 +26,18 @@ public:
       base::multiset_solver(__ctx),
       objective_(__obj),
       num_dimensions_(__ctx.datasets[0].num_dimensions),
-      num_tasks_(__ctx.datasets[0].num_tasks),
+      num_classes_(__ctx.datasets[0].num_classes),
       labels_(&(__ctx.datasets[0].labels[0])),
       features_(__ctx.datasets[0].data),
       primal_variables_(__ctx.primal_variables),
       dual_variables_(__ctx.dual_variables),
       norm2_(__ctx.datasets[0].num_examples),
-      scores_(__ctx.datasets[0].num_tasks),
-      vars_before_(__ctx.datasets[0].num_tasks),
+      scores_(__ctx.datasets[0].num_classes),
+      vars_before_(__ctx.datasets[0].num_classes),
       diff_tolerance_(std::numeric_limits<data_type>::epsilon()),
       D(static_cast<blas_int>(__ctx.datasets[0].num_dimensions)),
       N(static_cast<blas_int>(__ctx.datasets[0].num_examples)),
-      T(static_cast<blas_int>(__ctx.datasets[0].num_tasks))
+      T(static_cast<blas_int>(__ctx.datasets[0].num_classes))
   {
     LOG_INFO << "solver: " << base::name() << " (primal)" << std::endl
       << "objective: " << __obj.to_string() << std::endl
@@ -62,7 +62,7 @@ protected:
   // Main variables
   const objective_type& objective_;
   const size_type num_dimensions_;
-  const size_type num_tasks_;
+  const size_type num_classes_;
   const size_type* labels_;
   const data_type* features_;
   data_type* primal_variables_;
@@ -94,8 +94,8 @@ protected:
     const data_type* x_i = features_ + num_dimensions_ * i;
 
     // Update dual variables
-    data_type* variables = dual_variables_ + num_tasks_ * i;
-    std::copy_n(variables, num_tasks_, &vars_before_[0]);
+    data_type* variables = dual_variables_ + num_classes_ * i;
+    std::copy_n(variables, num_classes_, &vars_before_[0]);
     compute_scores_swap_gt(labels_[i], x_i, variables);
     objective_.update_variables(T, norm2_[i], variables, &scores_[0]);
     std::swap(variables[0], variables[labels_[i]]);
@@ -119,7 +119,7 @@ protected:
   inline evaluation_type
   evaluate_train() override {
     evaluation_type stats;
-    stats.accuracy.resize(num_tasks_);
+    stats.accuracy.resize(num_classes_);
     auto acc_first = stats.accuracy.begin();
     auto acc_last = stats.accuracy.end();
 
@@ -132,7 +132,7 @@ protected:
       const data_type* x_i = features_ + num_dimensions_ * i;
 
       // Compute prediction scores on example i
-      data_type* variables = dual_variables_ + num_tasks_ * i;
+      data_type* variables = dual_variables_ + num_classes_ * i;
       compute_scores_swap_gt(labels_[i], x_i, variables);
 
       // Increment the regularization term (before re-ordering scores)
@@ -170,7 +170,7 @@ protected:
   inline evaluation_type
   evaluate_test(const dataset_type& set) override {
     evaluation_type stats;
-    stats.accuracy.resize(num_tasks_);
+    stats.accuracy.resize(num_classes_);
     auto acc_first = stats.accuracy.begin();
     auto acc_last = stats.accuracy.end();
 

@@ -33,7 +33,7 @@ enum err_index {
   err_labels_range,
   err_cell_arrays,
   err_num_dim,
-  err_num_tasks,
+  err_num_classes,
   err_num_ex,
   err_command,
   err_prox,
@@ -42,6 +42,7 @@ enum err_index {
   err_precision,
   err_log_level,
   err_log_format,
+  err_help_arg,
   err_not_implemented
 };
 
@@ -64,7 +65,7 @@ static const char* err_id[] = {
   "LIBSDCA:labels_range",
   "LIBSDCA:cell_arrays",
   "LIBSDCA:num_dim",
-  "LIBSDCA:num_tasks",
+  "LIBSDCA:num_classes",
   "LIBSDCA:num_examples",
   "LIBSDCA:command",
   "LIBSDCA:prox",
@@ -73,12 +74,13 @@ static const char* err_id[] = {
   "LIBSDCA:precision",
   "LIBSDCA:log_level",
   "LIBSDCA:log_format",
+  "LIBSDCA:help_arg",
   "LIBSDCA:not_implemented"
 };
 
 static const char* err_msg[] = {
   "Invalid input.",
-  "Invalid number of input/output arguments.",
+  "Invalid number of input or output arguments.",
   "'%s' must be single.",
   "'%s' must be double.",
   "'%s' must be single or double.",
@@ -95,7 +97,7 @@ static const char* err_msg[] = {
   "Invalid labels range (must be 1:T or 0:T-1).",
   "Invalid cell arrays (must be non-empty and have the same size).",
   "Invalid number of dimensions in features #%d.",
-  "Invalid number of tasks in labels #%d.",
+  "Invalid number of classes in labels #%d.",
   "Invalid number of training examples (first dimension) in kernel #%d.",
   "Unknown command '%s'.",
   "Unknown prox '%s'.",
@@ -104,6 +106,7 @@ static const char* err_msg[] = {
   "Unknown precision '%s'.",
   "Unknown log_level '%s'.",
   "Unknown log_format '%s'.",
+  "Unknown help argument '%s'.",
   "%s is not implemented yet."
 };
 
@@ -425,21 +428,21 @@ mxCreateStruct(
 
 inline mxArray*
 mxDuplicateFieldOrCreateMatrix(
-    const mxArray* structure,
+    const mxArray* pa,
     const char* field,
     const std::size_t m,
     const std::size_t n,
     const mxClassID id
   ) {
-  mxArray *pa = mxGetField(structure, 0, field);
-  if (pa != nullptr) {
-    mxCheckMatrix(pa, field, m, n, id);
-    pa = mxDuplicateArray(pa);
+  mxArray *pb = (pa != nullptr) ? mxGetField(pa, 0, field) : nullptr;
+  if (pb != nullptr) {
+    mxCheckMatrix(pb, field, m, n, id);
+    pb = mxDuplicateArray(pb);
   } else {
-    pa = mxCreateNumericMatrix(m, n, id, mxREAL);
+    pb = mxCreateNumericMatrix(m, n, id, mxREAL);
   }
-  mxCheckCreated(pa, field);
-  return pa;
+  mxCheckCreated(pb, field);
+  return pb;
 }
 
 /**
@@ -489,7 +492,7 @@ set_labels(
   }
 
   data_set.labels = std::move(vec);
-  data_set.num_tasks = static_cast<size_type>(*minmax.second) + 1;
+  data_set.num_classes = static_cast<size_type>(*minmax.second) + 1;
 }
 
 template <typename Data>
@@ -539,7 +542,7 @@ set_datasets(
     set_dataset(mxGetCell(data, 0), mxGetCell(labels, 0), context);
     size_type num_dimensions = context.datasets[0].num_dimensions;
     size_type num_examples = context.datasets[0].num_examples;
-    size_type num_tasks = context.datasets[0].num_tasks;
+    size_type num_classes = context.datasets[0].num_classes;
 
     // Testing datasets
     size_type num_datasets = mxGetNumberOfElements(data);
@@ -548,8 +551,9 @@ set_datasets(
       if (num_dimensions != context.datasets[i].num_dimensions) {
         mexErrMsgIdAndTxt(err_id[err_num_dim], err_msg[err_num_dim], i + 1);
       }
-      if (num_tasks != context.datasets[i].num_tasks) {
-        mexErrMsgIdAndTxt(err_id[err_num_tasks], err_msg[err_num_tasks], i + 1);
+      if (num_classes != context.datasets[i].num_classes) {
+        mexErrMsgIdAndTxt(
+          err_id[err_num_classes], err_msg[err_num_classes], i + 1);
       }
       if (context.is_dual && num_examples != mxGetM(mxGetCell(data, i))) {
         mexErrMsgIdAndTxt(err_id[err_num_ex], err_msg[err_num_ex], i + 1);

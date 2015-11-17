@@ -24,7 +24,7 @@ set(USE_ILP64 TRUE)
 set(USE_SEQUENTIAL FALSE)
 
 # Whether to add a suffix (e.g. st/mt) for single-/multi-threaded versions
-set(USE_THREADING_SUFFIX TRUE)
+set(USE_THREADING_SUFFIX FALSE)
 
 # Whether to use the fast math functions from https://github.com/herumi/fmath
 add_definitions(-DUSE_FMATH_HERUMI=1)
@@ -48,8 +48,8 @@ endif()
 # Debug flags
 set(DEBUG_FLAGS "-O0 -DDEBUG -fstack-protector-all")
 
-# Release flags: -fno-stack-protector -fno-exceptions
-set(RELEASE_FLAGS "-O3 -DNDEBUG")
+# Release flags
+set(RELEASE_FLAGS "-O3 -DNDEBUG -march=native")
 if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
@@ -57,7 +57,7 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -Wl,-rpath,\\\$ORIGIN")
 endif()
 
-# Build specific flags: -march=native
+# Build specific flags
 set(CMAKE_CXX_FLAGS
   "${CMAKE_CXX_FLAGS} -std=c++11 ${WARN_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG
@@ -75,8 +75,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 # Install prefix
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/bin" CACHE PATH
-    "Install directory used by install." FORCE)
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/lib" CACHE PATH
+    "Installation directory." FORCE)
 endif()
 
 # Avoid a warning due to CMP0042
@@ -111,7 +111,7 @@ find_package(BLAS)
 find_package(MKL)
 
 # Select a BLAS library and set the corresponding compiler/linker flags
-include(UseBLAS)
+include(SelectBLAS)
 
 
 ###############################################################################

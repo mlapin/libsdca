@@ -1,20 +1,13 @@
 include_directories(.)
 
-set(PLAY_SRCS
-  play/main.cpp
-  )
-
 set(PROX_SRCS
   prox/prox.h
   prox/proxdef.h
-  prox/entropy.h
   prox/knapsack_eq.h
   prox/knapsack_le.h
   prox/knapsack_le_biased.h
   prox/topk_cone.h
   prox/topk_cone_biased.h
-  prox/topk_entropy.h
-  prox/topk_entropy_biased.h
   prox/topk_simplex.h
   prox/topk_simplex_biased.h
   )
@@ -26,7 +19,6 @@ set(SOLVE_SRCS
   solve/dual_solver.h
   solve/primal_solver.h
   solve/objective_base.h
-  solve/l2_entropy_topk.h
   solve/l2_hinge_topk.h
   solve/l2_topk_hinge.h
   )
@@ -35,7 +27,6 @@ set(UTIL_SRCS
   util/util.h
   util/blas.h
   util/fmath.h
-  util/lambert.h
   util/logging.h
   util/numeric.h
   util/stopwatch.h
@@ -45,16 +36,13 @@ if(${USE_THREADING_SUFFIX})
   if(${USE_SEQUENTIAL})
     set(MEX_PROX libsdca_prox_st)
     set(MEX_SOLVE libsdca_solve_st)
-    set(MEX_GD libsdca_gd_st)
   else()
     set(MEX_PROX libsdca_prox_mt)
     set(MEX_SOLVE libsdca_solve_mt)
-    set(MEX_GD libsdca_gd_mt)
   endif()
 else()
   set(MEX_PROX libsdca_prox)
   set(MEX_SOLVE libsdca_solve)
-  set(MEX_GD libsdca_gd)
 endif()
 
 # Matlab interface
@@ -63,15 +51,8 @@ if(${Matlab_FOUND})
   include_directories(${Matlab_INCLUDE_DIRS})
 
   add_definitions(
-    -DMEX_GD="${MEX_GD}"
     -DMEX_PROX="${MEX_PROX}"
     -DMEX_SOLVE="${MEX_SOLVE}"
-    )
-
-  matlab_add_mex(
-    NAME ${MEX_GD}
-    SRC matlab/mex_gd.cpp matlab/mex_util.h ${SOLVE_SRCS} ${UTIL_SRCS}
-    LINK_TO ${BLAS_LIBRARIES}
     )
 
   matlab_add_mex(
@@ -86,18 +67,10 @@ if(${Matlab_FOUND})
     LINK_TO ${BLAS_LIBRARIES}
     )
 
-#  set_target_properties(${MEX_SOLVE} PROPERTIES
-#    COMPILE_FLAGS "-Wno-unused-variable -Wno-unused-parameter"
-#    )
-
   install(
-    TARGETS ${MEX_GD} ${MEX_PROX} ${MEX_SOLVE}
+    TARGETS ${MEX_PROX} ${MEX_SOLVE}
     DESTINATION matlab
     )
 else()
   message(STATUS "Matlab interface is not compiled.")
 endif()
-
-# A playground for quick checks and small tests
-add_executable(main ${PLAY_SRCS} ${PROX_SRCS} ${SOLVE_SRCS} ${UTIL_SRCS})
-target_link_libraries(main ${BLAS_LIBRARIES})

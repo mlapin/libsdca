@@ -1,9 +1,22 @@
 #.rst:
 # FindMKL
-# --------
+# -------
 #
-# Find Intel MKL library (version 11.1)
+# Find module for Intel MKL
 #
+# Finds Intel MKL and Intel Composer XE installations
+#
+# The following variables and pre-defined locations are checked:
+# for Intel MKL,
+#     - MKL_ROOT_DIR            # CMake variable
+#     - MKLROOT                 # environment variable
+#     - /opt/intel/mkl          # default location
+#
+# for Intel Composer XE,
+#     - COMPOSER_ROOT_DIR       # CMake variable
+#     - PROD_DIR                # environment variable
+#     - CPRO_PATH               # environment variable
+#     - /opt/intel/composerxe   # default location
 
 # Copyright 2015 Maksim Lapin.
 

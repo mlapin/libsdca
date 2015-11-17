@@ -1,19 +1,25 @@
-# UseBLAS
-# -------
+#.rst:
+# SelectBLAS
+# ----------
 #
-# Use Module for BLAS
+# Select module for BLAS
 #
-# Selects a BLAS library from several options and sets up C and C++ to use it.
-# It is assumed that
-#   FindThreads.cmake
-# and at least one of the following have already been loaded:
-#   FindBLAS.cmake (loads FindThreads.cmake)
-#   FindMKL.cmake
-# Note that BLAS_* variables are overwritten.
-# Priority:
-# 1. Intel MKL
-# 2. Accelerate Framework
-# 3. Whichever library is found by FindBLAS
+# Selects a BLAS library and sets up C and C++ to use it.
+#
+# Use
+#     find_package(BLAS)
+#     find_package(MKL) # optional
+# before
+#     include(SelectBLAS)
+#
+# If Intel MKL is found, it will be used instead of the BLAS found by FindBLAS.
+# Intel MKL setup depends on the flags
+#     USE_ILP64
+#     USE_SEQUENTIAL
+#
+# Note: the following flags are overwritten in any case
+#     BLAS_FOUND
+#     BLAS_LIBRARIES
 
 # Copyright 2015 Maksim Lapin.
 

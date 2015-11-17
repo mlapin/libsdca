@@ -25,7 +25,7 @@ typedef typename std::ptrdiff_t difference_type;
 
 struct stopping_criteria {
   bool check_on_start = false;
-  size_type check_epoch = 1;
+  size_type check_epoch = 10;
   size_type max_epoch = 1000;
   double max_cpu_time = 0;
   double max_wall_time = 0;
@@ -49,7 +49,7 @@ struct dataset {
   typedef Data data_type;
   size_type num_dimensions = 0;
   size_type num_examples = 0;
-  size_type num_tasks = 0;
+  size_type num_classes = 0;
   std::vector<size_type> labels;
   data_type* data = nullptr;
 
@@ -57,7 +57,7 @@ struct dataset {
   to_string() const {
     std::ostringstream str;
     str << "num_dimensions = " << num_dimensions << ", "
-           "num_tasks = " << num_tasks << ", "
+           "num_classes = " << num_classes << ", "
            "num_examples = " << num_examples;
     return str.str();
   }

@@ -25,13 +25,13 @@ public:
     ) :
       base::multiset_solver(__ctx),
       objective_(__obj),
-      num_tasks_(__ctx.datasets[0].num_tasks),
+      num_classes_(__ctx.datasets[0].num_classes),
       labels_(&(__ctx.datasets[0].labels[0])),
       gram_matrix_(__ctx.datasets[0].data),
       dual_variables_(__ctx.dual_variables),
-      scores_(__ctx.datasets[0].num_tasks),
+      scores_(__ctx.datasets[0].num_classes),
       N(static_cast<blas_int>(__ctx.datasets[0].num_examples)),
-      T(static_cast<blas_int>(__ctx.datasets[0].num_tasks))
+      T(static_cast<blas_int>(__ctx.datasets[0].num_classes))
   {
     LOG_INFO << "solver: " << base::name() << " (dual)" << std::endl
       << "objective: " << __obj.to_string() << std::endl
@@ -55,7 +55,7 @@ protected:
 
   // Main variables
   const objective_type& objective_;
-  const size_type num_tasks_;
+  const size_type num_classes_;
   const size_type* labels_;
   const data_type* gram_matrix_;
   data_type* dual_variables_;
@@ -73,7 +73,7 @@ protected:
     if (K_i[i] <= 0) return;
 
     // Update dual variables
-    data_type* variables = dual_variables_ + num_tasks_ * i;
+    data_type* variables = dual_variables_ + num_classes_ * i;
     compute_scores_swap_gt(labels_[i], K_i, variables);
     objective_.update_variables(T, K_i[i], variables, &scores_[0]);
     std::swap(variables[0], variables[labels_[i]]);
@@ -82,7 +82,7 @@ protected:
   inline evaluation_type
   evaluate_train() override {
     evaluation_type stats;
-    stats.accuracy.resize(num_tasks_);
+    stats.accuracy.resize(num_classes_);
     auto acc_first = stats.accuracy.begin();
     auto acc_last = stats.accuracy.end();
 
@@ -95,7 +95,7 @@ protected:
       const data_type* K_i = gram_matrix_ + num_examples_ * i;
 
       // Compute prediction scores on example i
-      data_type* variables = dual_variables_ + num_tasks_ * i;
+      data_type* variables = dual_variables_ + num_classes_ * i;
       compute_scores_swap_gt(labels_[i], K_i, variables);
 
       // Increment the regularization term (before re-ordering scores)
@@ -133,7 +133,7 @@ protected:
   inline evaluation_type
   evaluate_test(const dataset_type& set) override {
     evaluation_type stats;
-    stats.accuracy.resize(num_tasks_);
+    stats.accuracy.resize(num_classes_);
     auto acc_first = stats.accuracy.begin();
     auto acc_last = stats.accuracy.end();
 
