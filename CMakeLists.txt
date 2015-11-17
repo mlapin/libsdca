@@ -99,7 +99,7 @@ endif()
 if(POLICY CMP0063)
   cmake_policy(SET CMP0063 NEW)
 endif()
-find_package(Matlab COMPONENTS MX_LIBRARY)
+find_package(Matlab COMPONENTS MX_LIBRARY IOMP_LIBRARY)
 
 #------------------------------------------------------------------------------
 # Find a BLAS library

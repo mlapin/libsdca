@@ -1289,6 +1289,8 @@ set(Matlab_BINARIES_DIR
     ${Matlab_ROOT_DIR}/bin/${_matlab_bin_prefix}${_matlab_current_suffix})
 set(Matlab_EXTERN_LIBRARY_DIR
     ${Matlab_ROOT_DIR}/extern/lib/${_matlab_bin_prefix}${_matlab_current_suffix})
+set(Matlab_SYS_DIR
+    ${Matlab_ROOT_DIR}/sys/os/${_matlab_bin_prefix}${_matlab_current_suffix})
 
 if(WIN32)
   set(_matlab_lib_dir_for_search ${Matlab_EXTERN_LIBRARY_DIR}/microsoft)
@@ -1297,6 +1299,7 @@ else()
   set(_matlab_lib_dir_for_search ${Matlab_BINARIES_DIR})
   set(_matlab_lib_prefix_for_search "lib")
 endif()
+set(_matlab_sys_lib_dir_for_search ${Matlab_SYS_DIR})
 
 unset(_matlab_64Build)
 
@@ -1443,7 +1446,21 @@ if(_matlab_find_blas GREATER -1)
 endif()
 unset(_matlab_find_blas)
 
-
+# Component Matlab's iomp5 library
+list(FIND Matlab_FIND_COMPONENTS IOMP_LIBRARY _matlab_find_iomp)
+if(_matlab_find_iomp GREATER -1)
+  _Matlab_find_library(
+    ${_matlab_lib_prefix_for_search}
+    Matlab_IOMP_LIBRARY
+    iomp5
+    PATHS ${_matlab_sys_lib_dir_for_search}
+    NO_DEFAULT_PATH
+  )
+  if(Matlab_IOMP_LIBRARY)
+    set(Matlab_IOMP_LIBRARY_FOUND TRUE)
+  endif()
+endif()
+unset(_matlab_find_iomp)
 
 
 unset(_matlab_lib_dir_for_search)

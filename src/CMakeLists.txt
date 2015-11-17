@@ -50,6 +50,11 @@ if(${Matlab_FOUND})
   include_directories(matlab)
   include_directories(${Matlab_INCLUDE_DIRS})
 
+  if(IS_DIRECTORY "${Matlab_SYS_DIR}")
+    # A hack to ensure that we link to the libstdc++ shipped with Matlab
+    set(CMAKE_SHARED_LINKER_FLAGS "-L${Matlab_SYS_DIR}")
+  endif()
+
   add_definitions(
     -DMEX_PROX="${MEX_PROX}"
     -DMEX_SOLVE="${MEX_SOLVE}"
