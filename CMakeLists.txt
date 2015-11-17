@@ -29,6 +29,12 @@ set(USE_THREADING_SUFFIX FALSE)
 # Whether to use the fast math functions from https://github.com/herumi/fmath
 add_definitions(-DUSE_FMATH_HERUMI=1)
 
+# RPATH settings
+set(CMAKE_SKIP_RPATH FALSE)
+SET(CMAKE_SKIP_BUILD_RPATH FALSE)
+SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+SET(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
+
 #------------------------------------------------------------------------------
 # Compiler flags
 #------------------------------------------------------------------------------
@@ -54,7 +60,7 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fuse-linker-plugin")
-  set(RELEASE_FLAGS "${RELEASE_FLAGS} -Wl,-rpath,\\\$ORIGIN")
+  #set(RELEASE_FLAGS "${RELEASE_FLAGS} -Wl,-rpath,\\\$ORIGIN")
 endif()
 
 # Build specific flags
@@ -80,9 +86,9 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 # Avoid a warning due to CMP0042
-if(POLICY CMP0042 AND APPLE)
-  set(CMAKE_MACOSX_RPATH ON)
-endif()
+#if(POLICY CMP0042 AND APPLE)
+#  set(CMAKE_MACOSX_RPATH ON)
+#endif()
 
 
 ###############################################################################
