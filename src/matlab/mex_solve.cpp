@@ -91,17 +91,17 @@ printHelp(const mxArray* opts) {
 "    - a cell array with the same number of elements as in data\n"
 "      containing vectors of labels as above.\n"
 "\n"
-"  data must be a non-sparse matrix of type single or double\n"
+"  data matrices must be non-sparse and of type single or double\n"
 "\n"
-"  labels must be a non-sparse vector of type double\n"
+"  labels vectors must be non-sparse and of type double\n"
       );
   } else if (arg == "obj" || arg == "objective") {
     mexPrintf(
 "opts.objective - the training objective to optimize.\n"
 "  Possible values:\n"
-"    msvm (synonym: svm_multi)\n"
+"    msvm (synonym: multi_svm)\n"
 "      - multiclass SVM of Crammer and Singer\n"
-"    l2_hinge_topk (synonym: topk_hinge_alpha)\n"
+"    l2_hinge_topk (synonyms: topk_hinge_alpha, topk_svm)\n"
 "      - l2 regularized hinge-of-top-k loss (top-k hinge alpha)\n"
 "    l2_topk_hinge (synonym: topk_hinge_beta)\n"
 "      - l2 regularized top-k-of-hinge loss (top-k hinge beta)\n"
@@ -265,12 +265,13 @@ mex_main(
   mxCheckRange<size_type>(k, 1, trn_data.num_classes - 1, "k");
 
   if (objective == "msvm" ||
-      objective == "svm_multi") {
+      objective == "multi_svm") {
     mxCheckRange<size_type>(k, 1, 1, "k");
     make_solver_solve(context, info,
       l2_topk_hinge<Data, Result, Summation>(k, C, sum));
   } else if (objective == "l2_hinge_topk" ||
-             objective == "topk_hinge_alpha") {
+             objective == "topk_hinge_alpha" ||
+             objective == "topk_svm") {
     info.add("k", mxCreateScalar(k));
     make_solver_solve(context, info,
       l2_hinge_topk<Data, Result, Summation>(k, C, sum));

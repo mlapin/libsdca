@@ -245,7 +245,7 @@ set(MATLAB_VERSIONS_MAPPING
 
 
 # temporary folder for all Matlab runs
-set(_matlab_temporary_folder ${CMAKE_BINARY_DIR}/Matlab)
+set(_matlab_temporary_folder ${CMAKE_BINARY_DIR}/matlab)
 
 if(NOT EXISTS "${_matlab_temporary_folder}")
   file(MAKE_DIRECTORY "${_matlab_temporary_folder}")
