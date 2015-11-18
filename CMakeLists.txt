@@ -104,7 +104,10 @@ endif()
 if(POLICY CMP0063)
   cmake_policy(SET CMP0063 NEW)
 endif()
-find_package(Matlab COMPONENTS MX_LIBRARY IOMP_LIBRARY)
+find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
+
+# This is appended to the install prefix defined above
+set(MATLAB_API_INSTALL_DIR matlab)
 
 #------------------------------------------------------------------------------
 # Find a BLAS library
@@ -113,7 +116,7 @@ find_package(Matlab COMPONENTS MX_LIBRARY IOMP_LIBRARY)
 find_package(BLAS)
 
 # Intel MKL
-find_package(MKL)
+#find_package(MKL)
 
 # Select a BLAS library and set the corresponding compiler/linker flags
 include(SelectBLAS)
