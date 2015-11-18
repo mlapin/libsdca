@@ -116,7 +116,7 @@ set(MATLAB_API_INSTALL_DIR matlab)
 find_package(BLAS)
 
 # Intel MKL
-#find_package(MKL)
+find_package(MKL)
 
 # Select a BLAS library and set the corresponding compiler/linker flags
 include(SelectBLAS)
