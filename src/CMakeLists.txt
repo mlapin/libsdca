@@ -47,14 +47,8 @@ endif()
 
 # Matlab interface
 if(${Matlab_FOUND})
-  set(MATLAB_API_INSTALL_DIR matlab)
   include_directories(matlab)
   include_directories(${Matlab_INCLUDE_DIRS})
-
-  if(IS_DIRECTORY "${Matlab_SYS_DIR}")
-    # A hack to ensure that we link to the libstdc++ shipped with Matlab
-    set(CMAKE_SHARED_LINKER_FLAGS "-L${Matlab_SYS_DIR}")
-  endif()
 
   add_definitions(
     -DMEX_PROX="${MEX_PROX}"
@@ -72,19 +66,6 @@ if(${Matlab_FOUND})
         ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
     LINK_TO ${BLAS_LIBRARIES}
     )
-
-  if(USE_INTEL_OMP_LIBRARY)
-    set(_install_dest "${CMAKE_INSTALL_PREFIX}/${MATLAB_API_INSTALL_DIR}")
-    add_custom_command(
-      TARGET ${MEX_SOLVE}
-      POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${INTEL_OMP_LIBRARY}"
-        "${_install_dest}"
-      COMMENT "Copying ${INTEL_OMP_LIBRARY} to ${_install_dest}"
-    )
-    unset(_install_dest)
-   endif()
 
   install(
     TARGETS ${MEX_PROX} ${MEX_SOLVE}

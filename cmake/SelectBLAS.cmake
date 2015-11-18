@@ -8,16 +8,22 @@
 #
 # Use
 #     find_package(BLAS)
-#     find_package(MKL) # optional
+#     find_package(MKL)
+#     find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
 # before
 #     include(SelectBLAS)
 #
-# If Intel MKL is found, it will be used instead of the BLAS found by FindBLAS.
+# BLAS libraries have the following precedence:
+#     Intel MKL
+#     Accelerate Framework
+#     BLAS shipped with Matlab
+#     BLAS found by FindBLAS
+#
 # Intel MKL setup depends on the flags
 #     USE_ILP64
 #     USE_SEQUENTIAL
 #
-# Note: the following flags are overwritten in any case
+# The following variables are set by this script
 #     BLAS_FOUND
 #     BLAS_LIBRARIES
 
@@ -37,14 +43,12 @@ if(MKL_FOUND)
 
   list(APPEND BLAS_LIBRARIES ${MKL_CORE_LIBRARY})
 
-  set(USE_INTEL_OMP_LIBRARY)
   if(USE_SEQUENTIAL)
     list(APPEND BLAS_LIBRARIES ${MKL_SEQUENTIAL_LIBRARY})
   else()
     if(INTEL_OMP_LIBRARY)
       list(APPEND BLAS_LIBRARIES ${MKL_INTEL_THREAD_LIBRARY})
       list(APPEND BLAS_LIBRARIES ${INTEL_OMP_LIBRARY})
-      set(USE_INTEL_OMP_LIBRARY TRUE)
     elseif(Matlab_IOMP_LIBRARY)
       list(APPEND BLAS_LIBRARIES ${MKL_INTEL_THREAD_LIBRARY})
       list(APPEND BLAS_LIBRARIES ${Matlab_IOMP_LIBRARY})
@@ -62,6 +66,11 @@ if(MKL_FOUND)
 elseif(BLAS_Accelerate_LIBRARY)
 
   add_definitions(-DBLAS_ACCELERATE)
+
+elseif(Matlab_BLAS_LIBRARY)
+
+  add_definitions(-DBLAS_MATLAB)
+  set(BLAS_LIBRARIES "${Matlab_BLAS_LIBRARY}")
 
 elseif(BLAS_FOUND)
 
