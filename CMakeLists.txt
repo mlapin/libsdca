@@ -15,6 +15,12 @@ add_definitions(-DLIBSDCA_VERSION="${libsdca_VERSION}")
 ###############################################################################
 
 #------------------------------------------------------------------------------
+# Matlab interface configuration
+#------------------------------------------------------------------------------
+# Where to put the compiled mex files (CMake install prefix is prepended)
+set(MATLAB_API_INSTALL_DIR matlab)
+
+#------------------------------------------------------------------------------
 # Intel MKL configuration (not applicable if another BLAS is used)
 #------------------------------------------------------------------------------
 # Whether to use 64 or 32 bit integers (default: TRUE)
@@ -26,21 +32,12 @@ set(USE_SEQUENTIAL FALSE)
 # Whether to add a suffix (e.g. st/mt) for single-/multi-threaded versions
 set(USE_THREADING_SUFFIX FALSE)
 
-# Whether to use the fast math functions from https://github.com/herumi/fmath
-add_definitions(-DUSE_FMATH_HERUMI=1)
-
-# RPATH settings
-set(CMAKE_SKIP_RPATH FALSE)
-SET(CMAKE_SKIP_BUILD_RPATH FALSE)
-SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-SET(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
-
 #------------------------------------------------------------------------------
 # Compiler flags
 #------------------------------------------------------------------------------
-# Select a build type
+# Select Release as the default build type
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE RELEASE)
+  set(CMAKE_BUILD_TYPE Release)
 endif()
 
 # Warning flags
@@ -52,10 +49,10 @@ if(CMAKE_COMPILER_IS_GNUCXX)
 endif()
 
 # Debug flags
-set(DEBUG_FLAGS "-O0 -DDEBUG -fstack-protector-all")
+set(DEBUG_FLAGS "-fstack-protector-all")
 
 # Release flags
-set(RELEASE_FLAGS "-O3 -DNDEBUG -march=native")
+set(RELEASE_FLAGS "-march=native")
 if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
@@ -89,12 +86,23 @@ if(POLICY CMP0042 AND APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+# RPATH settings
+set(CMAKE_SKIP_RPATH FALSE)
+SET(CMAKE_SKIP_BUILD_RPATH FALSE)
+SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+SET(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
 
 ###############################################################################
 #
 # Code Dependencies and Third Party Libraries
 #
 ###############################################################################
+
+#------------------------------------------------------------------------------
+# Fast math
+#------------------------------------------------------------------------------
+# Whether to use the fast math functions from https://github.com/herumi/fmath
+#add_definitions(-DUSE_FMATH_HERUMI=1)
 
 #------------------------------------------------------------------------------
 # Matlab interface
@@ -106,11 +114,8 @@ if(POLICY CMP0063)
 endif()
 find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
 
-# This is appended to the install prefix defined above
-set(MATLAB_API_INSTALL_DIR matlab)
-
 #------------------------------------------------------------------------------
-# Find a BLAS library
+# BLAS libraries
 #------------------------------------------------------------------------------
 # BLAS libraries from various vendors (e.g. Atlas or Accelerate)
 find_package(BLAS)
@@ -121,6 +126,8 @@ find_package(MKL)
 # Select a BLAS library and set the corresponding compiler/linker flags
 include(SelectBLAS)
 
+set(CMAKE_SHARED_LINKER_FLAGS
+  "${CMAKE_SHARED_LINKER_FLAGS} ${BLAS_LINKER_FLAGS}")
 
 ###############################################################################
 #

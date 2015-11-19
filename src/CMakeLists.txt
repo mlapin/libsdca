@@ -48,7 +48,6 @@ endif()
 # Matlab interface
 if(${Matlab_FOUND})
   include_directories(matlab)
-  include_directories(${Matlab_INCLUDE_DIRS})
 
   add_definitions(
     -DMEX_PROX="${MEX_PROX}"
@@ -57,13 +56,14 @@ if(${Matlab_FOUND})
 
   matlab_add_mex(
     NAME ${MEX_PROX}
-    SRC matlab/mex_prox.cpp matlab/mex_util.h ${PROX_SRCS} ${UTIL_SRCS}
+    SRC matlab/mex_prox.cpp
+      matlab/mex_util.h ${PROX_SRCS} ${UTIL_SRCS}
     )
 
   matlab_add_mex(
     NAME ${MEX_SOLVE}
-    SRC matlab/mex_solve.cpp matlab/mex_util.h
-        ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
+    SRC matlab/mex_solve.cpp
+      matlab/mex_util.h ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
     LINK_TO ${BLAS_LIBRARIES}
     )
 
