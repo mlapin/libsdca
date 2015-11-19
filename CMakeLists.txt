@@ -114,6 +114,9 @@ if(POLICY CMP0063)
 endif()
 find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
 
+# Whether to use the std::chrono namespace for the stopwatch
+#add_definitions(-DUSE_CHRONO=1)
+
 #------------------------------------------------------------------------------
 # BLAS libraries
 #------------------------------------------------------------------------------

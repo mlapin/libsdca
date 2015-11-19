@@ -1,13 +1,23 @@
 #ifndef SDCA_UTIL_STOPWATCH_H
 #define SDCA_UTIL_STOPWATCH_H
 
-#include <chrono>
+#ifdef USE_CHRONO
+  #include <chrono>
+#else
+  #include <sys/time.h>
+#endif
+
 #include <ctime>
 
 namespace sdca {
 
-using wall_clock = std::chrono::high_resolution_clock;
-typedef typename std::chrono::time_point<wall_clock> wall_time_point;
+#ifdef USE_CHRONO
+  using wall_clock = std::chrono::high_resolution_clock;
+  typedef typename std::chrono::time_point<wall_clock> wall_time_point;
+#else
+  typedef double wall_time_point;
+#endif
+
 typedef typename std::clock_t cpu_time_point;
 
 struct stopwatch_wall {
@@ -20,7 +30,11 @@ struct stopwatch_wall {
   }
 
   void stop() {
+#ifdef USE_CHRONO
     elapsed += std::chrono::duration<double>(wall_clock::now() - mark).count();
+#else
+    elapsed += now() - mark;
+#endif
   }
 
   void reset() {
@@ -28,13 +42,32 @@ struct stopwatch_wall {
   }
 
   void resume() {
+#ifdef USE_CHRONO
     mark = wall_clock::now();
+#else
+    mark = now();
+#endif
   }
 
   double elapsed_now() {
+#ifdef USE_CHRONO
     return elapsed
       + std::chrono::duration<double>(wall_clock::now() - mark).count();
+#else
+    return elapsed + now() - mark;
+#endif
   }
+
+#ifndef USE_CHRONO
+  double now() {
+    struct timeval time;
+    if (gettimeofday(&time, NULL)) {
+      return 0;
+    }
+    return static_cast<double>(time.tv_sec) +
+      static_cast<double>(time.tv_usec) * .000001;
+  }
+#endif
 };
 
 struct stopwatch_cpu {
