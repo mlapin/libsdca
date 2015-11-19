@@ -17,9 +17,6 @@ add_definitions(-DLIBSDCA_VERSION="${libsdca_VERSION}")
 #------------------------------------------------------------------------------
 # Matlab interface configuration
 #------------------------------------------------------------------------------
-# Whether to use the mex compiler instead of the CMake tool chain
-set(USE_MEX_COMPILER TRUE)
-
 # Where to put the compiled mex files (CMake install prefix is prepended)
 set(MATLAB_API_INSTALL_DIR matlab)
 
@@ -105,7 +102,7 @@ SET(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
 # Fast math
 #------------------------------------------------------------------------------
 # Whether to use the fast math functions from https://github.com/herumi/fmath
-add_definitions(-DUSE_FMATH_HERUMI=1)
+#add_definitions(-DUSE_FMATH_HERUMI=1)
 
 #------------------------------------------------------------------------------
 # Matlab interface
@@ -115,8 +112,7 @@ add_definitions(-DUSE_FMATH_HERUMI=1)
 if(POLICY CMP0063)
   cmake_policy(SET CMP0063 NEW)
 endif()
-find_package(Matlab
-  COMPONENTS MEX_COMPILER MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
+find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
 
 #------------------------------------------------------------------------------
 # BLAS libraries

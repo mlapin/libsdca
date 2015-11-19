@@ -54,46 +54,23 @@ if(${Matlab_FOUND})
     -DMEX_SOLVE="${MEX_SOLVE}"
     )
 
-  if(USE_MEX_COMPILER)
-    matlab_add_mex_use_compiler(
-      NAME ${MEX_PROX}
-      SRC matlab/mex_prox.cpp
-      DEPENDS matlab/mex_util.h ${PROX_SRCS} ${UTIL_SRCS}
-      )
+  matlab_add_mex(
+    NAME ${MEX_PROX}
+    SRC matlab/mex_prox.cpp
+      matlab/mex_util.h ${PROX_SRCS} ${UTIL_SRCS}
+    )
 
-    matlab_add_mex_use_compiler(
-      NAME ${MEX_SOLVE}
-      SRC matlab/mex_solve.cpp
-      DEPENDS matlab/mex_util.h ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
-      LINK_TO ${BLAS_LIBRARIES}
-      )
+  matlab_add_mex(
+    NAME ${MEX_SOLVE}
+    SRC matlab/mex_solve.cpp
+      matlab/mex_util.h ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
+    LINK_TO ${BLAS_LIBRARIES}
+    )
 
-    get_property(_mex_prox TARGET ${MEX_PROX} PROPERTY FULL_NAME)
-    get_property(_mex_solve TARGET ${MEX_SOLVE} PROPERTY FULL_NAME)
-    install(
-      FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/${_mex_prox}
-        ${CMAKE_CURRENT_BINARY_DIR}/${_mex_solve}
-      DESTINATION ${MATLAB_API_INSTALL_DIR}
-      )
-  else()
-    matlab_add_mex(
-      NAME ${MEX_PROX}
-      SRC matlab/mex_prox.cpp matlab/mex_util.h ${PROX_SRCS} ${UTIL_SRCS}
-      )
-
-    matlab_add_mex(
-      NAME ${MEX_SOLVE}
-      SRC matlab/mex_solve.cpp matlab/mex_util.h
-          ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
-      LINK_TO ${BLAS_LIBRARIES}
-      )
-
-    install(
-      TARGETS ${MEX_PROX} ${MEX_SOLVE}
-      DESTINATION ${MATLAB_API_INSTALL_DIR}
-      )
-  endif()
+  install(
+    TARGETS ${MEX_PROX} ${MEX_SOLVE}
+    DESTINATION ${MATLAB_API_INSTALL_DIR}
+    )
 else()
   message(STATUS "Matlab interface is not compiled.")
 endif()

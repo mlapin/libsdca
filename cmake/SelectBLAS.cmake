@@ -26,41 +26,39 @@
 # The following variables are set by this script
 #     BLAS_FOUND
 #     BLAS_LIBRARIES
-#     BLAS_LINKER_FLAGS
 
 # Copyright 2015 Maksim Lapin.
 
 if(MKL_FOUND)
 
   set(BLAS_LIBRARIES)
-  set(BLAS_LINKER_FLAGS)
-  list(APPEND BLAS_LINKER_FLAGS "-Wl,--start-group")
+  list(APPEND BLAS_LIBRARIES "-Wl,--start-group")
 
   if(USE_ILP64)
     add_definitions(-DMKL_ILP64)
-    list(APPEND BLAS_LINKER_FLAGS ${MKL_ILP64_LIBRARY})
+    list(APPEND BLAS_LIBRARIES ${MKL_ILP64_LIBRARY})
   else()
-    list(APPEND BLAS_LINKER_FLAGS ${MKL_LP64_LIBRARY})
+    list(APPEND BLAS_LIBRARIES ${MKL_LP64_LIBRARY})
   endif()
 
-  list(APPEND BLAS_LINKER_FLAGS ${MKL_CORE_LIBRARY})
+  list(APPEND BLAS_LIBRARIES ${MKL_CORE_LIBRARY})
 
   if(USE_SEQUENTIAL)
-    list(APPEND BLAS_LINKER_FLAGS ${MKL_SEQUENTIAL_LIBRARY})
+    list(APPEND BLAS_LIBRARIES ${MKL_SEQUENTIAL_LIBRARY})
   else()
     if(INTEL_OMP_LIBRARY)
-      list(APPEND BLAS_LINKER_FLAGS ${MKL_INTEL_THREAD_LIBRARY})
-      list(APPEND BLAS_LINKER_FLAGS ${INTEL_OMP_LIBRARY})
+      list(APPEND BLAS_LIBRARIES ${MKL_INTEL_THREAD_LIBRARY})
+      list(APPEND BLAS_LIBRARIES ${INTEL_OMP_LIBRARY})
     elseif(Matlab_IOMP_LIBRARY)
-      list(APPEND BLAS_LINKER_FLAGS ${MKL_INTEL_THREAD_LIBRARY})
-      list(APPEND BLAS_LINKER_FLAGS ${Matlab_IOMP_LIBRARY})
+      list(APPEND BLAS_LIBRARIES ${MKL_INTEL_THREAD_LIBRARY})
+      list(APPEND BLAS_LIBRARIES ${Matlab_IOMP_LIBRARY})
     else()
-      list(APPEND BLAS_LINKER_FLAGS ${MKL_GNU_THREAD_LIBRARY})
+      list(APPEND BLAS_LIBRARIES ${MKL_GNU_THREAD_LIBRARY})
       add_definitions(-fopenmp)
     endif()
   endif()
 
-  list(APPEND BLAS_LINKER_FLAGS "-Wl,--end-group")
+  list(APPEND BLAS_LIBRARIES "-Wl,--end-group")
 
   include_directories("${MKL_INCLUDE_DIRS}")
   add_definitions(-DBLAS_MKL)
@@ -85,7 +83,7 @@ elseif(BLAS_FOUND)
 
 endif()
 
-if((BLAS_LIBRARIES OR BLAS_LINKER_FLAGS) AND Threads_FOUND)
+if(BLAS_LIBRARIES AND Threads_FOUND)
 
   set(BLAS_FOUND TRUE)
   list(APPEND BLAS_LIBRARIES "-ldl" "-lm")
@@ -96,7 +94,6 @@ else()
 
   set(BLAS_FOUND FALSE)
   set(BLAS_LIBRARIES)
-  set(BLAS_LINKER_FLAGS)
   message(FATAL_ERROR "BLAS or Threads not found.")
 
 endif()
