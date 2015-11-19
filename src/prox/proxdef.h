@@ -2,6 +2,7 @@
 #define SDCA_PROX_PROXDEF_H
 
 #include <algorithm>
+#include <assert.h>
 #include <iterator>
 #include <limits>
 
