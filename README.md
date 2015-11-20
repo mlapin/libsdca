@@ -31,7 +31,7 @@ addpath matlab
 
 ## Quick start
 
-The Matlab interface is installed to `matlab`, which should contain two mex files:
+The Matlab interface is installed to the directory `matlab`, which should contain two mex files:
 
 - `libsdca_prox` provides proximal operators;
 - `libsdca_solve` provides solvers for multiclass classification.
