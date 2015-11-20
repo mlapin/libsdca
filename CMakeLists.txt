@@ -77,7 +77,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 # Install prefix
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}" CACHE PATH
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}" CACHE PATH
     "Installation directory." FORCE)
 endif()
 
@@ -113,6 +113,9 @@ if(POLICY CMP0063)
   cmake_policy(SET CMP0063 NEW)
 endif()
 find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
+
+# Whether to use the std::chrono namespace in the stopwatch
+#add_definitions(-DUSE_CHRONO=1)
 
 #------------------------------------------------------------------------------
 # BLAS libraries
