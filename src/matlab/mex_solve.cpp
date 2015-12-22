@@ -31,9 +31,10 @@ printHelp(const mxArray* opts) {
 "\n"
 "  opts is a struct with the following fields (defaults in [brackets]):\n"
 "\n"
-"    objective ['msvm']      - the objective to optimize;\n"
+"    objective ['topk_svm']  - the objective to optimize;\n"
 "    C         [1]           - the regularization parameter;\n"
 "    k         [1]           - the k in top-k optimization;\n"
+"    gamma     [1]           - the smoothing parameter for hinge losses;\n"
 "    is_dual   [false]       - whether data is given as Gram matrix;\n"
 "\n"
 "    check_on_start [false]  - whether to check the duality gap on start;\n"
@@ -101,12 +102,15 @@ printHelp(const mxArray* opts) {
 "  Possible values:\n"
 "    msvm (synonym: multi_svm)\n"
 "      - multiclass SVM of Crammer and Singer\n"
-"    l2_hinge_topk (synonyms: topk_hinge_alpha, topk_svm)\n"
+"    l2_hinge_topk (synonyms: topk_svm, topk_hinge_alpha)\n"
 "      - l2 regularized hinge-of-top-k loss (top-k hinge alpha)\n"
 "    l2_topk_hinge (synonym: topk_hinge_beta)\n"
 "      - l2 regularized top-k-of-hinge loss (top-k hinge beta)\n"
+"    l2_entropy_topk (synonyms: softmax)\n"
+"      - l2 regularized entropy-on-top-k-simplex loss\n"
+"        (reduced to the usual softmax loss for k=1)\n"
 "  Default value:\n"
-"    msvm\n"
+"    topk_svm\n"
       );
   } else {
     mexErrMsgIdAndTxt(
@@ -254,7 +258,7 @@ mex_main(
   info.add("num_classes", mxCreateScalar(trn_data.num_classes));
 
   std::string objective = mxGetFieldValueOrDefault(
-    opts, "objective", std::string("msvm"));
+    opts, "objective", std::string("topk_svm"));
   info.add("objective", mxCreateString(objective.c_str()));
 
   auto C = mxGetFieldValueOrDefault<Result>(opts, "C", 1);
@@ -264,22 +268,42 @@ mex_main(
   auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
   mxCheckRange<size_type>(k, 1, trn_data.num_classes - 1, "k");
 
+  auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 1);
+  mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
+
   if (objective == "msvm" ||
       objective == "multi_svm") {
     mxCheckRange<size_type>(k, 1, 1, "k");
     make_solver_solve(context, info,
       l2_topk_hinge<Data, Result, Summation>(k, C, sum));
-  } else if (objective == "l2_hinge_topk" ||
-             objective == "topk_hinge_alpha" ||
-             objective == "topk_svm") {
+  } else if (objective == "topk_svm" ||
+             objective == "l2_hinge_topk" ||
+             objective == "topk_hinge_alpha") {
     info.add("k", mxCreateScalar(k));
-    make_solver_solve(context, info,
-      l2_hinge_topk<Data, Result, Summation>(k, C, sum));
+    info.add("gamma", mxCreateScalar(gamma));
+    if (gamma > 0) {
+      make_solver_solve(context, info,
+        l2_hinge_topk_smooth<Data, Result, Summation>(k, C, gamma, sum));
+    } else {
+      make_solver_solve(context, info,
+        l2_hinge_topk<Data, Result, Summation>(k, C, sum));
+    }
   } else if (objective == "l2_topk_hinge" ||
              objective == "topk_hinge_beta") {
     info.add("k", mxCreateScalar(k));
+    info.add("gamma", mxCreateScalar(gamma));
+    if (gamma > 0) {
+      make_solver_solve(context, info,
+        l2_topk_hinge_smooth<Data, Result, Summation>(k, C, gamma, sum));
+    } else {
+      make_solver_solve(context, info,
+        l2_topk_hinge<Data, Result, Summation>(k, C, sum));
+    }
+  } else if (objective == "softmax" ||
+      objective == "l2_entropy_topk") {
+    info.add("k", mxCreateScalar(k));
     make_solver_solve(context, info,
-      l2_topk_hinge<Data, Result, Summation>(k, C, sum));
+      l2_entropy_topk<Data, Result, Summation>(k, C, sum));
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_objective], err_msg[err_objective], objective.c_str());

@@ -6,6 +6,7 @@
 #include <iterator>
 #include <limits>
 
+#include "util/lambert.h"
 #include "util/numeric.h"
 
 namespace sdca {
