@@ -2,25 +2,32 @@
 
 libsdca is a library for multiclass classification based on stochastic dual coordinate ascent (SDCA).
 
-Features:
+Objectives:
 - Multiclass softmax loss
 - Multiclass SVM of Crammer and Singer [1]
 - Top-k Multiclass SVM
-  - two versions: hinge-of-top-k and top-k-of-hinge (the latter is an instance of the OWPC loss of [2])
+  - hinge-of-top-k and top-k-of-hinge (the latter is an instance of the OWPC loss of [2])
   - non-smooth and smoothed losses
 - Top-k Entropy loss
-- Supported inputs:
-  - features (primal) and kernels (dual)
-  - float and double precision (dense)
-  - multiple datasets at once, e.g. to monitor performance on a validation set
-- Proximal operators for computing projections onto various sets
-  - simplex (implements the algorithm of [3])
-  - top-k simplex, top-k cone
-  - entropic projections
-- Matlab interface
 
-[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.
-[2] N. Usunier, D. Buffoni, and P. Gallinari. Ranking with ordered weighted pairwise classification. In ICML, 2009.
+Inputs:
+- float or double precision
+- features directly (primal)
+- kernels (dual)
+- multiple datasets at once (e.g. to monitor performance on a validation set)
+
+Proximal operators (compute projections onto various sets):
+- simplex (implements the algorithm of [3])
+- top-k simplex, top-k cone
+- entropic projections
+- Lambert W function of the exponent (computes W(exp(x)), not a prox operator)
+
+Interfaces:
+- C++ headers (no additional libraries to link)
+- Matlab
+
+[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.  
+[2] N. Usunier, D. Buffoni, and P. Gallinari. Ranking with ordered weighted pairwise classification. In ICML, 2009.  
 [3] K.C. Kiwiel. Variable fixing algorithms for the continuous quadratic knapsack problem. In JOTA, 2008.
 
 ## Installation instructions
