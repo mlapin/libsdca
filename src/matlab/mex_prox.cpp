@@ -99,6 +99,7 @@ printHelp(const mxArray* opts) {
 "    knapsack (synonym: knapsack_eq)\n"
 "    knapsack_le\n"
 "    knapsack_le_biased\n"
+"    entropy\n"
       );
   } else if (arg == "rhs") {
     mexPrintf(
@@ -113,6 +114,7 @@ printHelp(const mxArray* opts) {
 "    knapsack_le_biased\n"
 "    topk_simplex\n"
 "    topk_simplex_biased\n"
+"    entropy\n"
       );
   } else if (arg == "rho") {
     mexPrintf(
@@ -149,6 +151,8 @@ printHelp(const mxArray* opts) {
 "    topk_simplex_biased\n"
 "    topk_cone\n"
 "    topk_cone_biased\n"
+"    topk_entropy\n"
+"    topk_entropy_biased\n"
       );
   } else if (arg == "precision") {
     mexPrintf(

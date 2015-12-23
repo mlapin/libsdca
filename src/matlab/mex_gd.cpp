@@ -39,10 +39,11 @@ grad_topk_softmax_nonconvex(
     std::vector<Data>& scratch,
     std::vector<size_type>& idx
     ) {
+  typedef typename std::vector<size_type>::difference_type diff_t;
   auto ifirst = idx.begin() + 1; // ground truth at 0, start at 1
-  auto ikth = idx.begin() + k; // first + k - 1
+  auto ikth = idx.begin() + static_cast<diff_t>(k); // first + k - 1
   auto ilast = idx.end();
-  auto kth = scores.begin() + k;
+  auto kth = scores.begin() + static_cast<diff_t>(k);
   auto last = scores.end();
   const blas_int D = static_cast<blas_int>(num_dimensions);
   const blas_int T = static_cast<blas_int>(num_classes);
@@ -110,8 +111,9 @@ eval_topk_softmax_nonconvex(
     const Data* W,
     std::vector<Data>& scores
     ) {
+  typedef typename std::vector<size_type>::difference_type diff_t;
   auto first = scores.begin() + 1; // ground truth at 0, start at 1
-  auto kth = scores.begin() + k; // first + k - 1
+  auto kth = scores.begin() + static_cast<diff_t>(k); // first + k - 1
   auto last = scores.end();
   const blas_int D = static_cast<blas_int>(num_dimensions);
   const blas_int T = static_cast<blas_int>(num_classes);

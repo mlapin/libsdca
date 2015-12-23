@@ -69,7 +69,8 @@ topk_entropy_biased_kkt_iter_2(
  *    / A B \ _ / df1/dt  df1/ds \
  *    \ C D / - \ df2/dt  df2/ds /,
  * and the Newton's step d = (d1, d2) is computed from
- *    J * d = - F.
+ *    J * d = - f,
+ * where f = (f1, f2) as defined above.
  **/
 template <typename Iterator,
           typename Result = double,

@@ -108,7 +108,7 @@ printHelp(const mxArray* opts) {
 "      - l2 regularized top-k-of-hinge loss (top-k hinge beta)\n"
 "    l2_entropy_topk (synonyms: softmax)\n"
 "      - l2 regularized entropy-on-top-k-simplex loss\n"
-"        (reduced to the usual softmax loss for k=1)\n"
+"        (reduces to the usual softmax loss for k=1)\n"
 "  Default value:\n"
 "    topk_svm\n"
       );
@@ -276,6 +276,10 @@ mex_main(
     mxCheckRange<size_type>(k, 1, 1, "k");
     make_solver_solve(context, info,
       l2_topk_hinge<Data, Result, Summation>(k, C, sum));
+  } else if (objective == "softmax") {
+    mxCheckRange<size_type>(k, 1, 1, "k");
+    make_solver_solve(context, info,
+      l2_entropy_topk<Data, Result, Summation>(k, C, sum));
   } else if (objective == "topk_svm" ||
              objective == "l2_hinge_topk" ||
              objective == "topk_hinge_alpha") {
@@ -299,8 +303,7 @@ mex_main(
       make_solver_solve(context, info,
         l2_topk_hinge<Data, Result, Summation>(k, C, sum));
     }
-  } else if (objective == "softmax" ||
-      objective == "l2_entropy_topk") {
+  } else if (objective == "l2_entropy_topk") {
     info.add("k", mxCreateScalar(k));
     make_solver_solve(context, info,
       l2_entropy_topk<Data, Result, Summation>(k, C, sum));

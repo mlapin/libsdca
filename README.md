@@ -3,12 +3,25 @@
 libsdca is a library for multiclass classification based on stochastic dual coordinate ascent (SDCA).
 
 Features:
-- Matlab interface
+- Multiclass softmax loss
+- Multiclass SVM of Crammer and Singer [1]
 - Top-k Multiclass SVM
-- Multiclass SVM of Crammer and Singer
-- Proximal operators including efficient projections onto the unit simplex and the top-k simplex
+  - two versions: hinge-of-top-k and top-k-of-hinge (the latter is an instance of the OWPC loss of [2])
+  - non-smooth and smoothed losses
+- Top-k Entropy loss
+- Supported inputs:
+  - features (primal) and kernels (dual)
+  - float and double precision (dense)
+  - multiple datasets at once, e.g. to monitor performance on a validation set
+- Proximal operators for computing projections onto various sets
+  - simplex (implements the algorithm of [3])
+  - top-k simplex, top-k cone
+  - entropic projections
+- Matlab interface
 
-The library is currently in active development and more features are planned.
+[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.
+[2] N. Usunier, D. Buffoni, and P. Gallinari. Ranking with ordered weighted pairwise classification. In ICML, 2009.
+[3] K.C. Kiwiel. Variable fixing algorithms for the continuous quadratic knapsack problem. In JOTA, 2008.
 
 ## Installation instructions
 
@@ -35,6 +48,10 @@ The Matlab interface is installed to the directory `matlab`, which should contai
 
 - `libsdca_prox` provides proximal operators;
 - `libsdca_solve` provides solvers for multiclass classification.
+
+There is also `libsdca_gd` which is not officially a part of libsdca and implements a simple batch gradient descent for the (nonconvex) truncated top-k softmax loss.
+
+#### Examples
 
 To train the Multiclass SVM of Crammer and Singer on some random data, run
 ```
