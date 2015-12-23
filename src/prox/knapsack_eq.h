@@ -118,6 +118,7 @@ prox_knapsack_eq(
     thresholds_knapsack_eq<Iterator, Result, Summation>, lo, hi, rhs, sum);
 }
 
+
 template <typename Iterator,
           typename Result = double,
           typename Summation = std_sum<Iterator, Result>>
