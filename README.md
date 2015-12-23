@@ -2,6 +2,8 @@
 
 libsdca is a library for multiclass classification based on stochastic dual coordinate ascent (SDCA).
 
+Below is a brief overview of supported training objectives, inputs, proximal operators, and interfaces.
+
 Objectives:
 - Multiclass softmax loss
 - Multiclass SVM of Crammer and Singer [1]
@@ -11,24 +13,25 @@ Objectives:
 - Top-k Entropy loss
 
 Inputs:
-- float or double precision
 - features directly (primal)
 - kernels (dual)
+- float or double precision (dense matrices)
 - multiple datasets at once (e.g. to monitor performance on a validation set)
 
 Proximal operators (compute projections onto various sets):
 - simplex (implements the algorithm of [3])
-- top-k simplex, top-k cone
+- top-k simplex
+- top-k cone
 - entropic projections
 - Lambert W function of the exponent (computes W(exp(x)), not a prox operator)
 
 Interfaces:
-- C++ headers (no additional libraries to link)
 - Matlab
+- C++ headers (simply include and use; no additional libraries to compile and link)
 
-[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.  
-[2] N. Usunier, D. Buffoni, and P. Gallinari. Ranking with ordered weighted pairwise classification. In ICML, 2009.  
-[3] K.C. Kiwiel. Variable fixing algorithms for the continuous quadratic knapsack problem. In JOTA, 2008.
+<sup>[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.</sup>  
+<sup>[2] N. Usunier, D. Buffoni, and P. Gallinari. Ranking with ordered weighted pairwise classification. In ICML, 2009.</sup>  
+<sup>[3] K.C. Kiwiel. Variable fixing algorithms for the continuous quadratic knapsack problem. In JOTA, 2008.</sup>
 
 ## Installation instructions
 
