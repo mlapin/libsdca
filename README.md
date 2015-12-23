@@ -2,13 +2,36 @@
 
 libsdca is a library for multiclass classification based on stochastic dual coordinate ascent (SDCA).
 
-Features:
-- Matlab interface
-- Top-k Multiclass SVM
-- Multiclass SVM of Crammer and Singer
-- Proximal operators including efficient projections onto the unit simplex and the top-k simplex
+Below is a brief overview of supported training objectives, inputs, proximal operators, and interfaces.
 
-The library is currently in active development and more features are planned.
+Objectives:
+- Multiclass softmax loss
+- Multiclass SVM of Crammer and Singer [1]
+- Top-k Multiclass SVM
+  - hinge-of-top-k and top-k-of-hinge (the latter is an instance of the OWPC loss of [2])
+  - non-smooth and smoothed losses
+- Top-k Entropy loss
+
+Inputs:
+- features directly (primal)
+- kernels (dual)
+- float or double precision (dense matrices)
+- multiple datasets at once (e.g. to monitor performance on a validation set)
+
+Proximal operators (compute projections onto various sets):
+- simplex (implements the algorithm of [3])
+- top-k simplex
+- top-k cone
+- entropic projections
+- Lambert W function of the exponent (computes W(exp(x)), not a prox operator)
+
+Interfaces:
+- Matlab
+- C++ headers (simply include and use; no additional libraries to compile and link)
+
+<sup>[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.</sup>  
+<sup>[2] N. Usunier, D. Buffoni, and P. Gallinari. Ranking with ordered weighted pairwise classification. In ICML, 2009.</sup>  
+<sup>[3] K.C. Kiwiel. Variable fixing algorithms for the continuous quadratic knapsack problem. In JOTA, 2008.</sup>
 
 ## Installation instructions
 
@@ -35,6 +58,10 @@ The Matlab interface is installed to the directory `matlab`, which should contai
 
 - `libsdca_prox` provides proximal operators;
 - `libsdca_solve` provides solvers for multiclass classification.
+
+There is also `libsdca_gd` which is not officially a part of libsdca and implements a simple batch gradient descent for the (nonconvex) truncated top-k softmax loss.
+
+#### Examples
 
 To train the Multiclass SVM of Crammer and Singer on some random data, run
 ```

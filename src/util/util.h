@@ -2,6 +2,7 @@
 #define SDCA_UTIL_UTIL_H
 
 #include "blas.h"
+#include "lambert.h"
 #include "logging.h"
 #include "numeric.h"
 #include "stopwatch.h"
