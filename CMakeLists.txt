@@ -2,11 +2,13 @@ cmake_minimum_required(VERSION 2.8.9)
 project(libsdca)
 
 set(libsdca_MAJOR_VERSION 0)
-set(libsdca_MINOR_VERSION 2)
+set(libsdca_MINOR_VERSION 3)
 set(libsdca_PATCH_VERSION 0)
 set(libsdca_VERSION
-  ${libsdca_MAJOR_VERSION}.${libsdca_MINOR_VERSION}.${libsdca_PATCH_VERSION})
-add_definitions(-DLIBSDCA_VERSION="${libsdca_VERSION}")
+  ${libsdca_MAJOR_VERSION}.${libsdca_MINOR_VERSION}.${libsdca_PATCH_VERSION}
+  )
+add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
+
 
 ###############################################################################
 #
@@ -15,25 +17,7 @@ add_definitions(-DLIBSDCA_VERSION="${libsdca_VERSION}")
 ###############################################################################
 
 #------------------------------------------------------------------------------
-# Matlab interface configuration
-#------------------------------------------------------------------------------
-# Where to put the compiled mex files (CMake install prefix is prepended)
-set(MATLAB_API_INSTALL_DIR matlab)
-
-#------------------------------------------------------------------------------
-# Intel MKL configuration (not applicable if another BLAS is used)
-#------------------------------------------------------------------------------
-# Whether to use 64 or 32 bit integers (default: TRUE)
-set(USE_ILP64 TRUE)
-
-# Whether to use sequential or multi-threaded Intel MKL layer (default: FALSE)
-set(USE_SEQUENTIAL FALSE)
-
-# Whether to add a suffix (e.g. st/mt) for single-/multi-threaded versions
-set(USE_THREADING_SUFFIX FALSE)
-
-#------------------------------------------------------------------------------
-# Compiler flags
+# Compiler Flags
 #------------------------------------------------------------------------------
 # Select Release as the default build type
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
@@ -43,7 +27,8 @@ endif()
 # Warning flags
 set(WARN_FLAGS "-pedantic -Werror -W -Wall -Wextra -Wwrite-strings")
 set(WARN_FLAGS "${WARN_FLAGS} -Wcast-qual -Wcast-align -Wshadow")
-set(WARN_FLAGS "${WARN_FLAGS} -Wconversion -Wpointer-arith")
+#set(WARN_FLAGS "${WARN_FLAGS} -Wconversion") # google test fails with this
+set(WARN_FLAGS "${WARN_FLAGS} -Wpointer-arith")
 if(CMAKE_COMPILER_IS_GNUCXX)
   set(WARN_FLAGS "${WARN_FLAGS} -Wdouble-promotion")
 endif()
@@ -70,15 +55,28 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
   "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${RELEASE_FLAGS}")
 
 #------------------------------------------------------------------------------
-# Auxiliary Cmake configuration
+# Intel MKL configuration (not applicable if another BLAS is used)
+#------------------------------------------------------------------------------
+# Whether to use 64 or 32 bit integers (default: TRUE)
+set(SDCA_USE_ILP64 TRUE)
+
+# Whether to use sequential or multi-threaded Intel MKL layer (default: FALSE)
+set(SDCA_USE_SEQUENTIAL FALSE)
+
+# Whether to add a suffix (e.g. st/mt) for single-/multi-threaded versions
+set(SDCA_USE_THREADING_SUFFIX FALSE)
+
+#------------------------------------------------------------------------------
+# Auxiliary Cmake Configuration
 #------------------------------------------------------------------------------
 # Custom Cmake modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 # Install prefix
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}" CACHE PATH
-    "Installation directory." FORCE)
+  set(CMAKE_INSTALL_PREFIX
+    "${CMAKE_SOURCE_DIR}" CACHE PATH "Installation directory." FORCE
+    )
 endif()
 
 # Avoid a warning due to CMP0042
@@ -88,9 +86,10 @@ endif()
 
 # RPATH settings
 set(CMAKE_SKIP_RPATH FALSE)
-SET(CMAKE_SKIP_BUILD_RPATH FALSE)
-SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-SET(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
+
 
 ###############################################################################
 #
@@ -99,43 +98,66 @@ SET(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
 ###############################################################################
 
 #------------------------------------------------------------------------------
-# Fast math
+# BLAS Libraries
 #------------------------------------------------------------------------------
-# Whether to use the fast math functions from https://github.com/herumi/fmath
-add_definitions(-DUSE_FMATH_HERUMI=1)
+# BLAS libraries from various vendors (e.g. Atlas or Accelerate)
+#find_package(BLAS)
+
+# Intel MKL
+#find_package(MKL)
+
+# Select a BLAS library and set the corresponding compiler/linker flags
+#include(SelectBLAS)
+
+set(CMAKE_SHARED_LINKER_FLAGS
+  "${CMAKE_SHARED_LINKER_FLAGS} ${BLAS_LINKER_FLAGS}"
+  )
 
 #------------------------------------------------------------------------------
-# Matlab interface
+# Google Test Framework
+#------------------------------------------------------------------------------
+set(GOOGLETEST_PATH
+  ${CMAKE_SOURCE_DIR}/vendor/googletest/googletest
+  )
+
+include_directories(
+  ${GOOGLETEST_PATH}
+  ${GOOGLETEST_PATH}/include
+  )
+
+add_library(googletest ${GOOGLETEST_PATH}/src/gtest-all.cc)
+
+
+###############################################################################
+#
+# SDCA Library
+#
+###############################################################################
+
+include_directories(include)
+
+set(libsdca_INCLUDE_PATH
+  ${CMAKE_SOURCE_DIR}/include/sdca
+  )
+
+set(libsdca_MATH_SOURCES
+  ${libsdca_INCLUDE_PATH}/math/lambert.h
+  )
+
+#------------------------------------------------------------------------------
+# Unit tests
+#------------------------------------------------------------------------------
+add_subdirectory(test)
+
+#------------------------------------------------------------------------------
+# Matlab Interface
 #------------------------------------------------------------------------------
 # Honor the visibility properties set for targets of type OBJECT
 # (visibility is set to 'hidden' for mex files, see FindMatlab.cmake)
 if(POLICY CMP0063)
   cmake_policy(SET CMP0063 NEW)
 endif()
-find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
+#find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
 
 # Whether to use the std::chrono namespace in the stopwatch
 #add_definitions(-DUSE_CHRONO=1)
-
-#------------------------------------------------------------------------------
-# BLAS libraries
-#------------------------------------------------------------------------------
-# BLAS libraries from various vendors (e.g. Atlas or Accelerate)
-find_package(BLAS)
-
-# Intel MKL
-find_package(MKL)
-
-# Select a BLAS library and set the corresponding compiler/linker flags
-include(SelectBLAS)
-
-set(CMAKE_SHARED_LINKER_FLAGS
-  "${CMAKE_SHARED_LINKER_FLAGS} ${BLAS_LINKER_FLAGS}")
-
-###############################################################################
-#
-# SDCA Library Code
-#
-###############################################################################
-
-add_subdirectory(src)
