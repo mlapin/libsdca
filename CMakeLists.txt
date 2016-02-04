@@ -58,13 +58,13 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
 # Intel MKL configuration (not applicable if another BLAS is used)
 #------------------------------------------------------------------------------
 # Whether to use 64 or 32 bit integers (default: TRUE)
-set(SDCA_USE_ILP64 TRUE)
+set(USE_ILP64 TRUE)
 
 # Whether to use sequential or multi-threaded Intel MKL layer (default: FALSE)
-set(SDCA_USE_SEQUENTIAL FALSE)
+set(USE_SEQUENTIAL FALSE)
 
 # Whether to add a suffix (e.g. st/mt) for single-/multi-threaded versions
-set(SDCA_USE_THREADING_SUFFIX FALSE)
+set(USE_THREADING_SUFFIX FALSE)
 
 #------------------------------------------------------------------------------
 # Auxiliary Cmake Configuration
@@ -101,13 +101,13 @@ set(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
 # BLAS Libraries
 #------------------------------------------------------------------------------
 # BLAS libraries from various vendors (e.g. Atlas or Accelerate)
-#find_package(BLAS)
+find_package(BLAS)
 
 # Intel MKL
-#find_package(MKL)
+find_package(MKL)
 
 # Select a BLAS library and set the corresponding compiler/linker flags
-#include(SelectBLAS)
+include(SelectBLAS)
 
 set(CMAKE_SHARED_LINKER_FLAGS
   "${CMAKE_SHARED_LINKER_FLAGS} ${BLAS_LINKER_FLAGS}"
@@ -141,7 +141,9 @@ set(libsdca_INCLUDE_PATH
   )
 
 set(libsdca_MATH_SOURCES
+  ${libsdca_INCLUDE_PATH}/math/blas.h
   ${libsdca_INCLUDE_PATH}/math/lambert.h
+  ${libsdca_INCLUDE_PATH}/math/log_sum_exp.h
   )
 
 #------------------------------------------------------------------------------

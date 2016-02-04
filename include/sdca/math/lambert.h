@@ -9,7 +9,8 @@ namespace sdca {
 /**
  * Omega constant, see
  *    https://oeis.org/A030178.
- * Omega = lambert_w(1); it is the solution to x * exp(x) = 1.
+ * Omega = lambert_w(1) = lambert_w_exp(0);
+ * it is the solution to w * exp(w) = 1, w + log(w) = 0.
  */
 const long double kOmega =
 0.5671432904097838729999686622103555497538157871865125081351310792230457930866L;
@@ -41,7 +42,7 @@ lambert_w_iter_5(
 }
 
 /**
- * Fast approximation of the exponential function:
+ * Fast (crude) approximation of the exponential function:
  *    (1 + x/1024)^1024.
  * Note: not accurate for x < -1024 and x > 1.
  * For x in [-1024, 1], the following holds
@@ -62,11 +63,11 @@ exp_approx(
 
 /**
  * Lambert W function of exp(x),
- *    w = W_0(exp(x)).
+ *    w = W(exp(x)).
  * Computed w satisfies
  *    w + log(w) = x
  * or, equivalently,
- *    w * exp(w) = exp(x)
+ *    w * exp(w) = exp(x).
  * For positive x,
  *    (w + log(w) - x) < 4 * eps * max(1, x),
  * and for negative x,
@@ -84,6 +85,8 @@ lambert_w_exp(
    * (-1, 8]              - w_0 = x, return w_2
    * (8, 536870912]       - w_0 = x - log(x), return w_1
    * (536870912, +Inf)    - (x + log(x)) = x, return x
+   * Note: these intervals were chosen approximately
+   * and could be optimized further (as well as the if-else branching).
    */
   float w;
   if (x > -1.0f) { // (-1, +Inf)
@@ -104,7 +107,7 @@ lambert_w_exp(
 
 /**
  * Lambert W function of exp(x),
- *    w = W_0(exp(x)).
+ *    w = W(exp(x)).
  * Computed w satisfies
  *    w + log(w) = x
  * or, equivalently,
@@ -205,15 +208,6 @@ lambert_w_exp(
   w = lambert_w_iter_5(w, std::exp(x - w));
   return lambert_w_iter_5(w, std::exp(x - w));
 }
-
-template <typename Data,
-          typename Result = double>
-struct lambert_w_exp_functor {
-  inline Data
-  operator()(Data x) const {
-    return static_cast<Data>(lambert_w_exp(static_cast<Result>(x)));
-  }
-};
 
 /**
  * Inverse of the Lambert W function of exp(x).
