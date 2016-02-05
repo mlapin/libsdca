@@ -146,6 +146,26 @@ set(libsdca_MATH_SOURCES
   ${libsdca_INCLUDE_PATH}/math/log_sum_exp.h
   )
 
+set(libsdca_PROX_SOURCES
+  ${libsdca_INCLUDE_PATH}/prox/prox.h
+  ${libsdca_INCLUDE_PATH}/prox/proxdef.h
+  ${libsdca_INCLUDE_PATH}/prox/entropy.h
+  ${libsdca_INCLUDE_PATH}/prox/knapsack_eq.h
+  ${libsdca_INCLUDE_PATH}/prox/knapsack_le.h
+  ${libsdca_INCLUDE_PATH}/prox/knapsack_le_biased.h
+  ${libsdca_INCLUDE_PATH}/prox/topk_cone.h
+  ${libsdca_INCLUDE_PATH}/prox/topk_cone_biased.h
+  ${libsdca_INCLUDE_PATH}/prox/topk_entropy.h
+  ${libsdca_INCLUDE_PATH}/prox/topk_entropy_biased.h
+  ${libsdca_INCLUDE_PATH}/prox/topk_simplex.h
+  ${libsdca_INCLUDE_PATH}/prox/topk_simplex_biased.h
+)
+
+set(libsdca_UTIL_SOURCES
+  ${libsdca_INCLUDE_PATH}/util/logging.h
+  ${libsdca_INCLUDE_PATH}/util/stopwatch.h
+  )
+
 #------------------------------------------------------------------------------
 # Unit tests
 #------------------------------------------------------------------------------

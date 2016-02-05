@@ -8,23 +8,23 @@
 template <typename Type,
           typename Result = Type>
 inline void
-test_compare_log_sum_exp(const Type tol, const std::vector<Type>& v) {
+test_compare_log_sum_exp(const Type eps, const std::vector<Type>& v) {
   Type sum(0);
-  std::for_each(v.begin(), v.end(), [&](const Type &x){ sum += std::exp(x); });
+  std::for_each(v.begin(), v.end(), [&](const Type x){ sum += std::exp(x); });
   ASSERT_NEAR(std::log(sum),
               sdca::log_sum_exp<Result>(v.begin(), v.end()),
-              tol);
+              eps);
   ASSERT_NEAR(std::log(1 + sum),
               sdca::log_1_sum_exp<Result>(v.begin(), v.end()),
-              tol);
+              eps);
   Result lse(-1), lse1(-1);
   sdca::log_sum_exp<Result>(v.begin(), v.end(), lse, lse1);
   ASSERT_NEAR(std::log(sum),
               static_cast<Type>(lse),
-              tol);
+              eps);
   ASSERT_NEAR(std::log(1 + sum),
               static_cast<Type>(lse1),
-              tol);
+              eps);
 }
 
 template <typename Type>
@@ -43,32 +43,32 @@ template <typename Type,
 inline void
 test_log_sum_exp(const int pow_from, const int pow_to) {
   std::mt19937 gen(1);
-  Type tol = 1024 * std::numeric_limits<Type>::epsilon();
+  Type eps = 1024 * std::numeric_limits<Type>::epsilon();
 
   std::vector<Type> v;
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     test_populate(10000, p, p + 1, static_cast<Type>(1), gen, v);
-    test_compare_log_sum_exp(tol, v);
+    test_compare_log_sum_exp(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     test_populate(10000, p, p + 1, -static_cast<Type>(1), gen, v);
-    test_compare_log_sum_exp(tol, v);
+    test_compare_log_sum_exp(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     test_populate(5000, p, p + 1, static_cast<Type>(1), gen, v);
     test_populate(5000, p, p + 1, -static_cast<Type>(1), gen, v);
-    test_compare_log_sum_exp(tol, v);
+    test_compare_log_sum_exp(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
     test_populate(1000, p, p + 1, static_cast<Type>(1), gen, v);
     test_populate(1000, p, p + 1, -static_cast<Type>(1), gen, v);
-    test_compare_log_sum_exp<Type, Result>(tol, v);
+    test_compare_log_sum_exp<Type, Result>(eps, v);
   }
 }
 
@@ -88,7 +88,7 @@ test_special_cases(const int pow_from, const int pow_to) {
   ASSERT_TRUE(sdca::log_1_sum_exp(v.begin(), v.begin()) == 0);
 
   // Single element
-  Type tol = 4 * std::numeric_limits<Type>::epsilon();
+  Type eps = 4 * std::numeric_limits<Type>::epsilon();
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     test_populate(1, p, p + 1, static_cast<Type>(1), gen, v);
@@ -97,8 +97,8 @@ test_special_cases(const int pow_from, const int pow_to) {
     ASSERT_EQ(v.front(), sdca::log_sum_exp<Type>(v.begin(), v.end()));
     Type lse1_ref = std::log1p(std::exp(v.front()));
     if (std::isfinite(lse1_ref)) {
-      ASSERT_NEAR(lse1_ref, lse1, tol);
-      ASSERT_NEAR(lse1_ref, sdca::log_1_sum_exp<Type>(v.begin(), v.end()), tol);
+      ASSERT_NEAR(lse1_ref, lse1, eps);
+      ASSERT_NEAR(lse1_ref, sdca::log_1_sum_exp<Type>(v.begin(), v.end()), eps);
     }
   }
 

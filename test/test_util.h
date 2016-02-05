@@ -13,7 +13,7 @@ test_populate(
     const int pow_from,
     const int pow_to,
     const Type coeff,
-    std::mt19937 &gen,
+    std::mt19937& gen,
     std::vector<Type>& v
   ) {
   Type base(10);
