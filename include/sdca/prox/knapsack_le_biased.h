@@ -1,22 +1,20 @@
 #ifndef SDCA_PROX_KNAPSACK_LE_BIASED_H
 #define SDCA_PROX_KNAPSACK_LE_BIASED_H
 
-#include "knapsack_le.h"
+#include "sdca/prox/knapsack_le.h"
 
 namespace sdca {
 
-template <typename Iterator,
-          typename Result,
-          typename Summation = std_sum<Iterator, Result>>
-thresholds<Iterator, Result>
+template <typename Result,
+          typename Iterator>
+inline thresholds<Result, Iterator>
 thresholds_knapsack_le_biased_search(
     Iterator first,
     Iterator last,
     const Result lo,
     const Result hi,
     const Result rhs,
-    const Result rho,
-    const Summation sum = Summation()
+    const Result rho
     ) {
   // At this point, rho must be positive
   assert(rho > 0);
@@ -38,7 +36,7 @@ thresholds_knapsack_le_biased_search(
 
     Result min_M = +std::numeric_limits<Result>::infinity();
     Result max_M = -std::numeric_limits<Result>::infinity();
-    Result num_M = 0, sum_M = 0, sum_M_comp = 0;
+    Result num_M = 0, sum_M = 0;
     Result num_L = num_X - num_U;
 
     // Grow M starting with empty
@@ -70,7 +68,7 @@ thresholds_knapsack_le_biased_search(
       }
       min_M = static_cast<Result>(*m_last);
       max_M = static_cast<Result>(*m_first);
-      sum.add(min_M, sum_M, sum_M_comp); // sum_M += min_M;
+      sum_M += min_M;
       --num_L;
       ++num_M;
       ++m_last;
@@ -86,44 +84,40 @@ thresholds_knapsack_le_biased_search(
   }
 
   // Default to 0
-  return thresholds<Iterator, Result>(0, 0, 0, first, first);
+  return thresholds<Result, Iterator>(0, 0, 0, first, first);
 }
 
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
-thresholds<Iterator, Result>
+template <typename Result = double,
+          typename Iterator>
+inline thresholds<Result, Iterator>
 thresholds_knapsack_le_biased(
     Iterator first,
     Iterator last,
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    const Result rho = 1,
-    const Summation sum = Summation()
+    const Result rho = 1
     ) {
   assert(rho >= 0);
   if (rho == 0) {
-    return thresholds_knapsack_le(first, last, lo, hi, rhs, sum);
+    return thresholds_knapsack_le(first, last, lo, hi, rhs);
   }
 
   Result eps = std::numeric_limits<Result>::epsilon()
     * std::max(static_cast<Result>(1), std::abs(rhs));
 
   // Equality constraint
-  auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs, sum);
+  auto t = thresholds_knapsack_eq(first, last, lo, hi, rhs);
   if (t.t >= rho * rhs - eps) {
     return t;
   }
 
   // General case
-  return thresholds_knapsack_le_biased_search(
-    first, last, lo, hi, rhs, rho, sum);
+  return thresholds_knapsack_le_biased_search(first, last, lo, hi, rhs, rho);
 }
 
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
+template <typename Result = double,
+          typename Iterator>
 inline void
 prox_knapsack_le_biased(
     Iterator first,
@@ -131,17 +125,14 @@ prox_knapsack_le_biased(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    const Result rho = 1,
-    const Summation sum = Summation()
+    const Result rho = 1
     ) {
   prox(first, last,
-    thresholds_knapsack_le_biased<Iterator, Result, Summation>,
-    lo, hi, rhs, rho, sum);
+    thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
 }
 
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
+template <typename Result = double,
+          typename Iterator>
 inline void
 prox_knapsack_le_biased(
     Iterator first,
@@ -151,17 +142,14 @@ prox_knapsack_le_biased(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    const Result rho = 1,
-    const Summation sum = Summation()
+    const Result rho = 1
     ) {
   prox(first, last, aux_first, aux_last,
-    thresholds_knapsack_le_biased<Iterator, Result, Summation>,
-    lo, hi, rhs, rho, sum);
+    thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
 }
 
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
+template <typename Result = double,
+          typename Iterator>
 inline void
 prox_knapsack_le_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
@@ -172,12 +160,10 @@ prox_knapsack_le_biased(
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
-    const Result rho = 1,
-    const Summation sum = Summation()
+    const Result rho = 1
     ) {
   prox(dim, first, last, aux_first, aux_last,
-    thresholds_knapsack_le_biased<Iterator, Result, Summation>,
-    lo, hi, rhs, rho, sum);
+    thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
 }
 
 }

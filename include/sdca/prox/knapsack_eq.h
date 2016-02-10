@@ -1,7 +1,6 @@
 #ifndef SDCA_PROX_KNAPSACK_EQ_H
 #define SDCA_PROX_KNAPSACK_EQ_H
 
-#include <assert.h>
 #include <cmath>
 
 #include "sdca/prox/proxdef.h"

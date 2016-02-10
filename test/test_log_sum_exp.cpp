@@ -8,7 +8,7 @@
 template <typename Type,
           typename Result = Type>
 inline void
-test_compare_log_sum_exp(const Type eps, const std::vector<Type>& v) {
+test_log_sum_exp_compare(const Type eps, const std::vector<Type>& v) {
   Type sum(0);
   std::for_each(v.begin(), v.end(), [&](const Type x){ sum += std::exp(x); });
   ASSERT_NEAR(std::log(sum),
@@ -29,7 +29,7 @@ test_compare_log_sum_exp(const Type eps, const std::vector<Type>& v) {
 
 template <typename Type>
 inline void
-test_finite_log_sum_exp(const std::vector<Type>& v) {
+test_log_sum_exp_finite(const std::vector<Type>& v) {
   ASSERT_TRUE(std::isfinite(sdca::log_sum_exp(v.begin(), v.end())));
   ASSERT_TRUE(std::isfinite(sdca::log_1_sum_exp(v.begin(), v.end())));
   Type lse(-1), lse1(-1);
@@ -49,33 +49,33 @@ test_log_sum_exp(const int pow_from, const int pow_to) {
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     test_populate(10000, p, p + 1, static_cast<Type>(1), gen, v);
-    test_compare_log_sum_exp(eps, v);
+    test_log_sum_exp_compare(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     test_populate(10000, p, p + 1, -static_cast<Type>(1), gen, v);
-    test_compare_log_sum_exp(eps, v);
+    test_log_sum_exp_compare(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     test_populate(5000, p, p + 1, static_cast<Type>(1), gen, v);
     test_populate(5000, p, p + 1, -static_cast<Type>(1), gen, v);
-    test_compare_log_sum_exp(eps, v);
+    test_log_sum_exp_compare(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
     test_populate(1000, p, p + 1, static_cast<Type>(1), gen, v);
     test_populate(1000, p, p + 1, -static_cast<Type>(1), gen, v);
-    test_compare_log_sum_exp<Type, Result>(eps, v);
+    test_log_sum_exp_compare<Type, Result>(eps, v);
   }
 }
 
 template <typename Type,
           typename Result = Type>
 inline void
-test_special_cases(const int pow_from, const int pow_to) {
+test_log_sum_exp_special_cases(const int pow_from, const int pow_to) {
   std::mt19937 gen(1);
   std::vector<Type> v;
 
@@ -105,14 +105,14 @@ test_special_cases(const int pow_from, const int pow_to) {
   // Test overflow
   v.clear();
   test_populate(10000, pow_from, pow_to, static_cast<Type>(1), gen, v);
-  test_finite_log_sum_exp(v);
+  test_log_sum_exp_finite(v);
   v.clear();
   test_populate(10000, pow_from, pow_to, -static_cast<Type>(1), gen, v);
-  test_finite_log_sum_exp(v);
+  test_log_sum_exp_finite(v);
   v.clear();
   test_populate(5000, pow_from, pow_to, static_cast<Type>(1), gen, v);
   test_populate(5000, pow_from, pow_to, -static_cast<Type>(1), gen, v);
-  test_finite_log_sum_exp(v);
+  test_log_sum_exp_finite(v);
 }
 
 TEST(LogSumExpTest, extensive) {
@@ -122,7 +122,7 @@ TEST(LogSumExpTest, extensive) {
 }
 
 TEST(LogSumExpTest, special_cases) {
-  test_special_cases<float, double>(-8, 8);
-  test_special_cases<double, double>(-16, 16);
-  test_special_cases<long double, long double>(-24, 24);
+  test_log_sum_exp_special_cases<float, double>(-8, 8);
+  test_log_sum_exp_special_cases<double, double>(-16, 16);
+  test_log_sum_exp_special_cases<long double, long double>(-24, 24);
 }
