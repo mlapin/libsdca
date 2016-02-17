@@ -1,11 +1,83 @@
-#ifndef SDCA_MATH_LOG_SUM_EXP_H
-#define SDCA_MATH_LOG_SUM_EXP_H
+#ifndef SDCA_MATH_LOG_EXP_H
+#define SDCA_MATH_LOG_EXP_H
 
 #include <algorithm>
 #include <cmath>
 #include <numeric>
 
 namespace sdca {
+
+template <typename Type>
+struct log_traits {
+  /**
+   * The minimal argument of the given Type such that
+   * the logarithm value is finite and normal.
+   **/
+  static constexpr Type
+  min_arg() { return std::numeric_limits<Type>::min(); }
+
+  /**
+   * The maximal argument of the given Type such that
+   * the logarithm value is finite and normal.
+   **/
+  static constexpr Type
+  max_arg() { return std::numeric_limits<Type>::max(); }
+};
+
+template <typename Type>
+struct exp_traits {
+  /**
+   * The minimal argument of the given Type such that
+   * the exponent value is finite and normal.
+   **/
+  static constexpr Type
+  min_arg() { return std::log(std::numeric_limits<Type>::min()); }
+
+  /**
+   * The maximal argument of the given Type such that
+   * the exponent value is finite and normal.
+   **/
+  static constexpr Type
+  max_arg() { return std::log(std::numeric_limits<Type>::max()); }
+};
+
+// For float (and long double), the default values overflow.
+// Instead, we use the closest appropriate values.
+template <>
+struct exp_traits<float> {
+  static constexpr float
+  min_arg() { return -8.733654022216796875000000e+01f; }
+  static constexpr float
+  max_arg() { return 8.87228317260742187500e+01f; }
+};
+
+template <>
+struct exp_traits<long double> {
+  static constexpr long double
+  min_arg() { return -1.135513711193302405799699e+04L; }
+  static constexpr long double
+  max_arg() { return 1.135652340629414394879149e+04L; }
+};
+
+/**
+ * Computes
+ *    x * exp(x)
+ **/
+template <typename Type>
+inline Type
+x_exp_x(const Type x) {
+  return x * std::exp(x);
+}
+
+/**
+ * Computes
+ *    x * log(x)
+ **/
+template <typename Type>
+inline Type
+x_log_x(const Type x) {
+  return (x > 0) ? x * std::log(x) : 0;
+}
 
 /**
  * Computes

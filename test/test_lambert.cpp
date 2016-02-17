@@ -2,6 +2,7 @@
 
 #include "gtest/gtest.h"
 #include "sdca/math/lambert.h"
+#include "sdca/math/log_exp.h"
 
 #include "test_util.h"
 

@@ -13,6 +13,15 @@
 
 namespace sdca {
 
+/**
+ * Solve
+ *    min_x 0.5 * <x, x> - <a, x>
+ *          <1, x> = rhs
+ *          lo <= x_i <= hi
+ *
+ * The solution is
+ *    x = max(lo, min(a - t, hi))
+ **/
 template <typename Result = double,
           typename Iterator>
 inline thresholds<Result, Iterator>

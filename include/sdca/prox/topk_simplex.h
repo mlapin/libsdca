@@ -26,6 +26,15 @@ is_topk_simplex_lt(
   }
 }
 
+/**
+ * Solve
+ *    min_x 0.5 * <x, x> - <a, x>
+ *          <1, x> <= rhs
+ *          0 <= x_i <= <1, x> / k
+ *
+ * The solution is
+ *    x = max(0, min(a - t, hi))
+ **/
 template <typename Result = double,
           typename Iterator>
 inline thresholds<Result, Iterator>

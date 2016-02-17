@@ -142,14 +142,16 @@ set(libsdca_INCLUDE_PATH
 
 set(libsdca_MATH_SOURCES
   ${libsdca_INCLUDE_PATH}/math/blas.h
+  ${libsdca_INCLUDE_PATH}/math/functor.h
   ${libsdca_INCLUDE_PATH}/math/lambert.h
-  ${libsdca_INCLUDE_PATH}/math/log_sum_exp.h
+  ${libsdca_INCLUDE_PATH}/math/log_exp.h
   )
 
 set(libsdca_PROX_SOURCES
   ${libsdca_INCLUDE_PATH}/prox/prox.h
   ${libsdca_INCLUDE_PATH}/prox/proxdef.h
   ${libsdca_INCLUDE_PATH}/prox/entropy.h
+  ${libsdca_INCLUDE_PATH}/prox/entropy_norm.h
   ${libsdca_INCLUDE_PATH}/prox/knapsack_eq.h
   ${libsdca_INCLUDE_PATH}/prox/knapsack_le.h
   ${libsdca_INCLUDE_PATH}/prox/knapsack_le_biased.h

@@ -5,12 +5,16 @@ add_executable(
   ${GOOGLETEST_PATH}/src/gtest_main.cc
   test_util.h
   test_lambert.cpp
-  test_log_sum_exp.cpp
+  test_log_exp.cpp
+  test_prox_entropy.cpp
+  test_prox_entropy_norm.cpp
   test_prox_knapsack_eq.cpp
   test_prox_knapsack_le.cpp
   test_prox_knapsack_le_biased.cpp
   test_prox_topk_cone.cpp
   test_prox_topk_cone_biased.cpp
+  test_prox_topk_entropy.cpp
+  test_prox_topk_entropy_biased.cpp
   test_prox_topk_simplex.cpp
   test_prox_topk_simplex_biased.cpp
   ${libsdca_MATH_SOURCES}

@@ -85,6 +85,14 @@ thresholds_topk_cone_biased_search(
   return thresholds<Result, Iterator>(0, 0, 0, first, first);
 }
 
+/**
+ * Solve
+ *    min_x 0.5 * (<x, x> + rho * <1, x>^2) - <a, x>
+ *          0 <= x_i <= <1, x> / k
+ *
+ * The solution is
+ *    x = max(0, min(a - t, hi))
+ **/
 template <typename Result = double,
           typename Iterator>
 inline thresholds<Result, Iterator>

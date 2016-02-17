@@ -1,8 +1,9 @@
 #ifndef SDCA_PROX_TOPK_ENTROPY_BIASED_H
 #define SDCA_PROX_TOPK_ENTROPY_BIASED_H
 
-#include "proxdef.h"
-#include "util/lambert.h"
+#include "sdca/math/functor.h"
+#include "sdca/math/log_exp.h"
+#include "sdca/prox/proxdef.h"
 
 namespace sdca {
 
@@ -11,145 +12,146 @@ namespace sdca {
  *    topk_entropy_biased_kkt_iterate
  * below.
  **/
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
+template <typename Result,
+          typename Iterator>
 inline void
 topk_entropy_biased_kkt_iter_2(
     const Iterator m_first,
     const Iterator last,
-    const Result sum_U_k_alpha, // sum_U / k - alpha
+    const Result K,
     const Result alpha,
-    const Result alpha_k, // alpha / k
-    const Result rho,
-    const Result rho_1, // 1 - rho
-    Result &t,
+    const Result num_U,
+    const Result beta,  // sum_U + num_U * (1 + log(alpha / K))
     Result &s,
-    const Summation sum = Summation()
+    Result &t
     ) {
   // Compute the sum of x_i(t) and their derivatives over the set M
-  Result sm0(0), sm1(0), cm0(0), cm1(0);
+  Result sum0(0), sum1(0);
   for (auto a = m_first; a != last; ++a) {
     Result x = lambert_w_exp(static_cast<Result>(*a) - t);
-    sum.add(x, sm0, cm0);
-    sum.add(x / (1 + x), sm1, cm1);
+    sum0 += x;
+    sum1 += x / (1 + x);
   }
 
-  Result f1 = + rho_1 * t - rho * lambert_w_exp_inverse(alpha_k * s)
-              + lambert_w_exp_inverse(alpha - alpha * s) + sum_U_k_alpha;
-  Result f2 = alpha * rho_1 * s - sm0;
-  Result A = rho_1;
-  Result B = - (rho / s + 1 / (1 - s) + alpha_k * rho + alpha);
-  Result C = sm1;
-  Result D = alpha * rho_1;
-
-  Result DD = A * D - B * C;
-  Result d1 = (B * f2 - D * f1) / DD;
-  Result d2 = (C * f1 - A * f2) / DD;
-
-  if (std::isfinite(d1) && std::isfinite(d2)) {
-    t += d1;
-    s += d2;
+  // It is numerically more stable to consider s -> 0 and s -> 1 separately
+  Result A, B, C;
+  if (s < static_cast<Result>(0.5)) {
+    // s -> 0
+    Result k_1_s = K / (1 - s);
+    A = s * (K * k_1_s + (K * K + num_U) * alpha) + K * num_U;
+    B = s * (s * k_1_s + K * std::log1p(-s) + beta) - num_U * x_log_x(s);
+    C = s;
+  } else {
+    // s -> 1
+    Result z = 1 - s;
+    A = K * (K - num_U + num_U / (1 - z)) + (K * K + num_U) * alpha * z;
+    B = K * ((1 - z) + x_log_x(z)) + z * (beta - num_U * std::log1p(-z));
+    C = z;
   }
+
+  // Intermediate computations
+  Result sum0_t_sum1 = sum0 + t * sum1;
+  Result k_u = K - num_U;
+  Result denom = A * sum1 + alpha * (k_u * k_u) * C;
+
+  // Updated variables (the update step is absorbed)
+  s = K * (sum0_t_sum1 * k_u * C + B * sum1) / denom;
+  t = (A * sum0_t_sum1 - alpha * k_u * B) / denom;
 }
 
 /**
  * The KKT conditions for the optimization problem in
  *    thresholds_topk_entropy_biased
  * lead to the following system of nonlinear equations in two variables (s,t):
- *    f1: V^{-1}(alpha * (1 - s)) - rho * V^{-1}(alpha * s / k)
- *        + (1 - rho) * t - alpha + 1 / k * \sum_U a_i = 0,
- *    f2: alpha * (1 - rho) * s - \sum_M V(a_i - t) = 0,
+ *    F(s,t) = 0,
  * where
- *    V(t) = W(exp(t)),
- *    V'(t) = V(t) / (1 + V(t)),
- *    V^{-1}(v) = v + log(v),
- *    V^{-1}'(v) = 1 + 1 / v.
- * The Jacobian J is given as
- *    / A B \ _ / df1/dt  df1/ds \
- *    \ C D / - \ df2/dt  df2/ds /,
- * and the Newton's step d = (d1, d2) is computed from
- *    J * d = - f,
- * where f = (f1, f2) as defined above.
+ *    F = (f1, f2),
+ *    f1(s,t) = (1 + rho / k) * alpha * s + rho * log(s) - log(1 - s)
+ *            - (1 - rho) * t + rho * log(alpha / k) - sum_U a_i / k,
+ *    f2(s,t) = (1 - rho) * alpha * s - sum_M V(a_i - t),
+ * moreover,
+ *    rho = num_U / k,
+ *    V(x) = W(exp(x)),
+ *    V'(x) = V(x) / (1 + V(x)).
+ *
+ * The Newton's step d = (d1, d2) is computed from
+ *    J * d = - F,
+ * where J is the Jacobian matrix.
  **/
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
+template <typename Result = double,
+          typename Iterator>
 inline void
 topk_entropy_biased_kkt_iterate(
     const Iterator m_first,
     const Iterator last,
-    const Result sum_U_k_alpha,
+    const Result K,
     const Result alpha,
-    const Result alpha_k,
-    const Result rho,
-    const Result rho_1,
-    Result &t,
+    const Result log_alpha_k,
+    const Result num_U,
+    const Result sum_U,
     Result &s,
-    const Summation sum = Summation(),
-    const std::size_t max_num_iter = 16
+    Result &t,
+    const std::size_t max_num_iter = 32
     ) {
-  Result eps = 16 * std::numeric_limits<Result>::epsilon()
-      * std::max(static_cast<Result>(1), std::abs(t));
-
-  // Guard bounds on s
-  Result lb = 16 * std::numeric_limits<Result>::epsilon();
-  Result ub = 1 - 16 * std::numeric_limits<Result>::epsilon();
-
+  Result lb(0), ub(1), eps = 16 * std::numeric_limits<Result>::epsilon();
+  Result beta = sum_U + num_U + num_U * log_alpha_k;
   for (std::size_t iter = 0; iter < max_num_iter; ++iter) {
-    Result t1(t), s1(s);
+    Result s1(s), t1(t);
     s = std::min(std::max(lb, s), ub);
-    topk_entropy_biased_kkt_iter_2(m_first, last,
-      sum_U_k_alpha, alpha, alpha_k, rho, rho_1, t, s, sum);
+    topk_entropy_biased_kkt_iter_2(m_first, last, K, alpha, num_U, beta, s, t);
 
-    if (std::abs(t1 - t) + std::abs(s1 - s) <= eps) break;
+    if (std::abs(s1 - s) + std::abs(t1 - t)<= eps) break;
   }
-  s = std::min(std::max(static_cast<Result>(0), s), static_cast<Result>(1));
+  s = std::min(std::max(lb, s), ub);
 }
 
 /**
- * Partition 'a' and compute the thresholds 't', 'hi'
- * such that the solution to the optimization problem
- *    min_{x,s} 0.5 * alpha * (<x, x> + s * s) - <a, x>
- *              + <x, log(x)> + (1 - s) * log(1 - s)
- *    s.t.      <1, x> = s, s <= 1, 0 <= x_i <= s / k,
- * can be computed as
- *    x_i = hi, if i in U;
- *    x_i = 1 / alpha * W_0(exp(a_i - t)), otherwise.
+ * Solve
+ *    min_{x,s} 0.5 * alpha * (<x, x> + s * s)
+ *              + <x, log(x)> + (1 - s) * log(1 - s) - <a, x>
+ *    s.t.      <1, x> = s
+ *              s <= 1
+ *              0 <= x_i <= s / k
+ *
+ * The solution is
+ *    x = max(0, min(lambert_w_exp(a - t) / alpha, hi))
  **/
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
-lambert_a_thresholds<Iterator, Result>
+template <typename Result = double,
+          typename Iterator>
+inline generalized_thresholds<Result, Iterator,
+    a_lambert_w_exp_map<typename std::iterator_traits<Iterator>::value_type>>
 thresholds_topk_entropy_biased(
     Iterator first,
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
-    const Result alpha = 1,
-    const Summation sum = Summation()
+    const Result alpha = 1
     ) {
   assert(alpha > 0);
   assert(k <= std::distance(first, last));
   Result K = static_cast<Result>(k);
-  Result alpha_k(alpha / K);
+  Result alpha_k = alpha / K;
+  Result log_alpha_k = std::log(alpha_k);
 
   Iterator max_el = std::max_element(first, last);
   Result eps = 16 * std::numeric_limits<Result>::epsilon()
     * std::max(static_cast<Result>(1), static_cast<Result>(*max_el));
 
   // Grow U starting with empty
-  Result t(0), s(0);
+  Result s(0), t(0), sum_U(0);
   Result min_U = +std::numeric_limits<Result>::infinity();
-  Result sum_U_k_alpha(-alpha), sum_U_comp(0), rho(0);
   Iterator m_first = first;
   typedef typename std::iterator_traits<Iterator>::difference_type diff_t;
-  for (diff_t num_U = 0; num_U < k;) {
+  for (diff_t num_U = 0; ;) {
     std::swap(*m_first, *max_el);
 
-    // Compute t and s
-    t = static_cast<Result>(*m_first); s = static_cast<Result>(0.9);
-    topk_entropy_biased_kkt_iterate(m_first, last,
-      sum_U_k_alpha, alpha, alpha_k, rho, 1 - rho, t, s, sum);
+    // Compute s and t starting from an initial guess
+    s = 1; t = static_cast<Result>(*m_first);
+    topk_entropy_biased_kkt_iterate(
+      m_first, last, K, alpha, log_alpha_k,
+      static_cast<Result>(num_U), sum_U, s, t);
+
+    // No need to check feasibility if that was the last case
+    if (++num_U >= k) break;
 
     // Check feasibility
     Result tt = lambert_w_exp_inverse(alpha_k * s) + t;
@@ -159,34 +161,31 @@ thresholds_topk_entropy_biased(
 
     // Increment U
     min_U = static_cast<Result>(*m_first);
-    sum.add(static_cast<Result>(*m_first) / K, sum_U_k_alpha, sum_U_comp);
-    ++m_first; ++num_U;
-    rho = static_cast<Result>(num_U) / K;
-    max_el = std::max_element(m_first, last); // pre-sorting might be faster
+    sum_U += static_cast<Result>(*m_first);
+    max_el = std::max_element(++m_first, last); // pre-sorting might be faster
   }
 
-  Result a(1 / alpha), lo(0), hi(s / K);
-  return make_lambert_a_thresholds(a, t, lo, hi, m_first, last);
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  a_lambert_w_exp_map<Data> map(1 / static_cast<Data>(alpha));
+  Result lo(0), hi(s / K);
+  return make_thresholds(t, lo, hi, m_first, last, map);
 }
 
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
+template <typename Result = double,
+          typename Iterator>
 inline void
 prox_topk_entropy_biased(
     Iterator first,
     Iterator last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
-    const Result alpha = 1,
-    const Summation sum = Summation()
+    const Result alpha = 1
     ) {
   prox(first, last,
-    thresholds_topk_entropy_biased<Iterator, Result, Summation>, k, alpha, sum);
+    thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
 }
 
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
+template <typename Result = double,
+          typename Iterator>
 inline void
 prox_topk_entropy_biased(
     Iterator first,
@@ -194,16 +193,14 @@ prox_topk_entropy_biased(
     Iterator aux_first,
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
-    const Result alpha = 1,
-    const Summation sum = Summation()
+    const Result alpha = 1
     ) {
   prox(first, last, aux_first, aux_last,
-    thresholds_topk_entropy_biased<Iterator, Result, Summation>, k, alpha, sum);
+    thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
 }
 
-template <typename Iterator,
-          typename Result = double,
-          typename Summation = std_sum<Iterator, Result>>
+template <typename Result = double,
+          typename Iterator>
 inline void
 prox_topk_entropy_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
@@ -212,11 +209,10 @@ prox_topk_entropy_biased(
     Iterator aux_first,
     Iterator aux_last,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
-    const Result alpha = 1,
-    const Summation sum = Summation()
+    const Result alpha = 1
     ) {
   prox(dim, first, last, aux_first, aux_last,
-    thresholds_topk_entropy_biased<Iterator, Result, Summation>, k, alpha, sum);
+    thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
 }
 
 }

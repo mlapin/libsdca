@@ -87,6 +87,15 @@ thresholds_knapsack_le_biased_search(
   return thresholds<Result, Iterator>(0, 0, 0, first, first);
 }
 
+/**
+ * Solve
+ *    min_x 0.5 * (<x, x> + rho * <1, x>^2) - <a, x>
+ *          <1, x> <= rhs
+ *          lo <= x_i <= hi
+ *
+ * The solution is
+ *    x = max(lo, min(a - t, hi))
+ **/
 template <typename Result = double,
           typename Iterator>
 inline thresholds<Result, Iterator>

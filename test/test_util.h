@@ -6,6 +6,31 @@
 #include <random>
 #include <vector>
 
+
+inline float next_float(float x) {
+  return nextafterf(x, std::numeric_limits<float>::infinity());
+}
+
+inline double next_float(double x) {
+  return nextafter(x, std::numeric_limits<double>::infinity());
+}
+
+inline long double next_float(long double x) {
+  return nextafterl(x, std::numeric_limits<long double>::infinity());
+}
+
+inline float prev_float(float x) {
+  return nextafterf(x, -std::numeric_limits<float>::infinity());
+}
+
+inline double prev_float(double x) {
+  return nextafter(x, -std::numeric_limits<double>::infinity());
+}
+
+inline long double prev_float(long double x) {
+  return nextafterl(x, -std::numeric_limits<long double>::infinity());
+}
+
 template <typename Type>
 inline void
 test_populate(

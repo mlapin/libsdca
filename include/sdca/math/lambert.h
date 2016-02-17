@@ -220,16 +220,6 @@ lambert_w_exp_inverse(const Type w) {
   return w + std::log(w);
 }
 
-/**
- * Computes
- *    x * exp(x)
- **/
-template <typename Type>
-inline Type
-x_exp_x(const Type x) {
-  return x * std::exp(x);
-}
-
 }
 
 #endif

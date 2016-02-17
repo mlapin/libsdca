@@ -1,9 +1,35 @@
 #include <cstdio>
 
 #include "gtest/gtest.h"
-#include "sdca/math/log_sum_exp.h"
+#include "sdca/math/log_exp.h"
 
 #include "test_util.h"
+
+template <typename Type, typename Function>
+inline void
+test_log_exp_traits_one(Type x, Type y, Function fun) {
+  auto is_finite_and_normal = [&](Type z) -> bool {
+    return std::isfinite(z) && std::isnormal(z)
+        && std::isfinite(fun(z)) && std::isnormal(fun(z));
+  };
+  EXPECT_TRUE(is_finite_and_normal(x));
+  EXPECT_FALSE(is_finite_and_normal(y));
+}
+
+template <typename Type>
+inline void
+test_log_exp_traits() {
+  Type x;
+  x = sdca::log_traits<Type>::min_arg();
+  test_log_exp_traits_one(x, prev_float(x), [](Type z){ return std::log(z); });
+  x = sdca::log_traits<Type>::max_arg();
+  test_log_exp_traits_one(x, next_float(x), [](Type z){ return std::log(z); });
+
+  x = sdca::exp_traits<Type>::min_arg();
+  test_log_exp_traits_one(x, prev_float(x), [](Type z){ return std::exp(z); });
+  x = sdca::exp_traits<Type>::max_arg();
+  test_log_exp_traits_one(x, next_float(x), [](Type z){ return std::exp(z); });
+}
 
 template <typename Type,
           typename Result = Type>
@@ -115,13 +141,19 @@ test_log_sum_exp_special_cases(const int pow_from, const int pow_to) {
   test_log_sum_exp_finite(v);
 }
 
-TEST(LogSumExpTest, extensive) {
+TEST(LogExpTest, log_exp_traits) {
+  test_log_exp_traits<float>();
+  test_log_exp_traits<double>();
+  test_log_exp_traits<long double>();
+}
+
+TEST(LogExpTest, log_sum_exp_extensive) {
   test_log_sum_exp<float, double>(-8, 1);
   test_log_sum_exp<double, double>(-16, 2);
   test_log_sum_exp<long double, long double>(-24, 4);
 }
 
-TEST(LogSumExpTest, special_cases) {
+TEST(LogExpTest, log_sum_exp_special_cases) {
   test_log_sum_exp_special_cases<float, double>(-8, 8);
   test_log_sum_exp_special_cases<double, double>(-16, 16);
   test_log_sum_exp_special_cases<long double, long double>(-24, 24);
