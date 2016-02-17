@@ -9,7 +9,7 @@ namespace sdca {
 
 /**
  * Computes
- *    std::exp(x).
+ *    exp(x).
  **/
 template <typename Type>
 struct exp_map {
