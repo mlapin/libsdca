@@ -74,26 +74,26 @@ test_log_sum_exp(const int pow_from, const int pow_to) {
   std::vector<Type> v;
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
-    test_populate(10000, p, p + 1, static_cast<Type>(1), gen, v);
+    test_populate_real(10000, p, p + 1, static_cast<Type>(1), gen, v);
     test_log_sum_exp_compare(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
-    test_populate(10000, p, p + 1, -static_cast<Type>(1), gen, v);
+    test_populate_real(10000, p, p + 1, -static_cast<Type>(1), gen, v);
     test_log_sum_exp_compare(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
-    test_populate(5000, p, p + 1, static_cast<Type>(1), gen, v);
-    test_populate(5000, p, p + 1, -static_cast<Type>(1), gen, v);
+    test_populate_real(5000, p, p + 1, static_cast<Type>(1), gen, v);
+    test_populate_real(5000, p, p + 1, -static_cast<Type>(1), gen, v);
     test_log_sum_exp_compare(eps, v);
   }
 
   for (int p = pow_from; p < pow_to; ++p) {
-    test_populate(1000, p, p + 1, static_cast<Type>(1), gen, v);
-    test_populate(1000, p, p + 1, -static_cast<Type>(1), gen, v);
+    test_populate_real(1000, p, p + 1, static_cast<Type>(1), gen, v);
+    test_populate_real(1000, p, p + 1, -static_cast<Type>(1), gen, v);
     test_log_sum_exp_compare<Type, Result>(eps, v);
   }
 }
@@ -117,7 +117,7 @@ test_log_sum_exp_special_cases(const int pow_from, const int pow_to) {
   Type eps = 4 * std::numeric_limits<Type>::epsilon();
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
-    test_populate(1, p, p + 1, static_cast<Type>(1), gen, v);
+    test_populate_real(1, p, p + 1, static_cast<Type>(1), gen, v);
     sdca::log_sum_exp(v.begin(), v.end(), lse, lse1);
     ASSERT_EQ(v.front(), lse);
     ASSERT_EQ(v.front(), sdca::log_sum_exp<Type>(v.begin(), v.end()));
@@ -130,14 +130,14 @@ test_log_sum_exp_special_cases(const int pow_from, const int pow_to) {
 
   // Test overflow
   v.clear();
-  test_populate(10000, pow_from, pow_to, static_cast<Type>(1), gen, v);
+  test_populate_real(10000, pow_from, pow_to, static_cast<Type>(1), gen, v);
   test_log_sum_exp_finite(v);
   v.clear();
-  test_populate(10000, pow_from, pow_to, -static_cast<Type>(1), gen, v);
+  test_populate_real(10000, pow_from, pow_to, -static_cast<Type>(1), gen, v);
   test_log_sum_exp_finite(v);
   v.clear();
-  test_populate(5000, pow_from, pow_to, static_cast<Type>(1), gen, v);
-  test_populate(5000, pow_from, pow_to, -static_cast<Type>(1), gen, v);
+  test_populate_real(5000, pow_from, pow_to, static_cast<Type>(1), gen, v);
+  test_populate_real(5000, pow_from, pow_to, -static_cast<Type>(1), gen, v);
   test_log_sum_exp_finite(v);
 }
 

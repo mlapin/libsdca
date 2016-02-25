@@ -55,7 +55,7 @@ test_prox_topk_simplex_biased_feasible(
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     for (int i = 0; i < 100; ++i) {
-      test_populate(100, p, p + 1, static_cast<Type>(1), gen, v);
+      test_populate_real(100, p, p + 1, static_cast<Type>(1), gen, v);
       test_prox_topk_simplex_biased_set_params(
         v, gen, d_k, d_rhs, d_rho, k, rhs, rho, eps);
       test_prox_topk_simplex_biased_check_feasible(k, rhs, rho, tol * eps, v);
@@ -65,7 +65,7 @@ test_prox_topk_simplex_biased_feasible(
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     for (int i = 0; i < 100; ++i) {
-      test_populate(100, p, p + 1, -static_cast<Type>(1), gen, v);
+      test_populate_real(100, p, p + 1, -static_cast<Type>(1), gen, v);
       test_prox_topk_simplex_biased_set_params(
         v, gen, d_k, d_rhs, d_rho, k, rhs, rho, eps);
       test_prox_topk_simplex_biased_check_feasible(k, rhs, rho, tol * eps, v);
@@ -75,8 +75,8 @@ test_prox_topk_simplex_biased_feasible(
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     for (int i = 0; i < 100; ++i) {
-      test_populate(100, p, p + 1, static_cast<Type>(1), gen, v);
-      test_populate(100, p, p + 1, -static_cast<Type>(1), gen, v);
+      test_populate_real(100, p, p + 1, static_cast<Type>(1), gen, v);
+      test_populate_real(100, p, p + 1, -static_cast<Type>(1), gen, v);
       test_prox_topk_simplex_biased_set_params(
         v, gen, d_k, d_rhs, d_rho, k, rhs, rho, eps);
       test_prox_topk_simplex_biased_check_feasible(k, rhs, rho, tol * eps, v);
@@ -85,8 +85,8 @@ test_prox_topk_simplex_biased_feasible(
 
   for (int i = 0; i < 100; ++i) {
     for (int p = pow_from; p < pow_to; ++p) {
-      test_populate(25, p, p + 1, static_cast<Type>(1), gen, v);
-      test_populate(25, p, p + 1, -static_cast<Type>(1), gen, v);
+      test_populate_real(25, p, p + 1, static_cast<Type>(1), gen, v);
+      test_populate_real(25, p, p + 1, -static_cast<Type>(1), gen, v);
       test_prox_topk_simplex_biased_set_params(
         v, gen, d_k, d_rhs, d_rho, k, rhs, rho, eps);
       test_prox_topk_simplex_biased_check_feasible(k, rhs, rho, tol * eps, v);

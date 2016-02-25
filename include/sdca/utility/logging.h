@@ -1,5 +1,5 @@
-#ifndef SDCA_UTIL_LOGGING_H
-#define SDCA_UTIL_LOGGING_H
+#ifndef SDCA_UTILITY_LOGGING_H
+#define SDCA_UTILITY_LOGGING_H
 
 #include <iomanip>
 #include <iostream>

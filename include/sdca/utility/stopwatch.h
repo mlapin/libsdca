@@ -1,5 +1,5 @@
-#ifndef SDCA_UTIL_STOPWATCH_H
-#define SDCA_UTIL_STOPWATCH_H
+#ifndef SDCA_UTILITY_STOPWATCH_H
+#define SDCA_UTILITY_STOPWATCH_H
 
 #ifdef SDCA_USE_CHRONO
   #include <chrono>
@@ -19,6 +19,7 @@ namespace sdca {
 #endif
 
 typedef typename std::clock_t cpu_time_point;
+
 
 struct stopwatch_wall {
   double elapsed = 0;
@@ -70,6 +71,7 @@ struct stopwatch_wall {
 #endif
 };
 
+
 struct stopwatch_cpu {
   double elapsed = 0;
   cpu_time_point mark;
@@ -94,6 +96,32 @@ struct stopwatch_cpu {
   double elapsed_now() {
     return elapsed
       + static_cast<double>(std::clock() - mark) / CLOCKS_PER_SEC;
+  }
+};
+
+
+struct stopwatch {
+  stopwatch_wall wall;
+  stopwatch_cpu cpu;
+
+  void start() {
+    wall.start();
+    cpu.start();
+  }
+
+  void stop() {
+    wall.stop();
+    cpu.stop();
+  }
+
+  void reset() {
+    wall.reset();
+    cpu.reset();
+  }
+
+  void resume() {
+    wall.resume();
+    cpu.reset();
   }
 };
 

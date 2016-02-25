@@ -58,7 +58,7 @@ test_prox_knapsack_le_biased_feasible(
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     for (int i = 0; i < 100; ++i) {
-      test_populate(100, p, p + 1, static_cast<Type>(1), gen, v);
+      test_populate_real(100, p, p + 1, static_cast<Type>(1), gen, v);
       test_prox_knapsack_le_biased_set_params(
         v, gen, d_lo, d_hi, d_rhs, d_rho, lo, hi, rhs, rho, eps);
       test_prox_knapsack_le_biased_check_feasible(
@@ -69,7 +69,7 @@ test_prox_knapsack_le_biased_feasible(
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     for (int i = 0; i < 100; ++i) {
-      test_populate(100, p, p + 1, -static_cast<Type>(1), gen, v);
+      test_populate_real(100, p, p + 1, -static_cast<Type>(1), gen, v);
       test_prox_knapsack_le_biased_set_params(
         v, gen, d_lo, d_hi, d_rhs, d_rho, lo, hi, rhs, rho, eps);
       test_prox_knapsack_le_biased_check_feasible(
@@ -80,8 +80,8 @@ test_prox_knapsack_le_biased_feasible(
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     for (int i = 0; i < 100; ++i) {
-      test_populate(100, p, p + 1, static_cast<Type>(1), gen, v);
-      test_populate(100, p, p + 1, -static_cast<Type>(1), gen, v);
+      test_populate_real(100, p, p + 1, static_cast<Type>(1), gen, v);
+      test_populate_real(100, p, p + 1, -static_cast<Type>(1), gen, v);
       test_prox_knapsack_le_biased_set_params(
         v, gen, d_lo, d_hi, d_rhs, d_rho, lo, hi, rhs, rho, eps);
       test_prox_knapsack_le_biased_check_feasible(
@@ -91,8 +91,8 @@ test_prox_knapsack_le_biased_feasible(
 
   for (int i = 0; i < 100; ++i) {
     for (int p = pow_from; p < pow_to; ++p) {
-      test_populate(25, p, p + 1, static_cast<Type>(1), gen, v);
-      test_populate(25, p, p + 1, -static_cast<Type>(1), gen, v);
+      test_populate_real(25, p, p + 1, static_cast<Type>(1), gen, v);
+      test_populate_real(25, p, p + 1, -static_cast<Type>(1), gen, v);
       test_prox_knapsack_le_biased_set_params(
         v, gen, d_lo, d_hi, d_rhs, d_rho, lo, hi, rhs, rho, eps);
       test_prox_knapsack_le_biased_check_feasible(

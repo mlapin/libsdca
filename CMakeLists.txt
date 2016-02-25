@@ -148,7 +148,7 @@ set(libsdca_MATH_SOURCES
   )
 
 set(libsdca_PROX_SOURCES
-  ${libsdca_INCLUDE_PATH}/prox/prox.h
+  ${libsdca_INCLUDE_PATH}/prox.h
   ${libsdca_INCLUDE_PATH}/prox/proxdef.h
   ${libsdca_INCLUDE_PATH}/prox/entropy.h
   ${libsdca_INCLUDE_PATH}/prox/entropy_norm.h
@@ -163,9 +163,26 @@ set(libsdca_PROX_SOURCES
   ${libsdca_INCLUDE_PATH}/prox/topk_simplex_biased.h
 )
 
-set(libsdca_UTIL_SOURCES
-  ${libsdca_INCLUDE_PATH}/util/logging.h
-  ${libsdca_INCLUDE_PATH}/util/stopwatch.h
+set(libsdca_SOLVER_SOURCES
+  ${libsdca_INCLUDE_PATH}/solver.h
+  ${libsdca_INCLUDE_PATH}/solver/solverdef.h
+  ${libsdca_INCLUDE_PATH}/solver/dataset.h
+  ${libsdca_INCLUDE_PATH}/solver/context.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/base_objective.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy_topk.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_hinge_topk.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_topk_hinge.h
+  ${libsdca_INCLUDE_PATH}/solver/objective.h
+  ${libsdca_INCLUDE_PATH}/solver/base_solver.h
+  ${libsdca_INCLUDE_PATH}/solver/multiset_solver.h
+  ${libsdca_INCLUDE_PATH}/solver/dual_solver.h
+  ${libsdca_INCLUDE_PATH}/solver/primal_solver.h
+  )
+
+set(libsdca_UTILITY_SOURCES
+  ${libsdca_INCLUDE_PATH}/utility/logging.h
+  ${libsdca_INCLUDE_PATH}/utility/stopwatch.h
+  ${libsdca_INCLUDE_PATH}/utility/type_name.h
   )
 
 #------------------------------------------------------------------------------

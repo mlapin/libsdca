@@ -28,12 +28,12 @@ TEST(LambertTest, lambert_w_exp_float) {
 //  std::printf("lambert_w_exp_float: eps = %e\n", eps);
 
   std::vector<float> v;
-  test_populate(10000, -8, 8, 1.0f, gen, v);
+  test_populate_real(10000, -8, 8, 1.0f, gen, v);
   test_add_0_1_eps_min_max(1.0f, v);
   test_lambert_w_exp_pos(eps, v);
 
   v.clear();
-  test_populate(10000, -8, 8, -1.0f, gen, v);
+  test_populate_real(10000, -8, 8, -1.0f, gen, v);
   test_add_0_1_eps_min_max(-1.0f, v);
   test_lambert_w_exp_neg(eps, v);
 }
@@ -44,12 +44,12 @@ TEST(LambertTest, lambert_w_exp_double) {
 //  std::printf("lambert_w_exp_double: eps = %e\n", eps);
 
   std::vector<double> v;
-  test_populate(10000, -16, 16, 1.0, gen, v);
+  test_populate_real(10000, -16, 16, 1.0, gen, v);
   test_add_0_1_eps_min_max(1.0, v);
   test_lambert_w_exp_pos(eps, v);
 
   v.clear();
-  test_populate(10000, -16, 16, -1.0, gen, v);
+  test_populate_real(10000, -16, 16, -1.0, gen, v);
   test_add_0_1_eps_min_max(-1.0, v);
   test_lambert_w_exp_neg(eps, v);
 }
@@ -61,12 +61,12 @@ TEST(LambertTest, lambert_w_exp_long_double) {
 //  std::printf("lambert_w_exp_long_double: eps = %Le\n", eps);
 
   std::vector<long double> v;
-  test_populate(10000, -16, 16, 1.0L, gen, v);
+  test_populate_real(10000, -16, 16, 1.0L, gen, v);
   test_add_0_1_eps_min(1.0L, v); // googletest does not support long double
   test_lambert_w_exp_pos(eps, v);
 
   v.clear();
-  test_populate(10000, -16, 16, -1.0L, gen, v);
+  test_populate_real(10000, -16, 16, -1.0L, gen, v);
   test_add_0_1_eps_min_max(-1.0L, v);
   test_lambert_w_exp_neg(eps, v);
 }
@@ -85,12 +85,12 @@ TEST(LambertTest, exp_approx_float) {
 //  std::printf("exp_approx_float: eps = %e\n", eps);
 
   std::vector<float> v;
-  test_populate(10000, -8, 3, -1.0f, gen, v);
+  test_populate_real(10000, -8, 3, -1.0f, gen, v);
   test_add_0_1_eps_min(-1.0f, v);
   test_lambert_exp_approx(eps, v);
 
   v.clear();
-  test_populate(10000, -8, 0, 1.0f, gen, v);
+  test_populate_real(10000, -8, 0, 1.0f, gen, v);
   test_add_0_1_eps_min(1.0f, v);
   test_lambert_exp_approx(eps, v);
 }
@@ -101,12 +101,12 @@ TEST(LambertTest, exp_approx_double) {
 //  std::printf("exp_approx_double: eps = %e\n", eps);
 
   std::vector<double> v;
-  test_populate(10000, -16, 3, -1.0, gen, v);
+  test_populate_real(10000, -16, 3, -1.0, gen, v);
   test_add_0_1_eps_min(-1.0, v);
   test_lambert_exp_approx(eps, v);
 
   v.clear();
-  test_populate(10000, -16, 0, 1.0, gen, v);
+  test_populate_real(10000, -16, 0, 1.0, gen, v);
   test_add_0_1_eps_min(1.0, v);
   test_lambert_exp_approx(eps, v);
 }
@@ -117,12 +117,12 @@ TEST(LambertTest, exp_approx_long_double) {
 //  std::printf("exp_approx_long_double: eps = %Le\n", eps);
 
   std::vector<long double> v;
-  test_populate(10000, -16, 3, -1.0L, gen, v);
+  test_populate_real(10000, -16, 3, -1.0L, gen, v);
   test_add_0_1_eps_min(-1.0L, v);
   test_lambert_exp_approx(eps, v);
 
   v.clear();
-  test_populate(10000, -16, 0, 1.0L, gen, v);
+  test_populate_real(10000, -16, 0, 1.0L, gen, v);
   test_add_0_1_eps_min(1.0L, v);
   test_lambert_exp_approx(eps, v);
 }
