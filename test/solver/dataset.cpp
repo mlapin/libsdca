@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <typeinfo>
 
 #include "gtest/gtest.h"
 #include "sdca/solver/dataset.h"
@@ -48,6 +49,17 @@ TEST(SolverDatasetTest, feature_in_multiclass_out) {
   EXPECT_EQ(m, dataset.num_classes());
   EXPECT_EQ(n, dataset.out.labels.size());
 
+  auto trn_dataset = sdca::make_dataset_train_feature_in_multiclass_out(
+    d, n, &features[0], labels.begin());
+
+  EXPECT_EQ(d, trn_dataset.num_dimensions());
+  EXPECT_EQ(n, trn_dataset.num_examples());
+  EXPECT_EQ(m, trn_dataset.num_classes());
+  EXPECT_EQ(n, trn_dataset.out.labels.size());
+
+  typedef decltype(trn_dataset)::eval_type trn_eval_type;
+  EXPECT_TRUE((std::is_same<sdca::train_point<double>, trn_eval_type>::value));
+
   auto tst_dataset = sdca::make_dataset_test_feature_in_multiclass_out(
     d, n, &features[0], labels.begin());
 
@@ -55,6 +67,9 @@ TEST(SolverDatasetTest, feature_in_multiclass_out) {
   EXPECT_EQ(n, tst_dataset.num_examples());
   EXPECT_EQ(m, tst_dataset.num_classes());
   EXPECT_EQ(n, tst_dataset.out.labels.size());
+
+  typedef decltype(tst_dataset)::eval_type tst_eval_type;
+  EXPECT_TRUE((std::is_same<sdca::test_point<double>, tst_eval_type>::value));
 }
 
 
@@ -75,11 +90,25 @@ TEST(SolverDatasetTest, kernel_in_multiclass_out) {
   EXPECT_EQ(n, dataset.in.num_train_examples);
   EXPECT_EQ(n_tst, dataset.out.labels.size());
 
-  auto trn_dataset = sdca::make_dataset_train_kernel_in_multiclass_out(
+  auto trn_dataset = sdca::make_dataset_train_kernel_in_multiclass_out<float>(
     n, &kernel[0], labels.begin());
 
   EXPECT_EQ(n, trn_dataset.num_examples());
   EXPECT_EQ(m, trn_dataset.num_classes());
   EXPECT_EQ(n, trn_dataset.in.num_train_examples);
   EXPECT_EQ(n, trn_dataset.out.labels.size());
+
+  typedef decltype(trn_dataset)::eval_type trn_eval_type;
+  EXPECT_TRUE((std::is_same<sdca::train_point<float>, trn_eval_type>::value));
+
+  auto tst_dataset = sdca::make_dataset_test_kernel_in_multiclass_out<float>(
+    n, n_tst, &kernel[0], labels.begin());
+
+  EXPECT_EQ(n_tst, tst_dataset.num_examples());
+  EXPECT_EQ(m, tst_dataset.num_classes());
+  EXPECT_EQ(n, tst_dataset.in.num_train_examples);
+  EXPECT_EQ(n_tst, tst_dataset.out.labels.size());
+
+  typedef decltype(tst_dataset)::eval_type tst_eval_type;
+  EXPECT_TRUE((std::is_same<sdca::test_point<float>, tst_eval_type>::value));
 }

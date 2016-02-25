@@ -4,28 +4,20 @@
 namespace sdca {
 
 template <typename Type>
-struct type_name {
-  static constexpr const char*
-  name() { return "unknown type"; }
-};
+inline constexpr const char*
+type_name() { return "unknown"; }
 
 template <>
-struct type_name<float> {
-  static constexpr const char*
-  name() { return "float"; }
-};
+inline constexpr const char*
+type_name<float>() { return "float"; }
 
 template <>
-struct type_name<double> {
-  static constexpr const char*
-  name() { return "double"; }
-};
+inline constexpr const char*
+type_name<double>() { return "double"; }
 
 template <>
-struct type_name<long double> {
-  static constexpr const char*
-  name() { return "long double"; }
-};
+inline constexpr const char*
+type_name<long double>() { return "long double"; }
 
 }
 

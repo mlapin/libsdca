@@ -15,7 +15,7 @@ struct l2_topk_hinge
   typedef base_objective<Data, Result> base;
 
   const Result c;
-  const difference_type k;
+  const size_type k;
 
   const Result c_div_k;
 
@@ -26,7 +26,7 @@ struct l2_topk_hinge
     ) :
       base::base_objective(__c / static_cast<Result>(__k)),
       c(__c),
-      k(static_cast<difference_type>(__k)),
+      k(__k),
       c_div_k(__c / static_cast<Result>(__k))
   {}
 
@@ -90,7 +90,7 @@ struct l2_topk_hinge_smooth
 
   const Result c;
   const Result gamma;
-  const difference_type k;
+  const size_type k;
 
   const Result c_div_k;
   const Result gamma_div_k;
@@ -106,7 +106,7 @@ struct l2_topk_hinge_smooth
       base::base_objective(__c / __gamma),
       c(__c),
       gamma(__gamma),
-      k(static_cast<difference_type>(__k)),
+      k(__k),
       c_div_k(__c / static_cast<Result>(__k)),
       gamma_div_k(__gamma / static_cast<Result>(__k)),
       gamma_div_c(__gamma / __c),

@@ -16,7 +16,7 @@ struct l2_entropy_topk
   typedef base_objective<Data, Result> base;
 
   const Result c;
-  const difference_type k;
+  const size_type k;
 
   const Result c_log_c;
 
@@ -27,7 +27,7 @@ struct l2_entropy_topk
     ) :
       base::base_objective(__c),
       c(__c),
-      k(static_cast<difference_type>(__k)),
+      k(__k),
       c_log_c(x_log_x(__c))
   {}
 

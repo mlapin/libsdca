@@ -26,6 +26,7 @@ add_executable(
   test_libsdca_solver
   ${GOOGLETEST_PATH}/src/gtest_main.cc
   test_util.h
+  solver/objective.cpp
   solver/dataset.cpp
   solver/context.cpp
 #  solver/dual_solver.cpp

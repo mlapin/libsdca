@@ -8,14 +8,19 @@ namespace sdca {
 
 template <typename Data,
           typename Result,
-          typename Dataset>
+          template <typename> class Input,
+          typename Output>
 struct solver_context {
   typedef Data data_type;
   typedef Result result_type;
-  typedef Dataset dataset_type;
+  typedef Input<Data> input_type;
+  typedef Output output_type;
 
-  Dataset train;
-  std::vector<Dataset> test;
+  typedef eval_dataset<Input<Data>, Output, train_point<Result>> train_set_type;
+  typedef eval_dataset<Input<Data>, Output, test_point<Result>> test_set_type;
+
+  train_set_type train;
+  std::vector<test_set_type> test;
   stopping_criteria criteria;
 
   data_type* primal_variables;
@@ -26,7 +31,7 @@ struct solver_context {
 
 
   solver_context(
-      Dataset&& __train_set,
+      train_set_type&& __train_set,
       data_type* __dual_variables,
       data_type* __primal_variables = nullptr
     ) :
@@ -36,7 +41,7 @@ struct solver_context {
   {}
 
 
-  void add_test(Dataset&& d) { test.push_back(std::move(d)); }
+  void add_test(test_set_type&& d) { test.push_back(std::move(d)); }
 
   bool is_dual() const { return primal_variables == nullptr; }
 
@@ -46,11 +51,7 @@ struct solver_context {
 template <typename Result = double,
           typename Data,
           typename Iterator>
-inline solver_context<Data,
-                      Result,
-                      eval_dataset<feature_input<Data>,
-                                   multiclass_output,
-                                   train_point<Result>>>
+inline solver_context<Data, Result, feature_input, multiclass_output>
 make_context_multiclass(
     const size_type num_dimensions,
     const size_type num_examples,
@@ -59,11 +60,7 @@ make_context_multiclass(
     Data* dual_variables,
     Data* primal_variables
   ) {
-  return solver_context<Data,
-                        Result,
-                        eval_dataset<feature_input<Data>,
-                                     multiclass_output,
-                                     train_point<Result>>>(
+  return solver_context<Data, Result, feature_input, multiclass_output>(
     make_dataset_train_feature_in_multiclass_out<Result>(
       num_dimensions, num_examples, features, labels),
     dual_variables,
@@ -74,22 +71,14 @@ make_context_multiclass(
 template <typename Result = double,
           typename Data,
           typename Iterator>
-inline solver_context<Data,
-                      Result,
-                      eval_dataset<kernel_input<Data>,
-                                   multiclass_output,
-                                   train_point<Result>>>
+inline solver_context<Data, Result, kernel_input, multiclass_output>
 make_context_multiclass(
     const size_type num_examples,
     const Data* kernel,
     Iterator labels,
     Data* dual_variables
   ) {
-  return solver_context<Data,
-                        Result,
-                        eval_dataset<kernel_input<Data>,
-                                     multiclass_output,
-                                     train_point<Result>>>(
+  return solver_context<Data, Result, kernel_input, multiclass_output>(
     make_dataset_train_kernel_in_multiclass_out<Result>(
       num_examples, kernel, labels),
     dual_variables);

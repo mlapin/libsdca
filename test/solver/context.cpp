@@ -28,6 +28,21 @@ TEST(SolverContextTest, feature_in_multiclass_out) {
   EXPECT_EQ(primal[2], ctx.primal_variables[2]);
   EXPECT_EQ(dual[3], ctx.dual_variables[3]);
   EXPECT_FALSE(ctx.is_dual());
+
+  sdca::size_type n_tst = n - 5;
+  ctx.add_test(sdca::make_dataset_test_feature_in_multiclass_out(
+    d, n_tst, &features[0], labels.begin()));
+
+  EXPECT_EQ(static_cast<std::size_t>(1), ctx.test.size());
+  EXPECT_EQ(d, ctx.test[0].num_dimensions());
+  EXPECT_EQ(n_tst, ctx.test[0].num_examples());
+  EXPECT_EQ(m, ctx.test[0].num_classes());
+  EXPECT_EQ(n_tst, ctx.test[0].out.labels.size());
+
+  typedef decltype(ctx)::data_type data_type;
+  typedef decltype(ctx)::result_type result_type;
+  EXPECT_TRUE((std::is_same<float, data_type>::value));
+  EXPECT_TRUE((std::is_same<double, result_type>::value));
 }
 
 
@@ -50,4 +65,17 @@ TEST(SolverContextTest, kernel_in_multiclass_out) {
   EXPECT_EQ(n, ctx.train.out.labels.size());
   EXPECT_EQ(dual[3], ctx.dual_variables[3]);
   EXPECT_TRUE(ctx.is_dual());
+
+  sdca::size_type n_tst = n - 5;
+  ctx.add_test(sdca::make_dataset_test_kernel_in_multiclass_out(
+    n, n_tst, &kernel[0], labels.begin()));
+
+  EXPECT_EQ(n_tst, ctx.test[0].num_examples());
+  EXPECT_EQ(m, ctx.test[0].num_classes());
+  EXPECT_EQ(n_tst, ctx.test[0].out.labels.size());
+
+  typedef decltype(ctx)::data_type data_type;
+  typedef decltype(ctx)::result_type result_type;
+  EXPECT_TRUE((std::is_same<double, data_type>::value));
+  EXPECT_TRUE((std::is_same<double, result_type>::value));
 }
