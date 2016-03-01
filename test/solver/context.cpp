@@ -6,11 +6,14 @@
 #include "test_util.h"
 
 TEST(SolverContextTest, feature_in_multiclass_out) {
+  typedef float Data;
+  typedef double Result;
+
   sdca::size_type n = 50, m = 3, d = 5, pow_from = 0, pow_to = 1;
-  std::vector<float> features;
+  std::vector<Data> features;
   std::vector<sdca::size_type> labels;
-  std::vector<float> primal(d * m);
-  std::vector<float> dual(m * n);
+  std::vector<Data> primal(d * m);
+  std::vector<Data> dual(m * n);
   primal[2] = 1;
   dual[3] = 2;
 
@@ -19,6 +22,7 @@ TEST(SolverContextTest, feature_in_multiclass_out) {
   test_populate_int<sdca::size_type>(n, 1, m, gen, labels);
 
   auto ctx = sdca::make_context_multiclass(
+    sdca::make_objective_l2_topk_hinge<Data>(),
     d, n, &features[0], labels.begin(), &dual[0], &primal[0]);
 
   EXPECT_EQ(d, ctx.train.num_dimensions());
@@ -41,16 +45,19 @@ TEST(SolverContextTest, feature_in_multiclass_out) {
 
   typedef decltype(ctx)::data_type data_type;
   typedef decltype(ctx)::result_type result_type;
-  EXPECT_TRUE((std::is_same<float, data_type>::value));
-  EXPECT_TRUE((std::is_same<double, result_type>::value));
+  EXPECT_TRUE((std::is_same<Data, data_type>::value));
+  EXPECT_TRUE((std::is_same<Result, result_type>::value));
 }
 
 
 TEST(SolverContextTest, kernel_in_multiclass_out) {
+  typedef double Data;
+  typedef double Result;
+
   sdca::size_type n = 50, m = 3, pow_from = 0, pow_to = 1;
-  std::vector<double> kernel;
+  std::vector<Data> kernel;
   std::vector<sdca::size_type> labels;
-  std::vector<double> dual(m * n);
+  std::vector<Data> dual(m * n);
   dual[3] = 2;
 
   std::mt19937 gen(1);
@@ -58,6 +65,7 @@ TEST(SolverContextTest, kernel_in_multiclass_out) {
   test_populate_int<sdca::size_type>(n, 1, m, gen, labels);
 
   auto ctx = sdca::make_context_multiclass(
+    sdca::make_objective_l2_topk_hinge<Data>(),
     n, &kernel[0], labels.begin(), &dual[0]);
 
   EXPECT_EQ(n, ctx.train.num_examples());
@@ -76,6 +84,6 @@ TEST(SolverContextTest, kernel_in_multiclass_out) {
 
   typedef decltype(ctx)::data_type data_type;
   typedef decltype(ctx)::result_type result_type;
-  EXPECT_TRUE((std::is_same<double, data_type>::value));
-  EXPECT_TRUE((std::is_same<double, result_type>::value));
+  EXPECT_TRUE((std::is_same<Data, data_type>::value));
+  EXPECT_TRUE((std::is_same<Result, result_type>::value));
 }

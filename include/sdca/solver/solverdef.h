@@ -38,92 +38,28 @@ static const char* solver_status_name[] = {
 
 
 struct stopping_criteria {
-  size_type check_epoch = 10;
+  size_type eval_epoch = 10;
   size_type max_epoch = 1000;
   double epsilon = 1e-3;
   double max_cpu_time = 0;
   double max_wall_time = 0;
-  bool check_on_start = false;
+  bool eval_on_start = false;
 
 
   inline std::string
   to_string() const {
     std::ostringstream str;
     str << "epsilon = " << epsilon << ", "
-           "check_epoch = " << check_epoch << ", "
+           "eval_epoch = " << eval_epoch << ", "
            "max_epoch = " << max_epoch << ", "
            "max_cpu_time = " << max_cpu_time << ", "
            "max_wall_time = " << max_wall_time << ", "
-           "check_on_start = " << check_on_start;
+           "eval_on_start = " << eval_on_start;
     return str.str();
   }
 };
 
 
-template <typename Result>
-struct train_point {
-  typedef Result result_type;
-
-  Result primal;
-  Result dual;
-  Result gap;
-  Result primal_loss;
-  Result dual_loss;
-  Result regularizer;
-
-  size_type epoch;
-  double cpu_time;
-  double wall_time;
-  double solve_cpu_time;
-  double solve_wall_time;
-  double eval_cpu_time;
-  double eval_wall_time;
-
-
-  train_point(
-      const Result __primal,
-      const Result __dual,
-      const Result __gap,
-      const Result __p_loss,
-      const Result __d_loss,
-      const Result __regul,
-      const size_type __epoch,
-      const double __cpu_time,
-      const double __wall_time,
-      const double __solve_cpu,
-      const double __solve_wall,
-      const double __eval_cpu,
-      const double __eval_wall
-  ) :
-    primal(__primal), dual(__dual), gap(__gap),
-    primal_loss(__p_loss), dual_loss(__d_loss), regularizer(__regul),
-    epoch(__epoch), cpu_time(__cpu_time), wall_time(__wall_time),
-    solve_cpu_time(__solve_cpu), solve_wall_time(__solve_wall),
-    eval_cpu_time(__eval_cpu), eval_wall_time(__eval_wall)
-  {}
-
-};
-
-
-template <typename Result>
-struct test_point {
-  typedef Result result_type;
-
-  result_type loss;
-  std::vector<result_type> accuracy;
-
-
-  inline std::string
-  to_string() const {
-    std::ostringstream str;
-    str << "loss = " << std::setprecision(4) << loss << ", accuracy = ";
-    long offset = std::min(5L, static_cast<long>(accuracy.size()));
-    std::copy(accuracy.begin(), accuracy.begin() + offset,
-      std::ostream_iterator<result_type>(str, ", "));
-    return str.str();
-  }
-
-};
 
 
 template <typename Field>

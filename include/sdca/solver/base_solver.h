@@ -5,17 +5,135 @@
 #include <limits>
 #include <random>
 
-#include "sdca/solver/solverdef.h"
-#include "sdca/util/logging.h"
-#include "sdca/util/stopwatch.h"
+#include "sdca/solver/context.h"
+#include "sdca/utility/logging.h"
+#include "sdca/utility/stopwatch.h"
 
 namespace sdca {
+
+
+template <typename Data,
+          typename Result,
+          template <typename> class Input,
+          typename Output,
+          template <typename, typename> class Objective>
+class solver {
+public:
+  typedef Data data_type;
+  typedef Result result_type;
+  typedef Input<Data> input_type;
+  typedef Output output_type;
+  typedef Objective<Data, Result> objective_type;
+
+  typedef solver_context<Data, Result, Input, Output, Objective> context_type;
+
+
+  explicit solver(
+      context_type& __context
+    ) :
+      ctx_(__context)
+  {}
+
+
+  void solve() {
+    begin_solve();
+    while (ctx_.status == solver_status::solving) {
+
+      begin_epoch();
+      for (auto& example : examples_) {
+        solve_example(example);
+      }
+
+      end_epoch();
+    }
+    end_solve();
+  }
+
+
+protected:
+  context_type& ctx_;
+
+  bool is_evaluated_;
+  std::minstd_rand generator_;
+  std::vector<size_type> examples_;
+
+
+  virtual void begin_solve() {
+    if (ctx_.criteria.eval_on_start) {
+      evaluate_solution();
+    }
+  }
+
+
+  virtual void end_solve() {
+    ctx_.solve_time.stop();
+    if (!is_evaluated_) {
+      evaluate_solution();
+    }
+  }
+
+
+  virtual void begin_epoch() {
+    is_evaluated_ = false;
+    std::shuffle(examples_.begin(), examples_.end(), generator_);
+  }
+
+
+  virtual void end_epoch() {
+    ++ctx_.epoch;
+    ctx_.solve_time.stop();
+
+    if ((ctx_.criteria.eval_epoch > 0) &&
+        (ctx_.epoch % ctx_.criteria.eval_epoch == 0)) {
+      evaluate_solution();
+    }
+
+    check_stopping_conditions();
+    ctx_.solve_time.resume();
+  }
+
+
+  virtual void evaluate_solution() {
+    ctx_.train.evaluate(ctx_);
+  }
+
+
+  virtual void check_stopping_conditions() {
+    if (ctx_.status == solver_status::solving) {
+
+      if (ctx_.epoch >= ctx_.criteria.max_epoch) {
+
+        ctx_.status = solver_status::max_epoch;
+        LOG_DEBUG << "  (warning) "
+          "epoch limit: " << ctx_.epoch << std::endl;
+
+      } else if (ctx_.criteria.max_cpu_time > 0 &&
+                 ctx_.cpu_time() >= ctx_.criteria.max_cpu_time) {
+
+        ctx_.status = solver_status::max_cpu_time;
+        LOG_DEBUG << "  (warning) "
+          "cpu time limit: " << ctx_.cpu_time() << std::endl;
+
+      } else if (ctx_.criteria.max_wall_time > 0 &&
+                 ctx_.wall_time() >= ctx_.criteria.max_wall_time) {
+
+        ctx_.status = solver_status::max_wall_time;
+        LOG_DEBUG << "  (warning) "
+          "wall time limit: " << ctx_.wall_time() << std::endl;
+
+      }
+    }
+  }
+
+};
+
+
 
 template <typename Result>
 class base_solver {
 public:
   typedef Result result_type;
-  typedef train_point<Result> record_type;
+  typedef eval_train<Result> record_type;
 
   static constexpr Result sufficient_increase =
       1 - 16 * std::numeric_limits<Result>::epsilon();
@@ -164,7 +282,7 @@ protected:
 
 
   virtual void begin_solve() {
-    if (criteria_.check_on_start) {
+    if (criteria_.eval_on_start) {
       compute_duality_gap();
     }
   }
@@ -200,8 +318,8 @@ protected:
     solve_wall_timer_.stop();
 
     // Check the duality gap or log progress
-    if ((criteria_.check_epoch > 0) &&
-        (epoch_ % criteria_.check_epoch == 0)) {
+    if ((criteria_.eval_epoch > 0) &&
+        (epoch_ % criteria_.eval_epoch == 0)) {
       compute_duality_gap();
     } else {
       LOG_DEBUG << "  "

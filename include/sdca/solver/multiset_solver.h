@@ -19,7 +19,7 @@ public:
   typedef Dataset dataset_type;
 
   typedef solver_context<Data, Dataset> context_type;
-  typedef test_point<Result> evaluation_type;
+  typedef eval_test<Result> evaluation_type;
   typedef std::vector<evaluation_type> evaluations_type;
 
 

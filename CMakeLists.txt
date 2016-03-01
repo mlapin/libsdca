@@ -166,6 +166,10 @@ set(libsdca_PROX_SOURCES
 set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver.h
   ${libsdca_INCLUDE_PATH}/solver/solverdef.h
+  ${libsdca_INCLUDE_PATH}/solver/input.h
+  ${libsdca_INCLUDE_PATH}/solver/output.h
+  ${libsdca_INCLUDE_PATH}/solver/eval_type.h
+  ${libsdca_INCLUDE_PATH}/solver/eval_strategy.h
   ${libsdca_INCLUDE_PATH}/solver/dataset.h
   ${libsdca_INCLUDE_PATH}/solver/context.h
   ${libsdca_INCLUDE_PATH}/solver/objective/base_objective.h
