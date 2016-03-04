@@ -9,7 +9,6 @@ test_prox_two_simplex_check_feasible(
     const Type eps, std::vector<Type>& v) {
   ASSERT_TRUE(p > 0);
   ASSERT_TRUE(static_cast<std::size_t>(p) < v.size());
-  std::vector<Type> u(v);
   sdca::prox_two_simplex(v.begin(), v.begin() + p, v.end(), rhs);
 
   Type lo(0), hi(rhs);
@@ -22,13 +21,6 @@ test_prox_two_simplex_check_feasible(
   Type sum2 = std::accumulate(v.begin() + p, v.end(), static_cast<Type>(0));
   ASSERT_LE(sum1, rhs + eps);
   ASSERT_LE(sum2, rhs + eps);
-  if (std::abs(sum1 - sum2) > eps &&
-      std::abs(sum1 - sum2) > static_cast<Type>(1e-5)) {
-    std::printf("sum1 = %.15e\n", sum1);
-    std::printf("sum2 = %.15e\n", sum2);
-    std::printf("diff = %.15e\n", std::abs(sum1 - sum2));
-    sdca::prox_two_simplex(u.begin(), u.begin() + p, u.end(), rhs);
-  }
   ASSERT_NEAR(sum1, sum2, eps);
 }
 
@@ -43,14 +35,15 @@ test_prox_two_simplex_set_params(
   p = d_p(gen);
   rhs = d_rhs(gen);
   Type max(*std::max_element(v.begin(), v.end()));
-  eps = v.size() * std::max(static_cast<Type>(1), std::abs(max))
-      * std::numeric_limits<Type>::epsilon();
+  eps = std::numeric_limits<Type>::epsilon()
+      * std::max(static_cast<Type>(1), std::abs(max))
+      * static_cast<Type>(v.size());
 }
 
 template <typename Type>
 inline void
 test_prox_two_simplex_feasible(
-    const int pow_from, const int pow_to, const int tol) {
+    const int pow_from, const int pow_to, const Type tol) {
   std::mt19937 gen(1);
   std::uniform_int_distribution<ptrdiff_t> d_p(1, 10);
   std::uniform_real_distribution<Type> d_rhs(0, 5);

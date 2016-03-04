@@ -25,21 +25,23 @@ test_prox_knapsack_le_set_params(
     std::uniform_real_distribution<Type>& d_hi,
     std::uniform_real_distribution<Type>& d_rhs,
     Type& lo, Type& hi, Type& rhs, Type& eps) {
+  Type size = static_cast<Type>(v.size());
   for (;;) {
     lo = d_lo(gen);
     hi = d_hi(gen);
     rhs = d_rhs(gen);
-    if (lo <= hi && lo * v.size() <= rhs && hi * v.size() >= rhs) break;
+    if (lo <= hi && lo * size <= rhs && hi * size >= rhs) break;
   }
   Type max(*std::max_element(v.begin(), v.end()));
-  eps = v.size() * std::max(static_cast<Type>(1), std::abs(max))
-      * std::numeric_limits<Type>::epsilon();
+  eps = std::numeric_limits<Type>::epsilon()
+      * std::max(static_cast<Type>(1), std::abs(max))
+      * static_cast<Type>(v.size());
 }
 
 template <typename Type>
 inline void
 test_prox_knapsack_le_feasible(
-    const int pow_from, const int pow_to, const int tol) {
+    const int pow_from, const int pow_to, const Type tol) {
   std::mt19937 gen(1);
   std::uniform_real_distribution<Type> d_lo(-2, 0.5);
   std::uniform_real_distribution<Type> d_hi(-0.5, 2);

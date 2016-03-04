@@ -89,17 +89,17 @@ lambert_w_exp(
    * and could be optimized further (as well as the if-else branching).
    */
   float w;
-  if (x > -1.0f) { // (-1, +Inf)
-    if (x <= 8.0f) { // (-1, 8]
+  if (x > -1) { // (-1, +Inf)
+    if (x <= 8) { // (-1, 8]
       w = lambert_w_iter_5(x, 1.0f);
     } else { // (8, +Inf)
-      return (x <= 536870912.0f) ? lambert_w_iter_5(x - std::log(x), x) : x;
+      return (x <= 536870912) ? lambert_w_iter_5(x - std::log(x), x) : x;
     }
   } else { // (-Inf, -1]
-    if (x > -18.0f) { // (-18, -1]
+    if (x > -18) { // (-18, -1]
       w = exp_approx(x);
     } else { // (-Inf, -18]
-      return (x > -104.0f) ? std::exp(x) : 0.0f;
+      return (x > -104) ? std::exp(x) : 0.0f;
     }
   }
   return lambert_w_iter_5(w, std::exp(x - w));
@@ -133,24 +133,24 @@ lambert_w_exp(
    */
   double w;
   if (x > 0) { // (0, +Inf)
-    if (x <= 4.0) { // (0, 4]
+    if (x <= 4) { // (0, 4]
       w = lambert_w_iter_5(x, 1.0);
     } else { // (4, +Inf)
       if (x <= 576460752303423488.0) { // (4, 576460752303423488]
-        w = x - static_cast<double>(std::log(static_cast<float>(x)));
+        w = x - std::log(x);
         w = lambert_w_iter_5(w, x);
       } else { // (576460752303423488, +Inf)
         return x;
       }
     }
   } else { // (-Inf, 0]
-    if (x > -36.0) { // (-36, 0]
+    if (x > -36) { // (-36, 0]
       w = exp_approx(x);
-      if (x > -20.0) { // (-20, 0]
+      if (x > -20) { // (-20, 0]
         w = lambert_w_iter_5(w, exp_approx(x - w));
       }
     } else { // (-Inf, -36]
-      return (x > -746.0) ? std::exp(x) : 0.0;
+      return (x > -746) ? std::exp(x) : 0.0;
     }
   }
   return lambert_w_iter_5(w, std::exp(x - w));
@@ -174,14 +174,8 @@ inline long double
 lambert_w_exp(
     const long double x
   ) {
-  /* Initialize w for the Householder's iteration; consider intervals:
-   * (-Inf, -11400]               - exp underflows (exp(x)=0), return 0
-   * (-746, -36]                  - w = exp(x), return exp(x)
-   * (-36, -20]                   - w_0 = exp(x), return w_1
-   * (-20, 0]                     - w_0 = exp(x), return w_2
-   * (0, 4]                       - w_0 = x, return w_2
-   * (4, 576460752303423488]      - w_0 = x - log(x), return w_2
-   * (576460752303423488, +Inf)   - (x + log(x)) = x, return x
+  /* Initialize w for the Householder's iteration;
+   * use the same intervals as for double
    */
   long double w;
   if (x > 0) { // (0, +Inf)
@@ -202,10 +196,9 @@ lambert_w_exp(
         w = lambert_w_iter_5(w, exp_approx(x - w));
       }
     } else { // (-Inf, -36]
-      return (x > -11400) ? std::exp(x) : 0.0;
+      return (x > -746) ? std::exp(x) : 0.0;
     }
   }
-  w = lambert_w_iter_5(w, std::exp(x - w));
   return lambert_w_iter_5(w, std::exp(x - w));
 }
 

@@ -1,6 +1,7 @@
 #ifndef SDCA_SOLVER_OUTPUT_H
 #define SDCA_SOLVER_OUTPUT_H
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "sdca/solver/solverdef.h"

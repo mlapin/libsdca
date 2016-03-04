@@ -9,7 +9,7 @@ test_prox_topk_cone_biased_check_feasible(const ptrdiff_t k, const Type rho,
 
   Type sum = std::accumulate(v.begin(), v.end(), static_cast<Type>(0));
 
-  Type lo(0), hi(sum/k);
+  Type lo(0), hi(sum / static_cast<Type>(k));
   std::for_each(v.begin(), v.end(), [=](const Type x){
     ASSERT_GE(x, lo); });
   std::for_each(v.begin(), v.end(), [=](const Type x){
@@ -27,14 +27,15 @@ test_prox_topk_cone_biased_set_params(
   k = d_k(gen);
   rho = d_rho(gen);
   Type max(*std::max_element(v.begin(), v.end()));
-  eps = v.size() * std::max(static_cast<Type>(1), std::abs(max))
-      * std::numeric_limits<Type>::epsilon();
+  eps = std::numeric_limits<Type>::epsilon()
+      * std::max(static_cast<Type>(1), std::abs(max))
+      * static_cast<Type>(v.size());
 }
 
 template <typename Type>
 inline void
 test_prox_topk_cone_biased_feasible(
-    const int pow_from, const int pow_to, const int tol) {
+    const int pow_from, const int pow_to, const Type tol) {
   std::mt19937 gen(1);
   std::uniform_int_distribution<ptrdiff_t> d_k(1, 10);
   std::uniform_real_distribution<Type> d_rho(0, 2);

@@ -24,21 +24,23 @@ test_prox_entropy_norm_set_params(
     std::uniform_real_distribution<Type>& d_hi,
     std::uniform_real_distribution<Type>& d_rhs,
     Type& lo, Type& hi, Type& rhs, Type& eps) {
+  Type size = static_cast<Type>(v.size());
   for (;;) {
     lo = 0;
     hi = d_hi(gen);
     rhs = d_rhs(gen);
-    if (hi * v.size() >= rhs) break;
+    if (hi * size >= rhs) break;
   }
   Type max(*std::max_element(v.begin(), v.end()));
-  eps = v.size() * std::max(static_cast<Type>(1), std::abs(max))
-      * std::numeric_limits<Type>::epsilon();
+  eps = std::numeric_limits<Type>::epsilon()
+      * std::max(static_cast<Type>(1), std::abs(max))
+      * static_cast<Type>(v.size());
 }
 
 template <typename Type>
 inline void
 test_prox_entropy_norm_feasible(
-    const int pow_from, const int pow_to, const int tol) {
+    const int pow_from, const int pow_to, const Type tol) {
   std::mt19937 gen(1);
   std::uniform_real_distribution<Type> d_hi(0, 2);
   std::uniform_real_distribution<Type> d_rhs(0, 5);

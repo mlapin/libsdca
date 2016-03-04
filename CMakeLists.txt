@@ -8,7 +8,11 @@ set(libsdca_VERSION
   ${libsdca_MAJOR_VERSION}.${libsdca_MINOR_VERSION}.${libsdca_PATCH_VERSION}
   )
 add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
-#add_definitions(-DSDCA_ACCURATE_MATH)
+
+# Use either fast or accurate math
+#   TRUE  enables -Ofast
+#   FALSE defines SDCA_ACCURATE_MATH (and no -Ofast)
+set(USE_FAST_MATH TRUE)
 
 ###############################################################################
 #
@@ -26,13 +30,13 @@ endif()
 
 # Warning flags
 set(WARN_FLAGS "-pedantic -Werror -W -Wall -Wextra")
-if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   set(WARN_FLAGS "${WARN_FLAGS} -Weverything")
   set(WARN_FLAGS "${WARN_FLAGS} -Wno-c++98-compat")
   set(WARN_FLAGS "${WARN_FLAGS} -Wno-float-equal")
   set(WARN_FLAGS "${WARN_FLAGS} -Wno-documentation")
   set(WARN_FLAGS "${WARN_FLAGS} -Wno-padded")
-elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(WARN_FLAGS "${WARN_FLAGS} -Wparentheses")
   set(WARN_FLAGS "${WARN_FLAGS} -Wshadow")
   set(WARN_FLAGS "${WARN_FLAGS} -Wpointer-arith")
@@ -46,11 +50,6 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(WARN_FLAGS "${WARN_FLAGS} -Wuseless-cast")
   set(WARN_FLAGS "${WARN_FLAGS} -Wdouble-promotion")
   set(WARN_FLAGS "${WARN_FLAGS} -Wvector-operation-performance")
-  set(WARN_FLAGS "${WARN_FLAGS} -Wmisleading-indentation")
-  set(WARN_FLAGS "${WARN_FLAGS} -Wsuggest-final-types")
-  set(WARN_FLAGS "${WARN_FLAGS} -Wsuggest-final-methods")
-  set(WARN_FLAGS "${WARN_FLAGS} -Wsuggest-override")
-  set(WARN_FLAGS "${WARN_FLAGS} -Wunsafe-loop-optimizations")
   set(WARN_FLAGS "${WARN_FLAGS} -Wlogical-op")
 endif()
 
@@ -59,8 +58,11 @@ set(DEBUG_FLAGS "-fstack-protector-all")
 
 # Release flags
 set(RELEASE_FLAGS "-march=native")
-if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
-# -funsafe-loop-optimizations
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  if(${USE_FAST_MATH})
+    set(RELEASE_FLAGS "${RELEASE_FLAGS} -Ofast")
+  endif()
+  set(RELEASE_FLAGS "${RELEASE_FLAGS} -funsafe-loop-optimizations")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fuse-linker-plugin")
@@ -145,6 +147,11 @@ add_subdirectory(${GOOGLETEST_PATH})
 # SDCA Library
 #
 ###############################################################################
+
+if(NOT ${USE_FAST_MATH})
+  # If defined, more computations are performed to increase numerical stability
+  add_definitions(-DSDCA_ACCURATE_MATH)
+endif()
 
 # Set SDCA specific flags after 3rd party code is built
 set(CMAKE_CXX_FLAGS

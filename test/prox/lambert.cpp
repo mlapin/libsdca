@@ -14,18 +14,35 @@ test_lambert_w_exp_pos(const Type eps, const std::vector<Type>& v) {
 
 template <typename Type>
 inline void
+test_lambert_w_exp_neg_check(
+    const Type x,
+    const Type eps
+  ) {
+  Type d = std::abs(std::exp(x) - sdca::x_exp_x(sdca::lambert_w_exp(x)));
+  // Without this, the test fails with -Ofast on long double
+  if (d >= eps) {
+    std::printf("%.24Le\n\n", static_cast<long double>(d));
+  }
+  ASSERT_TRUE(d < eps);
+}
+
+template <typename Type>
+inline void
 test_lambert_w_exp_neg(const Type eps, const std::vector<Type>& v) {
   std::for_each(v.begin(), v.end(), [=](const Type x){
+#ifdef SDCA_ACCURATE_MATH
     ASSERT_TRUE(
-      std::abs(std::exp(x) - sdca::x_exp_x(sdca::lambert_w_exp(x)))
-      < eps
-    ); });
+      std::abs(std::exp(x) - sdca::x_exp_x(sdca::lambert_w_exp(x))) < eps
+    );
+#else
+    test_lambert_w_exp_neg_check(x, eps);
+#endif
+  });
 }
 
 TEST(LambertTest, lambert_w_exp_float) {
   std::mt19937 gen(1);
   float eps = 4 * std::numeric_limits<float>::epsilon();
-//  std::printf("lambert_w_exp_float: eps = %e\n", eps);
 
   std::vector<float> v;
   test_populate_real(10000, -8, 8, 1.0f, gen, v);
@@ -41,7 +58,6 @@ TEST(LambertTest, lambert_w_exp_float) {
 TEST(LambertTest, lambert_w_exp_double) {
   std::mt19937 gen(1);
   auto eps = 4 * std::numeric_limits<double>::epsilon();
-//  std::printf("lambert_w_exp_double: eps = %e\n", eps);
 
   std::vector<double> v;
   test_populate_real(10000, -16, 16, 1.0, gen, v);
@@ -56,9 +72,8 @@ TEST(LambertTest, lambert_w_exp_double) {
 
 TEST(LambertTest, lambert_w_exp_long_double) {
   std::mt19937 gen(1);
-  auto eps = 4 * static_cast<long double>(
-        std::numeric_limits<double>::epsilon());
-//  std::printf("lambert_w_exp_long_double: eps = %Le\n", eps);
+  auto eps = static_cast<long double>(
+    4 * std::numeric_limits<double>::epsilon());
 
   std::vector<long double> v;
   test_populate_real(10000, -16, 16, 1.0L, gen, v);
@@ -84,7 +99,6 @@ test_lambert_exp_approx(const Type eps, const std::vector<Type>& v) {
 TEST(LambertTest, exp_approx_float) {
   std::mt19937 gen(1);
   float eps = 0.001f;
-//  std::printf("exp_approx_float: eps = %e\n", eps);
 
   std::vector<float> v;
   test_populate_real(10000, -8, 3, -1.0f, gen, v);
@@ -100,7 +114,6 @@ TEST(LambertTest, exp_approx_float) {
 TEST(LambertTest, exp_approx_double) {
   std::mt19937 gen(1);
   double eps = 0.001;
-//  std::printf("exp_approx_double: eps = %e\n", eps);
 
   std::vector<double> v;
   test_populate_real(10000, -16, 3, -1.0, gen, v);
@@ -116,7 +129,6 @@ TEST(LambertTest, exp_approx_double) {
 TEST(LambertTest, exp_approx_long_double) {
   std::mt19937 gen(1);
   long double eps = 0.001L;
-//  std::printf("exp_approx_long_double: eps = %Le\n", eps);
 
   std::vector<long double> v;
   test_populate_real(10000, -16, 3, -1.0L, gen, v);
@@ -142,11 +154,4 @@ TEST(LambertTest, omega_const) {
   long double w_l = sdca::lambert_w_exp(0.0L);
   long double omega = static_cast<long double>(sdca::kOmega);
   EXPECT_TRUE(std::abs(w_l - omega) < eps_l);
-//  EXPECT_NEAR(w_l, omega, eps_l); // fails for long double
-
-//  std::printf("kOmega     : %.16Le\n"
-//              "long double: %.16Le\n"
-//              "double     : %.16e\n"
-//              "float      : %.16e\n"
-//              , sdca::kOmega, w_l, w_d, w_f);
 }

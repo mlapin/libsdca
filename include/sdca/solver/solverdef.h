@@ -25,16 +25,16 @@ enum class solver_status {
 
 typedef typename std::underlying_type<solver_status>::type solver_status_type;
 
-static const char* solver_status_name[] = {
-  "none",
-  "solving",
-  "solved",
-  "no_progress",
-  "max_epoch",
-  "max_cpu_time",
-  "max_wall_time",
-  "failed"
-};
+//static const char* solver_status_name[] = {
+//  "none",
+//  "solving",
+//  "solved",
+//  "no_progress",
+//  "max_epoch",
+//  "max_cpu_time",
+//  "max_wall_time",
+//  "failed"
+//};
 
 
 struct stopping_criteria {

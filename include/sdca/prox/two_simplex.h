@@ -164,7 +164,7 @@ template <typename Result = double,
           typename Iterator>
 inline void
 prox_two_simplex(
-    ptrdiff_t p,
+    std::ptrdiff_t p,
     Iterator first,
     Iterator last,
     Iterator aux,

@@ -93,14 +93,14 @@ log_sum_exp(
     Iterator last,
     Iterator max
   ) {
-  Result s(0);
+  Result s(0), m(static_cast<Result>(*max));
   for (; first != max; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
   for (first = max + 1; first != last; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
-  return static_cast<Result>(*max) + std::log1p(s);
+  return m + std::log1p(s);
 }
 
 /**
@@ -141,13 +141,14 @@ log_sum_exp(
     Result& s
   ) {
   s = 0;
+  Result m(static_cast<Result>(*max));
   for (; first != max; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
   for (first = max + 1; first != last; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
-  return static_cast<Result>(*max) + std::log1p(s);
+  return m + std::log1p(s);
 }
 
 /**
@@ -187,15 +188,16 @@ log_1_sum_exp(
     Iterator last,
     Iterator max
   ) {
-  Result s(std::exp(static_cast<Result>(-*max)));
+  Result m(static_cast<Result>(*max));
+  Result s(std::exp(-m));
   if (!std::isfinite(s)) return 0;
   for (; first != max; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
   for (first = max + 1; first != last; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
-  return static_cast<Result>(*max) + std::log1p(s);
+  return m + std::log1p(s);
 }
 
 /**
@@ -235,15 +237,16 @@ log_1_sum_exp(
     Iterator max,
     Result& s
   ) {
-  s = std::exp(static_cast<Result>(-*max));
+  Result m(static_cast<Result>(*max));
+  s = std::exp(-m);
   if (!std::isfinite(s)) return 0;
   for (; first != max; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
   for (first = max + 1; first != last; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
-  return static_cast<Result>(*max) + std::log1p(s);
+  return m + std::log1p(s);
 }
 
 /**
@@ -291,17 +294,16 @@ log_sum_exp(
     Result& lse,
     Result& lse1
   ) {
-  Result s(0);
+  Result s(0), m(static_cast<Result>(*max));
   for (; first != max; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
   for (first = max + 1; first != last; ++first) {
-    s += std::exp(static_cast<Result>(*first - *max));
+    s += std::exp(static_cast<Result>(*first) - m);
   }
-  lse = static_cast<Result>(*max) + std::log1p(s);
-  lse1 = std::exp(static_cast<Result>(-*max));
-  lse1 = std::isfinite(lse1) ?
-    static_cast<Result>(*max) + std::log1p(s + lse1) : 0;
+  lse = m + std::log1p(s);
+  lse1 = std::exp(-m);
+  lse1 = std::isfinite(lse1) ? m + std::log1p(s + lse1) : 0;
   return s;
 }
 

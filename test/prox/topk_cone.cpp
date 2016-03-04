@@ -9,7 +9,7 @@ test_prox_topk_cone_check_feasible(const ptrdiff_t k,
 
   Type sum = std::accumulate(v.begin(), v.end(), static_cast<Type>(0));
 
-  Type lo(0), hi(sum/k);
+  Type lo(0), hi(sum / static_cast<Type>(k));
   std::for_each(v.begin(), v.end(), [=](const Type x){
     ASSERT_GE(x, lo); });
   std::for_each(v.begin(), v.end(), [=](const Type x){
@@ -25,14 +25,15 @@ test_prox_topk_cone_set_params(
     ptrdiff_t& k, Type& eps) {
   k = d_k(gen);
   Type max(*std::max_element(v.begin(), v.end()));
-  eps = v.size() * std::max(static_cast<Type>(1), std::abs(max))
-      * std::numeric_limits<Type>::epsilon();
+  eps = std::numeric_limits<Type>::epsilon()
+      * std::max(static_cast<Type>(1), std::abs(max))
+      * static_cast<Type>(v.size());
 }
 
 template <typename Type>
 inline void
 test_prox_topk_cone_feasible(
-    const int pow_from, const int pow_to, const int tol) {
+    const int pow_from, const int pow_to, const Type tol) {
   std::mt19937 gen(1);
   std::uniform_int_distribution<ptrdiff_t> d_k(1, 10);
 

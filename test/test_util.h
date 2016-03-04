@@ -7,6 +7,8 @@
 #include <random>
 #include <vector>
 
+#if defined(__GNUC__)
+#elif defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wundef"
 #pragma clang diagnostic ignored "-Wc++98-compat-pedantic"
@@ -16,10 +18,14 @@
 #pragma clang diagnostic ignored "-Wused-but-marked-unused"
 #pragma clang diagnostic ignored "-Wweak-vtables"
 #pragma clang diagnostic ignored "-Wdeprecated"
+#endif
 
 #include "gtest/gtest.h"
 
+#if defined(__GNUC__)
+#elif defined(__clang__)
 #pragma clang diagnostic pop
+#endif
 
 template <typename IntType,
           typename RealType>
