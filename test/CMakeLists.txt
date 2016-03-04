@@ -28,22 +28,22 @@ add_executable(
   ${libsdca_UTILITY_SOURCES}
   )
 
-#add_executable(
-#  test_libsdca_solver
-#  test_main.cpp
-#  test_util.h
-#  solver/objective.cpp
-#  solver/dataset.cpp
-#  solver/context.cpp
-##  solver/dual_solver.cpp
-#  ${libsdca_MATH_SOURCES}
-#  ${libsdca_PROX_SOURCES}
-#  ${libsdca_SOLVER_SOURCES}
-#  ${libsdca_UTILITY_SOURCES}
-#  )
+add_executable(
+  test_libsdca_solver
+  test_main.cpp
+  test_util.h
+  solver/objective.cpp
+  solver/dataset.cpp
+  solver/context.cpp
+#  solver/dual_solver.cpp
+  ${libsdca_MATH_SOURCES}
+  ${libsdca_PROX_SOURCES}
+  ${libsdca_SOLVER_SOURCES}
+  ${libsdca_UTILITY_SOURCES}
+  )
 
 target_link_libraries(test_libsdca_prox gtest)
-#target_link_libraries(test_libsdca_solver gtest ${BLAS_LIBRARIES})
+target_link_libraries(test_libsdca_solver gtest ${BLAS_LIBRARIES})
 
 enable_testing()
 

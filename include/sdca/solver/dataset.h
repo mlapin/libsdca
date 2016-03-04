@@ -80,7 +80,8 @@ make_dataset_feature_in_multiclass_out(
   return dataset<feature_input<Data>,
                  multiclass_output>(
     make_input_feature(num_dimensions, num_examples, features),
-    make_output_multiclass(labels, labels + num_examples));
+    make_output_multiclass(labels, labels +
+                           static_cast<difference_type>(num_examples)));
 }
 
 
@@ -97,7 +98,8 @@ make_dataset_kernel_in_multiclass_out(
   return dataset<kernel_input<Data>,
                  multiclass_output>(
     make_input_kernel(num_train_examples, num_examples, kernel),
-    make_output_multiclass(labels, labels + num_examples));
+    make_output_multiclass(labels, labels +
+                           static_cast<difference_type>(num_examples)));
 }
 
 
@@ -117,7 +119,8 @@ make_dataset_train_feature_in_multiclass_out(
                       multiclass_output,
                       eval_train<Result, multiclass_output>>(
     make_input_feature(num_dimensions, num_examples, features),
-    make_output_multiclass(labels, labels + num_examples));
+    make_output_multiclass(labels, labels +
+                           static_cast<difference_type>(num_examples)));
 }
 
 
@@ -136,7 +139,8 @@ make_dataset_train_kernel_in_multiclass_out(
                       multiclass_output,
                       eval_train<Result, multiclass_output>>(
     make_input_kernel(num_examples, num_examples, kernel),
-    make_output_multiclass(labels, labels + num_examples));
+    make_output_multiclass(labels, labels +
+                           static_cast<difference_type>(num_examples)));
 }
 
 
@@ -156,7 +160,8 @@ make_dataset_test_feature_in_multiclass_out(
                       multiclass_output,
                       eval_test<Result, multiclass_output>>(
     make_input_feature(num_dimensions, num_examples, features),
-    make_output_multiclass(labels, labels + num_examples));
+    make_output_multiclass(labels, labels +
+                           static_cast<difference_type>(num_examples)));
 }
 
 
@@ -176,7 +181,8 @@ make_dataset_test_kernel_in_multiclass_out(
                       multiclass_output,
                       eval_test<Result, multiclass_output>>(
     make_input_kernel(num_train_examples, num_examples, kernel),
-    make_output_multiclass(labels, labels + num_examples));
+    make_output_multiclass(labels, labels +
+                           static_cast<difference_type>(num_examples)));
 }
 
 }
