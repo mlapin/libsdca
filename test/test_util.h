@@ -7,8 +7,7 @@
 #include <random>
 #include <vector>
 
-#if defined(__GNUC__)
-#elif defined(__clang__)
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wundef"
 #pragma clang diagnostic ignored "-Wc++98-compat-pedantic"
@@ -22,8 +21,7 @@
 
 #include "gtest/gtest.h"
 
-#if defined(__GNUC__)
-#elif defined(__clang__)
+#if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
 

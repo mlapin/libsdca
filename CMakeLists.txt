@@ -10,9 +10,9 @@ set(libsdca_VERSION
 add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
 
 # Use either fast or accurate math
-#   TRUE  enables -Ofast
+#   TRUE  enables -Ofast (with GCC)
 #   FALSE defines SDCA_ACCURATE_MATH (and no -Ofast)
-set(USE_FAST_MATH TRUE)
+set(USE_FAST_MATH FALSE)
 
 ###############################################################################
 #
@@ -60,6 +60,7 @@ set(DEBUG_FLAGS "-fstack-protector-all")
 set(RELEASE_FLAGS "-march=native")
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   if(${USE_FAST_MATH})
+    # Tests pass with -Ofast using gcc-4.9.2, but not clang-7.0.2
     set(RELEASE_FLAGS "${RELEASE_FLAGS} -Ofast")
   endif()
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -funsafe-loop-optimizations")
@@ -133,11 +134,6 @@ set(CMAKE_SHARED_LINKER_FLAGS
 
 # At this point, we only need googletest, not googlemock
 set(GOOGLETEST_PATH ${CMAKE_SOURCE_DIR}/vendor/googletest/googletest)
-
-#include_directories(
-#  ${GOOGLETEST_PATH}
-#  ${GOOGLETEST_PATH}/include
-#  )
 
 add_subdirectory(${GOOGLETEST_PATH})
 
