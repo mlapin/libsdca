@@ -1,6 +1,8 @@
 #ifndef SDCA_PROX_TOPK_CONE_H
 #define SDCA_PROX_TOPK_CONE_H
 
+#include <functional>
+
 #include "sdca/prox/proxdef.h"
 
 namespace sdca {
@@ -11,6 +13,7 @@ struct topk_cone_projection {
   sdca::projection projection;
   sdca::thresholds<Result, Iterator> thresholds;
 };
+
 
 template <typename Result,
           typename Iterator>
@@ -50,6 +53,7 @@ topk_cone_special_cases(
   proj.projection = projection::general;
   return proj;
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -128,6 +132,7 @@ thresholds_topk_cone_search(
   return thresholds<Result, Iterator>(0, 0, 0, first, first);
 }
 
+
 /**
  * Solve
  *    min_x 0.5 * <x, x> - <a, x>
@@ -151,6 +156,7 @@ thresholds_topk_cone(
   return proj.thresholds;
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -160,8 +166,9 @@ prox_topk_cone(
     const typename std::iterator_traits<Iterator>::difference_type k = 1
     ) {
   prox(first, last,
-    thresholds_topk_cone<Result, Iterator>, k);
+       thresholds_topk_cone<Result, Iterator>, k);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -169,13 +176,13 @@ inline void
 prox_topk_cone(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_topk_cone<Result, Iterator>, k);
+  prox(first, last, aux,
+       thresholds_topk_cone<Result, Iterator>, k);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -184,12 +191,11 @@ prox_topk_cone(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_topk_cone<Result, Iterator>, k);
+  prox(dim, first, last, aux,
+       thresholds_topk_cone<Result, Iterator>, k);
 }
 
 }

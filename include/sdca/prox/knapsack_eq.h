@@ -32,48 +32,59 @@ thresholds_knapsack_eq(
     const Result hi = 1,
     const Result rhs = 1
     ) {
+  assert(std::distance(first, last) > 0);
+
   // Initialization
   Result eps = std::numeric_limits<Result>::epsilon()
-    * std::max(static_cast<Result>(1), std::abs(rhs));
-  Result t = (std::accumulate(first, last, static_cast<Result>(0)) - rhs) /
-    static_cast<Result>(std::distance(first, last));
+             * std::max(static_cast<Result>(1), std::abs(rhs));
 
-  Iterator m_first = first, m_last = last;
+  auto m = std::distance(first, last);
+  Result t = (std::accumulate(first, last, static_cast<Result>(0)) - rhs)
+             / static_cast<Result>(m);
+
+  Iterator m_first(first), m_last(last);
   for (;;) {
-    // Feasibility check
+    // Re-partition and compute sums
     Result tt = lo + t;
-    auto lo_it = std::partition(m_first, m_last,
-      [=](const Result x){ return x > tt; });
-    Result infeas_lo = std::max(static_cast<Result>(0),
-      + tt * static_cast<Result>(std::distance(lo_it, m_last))
-      - std::accumulate(lo_it, m_last, static_cast<Result>(0)));
+    auto it_lo = std::partition(m_first, m_last,
+                                [=](const Result x){ return x > tt; });
+    auto sum_lo = std::accumulate(it_lo, m_last, static_cast<Result>(0));
+    auto n_lo = std::distance(it_lo, m_last);
 
     tt = hi + t;
-    auto hi_it = std::partition(m_first, lo_it,
-      [=](const Result x){ return x > tt; });
-    Result infeas_hi = std::max(static_cast<Result>(0),
-      - tt * static_cast<Result>(std::distance(m_first, hi_it))
-      + std::accumulate(m_first, hi_it, static_cast<Result>(0)));
+    auto it_hi = std::partition(m_first, it_lo,
+                                [=](const Result x){ return x > tt; });
+    auto sum_hi = std::accumulate(m_first, it_hi, static_cast<Result>(0));
+    auto n_hi = std::distance(m_first, it_hi);
 
-    // Variable fixing (using the incremental multiplier formula (23))
-    if (std::abs(infeas_hi - infeas_lo) <= eps) {
-      m_first = hi_it;
-      m_last = lo_it;
-      break;
-    } else if (infeas_lo < infeas_hi) {
-      m_first = hi_it;
-      tt = -infeas_hi;
-    } else { //infeas_lo > infeas_hi
-      m_last = lo_it;
-      tt = +infeas_lo;
-    }
-    if (m_first == m_last) {
-      break;
+    // Check feasibility and fix variables
+    Result s_hi = static_cast<Result>(n_hi) * hi;
+    Result s_lo = static_cast<Result>(n_lo) * lo;
+    Result infeas = sum_hi + sum_lo - (s_hi + s_lo)
+                  - static_cast<Result>(n_hi + n_lo) * t;
+    if (infeas > eps) {
+      m_first = it_hi;
+      tt = static_cast<Result>(m) * t - sum_hi + s_hi;
+      m -= n_hi;
+    } else if (infeas < -eps) {
+      m_last = it_lo;
+      tt = static_cast<Result>(m) * t - sum_lo + s_lo;
+      m -= n_lo;
     } else {
-      t += tt / static_cast<Result>(std::distance(m_first, m_last));
+      m_first = it_hi;
+      m_last = it_lo;
+      break;
+    }
+
+    // Update t or stop if degenerated
+    if (m > 0) {
+      t = tt / static_cast<Result>(m);
+    } else {
+      break;
     }
   }
 
+#ifdef SDCA_ACCURATE_MATH
   // (Optional) Recompute t to increase numerical accuracy (see Lemma 5.3)
   Result t_lo(std::numeric_limits<Result>::lowest());
   Result t_hi(std::numeric_limits<Result>::max());
@@ -92,9 +103,11 @@ thresholds_knapsack_eq(
   } else {
     t = static_cast<Result>(0.5) * (t_lo + t_hi);
   }
+#endif
 
   return make_thresholds(t, lo, hi, m_first, m_last);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -107,8 +120,9 @@ prox_knapsack_eq(
     const Result rhs = 1
     ) {
   prox(first, last,
-    thresholds_knapsack_eq<Result, Iterator>, lo, hi, rhs);
+       thresholds_knapsack_eq<Result, Iterator>, lo, hi, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -116,15 +130,15 @@ inline void
 prox_knapsack_eq(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_knapsack_eq<Result, Iterator>, lo, hi, rhs);
+  prox(first, last, aux,
+       thresholds_knapsack_eq<Result, Iterator>, lo, hi, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -133,14 +147,13 @@ prox_knapsack_eq(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_knapsack_eq<Result, Iterator>, lo, hi, rhs);
+  prox(dim, first, last, aux,
+       thresholds_knapsack_eq<Result, Iterator>, lo, hi, rhs);
 }
 
 }

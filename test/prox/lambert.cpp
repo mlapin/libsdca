@@ -1,25 +1,25 @@
-#include <cstdio>
-
-#include "gtest/gtest.h"
 #include "sdca/math/lambert.h"
 #include "sdca/math/log_exp.h"
-
 #include "test_util.h"
 
 template <typename Type>
 inline void
 test_lambert_w_exp_pos(const Type eps, const std::vector<Type>& v) {
-  std::for_each(v.begin(), v.end(), [=](const Type x){ ASSERT_NEAR(
-    x, sdca::lambert_w_exp_inverse(sdca::lambert_w_exp(x)),
-    eps * std::max(static_cast<Type>(1), x)); });
+  std::for_each(v.begin(), v.end(), [=](const Type x){
+    ASSERT_TRUE(
+      std::abs(x - sdca::lambert_w_exp_inverse(sdca::lambert_w_exp(x)))
+      < eps * std::max(static_cast<Type>(1), x)
+    ); });
 }
 
 template <typename Type>
 inline void
 test_lambert_w_exp_neg(const Type eps, const std::vector<Type>& v) {
-  std::for_each(v.begin(), v.end(), [=](const Type x){ ASSERT_NEAR(
-    std::exp(x), sdca::x_exp_x(sdca::lambert_w_exp(x)),
-    eps); });
+  std::for_each(v.begin(), v.end(), [=](const Type x){
+    ASSERT_TRUE(
+      std::abs(std::exp(x) - sdca::x_exp_x(sdca::lambert_w_exp(x)))
+      < eps
+    ); });
 }
 
 TEST(LambertTest, lambert_w_exp_float) {
@@ -74,9 +74,11 @@ TEST(LambertTest, lambert_w_exp_long_double) {
 template <typename Type>
 inline void
 test_lambert_exp_approx(const Type eps, const std::vector<Type>& v) {
-  std::for_each(v.begin(), v.end(), [=](const Type x){ ASSERT_NEAR(
-    std::exp(x), sdca::exp_approx(x),
-    eps * std::max(static_cast<Type>(1), std::exp(x))); });
+  std::for_each(v.begin(), v.end(), [=](const Type x){
+    ASSERT_TRUE(
+      std::abs(std::exp(x) - sdca::exp_approx(x))
+      < eps * std::max(static_cast<Type>(1), std::exp(x))
+    ); });
 }
 
 TEST(LambertTest, exp_approx_float) {
@@ -138,7 +140,9 @@ TEST(LambertTest, omega_const) {
 
   long double eps_l = std::numeric_limits<long double>::epsilon();
   long double w_l = sdca::lambert_w_exp(0.0L);
-  EXPECT_NEAR(w_l, static_cast<long double>(sdca::kOmega), eps_l);
+  long double omega = static_cast<long double>(sdca::kOmega);
+  EXPECT_TRUE(std::abs(w_l - omega) < eps_l);
+//  EXPECT_NEAR(w_l, omega, eps_l); // fails for long double
 
 //  std::printf("kOmega     : %.16Le\n"
 //              "long double: %.16Le\n"

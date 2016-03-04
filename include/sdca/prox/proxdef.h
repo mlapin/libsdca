@@ -2,9 +2,11 @@
 #define SDCA_PROX_PROXDEF_H
 
 #include <algorithm>
+#include <cassert>
 #include <iterator>
 #include <limits>
 #include <numeric>
+#include <vector>
 
 namespace sdca {
 
@@ -13,6 +15,7 @@ enum class projection {
   constant,
   general
 };
+
 
 template <typename Result,
           typename Iterator>
@@ -54,6 +57,7 @@ struct thresholds {
 
 };
 
+
 template <typename Result,
           typename Iterator,
           typename Mapping>
@@ -88,6 +92,7 @@ struct generalized_thresholds : thresholds<Result, Iterator> {
 
 };
 
+
 template <typename Result>
 inline thresholds<Result, Result*>
 make_thresholds(
@@ -97,6 +102,7 @@ make_thresholds(
   ) {
   return thresholds<Result, Result*>(t, lo, hi);
 }
+
 
 template <typename Result,
           typename Iterator>
@@ -111,6 +117,7 @@ make_thresholds(
   return thresholds<Result, Iterator>(t, lo, hi, first, last);
 }
 
+
 template <typename Result,
           typename Mapping>
 inline generalized_thresholds<Result, Result*, Mapping>
@@ -122,6 +129,7 @@ make_thresholds(
   ) {
   return generalized_thresholds<Result, Result*, Mapping>(t, lo, hi, map);
 }
+
 
 template <typename Result,
           typename Iterator,
@@ -139,11 +147,12 @@ make_thresholds(
     t, lo, hi, first, last, map);
 }
 
+
 template <typename Result,
           typename Iterator>
 inline void
 prox(
-    const sdca::thresholds<Result, Iterator> thresholds,
+    const sdca::thresholds<Result, Iterator>& thresholds,
     Iterator first,
     Iterator last
     ) {
@@ -155,12 +164,13 @@ prox(
     [=](Data& x){ x = std::max(lo, std::min(x - t, hi)); });
 }
 
+
 template <typename Result,
           typename Iterator,
           typename Mapping>
 inline void
 prox(
-    const sdca::generalized_thresholds<Result, Iterator, Mapping> thresholds,
+    const sdca::generalized_thresholds<Result, Iterator, Mapping>& thresholds,
     Iterator first,
     Iterator last
     ) {
@@ -171,6 +181,7 @@ prox(
   std::for_each(first, last,
     [=](Data& x){ x = std::max(lo, std::min(thresholds.map(x - t), hi)); });
 }
+
 
 template <typename Iterator,
           typename Algorithm,
@@ -188,6 +199,7 @@ prox(
   prox(thresholds, first, last);
 }
 
+
 template <typename Iterator,
           typename Algorithm,
           typename... Types>
@@ -195,15 +207,61 @@ inline void
 prox(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     Algorithm compute,
     Types... params
     ) {
-  std::copy(first, last, aux_first);
-  auto thresholds = compute(aux_first, aux_last, params...);
+  std::copy(first, last, aux);
+  auto thresholds = compute(aux, aux + std::distance(first, last), params...);
   prox(thresholds, first, last);
 }
+
+
+template <typename Iterator,
+          typename Algorithm,
+          typename... Types>
+inline void
+prox(
+    Iterator a_first,
+    Iterator a_last,
+    Iterator b_first,
+    Iterator b_last,
+    Algorithm compute,
+    Types... params
+    ) {
+  typedef typename std::iterator_traits<Iterator>::value_type Data;
+  std::vector<Data> a_aux(a_first, a_last);
+  std::vector<Data> b_aux(b_first, b_last);
+  auto thresholds = compute(
+    a_aux.begin(), a_aux.end(), b_aux.begin(), b_aux.end(), params...);
+  prox(thresholds.first, a_first, a_last);
+  prox(thresholds.second, b_first, b_last);
+}
+
+
+template <typename Iterator,
+          typename Algorithm,
+          typename... Types>
+inline void
+prox(
+    Iterator a_first,
+    Iterator a_last,
+    Iterator b_first,
+    Iterator b_last,
+    Iterator a_aux,
+    Iterator b_aux,
+    Algorithm compute,
+    Types... params
+    ) {
+  std::copy(a_first, a_last, a_aux);
+  std::copy(b_first, b_last, b_aux);
+  auto thresholds = compute(
+    a_aux, a_aux + std::distance(a_first, a_last),
+    b_aux, b_aux + std::distance(b_first, b_last), params...);
+  prox(thresholds.first, a_first, a_last);
+  prox(thresholds.second, b_first, b_last);
+}
+
 
 template <typename Iterator,
           typename Algorithm,
@@ -213,19 +271,19 @@ prox(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     Algorithm compute,
     Types... params
     ) {
-  Iterator vec_last = first + dim;
+  Iterator vec_last(first + dim), aux_last(aux + dim);
   for (; first != last; vec_last += dim) {
-    std::copy(first, vec_last, aux_first);
-    auto thresholds = compute(aux_first, aux_last, params...);
+    std::copy(first, vec_last, aux);
+    auto thresholds = compute(aux, aux_last, params...);
     prox(thresholds, first, vec_last);
     first = vec_last;
   }
 }
+
 
 /**
  * Computes the dot product
@@ -236,7 +294,7 @@ template <typename Result,
           typename Iterator>
 inline Result
 dot_prox_prox(
-    const thresholds<Iterator, Result> t,
+    const thresholds<Iterator, Result>& t,
     Iterator first,
     Iterator last
     ) {
@@ -250,6 +308,7 @@ dot_prox_prox(
     + dot_mi - static_cast<Result>(2) * t.t * sum_mi ;
 }
 
+
 /**
  * Computes the dot product
  *    <x, prox(x)>
@@ -259,7 +318,7 @@ template <typename Result,
           typename Iterator>
 inline Result
 dot_x_prox(
-    const thresholds<Result, Iterator> t,
+    const thresholds<Result, Iterator>& t,
     Iterator first,
     Iterator last
     ) {
@@ -270,6 +329,7 @@ dot_x_prox(
   std::for_each(t.first, t.last, [&](const Result x){ dot_mi += x * x; });
   return t.hi * sum_hi - t.t * sum_mi + t.lo * sum_lo + dot_mi;
 }
+
 
 template <typename Iterator,
           typename Functor>
@@ -282,6 +342,7 @@ apply(
   typedef typename std::iterator_traits<Iterator>::value_type Data;
   std::for_each(first, last, [=](Data& x){ x = functor(x); });
 }
+
 
 template <typename Iterator,
           typename Functor>

@@ -1,8 +1,4 @@
-#include <cstdio>
-
-#include "gtest/gtest.h"
 #include "sdca/prox/entropy.h"
-
 #include "test_util.h"
 
 template <typename Type>

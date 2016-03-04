@@ -2,9 +2,24 @@
 #define SDCA_TEST_UTIL_H
 
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <random>
 #include <vector>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wundef"
+#pragma clang diagnostic ignored "-Wc++98-compat-pedantic"
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
+#pragma clang diagnostic ignored "-Wpadded"
+#pragma clang diagnostic ignored "-Wshift-sign-overflow"
+#pragma clang diagnostic ignored "-Wused-but-marked-unused"
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#pragma clang diagnostic ignored "-Wdeprecated"
+
+#include "gtest/gtest.h"
+
+#pragma clang diagnostic pop
 
 template <typename IntType,
           typename RealType>
@@ -19,7 +34,7 @@ test_populate_real(
   ) {
   RealType base(10);
   for (IntType p = pow_from; p < pow_to; ++p) {
-    RealType x = std::pow(base, p);
+    RealType x = static_cast<RealType>(std::pow(base, p));
     std::uniform_real_distribution<RealType> d(x, x*base);
     for (IntType i = 0; i < n; ++i) {
       v.push_back(coeff * d(gen));

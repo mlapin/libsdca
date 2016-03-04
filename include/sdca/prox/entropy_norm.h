@@ -9,7 +9,7 @@ namespace sdca {
 
 /**
  * Householder's iteration for the equation
- *    \sum_i W_0(exp(a_i - t)) - rhs = 0
+ *    sum_i W_0(exp(a_i - t)) - rhs = 0
  * with convergence rate of order 2 (Newton-Raphson method).
  **/
 template <typename Result,
@@ -31,9 +31,10 @@ sum_w_exp_iter_2(
   return t + f0 / f1;
 }
 
+
 /**
  * Householder's iteration for the equation
- *    \sum_i W_0(exp(a_i - t)) - rhs = 0
+ *    sum_i W_0(exp(a_i - t)) - rhs = 0
  * with convergence rate of order 3 (Halley's method).
  **/
 template <typename Result,
@@ -59,9 +60,10 @@ sum_w_exp_iter_3(
   return t - 2 * f0 * f1 / (f0 * f2 - 2 * f1 * f1);
 }
 
+
 /**
  * Householder's iteration for the equation
- *    \sum_i W_0(exp(a_i - t)) - rhs = 0
+ *    sum_i W_0(exp(a_i - t)) - rhs = 0
  * with convergence rate of order 4.
  **/
 template <typename Result,
@@ -90,9 +92,10 @@ sum_w_exp_iter_4(
   return t - 3 * f0 * (2 * f11 - f02) / (6 * f1 * (f02 - f11) - f0 * (f0 * f3));
 }
 
+
 /**
  * Use Householder's method to find an approximate solution to
- *    \sum_i W_0(exp(a_i - t)) = rhs.
+ *    sum_i W_0(exp(a_i - t)) = rhs.
  **/
 template <typename Result,
           typename Iterator>
@@ -117,9 +120,10 @@ solve_sum_w_exp_iterate(
   return t;
 }
 
+
 /**
  * Find the root t of the nonlinear equation
- *    \sum_i W_0(exp(a_i - t)) = rhs,
+ *    sum_i W_0(exp(a_i - t)) = rhs,
  * where W_0 is the Lambert function.
  **/
 template <typename Result = double,
@@ -147,6 +151,7 @@ solve_sum_w_exp(
 
   return solve_sum_w_exp_iterate(first, last, rhs, t);
 }
+
 
 /**
  * Solve
@@ -194,6 +199,7 @@ thresholds_entropy_norm(
   return make_thresholds(t, lo, hi, m_first, last, map);
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -204,8 +210,9 @@ prox_entropy_norm(
     const Result rhs = 1
     ) {
   prox(first, last,
-    thresholds_entropy_norm<Result, Iterator>, hi, rhs);
+       thresholds_entropy_norm<Result, Iterator>, hi, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -213,14 +220,14 @@ inline void
 prox_entropy_norm(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result hi = 1,
     const Result rhs = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_entropy_norm<Result, Iterator>, hi, rhs);
+  prox(first, last, aux,
+       thresholds_entropy_norm<Result, Iterator>, hi, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -229,13 +236,12 @@ prox_entropy_norm(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result hi = 1,
     const Result rhs = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_entropy_norm<Result, Iterator>, hi, rhs);
+  prox(dim, first, last, aux,
+       thresholds_entropy_norm<Result, Iterator>, hi, rhs);
 }
 
 }

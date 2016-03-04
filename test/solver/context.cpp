@@ -1,8 +1,4 @@
-#include <cstdio>
-
-#include "gtest/gtest.h"
 #include "sdca/solver/context.h"
-
 #include "test_util.h"
 
 TEST(SolverContextTest, feature_in_multiclass_out) {

@@ -1,8 +1,4 @@
-#include <cstdio>
-
-#include "gtest/gtest.h"
 #include "sdca/prox/knapsack_le.h"
-
 #include "test_util.h"
 
 template <typename Type>

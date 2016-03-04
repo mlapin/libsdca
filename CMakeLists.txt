@@ -8,7 +8,7 @@ set(libsdca_VERSION
   ${libsdca_MAJOR_VERSION}.${libsdca_MINOR_VERSION}.${libsdca_PATCH_VERSION}
   )
 add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
-
+#add_definitions(-DSDCA_ACCURATE_MATH)
 
 ###############################################################################
 #
@@ -25,12 +25,33 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Warning flags
-set(WARN_FLAGS "-pedantic -Werror -W -Wall -Wextra -Wwrite-strings")
-set(WARN_FLAGS "${WARN_FLAGS} -Wcast-qual -Wcast-align -Wshadow")
-#set(WARN_FLAGS "${WARN_FLAGS} -Wconversion") # google test fails with this
-set(WARN_FLAGS "${WARN_FLAGS} -Wpointer-arith")
-if(CMAKE_COMPILER_IS_GNUCXX)
+set(WARN_FLAGS "-pedantic -Werror -W -Wall -Wextra")
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+  set(WARN_FLAGS "${WARN_FLAGS} -Weverything")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wno-c++98-compat")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wno-float-equal")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wno-documentation")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wno-padded")
+elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wparentheses")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wshadow")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wpointer-arith")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wcast-qual")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wcast-align")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wwrite-strings")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wconversion")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wmissing-declarations")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wredundant-decls")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wstack-protector")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wuseless-cast")
   set(WARN_FLAGS "${WARN_FLAGS} -Wdouble-promotion")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wvector-operation-performance")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wmisleading-indentation")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wsuggest-final-types")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wsuggest-final-methods")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wsuggest-override")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wunsafe-loop-optimizations")
+  set(WARN_FLAGS "${WARN_FLAGS} -Wlogical-op")
 endif()
 
 # Debug flags
@@ -39,20 +60,11 @@ set(DEBUG_FLAGS "-fstack-protector-all")
 # Release flags
 set(RELEASE_FLAGS "-march=native")
 if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
+# -funsafe-loop-optimizations
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto -flto-partition=none")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fno-fat-lto-objects")
   set(RELEASE_FLAGS "${RELEASE_FLAGS} -fuse-linker-plugin")
 endif()
-
-# Build specific flags
-set(CMAKE_CXX_FLAGS
-  "${CMAKE_CXX_FLAGS} -std=c++11 ${WARN_FLAGS}")
-set(CMAKE_CXX_FLAGS_DEBUG
-  "${CMAKE_CXX_FLAGS_DEBUG} ${DEBUG_FLAGS}")
-set(CMAKE_CXX_FLAGS_RELEASE
-  "${CMAKE_CXX_FLAGS_RELEASE} ${RELEASE_FLAGS}")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
-  "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${RELEASE_FLAGS}")
 
 #------------------------------------------------------------------------------
 # Intel MKL configuration (not applicable if another BLAS is used)
@@ -116,16 +128,16 @@ set(CMAKE_SHARED_LINKER_FLAGS
 #------------------------------------------------------------------------------
 # Google Test Framework
 #------------------------------------------------------------------------------
-set(GOOGLETEST_PATH
-  ${CMAKE_SOURCE_DIR}/vendor/googletest/googletest
-  )
 
-include_directories(
-  ${GOOGLETEST_PATH}
-  ${GOOGLETEST_PATH}/include
-  )
+# At this point, we only need googletest, not googlemock
+set(GOOGLETEST_PATH ${CMAKE_SOURCE_DIR}/vendor/googletest/googletest)
 
-add_library(googletest ${GOOGLETEST_PATH}/src/gtest-all.cc)
+#include_directories(
+#  ${GOOGLETEST_PATH}
+#  ${GOOGLETEST_PATH}/include
+#  )
+
+add_subdirectory(${GOOGLETEST_PATH})
 
 
 ###############################################################################
@@ -133,6 +145,16 @@ add_library(googletest ${GOOGLETEST_PATH}/src/gtest-all.cc)
 # SDCA Library
 #
 ###############################################################################
+
+# Set SDCA specific flags after 3rd party code is built
+set(CMAKE_CXX_FLAGS
+  "${CMAKE_CXX_FLAGS} -std=c++11 ${WARN_FLAGS}")
+set(CMAKE_CXX_FLAGS_DEBUG
+  "${CMAKE_CXX_FLAGS_DEBUG} ${DEBUG_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELEASE
+  "${CMAKE_CXX_FLAGS_RELEASE} ${RELEASE_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
+  "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${RELEASE_FLAGS}")
 
 include_directories(include)
 

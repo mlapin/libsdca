@@ -1,8 +1,4 @@
-#include <cstdio>
-
-#include "gtest/gtest.h"
 #include "sdca/prox/knapsack_eq.h"
-
 #include "test_util.h"
 
 template <typename Type>
@@ -95,9 +91,17 @@ test_prox_knapsack_eq_feasible(
 }
 
 TEST(ProxKnapsackEQTest, test_prox_feasible_float) {
+#ifdef SDCA_ACCURATE_MATH
   test_prox_knapsack_eq_feasible<float>(-3, 3, 256);
+#else
+  test_prox_knapsack_eq_feasible<float>(-3, 3, 512);
+#endif
 }
 
 TEST(ProxKnapsackEQTest, test_prox_feasible_double) {
+#ifdef SDCA_ACCURATE_MATH
   test_prox_knapsack_eq_feasible<double>(-6, 6, 256);
+#else
+  test_prox_knapsack_eq_feasible<double>(-3, 3, 512);
+#endif
 }

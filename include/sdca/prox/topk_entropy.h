@@ -68,6 +68,7 @@ thresholds_topk_entropy(
   return make_thresholds(t, lo, hi, m_first, last, map);
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -77,8 +78,9 @@ prox_topk_entropy(
     const typename std::iterator_traits<Iterator>::difference_type k = 1
     ) {
   prox(first, last,
-    thresholds_topk_entropy<Result, Iterator>, k);
+       thresholds_topk_entropy<Result, Iterator>, k);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -86,13 +88,13 @@ inline void
 prox_topk_entropy(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_topk_entropy<Result, Iterator>, k);
+  prox(first, last, aux,
+       thresholds_topk_entropy<Result, Iterator>, k);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -101,12 +103,11 @@ prox_topk_entropy(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_topk_entropy<Result, Iterator>, k);
+  prox(dim, first, last, aux,
+       thresholds_topk_entropy<Result, Iterator>, k);
 }
 
 }

@@ -1,6 +1,8 @@
 #ifndef SDCA_PROX_KNAPSACK_LE_BIASED_H
 #define SDCA_PROX_KNAPSACK_LE_BIASED_H
 
+#include <functional>
+
 #include "sdca/prox/knapsack_le.h"
 
 namespace sdca {
@@ -87,6 +89,7 @@ thresholds_knapsack_le_biased_search(
   return thresholds<Result, Iterator>(0, 0, 0, first, first);
 }
 
+
 /**
  * Solve
  *    min_x 0.5 * (<x, x> + rho * <1, x>^2) - <a, x>
@@ -125,6 +128,7 @@ thresholds_knapsack_le_biased(
   return thresholds_knapsack_le_biased_search(first, last, lo, hi, rhs, rho);
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -137,8 +141,9 @@ prox_knapsack_le_biased(
     const Result rho = 1
     ) {
   prox(first, last,
-    thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
+       thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -146,16 +151,16 @@ inline void
 prox_knapsack_le_biased(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
     const Result rho = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
+  prox(first, last, aux,
+       thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -164,15 +169,14 @@ prox_knapsack_le_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1,
     const Result rho = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
+  prox(dim, first, last, aux,
+       thresholds_knapsack_le_biased<Result, Iterator>, lo, hi, rhs, rho);
 }
 
 }

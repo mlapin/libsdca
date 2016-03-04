@@ -26,6 +26,7 @@ is_topk_simplex_lt(
   }
 }
 
+
 /**
  * Solve
  *    min_x 0.5 * <x, x> - <a, x>
@@ -66,6 +67,7 @@ thresholds_topk_simplex(
   return proj.thresholds;
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -76,8 +78,9 @@ prox_topk_simplex(
     const Result rhs = 1
     ) {
   prox(first, last,
-    thresholds_topk_simplex<Result, Iterator>, k, rhs);
+       thresholds_topk_simplex<Result, Iterator>, k, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -85,14 +88,14 @@ inline void
 prox_topk_simplex(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_topk_simplex<Result, Iterator>, k, rhs);
+  prox(first, last, aux,
+       thresholds_topk_simplex<Result, Iterator>, k, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -101,13 +104,12 @@ prox_topk_simplex(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_topk_simplex<Result, Iterator>, k, rhs);
+  prox(dim, first, last, aux,
+       thresholds_topk_simplex<Result, Iterator>, k, rhs);
 }
 
 }

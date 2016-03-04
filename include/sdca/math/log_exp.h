@@ -81,7 +81,7 @@ x_log_x(const Type x) {
 
 /**
  * Computes
- *    log(\sum_i exp(a_i))
+ *    log(sum_i exp(a_i))
  * where a_i are elements in the range [first, last)
  * and max is an iterator to the maximum in the given range.
  **/
@@ -105,7 +105,7 @@ log_sum_exp(
 
 /**
  * Computes
- *    log(\sum_i exp(a_i))
+ *    log(sum_i exp(a_i))
  * where a_i are elements in the range [first, last).
  * Returns 0 if the range is empty (first == last).
  **/
@@ -123,11 +123,11 @@ log_sum_exp(
 
 /**
  * Computes
- *    log(\sum_i exp(a_i))
+ *    log(sum_i exp(a_i))
  * where a_i are elements in the range [first, last)
  * and max is an iterator to the maximum in the given range.
  * Additionally, the variable s is set to
- *    s = \sum_i exp(a_i - *max)
+ *    s = sum_i exp(a_i - *max)
  * where the sum is over all the elements in the range,
  * except the maximum element.
  **/
@@ -152,10 +152,10 @@ log_sum_exp(
 
 /**
  * Computes
- *    log(\sum_i exp(a_i))
+ *    log(sum_i exp(a_i))
  * where a_i are elements in the range [first, last).
  * Additionally, the variable s is set to
- *    s = \sum_i exp(a_i - *max)
+ *    s = sum_i exp(a_i - *max)
  * where the sum is over all the elements in the range,
  * except the maximum element.
  * Returns 0 if the range is empty (first == last).
@@ -175,7 +175,7 @@ log_sum_exp(
 
 /**
  * Computes
- *    log(1 + \sum_i exp(a_i))
+ *    log(1 + sum_i exp(a_i))
  * where a_i are elements in the range [first, last)
  * and max is an iterator to the maximum in the given range.
  **/
@@ -200,7 +200,7 @@ log_1_sum_exp(
 
 /**
  * Computes
- *    log(1 + \sum_i exp(a_i))
+ *    log(1 + sum_i exp(a_i))
  * where a_i are elements in the range [first, last).
  * Returns 0 if the range is empty (first == last).
  **/
@@ -218,11 +218,11 @@ log_1_sum_exp(
 
 /**
  * Computes
- *    log(1 + \sum_i exp(a_i))
+ *    log(1 + sum_i exp(a_i))
  * where a_i are elements in the range [first, last)
  * and max is an iterator to the maximum in the given range.
  * Additionally, the variable s is set to
- *    s = exp(-*max) + \sum_i exp(a_i - *max)
+ *    s = exp(-*max) + sum_i exp(a_i - *max)
  * where the sum is over all the elements in the range,
  * except the maximum element.
  **/
@@ -248,10 +248,10 @@ log_1_sum_exp(
 
 /**
  * Computes
- *    log(1 + \sum_i exp(a_i))
+ *    log(1 + sum_i exp(a_i))
  * where a_i are elements in the range [first, last).
  * Additionally, the variable s is set to
- *    s = exp(-*max) + \sum_i exp(a_i - *max)
+ *    s = exp(-*max) + sum_i exp(a_i - *max)
  * where the sum is over all the elements in the range,
  * except the maximum element.
  * Returns 0 if the range is empty (first == last).
@@ -271,13 +271,13 @@ log_1_sum_exp(
 
 /**
  * Computes both
- *    lse  = log(\sum_i exp(a_i))
- *    lse1 = log(1 + \sum_i exp(a_i))
+ *    lse  = log(sum_i exp(a_i))
+ *    lse1 = log(1 + sum_i exp(a_i))
  * in a single pass over the data
  * where a_i are elements in the range [first, last)
  * and max is an iterator to the maximum in the given range.
  * Returns
- *    \sum_i exp(a_i - *max)
+ *    sum_i exp(a_i - *max)
  * where the sum is over all the elements in the range,
  * except the maximum element.
  **/
@@ -307,13 +307,13 @@ log_sum_exp(
 
 /**
  * Computes both
- *    lse  = log(\sum_i exp(a_i))
- *    lse1 = log(1 + \sum_i exp(a_i))
+ *    lse  = log(sum_i exp(a_i))
+ *    lse1 = log(1 + sum_i exp(a_i))
  * in a single pass over the data
  * where a_i are elements in the range [first, last)
  * and max is an iterator to the maximum in the given range.
  * Returns
- *    \sum_i exp(a_i - *max)
+ *    sum_i exp(a_i - *max)
  * where the sum is over all the elements in the range,
  * except the maximum element.
  * Returns 0 and sets lse = lse1 = 0 if the range is empty (first == last).

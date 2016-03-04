@@ -1,8 +1,4 @@
-#include <cstdio>
-
-#include "gtest/gtest.h"
 #include "sdca/math/log_exp.h"
-
 #include "test_util.h"
 
 template <typename Type, typename Function>
@@ -37,20 +33,25 @@ inline void
 test_log_sum_exp_compare(const Type eps, const std::vector<Type>& v) {
   Type sum(0);
   std::for_each(v.begin(), v.end(), [&](const Type x){ sum += std::exp(x); });
-  ASSERT_NEAR(std::log(sum),
-              sdca::log_sum_exp<Result>(v.begin(), v.end()),
-              eps);
-  ASSERT_NEAR(std::log(1 + sum),
-              sdca::log_1_sum_exp<Result>(v.begin(), v.end()),
-              eps);
+  ASSERT_TRUE(
+    std::abs(
+      std::log(sum) - sdca::log_sum_exp<Result>(v.begin(), v.end())
+    ) < eps);
+  ASSERT_TRUE(
+    std::abs(
+      std::log(1 + sum) - sdca::log_1_sum_exp<Result>(v.begin(), v.end())
+    ) < eps);
+
   Result lse(-1), lse1(-1);
   sdca::log_sum_exp<Result>(v.begin(), v.end(), lse, lse1);
-  ASSERT_NEAR(std::log(sum),
-              static_cast<Type>(lse),
-              eps);
-  ASSERT_NEAR(std::log(1 + sum),
-              static_cast<Type>(lse1),
-              eps);
+  ASSERT_TRUE(
+    std::abs(
+      std::log(sum) - static_cast<Type>(lse)
+    ) < eps);
+  ASSERT_TRUE(
+    std::abs(
+      std::log(1 + sum) - static_cast<Type>(lse1)
+    ) < eps);
 }
 
 template <typename Type>
@@ -123,8 +124,9 @@ test_log_sum_exp_special_cases(const int pow_from, const int pow_to) {
     ASSERT_EQ(v.front(), sdca::log_sum_exp<Type>(v.begin(), v.end()));
     Type lse1_ref = std::log1p(std::exp(v.front()));
     if (std::isfinite(lse1_ref)) {
-      ASSERT_NEAR(lse1_ref, lse1, eps);
-      ASSERT_NEAR(lse1_ref, sdca::log_1_sum_exp<Type>(v.begin(), v.end()), eps);
+      ASSERT_TRUE(std::abs(lse1_ref - lse1) < eps);
+      ASSERT_TRUE(std::abs(
+        lse1_ref - sdca::log_1_sum_exp<Type>(v.begin(), v.end())) < eps);
     }
   }
 
@@ -150,7 +152,7 @@ TEST(LogExpTest, log_exp_traits) {
 TEST(LogExpTest, log_sum_exp_extensive) {
   test_log_sum_exp<float, double>(-8, 1);
   test_log_sum_exp<double, double>(-16, 2);
-  test_log_sum_exp<long double, long double>(-24, 4);
+  test_log_sum_exp<long double, long double>(-24, 3);
 }
 
 TEST(LogExpTest, log_sum_exp_special_cases) {

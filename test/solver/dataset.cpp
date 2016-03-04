@@ -1,9 +1,6 @@
-#include <cstdio>
 #include <typeinfo>
 
-#include "gtest/gtest.h"
 #include "sdca/solver/dataset.h"
-
 #include "test_util.h"
 
 

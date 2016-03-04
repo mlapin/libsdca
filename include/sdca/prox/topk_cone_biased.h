@@ -85,6 +85,7 @@ thresholds_topk_cone_biased_search(
   return thresholds<Result, Iterator>(0, 0, 0, first, first);
 }
 
+
 /**
  * Solve
  *    min_x 0.5 * (<x, x> + rho * <1, x>^2) - <a, x>
@@ -111,6 +112,7 @@ thresholds_topk_cone_biased(
   return proj.thresholds;
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -121,8 +123,9 @@ prox_topk_cone_biased(
     const Result rho = 1
     ) {
   prox(first, last,
-    thresholds_topk_cone_biased<Result, Iterator>, k, rho);
+       thresholds_topk_cone_biased<Result, Iterator>, k, rho);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -130,14 +133,14 @@ inline void
 prox_topk_cone_biased(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_topk_cone_biased<Result, Iterator>, k, rho);
+  prox(first, last, aux,
+       thresholds_topk_cone_biased<Result, Iterator>, k, rho);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -146,13 +149,12 @@ prox_topk_cone_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rho = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_topk_cone_biased<Result, Iterator>, k, rho);
+  prox(dim, first, last, aux,
+       thresholds_topk_cone_biased<Result, Iterator>, k, rho);
 }
 
 }

@@ -59,6 +59,7 @@ topk_entropy_biased_kkt_iter_2(
   t = (A * sum0_t_sum1 - alpha * k_u * B) / denom;
 }
 
+
 /**
  * The KKT conditions for the optimization problem in
  *    thresholds_topk_entropy_biased
@@ -104,6 +105,7 @@ topk_entropy_biased_kkt_iterate(
   }
   s = std::min(std::max(lb, s), ub);
 }
+
 
 /**
  * Solve
@@ -171,6 +173,7 @@ thresholds_topk_entropy_biased(
   return make_thresholds(t, lo, hi, m_first, last, map);
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -181,8 +184,9 @@ prox_topk_entropy_biased(
     const Result alpha = 1
     ) {
   prox(first, last,
-    thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
+       thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -190,14 +194,14 @@ inline void
 prox_topk_entropy_biased(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result alpha = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
+  prox(first, last, aux,
+       thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -206,13 +210,12 @@ prox_topk_entropy_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result alpha = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
+  prox(dim, first, last, aux,
+       thresholds_topk_entropy_biased<Result, Iterator>, k, alpha);
 }
 
 }

@@ -1,8 +1,4 @@
-#include <cstdio>
-
-#include "gtest/gtest.h"
 #include "sdca/prox/topk_simplex_biased.h"
-
 #include "test_util.h"
 
 template <typename Type>
@@ -95,9 +91,17 @@ test_prox_topk_simplex_biased_feasible(
 }
 
 TEST(ProxTopKSimplexBiasedTest, test_prox_feasible_float) {
+#ifdef SDCA_ACCURATE_MATH
   test_prox_topk_simplex_biased_feasible<float>(-3, 3, 1);
+#else
+  test_prox_topk_simplex_biased_feasible<float>(-3, 3, 1);
+#endif
 }
 
 TEST(ProxTopKSimplexBiasedTest, test_prox_feasible_double) {
+#ifdef SDCA_ACCURATE_MATH
   test_prox_topk_simplex_biased_feasible<double>(-6, 6, 1);
+#else
+  test_prox_topk_simplex_biased_feasible<double>(-6, 6, 2);
+#endif
 }

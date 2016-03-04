@@ -52,6 +52,7 @@ thresholds_entropy(
   return make_thresholds(t, lo, hi, m_first, last, map);
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -62,8 +63,9 @@ prox_entropy(
     const Result rhs = 1
     ) {
   prox(first, last,
-    thresholds_entropy<Result, Iterator>, hi, rhs);
+       thresholds_entropy<Result, Iterator>, hi, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -71,14 +73,14 @@ inline void
 prox_entropy(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result hi = 1,
     const Result rhs = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_entropy<Result, Iterator>, hi, rhs);
+  prox(first, last, aux,
+       thresholds_entropy<Result, Iterator>, hi, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -87,13 +89,12 @@ prox_entropy(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result hi = 1,
     const Result rhs = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_entropy<Result, Iterator>, hi, rhs);
+  prox(dim, first, last, aux,
+       thresholds_entropy<Result, Iterator>, hi, rhs);
 }
 
 }

@@ -27,6 +27,7 @@ is_topk_simplex_biased_lt(
   }
 }
 
+
 /**
  * Solve
  *    min_x 0.5 * (<x, x> + rho * <1, x>^2) - <a, x>
@@ -69,6 +70,7 @@ thresholds_topk_simplex_biased(
   return proj.thresholds;
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -80,8 +82,9 @@ prox_topk_simplex_biased(
     const Result rho = 1
     ) {
   prox(first, last,
-    thresholds_topk_simplex_biased<Result, Iterator>, k, rhs, rho);
+       thresholds_topk_simplex_biased<Result, Iterator>, k, rhs, rho);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -89,15 +92,15 @@ inline void
 prox_topk_simplex_biased(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_topk_simplex_biased<Result, Iterator>, k, rhs, rho);
+  prox(first, last, aux,
+       thresholds_topk_simplex_biased<Result, Iterator>, k, rhs, rho);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -106,14 +109,13 @@ prox_topk_simplex_biased(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const typename std::iterator_traits<Iterator>::difference_type k = 1,
     const Result rhs = 1,
     const Result rho = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_topk_simplex_biased<Result, Iterator>, k, rhs, rho);
+  prox(dim, first, last, aux,
+       thresholds_topk_simplex_biased<Result, Iterator>, k, rhs, rho);
 }
 
 }

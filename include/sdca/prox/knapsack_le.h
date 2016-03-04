@@ -43,6 +43,7 @@ thresholds_knapsack_le(
   }
 }
 
+
 template <typename Result = double,
           typename Iterator>
 inline void
@@ -54,8 +55,9 @@ prox_knapsack_le(
     const Result rhs = 1
     ) {
   prox(first, last,
-    thresholds_knapsack_le<Result, Iterator>, lo, hi, rhs);
+       thresholds_knapsack_le<Result, Iterator>, lo, hi, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -63,15 +65,15 @@ inline void
 prox_knapsack_le(
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1
     ) {
-  prox(first, last, aux_first, aux_last,
-    thresholds_knapsack_le<Result, Iterator>, lo, hi, rhs);
+  prox(first, last, aux,
+       thresholds_knapsack_le<Result, Iterator>, lo, hi, rhs);
 }
+
 
 template <typename Result = double,
           typename Iterator>
@@ -80,14 +82,13 @@ prox_knapsack_le(
     const typename std::iterator_traits<Iterator>::difference_type dim,
     Iterator first,
     Iterator last,
-    Iterator aux_first,
-    Iterator aux_last,
+    Iterator aux,
     const Result lo = 0,
     const Result hi = 1,
     const Result rhs = 1
     ) {
-  prox(dim, first, last, aux_first, aux_last,
-    thresholds_knapsack_le<Result, Iterator>, lo, hi, rhs);
+  prox(dim, first, last, aux,
+       thresholds_knapsack_le<Result, Iterator>, lo, hi, rhs);
 }
 
 }
