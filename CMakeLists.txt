@@ -186,6 +186,7 @@ set(libsdca_PROX_SOURCES
   ${libsdca_INCLUDE_PATH}/prox/topk_entropy_biased.h
   ${libsdca_INCLUDE_PATH}/prox/topk_simplex.h
   ${libsdca_INCLUDE_PATH}/prox/topk_simplex_biased.h
+  ${libsdca_INCLUDE_PATH}/prox/two_simplex.h
 )
 
 set(libsdca_SOLVER_SOURCES

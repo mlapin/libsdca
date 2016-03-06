@@ -47,5 +47,7 @@ target_link_libraries(test_libsdca_solver gtest ${BLAS_LIBRARIES})
 
 enable_testing()
 
-add_test(test_libsdca_prox ${PROJECT_BINARY_DIR}/test_libsdca_prox)
-add_test(test_libsdca_solver ${PROJECT_BINARY_DIR}/test_libsdca_solver)
+add_test(test
+  ${PROJECT_BINARY_DIR}/test_libsdca_prox
+  ${PROJECT_BINARY_DIR}/test_libsdca_solver
+  )

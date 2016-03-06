@@ -34,7 +34,7 @@ thresholds_two_simplex(
     * std::max(static_cast<Result>(1), rhs);
 
   // Phase 1: <1, x> = <1, y> = rhs
-  Iterator x_last(a_last), y_last(b_last);
+  Iterator x_last(a_last);
   for (;;) {
     // Solve the restricted subproblem
     t = (std::accumulate(a_first, x_last, static_cast<Result>(0)) - rhs)
@@ -42,16 +42,21 @@ thresholds_two_simplex(
     auto x_it = std::partition(a_first, x_last,
                                [=](const Result x){ return x > t; });
 
+    // Feasibility check
+    if (x_it == x_last) break;
+    x_last = x_it;
+  }
+
+  Iterator y_last(b_last);
+  for (;;) {
+    // Solve the restricted subproblem
     s = (std::accumulate(b_first, y_last, static_cast<Result>(0)) - rhs)
         / static_cast<Result>(std::distance(b_first, y_last));
     auto y_it = std::partition(b_first, y_last,
                                [=](const Result y){ return y > s; });
 
     // Feasibility check
-    if (x_it == x_last && y_it == y_last) {
-      break;
-    }
-    x_last = x_it;
+    if (y_it == y_last) break;
     y_last = y_it;
   }
 
