@@ -34,9 +34,9 @@ static const char* format_name[] = {
   "long_e"
 };
 
-level __level__;
-format __format__;
-std::ios __ios_state__(nullptr);
+extern level __level__;
+extern format __format__;
+extern std::ios __ios_state__; // can be initialized with nullptr
 
 inline void set_level(level __level) { __level__ = __level; }
 

@@ -77,7 +77,7 @@ thresholds_two_simplex(
        - std::accumulate(b_first, y_last, static_cast<Result>(0))
        ) / static_cast<Result>(m);
   for (;;) {
-    // Re-partition and compute sums
+    // Re-partition and compute the sums
     auto x_it = std::partition(a_first, x_last,
                                [=](const Result x){ return x > t; });
     auto sum_x = std::accumulate(x_it, x_last, static_cast<Result>(0));

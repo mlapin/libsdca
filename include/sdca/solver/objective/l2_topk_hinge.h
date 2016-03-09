@@ -3,16 +3,19 @@
 
 #include "sdca/prox/knapsack_le_biased.h"
 #include "sdca/solver/solverdef.h"
-#include "sdca/solver/objective/base_objective.h"
+#include "sdca/solver/objective/objective_base.h"
 
 namespace sdca {
 
 template <typename Data,
           typename Result>
 struct l2_topk_hinge
-    : public base_objective<Data, Result> {
+    : public objective_base<Data, Result> {
 
-  typedef base_objective<Data, Result> base;
+  typedef Data data_type;
+  typedef Result result_type;
+
+  typedef objective_base<Data, Result> base;
 
   const Result c;
   const size_type k;
@@ -24,7 +27,7 @@ struct l2_topk_hinge
       const Result __c,
       const size_type __k
     ) :
-      base::base_objective(__c / static_cast<Result>(__k)),
+      base::objective_base(__c / static_cast<Result>(__k)),
       c(__c),
       k(__k),
       c_div_k(__c / static_cast<Result>(__k))
@@ -38,8 +41,9 @@ struct l2_topk_hinge
   }
 
 
+  template <typename Int>
   void update_dual_variables(
-      const blas_int num_classes,
+      const Int num_classes,
       const Data norm2,
       Data* variables,
       Data* scores
@@ -48,7 +52,8 @@ struct l2_topk_hinge
     Result lo(0), hi(c_div_k), rhs(c), rho(1), zero(0);
 
     // 1. Prepare a vector to project in 'variables'.
-    sdca_blas_axpby(num_classes, a, scores, -1, variables);
+    sdca_blas_axpby(
+      static_cast<blas_int>(num_classes), a, scores, -1, variables);
     a -= variables[0];
     std::for_each(first, last, [=](Data &x){ x += a; });
 
@@ -59,13 +64,15 @@ struct l2_topk_hinge
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
       std::min(rhs, std::accumulate(first, last, zero)));
-    sdca_blas_scal(num_classes - 1, static_cast<Data>(-1), first);
+    sdca_blas_scal(
+      static_cast<blas_int>(num_classes - 1), static_cast<Data>(-1), first);
   }
 
 
+  template <typename Int>
   inline Result
   primal_loss(
-      const blas_int num_classes,
+      const Int num_classes,
       Data* scores
     ) const {
     Data *first(scores + 1), *last(scores + num_classes), a(1 - scores[0]);
@@ -84,9 +91,12 @@ struct l2_topk_hinge
 template <typename Data,
           typename Result>
 struct l2_topk_hinge_smooth
-    : public base_objective<Data, Result> {
+    : public objective_base<Data, Result> {
 
-  typedef base_objective<Data, Result> base;
+  typedef Data data_type;
+  typedef Result result_type;
+
+  typedef objective_base<Data, Result> base;
 
   const Result c;
   const Result gamma;
@@ -103,7 +113,7 @@ struct l2_topk_hinge_smooth
       const Result __gamma,
       const size_type __k
     ) :
-      base::base_objective(__c / __gamma),
+      base::objective_base(__c / __gamma),
       c(__c),
       gamma(__gamma),
       k(__k),
@@ -122,8 +132,9 @@ struct l2_topk_hinge_smooth
   }
 
 
+  template <typename Int>
   void update_dual_variables(
-      const blas_int num_classes,
+      const Int num_classes,
       const Data norm2,
       Data* variables,
       Data* scores
@@ -134,7 +145,9 @@ struct l2_topk_hinge_smooth
 
     // 1. Prepare a vector to project in 'variables'.
     Data a(static_cast<Data>(rho) / norm2);
-    sdca_blas_axpby(num_classes, a, scores, -static_cast<Data>(rho), variables);
+    sdca_blas_axpby(
+      static_cast<blas_int>(num_classes), a, scores,
+      -static_cast<Data>(rho), variables);
     a -= variables[0];
     std::for_each(first, last, [=](Data &x){ x += a; });
 
@@ -145,24 +158,28 @@ struct l2_topk_hinge_smooth
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
       std::min(rhs, std::accumulate(first, last, zero) ));
-    sdca_blas_scal(num_classes - 1, static_cast<Data>(-1), first);
+    sdca_blas_scal(
+      static_cast<blas_int>(num_classes - 1), static_cast<Data>(-1), first);
   }
 
 
+  template <typename Int>
   inline Result
   dual_loss(
-      const blas_int num_classes,
+      const Int num_classes,
       const Data* variables
     ) const {
     return static_cast<Result>(variables[0])
       - gamma_div_2c * static_cast<Result>(
-      sdca_blas_dot(num_classes - 1, variables + 1, variables + 1));
+      sdca_blas_dot(
+        static_cast<blas_int>(num_classes - 1), variables + 1, variables + 1));
   }
 
 
+  template <typename Int>
   inline Result
   primal_loss(
-      const blas_int num_classes,
+      const Int num_classes,
       Data* scores
     ) const {
     Data *first(scores + 1), *last(scores + num_classes), a(1 - scores[0]);

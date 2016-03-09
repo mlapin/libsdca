@@ -194,11 +194,17 @@ set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver/solverdef.h
   ${libsdca_INCLUDE_PATH}/solver/input.h
   ${libsdca_INCLUDE_PATH}/solver/output.h
-  ${libsdca_INCLUDE_PATH}/solver/eval_type.h
-  ${libsdca_INCLUDE_PATH}/solver/eval_strategy.h
+  ${libsdca_INCLUDE_PATH}/solver/eval/begin.h
+  ${libsdca_INCLUDE_PATH}/solver/eval/dual.h
+  ${libsdca_INCLUDE_PATH}/solver/eval/end.h
+  ${libsdca_INCLUDE_PATH}/solver/eval/primal.h
+  ${libsdca_INCLUDE_PATH}/solver/eval/regularizer.h
+  ${libsdca_INCLUDE_PATH}/solver/eval/scores.h
+  ${libsdca_INCLUDE_PATH}/solver/eval/types.h
+  ${libsdca_INCLUDE_PATH}/solver/eval.h
   ${libsdca_INCLUDE_PATH}/solver/dataset.h
   ${libsdca_INCLUDE_PATH}/solver/context.h
-  ${libsdca_INCLUDE_PATH}/solver/objective/base_objective.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/objective_base.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy_topk.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_hinge_topk.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_topk_hinge.h

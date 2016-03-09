@@ -55,7 +55,8 @@ TEST(SolverDatasetTest, feature_in_multiclass_out) {
   EXPECT_EQ(n, trn_dataset.out.labels.size());
 
   typedef decltype(trn_dataset)::eval_type trn_eval_type;
-  EXPECT_TRUE((std::is_same<sdca::eval_train<double>, trn_eval_type>::value));
+  EXPECT_TRUE((std::is_same<sdca::eval_train<double, sdca::multiclass_output>,
+               trn_eval_type>::value));
 
   auto tst_dataset = sdca::make_dataset_test_feature_in_multiclass_out(
     d, n, &features[0], labels.begin());
@@ -66,7 +67,8 @@ TEST(SolverDatasetTest, feature_in_multiclass_out) {
   EXPECT_EQ(n, tst_dataset.out.labels.size());
 
   typedef decltype(tst_dataset)::eval_type tst_eval_type;
-  EXPECT_TRUE((std::is_same<sdca::eval_test<double>, tst_eval_type>::value));
+  EXPECT_TRUE((std::is_same<sdca::eval_test<double, sdca::multiclass_output>,
+               tst_eval_type>::value));
 }
 
 
@@ -96,7 +98,8 @@ TEST(SolverDatasetTest, kernel_in_multiclass_out) {
   EXPECT_EQ(n, trn_dataset.out.labels.size());
 
   typedef decltype(trn_dataset)::eval_type trn_eval_type;
-  EXPECT_TRUE((std::is_same<sdca::eval_train<float>, trn_eval_type>::value));
+  EXPECT_TRUE((std::is_same<sdca::eval_train<float, sdca::multiclass_output>,
+               trn_eval_type>::value));
 
   auto tst_dataset = sdca::make_dataset_test_kernel_in_multiclass_out<float>(
     n, n_tst, &kernel[0], labels.begin());
@@ -107,5 +110,6 @@ TEST(SolverDatasetTest, kernel_in_multiclass_out) {
   EXPECT_EQ(n_tst, tst_dataset.out.labels.size());
 
   typedef decltype(tst_dataset)::eval_type tst_eval_type;
-  EXPECT_TRUE((std::is_same<sdca::eval_test<float>, tst_eval_type>::value));
+  EXPECT_TRUE((std::is_same<sdca::eval_test<float, sdca::multiclass_output>,
+               tst_eval_type>::value));
 }

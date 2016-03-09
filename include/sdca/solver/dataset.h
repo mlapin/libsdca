@@ -3,7 +3,7 @@
 
 #include "sdca/solver/input.h"
 #include "sdca/solver/output.h"
-#include "sdca/solver/eval_type.h"
+#include "sdca/solver/eval/types.h"
 
 namespace sdca {
 

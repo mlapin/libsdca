@@ -4,16 +4,19 @@
 #include "sdca/prox/topk_entropy.h"
 #include "sdca/prox/topk_entropy_biased.h"
 #include "sdca/solver/solverdef.h"
-#include "sdca/solver/objective/base_objective.h"
+#include "sdca/solver/objective/objective_base.h"
 
 namespace sdca {
 
 template <typename Data,
           typename Result>
 struct l2_entropy_topk
-    : public base_objective<Data, Result> {
+    : public objective_base<Data, Result> {
 
-  typedef base_objective<Data, Result> base;
+  typedef Data data_type;
+  typedef Result result_type;
+
+  typedef objective_base<Data, Result> base;
 
   const Result c;
   const size_type k;
@@ -25,7 +28,7 @@ struct l2_entropy_topk
       const Result __c,
       const size_type __k
     ) :
-      base::base_objective(__c),
+      base::objective_base(__c),
       c(__c),
       k(__k),
       c_log_c(x_log_x(__c))
@@ -39,8 +42,9 @@ struct l2_entropy_topk
   }
 
 
+  template <typename Int>
   void update_dual_variables(
-      const blas_int num_tasks,
+      const Int num_tasks,
       const Data norm2,
       Data* variables,
       Data* scores
@@ -49,7 +53,8 @@ struct l2_entropy_topk
     Result alpha(c * static_cast<Result>(norm2)), zero(0), one(1);
 
     // 1. Prepare a vector to project in 'variables'.
-    sdca_blas_axpby(num_tasks, 1, scores, -norm2, variables);
+    sdca_blas_axpby(
+      static_cast<blas_int>(num_tasks), 1, scores, -norm2, variables);
     Data a(-variables[0]);
     std::for_each(first, last, [=](Data &x){ x += a; });
 
@@ -60,13 +65,15 @@ struct l2_entropy_topk
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
       c * std::min(one, std::accumulate(first, last, zero)));
-    sdca_blas_scal(num_tasks - 1, static_cast<Data>(-c), first);
+    sdca_blas_scal(
+      static_cast<blas_int>(num_tasks - 1), static_cast<Data>(-c), first);
   }
 
 
+  template <typename Int>
   inline Result
   dual_loss(
-      const blas_int num_tasks,
+      const Int num_tasks,
       const Data* variables
     ) const {
     Result d_loss = c_log_c - x_log_x(c - static_cast<Result>(variables[0]));
@@ -76,9 +83,10 @@ struct l2_entropy_topk
   }
 
 
+  template <typename Int>
   inline Result
   primal_loss(
-      const blas_int num_tasks,
+      const Int num_tasks,
       Data* scores
     ) const {
     Data *first(scores + 1), *last(scores + num_tasks), a(-scores[0]);
