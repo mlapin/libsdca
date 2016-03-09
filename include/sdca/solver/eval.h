@@ -41,7 +41,7 @@ evaluate_dataset(
 
   }
 
-  eval_end(m, n, eval);
+  eval_end(m, n, ctx.objective, eval);
 }
 
 }
