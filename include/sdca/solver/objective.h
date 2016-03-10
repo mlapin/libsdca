@@ -1,15 +1,11 @@
 #ifndef SDCA_SOLVER_OBJECTIVE_H
 #define SDCA_SOLVER_OBJECTIVE_H
 
-#include <cstddef>
-
-#include "sdca/solver/objective/objective_base.h"
 #include "sdca/solver/objective/l2_entropy_topk.h"
 #include "sdca/solver/objective/l2_hinge_topk.h"
 #include "sdca/solver/objective/l2_topk_hinge.h"
 
 namespace sdca {
-
 
 template <typename Data,
           typename Result = double>

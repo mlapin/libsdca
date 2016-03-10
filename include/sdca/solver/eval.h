@@ -1,6 +1,7 @@
 #ifndef SDCA_SOLVER_EVAL_H
 #define SDCA_SOLVER_EVAL_H
 
+#include "sdca/solver/context.h"
 #include "sdca/solver/eval/begin.h"
 #include "sdca/solver/eval/dual.h"
 #include "sdca/solver/eval/end.h"
@@ -42,6 +43,60 @@ evaluate_dataset(
   }
 
   eval_end(m, n, ctx.objective, eval);
+}
+
+
+template <typename Result,
+          typename Data,
+          typename Context,
+          typename Dataset>
+inline void
+check_stopping_criteria(
+    Context& ctx
+  ) {
+  // Nothing to check if the solver is not running
+  if (ctx.status != solver_status::solving) return;
+
+  // First, check the relative duality gap
+  const auto& criteria = ctx.criteria;
+  const auto& evals = ctx.train.evals;
+  if (evals.size() > 0) {
+    const auto& eval = evals.back();
+
+    Result gap = eval.primal - eval.dual;
+    Result max = std::max(std::abs(eval.primal), std::abs(eval.dual));
+    Result eps = std::max(max, static_cast<Result>(16))
+               * std::numeric_limits<Result>::epsilon();
+
+    // Check if the relative duality gap is below epsilon
+    if (gap < max * static_cast<Result>(criteria.epsilon)) {
+      ctx.status = solver_status::solved;
+
+      // A large negative duality gap likely indicates an issue in the code
+      if (gap < - eps) {
+        ctx.status = solver_status::failed;
+      }
+    } else if (evals.size() > 1) {
+      // Check if the solver is making progress
+      const auto& before = evals.rbegin()[1];
+      if (eval.dual + eps * before.dual < before.dual) {
+        ctx.status = solver_status::no_progress;
+      }
+    }
+  }
+
+  // Second, check the runtime limits
+  if (ctx.status == solver_status::solving) {
+    if (ctx.epoch >= criteria.max_epoch) {
+      ctx.status = solver_status::max_epoch;
+    } else if (criteria.max_cpu_time > 0 &&
+               ctx.cpu_time() >= criteria.max_cpu_time) {
+      ctx.status = solver_status::max_cpu_time;
+    } else if (criteria.max_wall_time > 0 &&
+               ctx.wall_time() >= criteria.max_wall_time) {
+      ctx.status = solver_status::max_wall_time;
+    }
+  }
 }
 
 }

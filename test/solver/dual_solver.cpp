@@ -1,4 +1,4 @@
-#include "sdca/solver/base_solver.h"
+#include "sdca/solver.h"
 #include "test_util.h"
 
 TEST(SolverDualSolverTest, feature_in_multiclass_out) {

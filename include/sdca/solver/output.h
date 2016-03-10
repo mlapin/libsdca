@@ -2,9 +2,11 @@
 #define SDCA_SOLVER_OUTPUT_H
 
 #include <algorithm>
+#include <sstream>
 #include <stdexcept>
+#include <vector>
 
-#include "sdca/solver/solverdef.h"
+#include "sdca/types.h"
 
 namespace sdca {
 

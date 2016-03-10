@@ -1,7 +1,9 @@
 #ifndef SDCA_SOLVER_INPUT_H
 #define SDCA_SOLVER_INPUT_H
 
-#include "sdca/solver/solverdef.h"
+#include <sstream>
+
+#include "sdca/types.h"
 
 namespace sdca {
 

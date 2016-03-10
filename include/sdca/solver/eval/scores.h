@@ -6,7 +6,6 @@
 
 namespace sdca {
 
-
 template <typename Int,
           typename Data,
           typename Context>

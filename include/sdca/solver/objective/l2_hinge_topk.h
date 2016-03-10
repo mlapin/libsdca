@@ -1,9 +1,9 @@
 #ifndef SDCA_SOLVER_OBJECTIVE_L2_HINGE_TOPK_H
 #define SDCA_SOLVER_OBJECTIVE_L2_HINGE_TOPK_H
 
+#include "sdca/types.h"
 #include "sdca/prox/topk_simplex.h"
 #include "sdca/prox/topk_simplex_biased.h"
-#include "sdca/solver/solverdef.h"
 #include "sdca/solver/objective/objective_base.h"
 
 namespace sdca {

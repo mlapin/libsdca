@@ -3,9 +3,22 @@
 
 #include "sdca/solver/dataset.h"
 #include "sdca/solver/objective.h"
+#include "sdca/solver/stopping_criteria.h"
 #include "sdca/utility/stopwatch.h"
 
 namespace sdca {
+
+enum class solver_status {
+  none = 0,
+  solving,
+  solved,
+  no_progress,
+  max_epoch,
+  max_cpu_time,
+  max_wall_time,
+  failed
+};
+
 
 template <typename Data,
           typename Result,
