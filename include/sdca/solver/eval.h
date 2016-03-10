@@ -9,6 +9,7 @@
 #include "sdca/solver/eval/regularizer.h"
 #include "sdca/solver/eval/scores.h"
 #include "sdca/solver/eval/types.h"
+#include "sdca/solver/reporting.h"
 
 namespace sdca {
 
@@ -43,6 +44,7 @@ evaluate_dataset(
   }
 
   eval_end(m, n, ctx.objective, eval);
+  reporting::eval_created(ctx, eval);
 }
 
 
@@ -70,17 +72,20 @@ check_stopping_criteria(
 
     // Check if the relative duality gap is below epsilon
     if (gap < max * static_cast<Result>(criteria.epsilon)) {
-      ctx.status = solver_status::solved;
-
       // A large negative duality gap likely indicates an issue in the code
       if (gap < - eps) {
         ctx.status = solver_status::failed;
+        reporting::stop_failed(ctx, eval);
+      } else {
+        ctx.status = solver_status::solved;
+        reporting::stop_solved(ctx, eval);
       }
     } else if (evals.size() > 1) {
       // Check if the solver is making progress
       const auto& before = evals.rbegin()[1];
       if (eval.dual + eps * before.dual < before.dual) {
         ctx.status = solver_status::no_progress;
+        reporting::stop_no_progress(ctx, eval, before);
       }
     }
   }
@@ -89,12 +94,15 @@ check_stopping_criteria(
   if (ctx.status == solver_status::solving) {
     if (ctx.epoch >= criteria.max_epoch) {
       ctx.status = solver_status::max_epoch;
+      reporting::stop_max_epoch(ctx);
     } else if (criteria.max_cpu_time > 0 &&
                ctx.cpu_time() >= criteria.max_cpu_time) {
       ctx.status = solver_status::max_cpu_time;
+      reporting::stop_max_cpu_time(ctx);
     } else if (criteria.max_wall_time > 0 &&
                ctx.wall_time() >= criteria.max_wall_time) {
       ctx.status = solver_status::max_wall_time;
+      reporting::stop_max_wall_time(ctx);
     }
   }
 }
