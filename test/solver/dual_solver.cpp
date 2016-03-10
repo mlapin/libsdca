@@ -24,4 +24,7 @@ TEST(SolverDualSolverTest, feature_in_multiclass_out) {
   EXPECT_EQ(d, ctx.train.num_dimensions());
   EXPECT_EQ(n, ctx.train.num_examples());
   EXPECT_EQ(m, ctx.train.num_classes());
+
+//  auto solver = sdca::make_solver(ctx);
+//  solver.solve();
 }

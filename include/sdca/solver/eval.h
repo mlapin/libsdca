@@ -10,36 +10,39 @@
 #include "sdca/solver/eval/scores.h"
 #include "sdca/solver/eval/types.h"
 #include "sdca/solver/reporting.h"
+#include "sdca/solver/scratch.h"
 
 namespace sdca {
 
-template <typename Result,
-          typename Data,
-          typename Context,
-          typename Dataset>
+template <typename Data,
+          template <typename> class Input,
+          typename Dataset,
+          typename Context>
 inline void
 evaluate_dataset(
-    Context& ctx,
-    Dataset& d,
-    Data* scores
+    const Context& ctx,
+    const Dataset& d,
+    solver_scratch<Data, Input>& scratch
   ) {
   const size_type m = d.num_classes();
   const size_type n = d.num_examples();
 
   auto& eval = eval_begin(d);
 
-  eval_regularizer_primal(d.in, ctx.objective, m, ctx.primal_variables, eval);
+  eval_regularizer_primal(m, d.in, ctx.objective, ctx.primal_variables, eval);
 
+  assert(m == scratch.scores.size());
+  Data* scores = *scratch.scores[0];
   for (size_type i = 0; i < n; ++i) {
     Data* variables = ctx.dual_variables + m * i;
 
     eval_scores(i, m, d.in, ctx, scores);
 
-    eval_regularizer_dual(d.in, ctx.objective, m, variables, scores, eval);
+    eval_regularizer_dual(m, d.in, ctx.objective, variables, scores, eval);
 
-    eval_dual_loss(d.out, ctx.objective, i, variables, eval);
+    eval_dual_loss(i, d.out, ctx.objective, variables, eval);
 
-    eval_primal_loss(d.out, ctx.objective, i, scores, eval);
+    eval_primal_loss(i, d.out, ctx.objective, scores, eval);
 
   }
 
@@ -49,9 +52,7 @@ evaluate_dataset(
 
 
 template <typename Result,
-          typename Data,
-          typename Context,
-          typename Dataset>
+          typename Context>
 inline void
 check_stopping_criteria(
     Context& ctx

@@ -44,29 +44,29 @@ struct l2_entropy_topk
 
   template <typename Int>
   void update_dual_variables(
-      const Int num_tasks,
+      const Int num_classes,
       const Data norm2,
       Data* variables,
       Data* scores
       ) const {
-    Data *first(variables + 1), *last(variables + num_tasks);
+    Data *first(variables + 1), *last(variables + num_classes);
     Result alpha(c * static_cast<Result>(norm2)), zero(0), one(1);
 
     // 1. Prepare a vector to project in 'variables'.
     sdca_blas_axpby(
-      static_cast<blas_int>(num_tasks), 1, scores, -norm2, variables);
+      static_cast<blas_int>(num_classes), 1, scores, -norm2, variables);
     Data a(-variables[0]);
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
     prox_topk_entropy_biased(
-      first, last, scores + 1, scores + num_tasks, k, alpha);
+      first, last, scores + 1, scores + num_classes, k, alpha);
 
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
       c * std::min(one, std::accumulate(first, last, zero)));
     sdca_blas_scal(
-      static_cast<blas_int>(num_tasks - 1), static_cast<Data>(-c), first);
+      static_cast<blas_int>(num_classes - 1), static_cast<Data>(-c), first);
   }
 
 

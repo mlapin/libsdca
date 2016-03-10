@@ -13,9 +13,9 @@ template <typename Int,
           typename Evaluation>
 inline void
 eval_regularizer_primal(
+    const Int,
     const Input&,
     const Objective&,
-    const Int,
     const Data*,
     Evaluation&
   ) {}
@@ -28,9 +28,9 @@ template <typename Int,
           template <typename, typename> class Objective>
 inline void
 eval_regularizer_primal(
+    const Int num_classes,
     const feature_input<Data>& in,
     const Objective<Data, Result>& obj,
-    const Int num_classes,
     const Data* primal_variables,
     eval_train<Result, Output>& eval
   ) {
@@ -46,9 +46,9 @@ template <typename Int,
           typename Evaluation>
 inline void
 eval_regularizer_dual(
+    const Int,
     const Input&,
     const Objective&,
-    const Int,
     const Data*,
     const Data*,
     Evaluation&
@@ -62,9 +62,9 @@ template <typename Int,
           template <typename, typename> class Objective>
 inline void
 eval_regularizer_dual(
+    const Int num_classes,
     const kernel_input<Data>&,
     const Objective<Data, Result>& obj,
-    const Int num_classes,
     const Data* dual_variables,
     const Data* scores,
     eval_train<Result, Output>& eval

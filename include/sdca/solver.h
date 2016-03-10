@@ -8,6 +8,8 @@
 #include "sdca/solver/context.h"
 #include "sdca/solver/eval.h"
 #include "sdca/solver/reporting.h"
+#include "sdca/solver/scratch.h"
+#include "sdca/solver/update.h"
 
 namespace sdca {
 
@@ -25,6 +27,7 @@ public:
   typedef Objective<Data, Result> objective_type;
 
   typedef solver_context<Data, Result, Input, Output, Objective> context_type;
+  typedef solver_scratch<Data, Input> scratch_type;
 
 
   explicit solver(
@@ -40,7 +43,7 @@ public:
 
       begin_epoch();
       for (auto& example : examples_) {
-        solve_example(example);
+        update_variables(example, ctx_, scratch_);
       }
 
       end_epoch();
@@ -51,11 +54,11 @@ public:
 
 protected:
   context_type& ctx_;
+  scratch_type scratch_;
 
   bool is_evaluated_;
   std::minstd_rand generator_;
   std::vector<size_type> examples_;
-  std::vector<data_type> scores_;
 
 
   void begin_solve() {
@@ -64,13 +67,13 @@ protected:
                   : solver_status::max_epoch;
 
     if (ctx_.criteria.eval_on_start) {
-      scores_.resize(ctx_.train.num_classes());
+      scratch_.init(ctx_.train);
       evaluate_solution();
     }
 
     if (ctx_.status == solver_status::solving) {
+      scratch_.init(ctx_.train);
       examples_.resize(ctx_.train.num_examples());
-      scores_.resize(ctx_.train.num_classes());
 
       generator_.seed();
       std::iota(examples_.begin(), examples_.end(), 0);
@@ -105,7 +108,7 @@ protected:
       evaluate_solution();
     }
 
-    check_stopping_criteria(ctx_);
+    check_stopping_criteria<Result>(ctx_);
     reporting::end_epoch(ctx_);
 
     ctx_.solve_time.resume();
@@ -115,10 +118,9 @@ protected:
   void evaluate_solution() {
     ctx_.eval_time.resume();
 
-    assert(scores_.size() == ctx_.train.num_classes());
-    evaluate_dataset<Result>(ctx_, ctx_.train, &scores_[0]);
+    evaluate_dataset(ctx_, ctx_.train, scratch_);
     for (auto& test_set : ctx_.test) {
-      evaluate_dataset<Result>(ctx_, test_set, &scores_[0]);
+      evaluate_dataset(ctx_, test_set, scratch_);
     }
 
     is_evaluated_ = true;
@@ -126,6 +128,19 @@ protected:
   }
 
 };
+
+
+template <typename Data,
+          typename Result,
+          template <typename> class Input,
+          typename Output,
+          template <typename, typename> class Objective>
+inline solver<Data, Result, Input, Output, Objective>
+make_solver(
+    solver_context<Data, Result, Input, Output, Objective>& ctx
+  ) {
+  return solver<Data, Result, Input, Output, Objective>(ctx);
+}
 
 }
 

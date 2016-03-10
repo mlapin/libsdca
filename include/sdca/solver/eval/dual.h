@@ -12,9 +12,9 @@ template <typename Int,
           typename Evaluation>
 inline void
 eval_dual_loss(
+    const Int,
     const Output&,
     const Objective&,
-    const Int,
     Data*,
     Evaluation&
   ) {}
@@ -26,9 +26,9 @@ template <typename Int,
           template <typename, typename> class Objective>
 inline void
 eval_dual_loss(
+    const Int i,
     const multiclass_output& out,
     const Objective<Data, Result>& obj,
-    const Int i,
     Data* dual_variables,
     eval_train<Result, multiclass_output>& eval
   ) {
