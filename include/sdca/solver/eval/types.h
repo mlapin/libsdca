@@ -1,6 +1,8 @@
 #ifndef SDCA_SOLVER_EVAL_TYPES_H
 #define SDCA_SOLVER_EVAL_TYPES_H
 
+#include <limits>
+
 #include "sdca/solver/output.h"
 
 namespace sdca {
@@ -17,6 +19,15 @@ struct eval_train {
   Result dual_loss = Result();
   Result regularizer = Result();
 
+
+  inline Result relative_gap() const {
+    Result max = std::max(std::abs(primal), std::abs(dual));
+    return (max > static_cast<Result>(0))
+      ? (max < std::numeric_limits<Result>::infinity()
+        ? (primal - dual) / max
+        : std::numeric_limits<Result>::infinity())
+      : static_cast<Result>(0);
+  }
 };
 
 
@@ -30,6 +41,15 @@ struct eval_train<Result, multiclass_output> {
   Result regularizer = Result();
   std::vector<Result> accuracy;
 
+
+  inline Result relative_gap() const {
+    Result max = std::max(std::abs(primal), std::abs(dual));
+    return (max > static_cast<Result>(0))
+      ? (max < std::numeric_limits<Result>::infinity()
+        ? (primal - dual) / max
+        : std::numeric_limits<Result>::infinity())
+      : static_cast<Result>(0);
+  }
 };
 
 

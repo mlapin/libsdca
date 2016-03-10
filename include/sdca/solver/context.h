@@ -20,21 +20,6 @@ enum class solver_status {
 };
 
 
-template <typename Type>
-inline Type
-relative_gap(
-    const Type primal,
-    const Type dual
-    ) {
-  Type max = std::max(std::abs(primal), std::abs(dual));
-  return (max > static_cast<Type>(0))
-    ? (max < std::numeric_limits<Type>::infinity()
-      ? (primal - dual) / max
-      : std::numeric_limits<Type>::infinity())
-    : static_cast<Type>(0);
-}
-
-
 template <typename Data,
           typename Result,
           template <typename> class Input,

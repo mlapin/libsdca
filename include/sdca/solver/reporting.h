@@ -83,7 +83,7 @@ eval_created(
     "  "
     "epoch: " << std::setw(3) << ctx.epoch << std::setw(0) << ", "
     "accuracy: " << str.str() <<
-    "relative_gap: " << relative_gap(eval.primal, eval.dual) << ", "
+    "relative_gap: " << eval.relative_gap() << ", "
     "absolute_gap: " << eval.primal - eval.dual << ", "
     "primal: " << eval.primal << ", "
     "dual: " << eval.dual << ", "
@@ -130,7 +130,7 @@ stop_solved(
   LOG_DEBUG <<
     "  "
     "stop: " << to_string(ctx.status) << ", "
-    "relative_gap: " << relative_gap(eval.primal, eval.dual) << ", "
+    "relative_gap: " << eval.relative_gap() << ", "
     "epsilon: " << ctx.criteria.epsilon <<
     std::endl;
 }

@@ -121,6 +121,7 @@ protected:
       evaluate_dataset<Result>(ctx_, test_set, &scores_[0]);
     }
 
+    is_evaluated_ = true;
     ctx_.eval_time.stop();
   }
 
