@@ -59,27 +59,13 @@ struct l2_entropy_topk
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    prox_topk_entropy_biased(
-      first, last, scores + 1, scores + num_classes, k, alpha);
+    prox_topk_entropy_biased(first, last, scores + 1, k, alpha);
 
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
       c * std::min(one, std::accumulate(first, last, zero)));
     sdca_blas_scal(
       static_cast<blas_int>(num_classes - 1), static_cast<Data>(-c), first);
-  }
-
-
-  template <typename Int>
-  inline Result
-  dual_loss(
-      const Int num_tasks,
-      const Data* variables
-    ) const {
-    Result d_loss = c_log_c - x_log_x(c - static_cast<Result>(variables[0]));
-    std::for_each(variables + 1, variables + num_tasks,
-      [&](const Result a){ d_loss -= x_log_x(-a); });
-    return d_loss;
   }
 
 
@@ -102,6 +88,19 @@ struct l2_entropy_topk
       return t.hi * (sum_hi + t.t * (static_cast<Result>(k) - num_hi))
         - x_log_x(1 - s) - num_hi * x_log_x(t.hi);
     }
+  }
+
+
+  template <typename Int>
+  inline Result
+  dual_loss(
+      const Int num_classes,
+      const Data* variables
+    ) const {
+    Result d_loss = c_log_c - x_log_x(c - static_cast<Result>(variables[0]));
+    std::for_each(variables + 1, variables + num_classes,
+      [&](const Result a){ d_loss -= x_log_x(-a); });
+    return d_loss;
   }
 
 };

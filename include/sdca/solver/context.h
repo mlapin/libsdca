@@ -3,7 +3,7 @@
 
 #include "sdca/solver/dataset.h"
 #include "sdca/solver/objective.h"
-#include "sdca/solver/stopping_criteria.h"
+#include "sdca/solver/stopping.h"
 #include "sdca/utility/stopwatch.h"
 
 namespace sdca {

@@ -21,7 +21,7 @@ template <typename Data,
 inline void
 evaluate_dataset(
     const Context& ctx,
-    const Dataset& d,
+    Dataset& d,
     solver_scratch<Data, Input>& scratch
   ) {
   const size_type m = d.num_classes();
@@ -32,7 +32,7 @@ evaluate_dataset(
   eval_regularizer_primal(m, d.in, ctx.objective, ctx.primal_variables, eval);
 
   assert(m == scratch.scores.size());
-  Data* scores = *scratch.scores[0];
+  Data* scores = &scratch.scores[0];
   for (size_type i = 0; i < n; ++i) {
     Data* variables = ctx.dual_variables + m * i;
 

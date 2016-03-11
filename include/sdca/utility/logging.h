@@ -26,7 +26,6 @@ enum class format {
 
 extern level __level__;
 extern format __format__;
-extern std::ios __ios_state__; // can be initialized with nullptr
 
 
 inline level
@@ -86,17 +85,6 @@ to_string(format __format) {
     case format::long_e:
       return "long_e";
   }
-}
-
-
-inline void
-format_push() {
-  __ios_state__.copyfmt(std::cout);
-}
-
-inline void
-format_pop() {
-  std::cout.copyfmt(__ios_state__);
 }
 
 }

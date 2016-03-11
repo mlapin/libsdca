@@ -7,12 +7,11 @@ namespace sdca {
 
 template <typename Result,
           typename Input,
-          template <typename, typename> class Evaluation,
-          template <typename, typename> class Dataset>
+          template <typename, typename> class Evaluation>
 inline Evaluation<Result, multiclass_output>&
 eval_begin(
-    const eval_dataset<Input, multiclass_output,
-                       Evaluation<Result, multiclass_output>>& d
+    eval_dataset<Input, multiclass_output,
+                 Evaluation<Result, multiclass_output>>& d
   ) {
   // Create a new eval using the default c'tor
   d.evals.resize(d.evals.size() + 1);

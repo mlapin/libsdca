@@ -1,7 +1,12 @@
 #include "sdca/solver.h"
 #include "test_util.h"
 
-TEST(SolverDualSolverTest, feature_in_multiclass_out) {
+namespace sdca { namespace logging {
+level __level__;
+format __format__;
+}}
+
+TEST(SolverSolverTest, feature_in_multiclass_out) {
   typedef float Data;
 //  typedef double Result;
 
@@ -25,6 +30,6 @@ TEST(SolverDualSolverTest, feature_in_multiclass_out) {
   EXPECT_EQ(n, ctx.train.num_examples());
   EXPECT_EQ(m, ctx.train.num_classes());
 
-//  auto solver = sdca::make_solver(ctx);
-//  solver.solve();
+  auto solver = sdca::make_solver(ctx);
+  solver.solve();
 }

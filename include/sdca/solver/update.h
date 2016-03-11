@@ -23,7 +23,7 @@ update_dual_variables(
   size_type label = out.labels[i];
   std::swap(variables[0], variables[label]);
   std::swap(scores[0], scores[label]);
-  obj.update_variables(m, norm2, variables, scores);
+  obj.update_dual_variables(m, norm2, variables, scores);
   std::swap(variables[0], variables[label]);
 }
 
@@ -42,12 +42,12 @@ update_variables(
   if (norm2 <= 0) return;
 
   const size_type m = d.num_classes();
-  Data* scores = *scratch.scores[0];
+  Data* scores = &scratch.scores[0];
   eval_scores(i, m, d.in, ctx, scores);
 
   // Update dual variables
   const blas_int M = static_cast<blas_int>(m);
-  Data* var_copy = *scratch.variables[0];
+  Data* var_copy = &scratch.variables[0];
   Data* variables = ctx.dual_variables + m * i;
   sdca_blas_copy(M, variables, var_copy);
   update_dual_variables(i, m, norm2, d.out, ctx.objective, variables, scores);
@@ -56,8 +56,9 @@ update_variables(
   sdca_blas_axpy(M, -1, variables, var_copy);
   Data diff = sdca_blas_asum(M, var_copy);
   if (diff > std::numeric_limits<Data>::epsilon()) {
-    const blas_int D = static_cast<blas_int>(d.num_dimensions());
-    const Data* x_i = d.in.features + D * i;
+    const size_type dim = d.in.num_dimensions;
+    const blas_int D = static_cast<blas_int>(dim);
+    const Data* x_i = d.in.features + dim * i;
     sdca_blas_ger(D, M, -1, x_i, var_copy, ctx.primal_variables);
   }
 }

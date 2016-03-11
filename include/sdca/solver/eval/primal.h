@@ -46,7 +46,7 @@ eval_primal_loss(
   // Count correct predictions - re-orders the scores!
   auto it = std::partition(scores + 1, scores + out.num_classes,
     [=](const Data& x){ return x >= scores[0]; });
-  eval.accuracy[std::distance(scores + 1, it)] += 1;
+  eval.accuracy[static_cast<std::size_t>(std::distance(scores + 1, it))] += 1;
 
   // Increment the primal loss (may re-order the scores)
   eval.primal_loss += obj.primal_loss(out.num_classes, scores);

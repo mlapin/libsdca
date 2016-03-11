@@ -35,7 +35,7 @@ add_executable(
   solver/objective.cpp
   solver/dataset.cpp
   solver/context.cpp
-  solver/dual_solver.cpp
+  solver/solver.cpp
   ${libsdca_MATH_SOURCES}
   ${libsdca_PROX_SOURCES}
   ${libsdca_SOLVER_SOURCES}

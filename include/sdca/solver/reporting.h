@@ -76,7 +76,7 @@ eval_created(
     const eval_train<Result, multiclass_output>& eval
   ) {
   std::ostringstream str;
-  auto offset = std::min(static_cast<std::size_t>(5), eval.accuracy.size());
+  long offset = std::min(5L, static_cast<long>(eval.accuracy.size()));
   std::copy(eval.accuracy.begin(), eval.accuracy.begin() + offset,
     std::ostream_iterator<Result>(str, ", "));
   LOG_VERBOSE <<
@@ -104,7 +104,7 @@ eval_created(
     const eval_test<Result, multiclass_output>& eval
   ) {
   std::ostringstream str;
-  auto offset = std::min(static_cast<std::size_t>(5), eval.accuracy.size());
+  long offset = std::min(5L, static_cast<long>(eval.accuracy.size()));
   std::copy(eval.accuracy.begin(), eval.accuracy.begin() + offset,
     std::ostream_iterator<Result>(str, ", "));
   LOG_VERBOSE <<
@@ -215,7 +215,7 @@ stop_max_wall_time(
     "  "
     "stop: " << to_string(ctx.status) << ", "
     "wall_time: " << ctx.wall_time() << ", "
-    "max_wall_time: " << ctx.criteria.wall_cpu_time <<
+    "max_wall_time: " << ctx.criteria.max_wall_time <<
     std::endl;
 }
 

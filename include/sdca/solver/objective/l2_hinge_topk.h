@@ -56,8 +56,7 @@ struct l2_hinge_topk
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    prox_topk_simplex_biased(first, last,
-      scores + 1, scores + num_classes, k, rhs, rho);
+    prox_topk_simplex_biased(first, last, scores + 1, k, rhs, rho);
 
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
@@ -149,27 +148,13 @@ struct l2_hinge_topk_smooth
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    prox_topk_simplex_biased(first, last,
-      scores + 1, scores + num_classes, k, rhs, rho);
+    prox_topk_simplex_biased(first, last, scores + 1, k, rhs, rho);
 
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
       std::min(rhs, std::accumulate(first, last, zero)));
     sdca_blas_scal(
       static_cast<blas_int>(num_classes - 1), static_cast<Data>(-1), first);
-  }
-
-
-  template <typename Int>
-  inline Result
-  dual_loss(
-      const Int num_classes,
-      const Data* variables
-    ) const {
-    return static_cast<Result>(variables[0])
-      - gamma_div_2c * static_cast<Result>(
-      sdca_blas_dot(
-        static_cast<blas_int>(num_classes - 1), variables + 1, variables + 1));
   }
 
 
@@ -189,6 +174,19 @@ struct l2_hinge_topk_smooth
 
     // (division by gamma happens later)
     return hp - static_cast<Result>(0.5) * pp;
+  }
+
+
+  template <typename Int>
+  inline Result
+  dual_loss(
+      const Int num_classes,
+      const Data* variables
+    ) const {
+    return static_cast<Result>(variables[0])
+      - gamma_div_2c * static_cast<Result>(
+      sdca_blas_dot(
+        static_cast<blas_int>(num_classes - 1), variables + 1, variables + 1));
   }
 
 };

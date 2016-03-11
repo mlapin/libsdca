@@ -25,7 +25,7 @@ eval_end(
   // Top-k accuracies for all k
   std::partial_sum(e.accuracy.begin(), e.accuracy.end(), e.accuracy.begin());
   Result coeff(1 / static_cast<Result>(num_examples));
-  sdca_blas_scal(static_cast<Int>(num_classes), coeff, e.accuracy[0]);
+  sdca_blas_scal(static_cast<blas_int>(num_classes), coeff, &e.accuracy[0]);
 }
 
 template <typename Int,
@@ -45,7 +45,7 @@ eval_end(
   // Top-k accuracies for all k
   std::partial_sum(e.accuracy.begin(), e.accuracy.end(), e.accuracy.begin());
   Result coeff(1 / static_cast<Result>(num_examples));
-  sdca_blas_scal(static_cast<Int>(num_classes), coeff, e.accuracy[0]);
+  sdca_blas_scal(static_cast<blas_int>(num_classes), coeff, &e.accuracy[0]);
 }
 
 }

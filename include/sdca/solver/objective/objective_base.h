@@ -32,6 +32,33 @@ struct objective_base {
 
 
   template <typename Int>
+  void update_dual_variables(
+      const Int,  // num_classes
+      const Data, // norm2
+      Data*,      // variables
+      Data*       // scores
+      ) const {}
+
+
+  template <typename Int>
+  inline Result
+  primal_loss(
+      const Int,  // num_classes
+      Data*       // scores
+    ) const {}
+
+
+  template <typename Int>
+  inline Result
+  dual_loss(
+      const Int,
+      const Data* variables
+    ) const {
+    return static_cast<Result>(variables[0]);
+  }
+
+
+  template <typename Int>
   inline Result
   regularizer_primal(
       const Int num_dimensions,
@@ -51,16 +78,6 @@ struct objective_base {
     ) const {
     return static_cast<Result>(sdca_blas_dot(
       static_cast<blas_int>(num_classes), variables, scores));
-  }
-
-
-  template <typename Int>
-  inline Result
-  dual_loss(
-      const Int,
-      const Data* variables
-    ) const {
-    return static_cast<Result>(variables[0]);
   }
 
 

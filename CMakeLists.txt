@@ -211,7 +211,7 @@ set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver/output.h
   ${libsdca_INCLUDE_PATH}/solver/reporting.h
   ${libsdca_INCLUDE_PATH}/solver/scratch.h
-  ${libsdca_INCLUDE_PATH}/solver/stopping_criteria.h
+  ${libsdca_INCLUDE_PATH}/solver/stopping.h
   ${libsdca_INCLUDE_PATH}/solver/update.h
   )
 
