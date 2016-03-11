@@ -32,9 +32,9 @@ add_executable(
   test_libsdca_solver
   test_main.cpp
   test_util.h
-  solver/objective.cpp
-  solver/dataset.cpp
-  solver/context.cpp
+#  solver/objective.cpp
+#  solver/dataset.cpp
+#  solver/context.cpp
   solver/solver.cpp
   ${libsdca_MATH_SOURCES}
   ${libsdca_PROX_SOURCES}

@@ -27,7 +27,8 @@ struct multiclass_output {
   inline std::string
   to_string() const {
     std::ostringstream str;
-    str << "labels (" << num_classes << "-by-" << labels.size() << ")";
+    str << "labels (num_classes: " << num_classes <<
+           ", num_examples: " << labels.size() << ")";
     return str.str();
   }
 

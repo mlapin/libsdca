@@ -33,7 +33,8 @@ public:
   explicit solver(
       context_type& __context
     ) :
-      ctx_(__context)
+      ctx_(__context),
+      is_evaluated_(false)
   {}
 
 
@@ -62,6 +63,8 @@ protected:
 
 
   void begin_solve() {
+    reporting::begin_solve(ctx_);
+
     ctx_.status = (ctx_.criteria.max_epoch > ctx_.epoch)
                   ? solver_status::solving
                   : solver_status::max_epoch;

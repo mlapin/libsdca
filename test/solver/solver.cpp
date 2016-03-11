@@ -1,10 +1,7 @@
 #include "sdca/solver.h"
 #include "test_util.h"
 
-namespace sdca { namespace logging {
-level __level__;
-format __format__;
-}}
+#include "sdca/utility/logging.cpp"
 
 TEST(SolverSolverTest, feature_in_multiclass_out) {
   typedef float Data;
@@ -29,6 +26,9 @@ TEST(SolverSolverTest, feature_in_multiclass_out) {
   EXPECT_EQ(d, ctx.train.num_dimensions());
   EXPECT_EQ(n, ctx.train.num_examples());
   EXPECT_EQ(m, ctx.train.num_classes());
+
+  sdca::logging::set_level(sdca::logging::level::info);
+  sdca::logging::set_format(sdca::logging::format::short_e);
 
   auto solver = sdca::make_solver(ctx);
   solver.solve();

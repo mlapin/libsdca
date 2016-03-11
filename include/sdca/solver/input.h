@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include "sdca/types.h"
+#include "sdca/utility/type_name.h"
 
 namespace sdca {
 
@@ -32,7 +33,9 @@ struct feature_input {
   inline std::string
   to_string() const {
     std::ostringstream str;
-    str << "features (" << num_dimensions << "-by-" << num_examples << ")";
+    str << "features (num_dimensions: " << num_dimensions <<
+           ", num_examples: " << num_examples <<
+           ", precision: " << type_name<Data>() << ")";
     return str.str();
   }
 
@@ -64,7 +67,9 @@ struct kernel_input {
   inline std::string
   to_string() const {
     std::ostringstream str;
-    str << "kernel (" << num_train_examples << "-by-" << num_examples << ")";
+    str << "kernel (num_train_examples: " << num_train_examples <<
+           ", num_examples: " << num_examples <<
+           ", precision: " << type_name<Data>() << ")";
     return str.str();
   }
 

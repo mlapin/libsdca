@@ -36,7 +36,8 @@ struct l2_topk_hinge
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_topk_hinge (c = " << c << ", gamma = 0, k = " << k << ")";
+    str << "l2_topk_hinge (c: " << c << ", k: " << k <<
+           ", precision: " << type_name<Result>() << ")";
     return str.str();
   }
 
@@ -126,8 +127,8 @@ struct l2_topk_hinge_smooth
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_topk_hinge (c = " << c << ", gamma = " << gamma << ", "
-      "k = " << k << ")";
+    str << "l2_topk_hinge (c: " << c << ", gamma: " << gamma << ", "
+           "k: " << k << ", precision: " << type_name<Result>() << ")";
     return str.str();
   }
 

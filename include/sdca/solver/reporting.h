@@ -34,18 +34,33 @@ namespace reporting {
 
 template <typename Context>
 inline void
+begin_solve(
+    const Context& ctx
+  ) {
+  LOG_INFO <<
+    "Started: " <<
+    ctx.objective.to_string() << ", " <<
+    ctx.train.to_string() << ", "
+    "stopping_criteria (" << ctx.criteria.to_string() << ")" <<
+    std::endl;
+}
+
+
+template <typename Context>
+inline void
 end_solve(
     const Context& ctx
   ) {
   LOG_INFO <<
+    "Completed: "
     "status: " << to_string(ctx.status) << ", "
     "epoch: " << ctx.epoch << ", "
     "wall_time: " << ctx.wall_time() <<
-    " (" << ctx.solve_time.wall.elapsed <<
-    " + " << ctx.eval_time.wall.elapsed << "), "
+    " (solve: " << ctx.solve_time.wall.elapsed <<
+    ", eval: " << ctx.eval_time.wall.elapsed << "), "
     "cpu_time: " << ctx.cpu_time() <<
-    " (" << ctx.solve_time.cpu.elapsed <<
-    " + " << ctx.eval_time.cpu.elapsed << ")" <<
+    " (solve: " << ctx.solve_time.cpu.elapsed <<
+    ", eval: " << ctx.eval_time.cpu.elapsed << ")" <<
     std::endl;
 }
 

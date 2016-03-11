@@ -19,12 +19,12 @@ struct stopping_criteria {
   inline std::string
   to_string() const {
     std::ostringstream str;
-    str << "epsilon = " << epsilon << ", "
-           "eval_epoch = " << eval_epoch << ", "
-           "max_epoch = " << max_epoch << ", "
-           "max_cpu_time = " << max_cpu_time << ", "
-           "max_wall_time = " << max_wall_time << ", "
-           "eval_on_start = " << eval_on_start;
+    str << "epsilon: " << epsilon << ", "
+           "eval_epoch: " << eval_epoch << ", "
+           "max_epoch: " << max_epoch << ", "
+           "max_cpu_time: " << max_cpu_time << ", "
+           "max_wall_time: " << max_wall_time << ", "
+           "eval_on_start: " << eval_on_start;
     return str.str();
   }
 };

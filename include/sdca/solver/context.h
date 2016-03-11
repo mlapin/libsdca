@@ -44,11 +44,11 @@ struct solver_context {
   objective_type objective;
   stopping_criteria criteria;
 
-  data_type* primal_variables;
-  data_type* dual_variables;
+  data_type* primal_variables = nullptr;
+  data_type* dual_variables = nullptr;
 
-  size_type epoch;
-  solver_status status;
+  size_type epoch = 0;
+  solver_status status = solver_status::none;
   stopwatch solve_time;
   stopwatch eval_time;
 

@@ -22,11 +22,9 @@ struct objective_base {
   {}
 
 
-  inline std::string precision_string() const {
+  inline std::string to_string() const {
     std::ostringstream str;
-    str << "precision ("
-        << type_name<Data>() << ", "
-        << type_name<Result>() << ")";
+    str << "objective (precision: " << type_name<Result>() << ")";
     return str.str();
   }
 

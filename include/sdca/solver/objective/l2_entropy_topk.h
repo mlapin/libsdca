@@ -37,7 +37,8 @@ struct l2_entropy_topk
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_entropy_topk (c = " << c << ", k = " << k << ")";
+    str << "l2_entropy_topk (c: " << c << ", k: " << k <<
+           ", precision: " << type_name<Result>() << ")";
     return str.str();
   }
 

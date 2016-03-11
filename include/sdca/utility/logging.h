@@ -17,10 +17,10 @@ enum class level {
 };
 
 enum class format {
-  short_f = 0,
-  short_e,
-  long_f,
-  long_e
+  short_e = 0,
+  short_f,
+  long_e,
+  long_f
 };
 
 
@@ -42,17 +42,17 @@ inline void
 set_format(format __format) {
   __format__ = __format;
   switch (__format) {
-    case format::short_f:
-      std::cout << std::setprecision(4) << std::fixed;
-      break;
     case format::short_e:
       std::cout << std::setprecision(4) << std::scientific;
       break;
-    case format::long_f:
-      std::cout << std::setprecision(16) << std::fixed;
+    case format::short_f:
+      std::cout << std::setprecision(4) << std::fixed;
       break;
     case format::long_e:
       std::cout << std::setprecision(16) << std::scientific;
+      break;
+    case format::long_f:
+      std::cout << std::setprecision(16) << std::fixed;
       break;
   }
 }
@@ -76,14 +76,14 @@ to_string(level __level) {
 inline std::string
 to_string(format __format) {
   switch (__format) {
-    case format::short_f:
-      return "short_f";
     case format::short_e:
       return "short_e";
-    case format::long_f:
-      return "long_f";
+    case format::short_f:
+      return "short_f";
     case format::long_e:
       return "long_e";
+    case format::long_f:
+      return "long_f";
   }
 }
 
