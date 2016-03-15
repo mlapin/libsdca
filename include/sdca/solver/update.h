@@ -78,7 +78,7 @@ update_variables(
   if (norm2 <= 0) return;
 
   const size_type m = d.num_classes();
-  Data* scores = *scratch.scores[0];
+  Data* scores = &scratch.scores[0];
   eval_scores(i, m, d.in, ctx, scores);
 
   Data* variables = ctx.dual_variables + m * i;

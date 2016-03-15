@@ -98,10 +98,10 @@ check_stopping_criteria(
     if (ctx.epoch >= criteria.max_epoch) {
       ctx.status = solver_status::max_epoch;
     } else if (criteria.max_cpu_time > 0 &&
-               ctx.cpu_time() >= criteria.max_cpu_time) {
+               ctx.cpu_time_now() >= criteria.max_cpu_time) {
       ctx.status = solver_status::max_cpu_time;
     } else if (criteria.max_wall_time > 0 &&
-               ctx.wall_time() >= criteria.max_wall_time) {
+               ctx.wall_time_now() >= criteria.max_wall_time) {
       ctx.status = solver_status::max_wall_time;
     }
   }

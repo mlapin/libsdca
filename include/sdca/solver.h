@@ -72,6 +72,7 @@ protected:
     if (ctx_.criteria.eval_on_start) {
       scratch_.init(ctx_.train);
       evaluate_solution();
+      check_stopping_criteria<Data, Result>(ctx_);
     }
 
     if (ctx_.status == solver_status::solving) {
