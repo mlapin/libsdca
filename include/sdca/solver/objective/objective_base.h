@@ -81,24 +81,24 @@ struct objective_base {
 
   inline void
   update_primal_loss(
-      Result& primal_loss
+      Result& __primal_loss
     ) const {
-    primal_loss *= coeff_primal_loss;
+    __primal_loss *= coeff_primal_loss;
   }
 
 
   inline void
   update_all(
-      Result& primal,
-      Result& dual,
-      Result& primal_loss,
-      Result& dual_loss,
-      Result& regularizer
+      Result& __primal,
+      Result& __dual,
+      Result& __primal_loss,
+      Result& __dual_loss,
+      Result& __regularizer
     ) const {
-    primal_loss *= coeff_primal_loss;
-    regularizer *= static_cast<Result>(0.5);
-    primal = primal_loss + regularizer;
-    dual = dual_loss - regularizer;
+    __primal_loss *= coeff_primal_loss;
+    __regularizer *= static_cast<Result>(0.5);
+    __primal = __primal_loss + __regularizer;
+    __dual = __dual_loss - __regularizer;
   }
 
 };

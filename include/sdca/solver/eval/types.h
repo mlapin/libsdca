@@ -1,6 +1,7 @@
 #ifndef SDCA_SOLVER_EVAL_TYPES_H
 #define SDCA_SOLVER_EVAL_TYPES_H
 
+#include <iterator>
 #include <iostream>
 #include <limits>
 
