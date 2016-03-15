@@ -2,9 +2,8 @@
 #define SDCA_SOLVER_EVAL_H
 
 #include "sdca/solver/context.h"
-#include "sdca/solver/eval/begin.h"
+#include "sdca/solver/eval/core.h"
 #include "sdca/solver/eval/dual.h"
-#include "sdca/solver/eval/end.h"
 #include "sdca/solver/eval/primal.h"
 #include "sdca/solver/eval/regularizer.h"
 #include "sdca/solver/eval/scores.h"
@@ -29,6 +28,7 @@ evaluate_dataset(
 
   auto& eval = eval_begin(d);
 
+  eval_recompute_primal(m, n, d, ctx.dual_variables, ctx.primal_variables);
   eval_regularizer_primal(m, d.in, ctx.objective, ctx.primal_variables, eval);
 
   assert(m == scratch.scores.size());
@@ -51,7 +51,8 @@ evaluate_dataset(
 }
 
 
-template <typename Result,
+template <typename Data,
+          typename Result,
           typename Context>
 inline void
 check_stopping_criteria(
@@ -68,25 +69,26 @@ check_stopping_criteria(
 
     Result gap = eval.primal - eval.dual;
     Result max = std::max(std::abs(eval.primal), std::abs(eval.dual));
-    Result eps = std::max(max, static_cast<Result>(16))
-               * std::numeric_limits<Result>::epsilon();
+    Result eps_stop = max * static_cast<Result>(criteria.epsilon);
+    Result eps = 64 * std::max(static_cast<Result>(1), max)
+      * std::max(std::numeric_limits<Result>::epsilon(),
+                 static_cast<Result>(std::numeric_limits<Data>::epsilon()));
 
     // Check if the relative duality gap is below epsilon
-    if (gap < max * static_cast<Result>(criteria.epsilon)) {
+    if (gap < eps_stop) {
       // A large negative duality gap likely indicates an issue in the code
-      if (gap < - eps) {
+      if (gap < - eps || gap <= - eps_stop) {
         ctx.status = solver_status::failed;
-        reporting::stop_failed(ctx, eval);
+        reporting::solver_stop_failed(gap, eps, eps_stop);
       } else {
         ctx.status = solver_status::solved;
-        reporting::stop_solved(ctx, eval);
       }
     } else if (evals.size() > 1) {
       // Check if the solver is making progress
       const auto& before = evals.rbegin()[1];
       if (eval.dual + eps * before.dual < before.dual) {
         ctx.status = solver_status::no_progress;
-        reporting::stop_no_progress(ctx, eval, before);
+        reporting::solver_stop_no_progress(eval, before);
       }
     }
   }
@@ -95,15 +97,12 @@ check_stopping_criteria(
   if (ctx.status == solver_status::solving) {
     if (ctx.epoch >= criteria.max_epoch) {
       ctx.status = solver_status::max_epoch;
-      reporting::stop_max_epoch(ctx);
     } else if (criteria.max_cpu_time > 0 &&
                ctx.cpu_time() >= criteria.max_cpu_time) {
       ctx.status = solver_status::max_cpu_time;
-      reporting::stop_max_cpu_time(ctx);
     } else if (criteria.max_wall_time > 0 &&
                ctx.wall_time() >= criteria.max_wall_time) {
       ctx.status = solver_status::max_wall_time;
-      reporting::stop_max_wall_time(ctx);
     }
   }
 }

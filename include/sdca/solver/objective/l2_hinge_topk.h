@@ -57,7 +57,8 @@ struct l2_hinge_topk
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    prox_topk_simplex_biased(first, last, scores + 1, k, rhs, rho);
+    prox_topk_simplex_biased(
+      first, last, scores + 1, static_cast<diff_type>(k), rhs, rho);
 
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
@@ -149,7 +150,8 @@ struct l2_hinge_topk_smooth
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    prox_topk_simplex_biased(first, last, scores + 1, k, rhs, rho);
+    prox_topk_simplex_biased(
+      first, last, scores + 1, static_cast<diff_type>(k), rhs, rho);
 
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
@@ -169,7 +171,8 @@ struct l2_hinge_topk_smooth
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // loss = 1/gamma (<h,p> - 1/2 <p,p>), p =prox_{k,gamma}(h), h = c + a
-    auto t = thresholds_topk_simplex(first, last, k, gamma);
+    auto t = thresholds_topk_simplex(
+      first, last, static_cast<diff_type>(k), gamma);
     Result hp = dot_x_prox(t, first, last);
     Result pp = dot_prox_prox(t, first, last);
 

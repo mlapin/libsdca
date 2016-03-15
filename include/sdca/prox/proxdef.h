@@ -294,7 +294,7 @@ template <typename Result,
           typename Iterator>
 inline Result
 dot_prox_prox(
-    const thresholds<Iterator, Result>& t,
+    const thresholds<Result, Iterator>& t,
     Iterator first,
     Iterator last
     ) {

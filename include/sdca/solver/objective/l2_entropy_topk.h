@@ -60,7 +60,8 @@ struct l2_entropy_topk
     std::for_each(first, last, [=](Data &x){ x += a; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    prox_topk_entropy_biased(first, last, scores + 1, k, alpha);
+    prox_topk_entropy_biased(
+      first, last, scores + 1, static_cast<diff_type>(k), alpha);
 
     // 3. Recover the updated variables
     *variables = static_cast<Data>(
@@ -79,7 +80,8 @@ struct l2_entropy_topk
     Data *first(scores + 1), *last(scores + num_tasks), a(-scores[0]);
     std::for_each(first, last, [=](Data &x){ x += a; });
 
-    auto t = thresholds_topk_entropy<Result>(first, last, k);
+    auto t = thresholds_topk_entropy<Result>(first, last,
+                                             static_cast<diff_type>(k));
     if (t.first == first) {
       return t.t; // equals to log(1 + \sum exp scores)
     } else {

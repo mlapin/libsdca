@@ -63,7 +63,6 @@ struct eval_dataset
     ) :
       base::dataset(std::move(__in), std::move(__out))
   {}
-
 };
 
 

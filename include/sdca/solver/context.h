@@ -20,6 +20,31 @@ enum class solver_status {
 };
 
 
+inline std::string
+status_name(
+    solver_status __status
+  ) {
+  switch (__status) {
+    case solver_status::none:
+      return "none";
+    case solver_status::solving:
+      return "solving";
+    case solver_status::solved:
+      return "solved";
+    case solver_status::no_progress:
+      return "no_progress";
+    case solver_status::max_epoch:
+      return "max_epoch";
+    case solver_status::max_cpu_time:
+      return "max_cpu_time";
+    case solver_status::max_wall_time:
+      return "max_wall_time";
+    case solver_status::failed:
+      return "failed";
+  }
+}
+
+
 template <typename Data,
           typename Result,
           template <typename> class Input,
@@ -47,8 +72,8 @@ struct solver_context {
   data_type* primal_variables = nullptr;
   data_type* dual_variables = nullptr;
 
-  size_type epoch = 0;
   solver_status status = solver_status::none;
+  size_type epoch = 0;
   stopwatch solve_time;
   stopwatch eval_time;
 
@@ -64,6 +89,34 @@ struct solver_context {
       primal_variables(__primal_variables),
       dual_variables(__dual_variables)
   {}
+
+
+  inline std::string to_string() const {
+    std::ostringstream str;
+    str.copyfmt(std::cout);
+    str << objective.to_string() << ", " <<
+           "stopping_criteria (" << criteria.to_string() << "), " <<
+           train.to_string();
+    return str.str();
+  }
+
+
+  inline std::string status_string() const {
+    std::ostringstream str;
+    str.copyfmt(std::cout);
+    str << "status: " << status_name(status) << ", "
+           "epoch: " << epoch << ", ";
+    if (train.evals.size() > 0) {
+      str << "eval: " << train.evals.back().to_string() << ", ";
+    }
+    str << "wall_time: " << wall_time() <<
+           " (solve: " << solve_time.wall.elapsed <<
+           ", eval: " << eval_time.wall.elapsed << "), "
+           "cpu_time: " << cpu_time() <<
+           " (solve: " << solve_time.cpu.elapsed <<
+           ", eval: " << eval_time.cpu.elapsed << ")";
+    return str.str();
+  }
 
 
   void add_test(test_set_type&& d) { test.push_back(std::move(d)); }

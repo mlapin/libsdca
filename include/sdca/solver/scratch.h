@@ -3,6 +3,7 @@
 
 #include <vector>
 
+#include "sdca/math/blas.h"
 #include "sdca/solver/dataset.h"
 
 namespace sdca {
@@ -26,7 +27,17 @@ struct solver_scratch<Data, feature_input> {
   void init(const Dataset& d) {
     scores.resize(d.num_classes());
     variables.resize(d.num_classes());
-    norms.resize(d.num_examples());
+
+    const auto n = d.num_examples();
+    norms.resize(n);
+
+    const auto dim = d.num_dimensions();
+    const blas_int D = static_cast<blas_int>(dim);
+    const Data* features = d.in.features;
+    for (size_type i = 0; i < n; ++i) {
+      const Data* x_i = features + dim * i;
+      norms[i] = sdca_blas_dot(D, x_i, x_i);
+    }
   }
 };
 

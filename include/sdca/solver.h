@@ -111,7 +111,7 @@ protected:
       evaluate_solution();
     }
 
-    check_stopping_criteria<Result>(ctx_);
+    check_stopping_criteria<Data, Result>(ctx_);
     reporting::end_epoch(ctx_);
 
     ctx_.solve_time.resume();

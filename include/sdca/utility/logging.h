@@ -11,6 +11,7 @@ namespace logging {
 
 enum class level {
   none = 0,
+  warning,
   info,
   verbose,
   debug
@@ -63,6 +64,8 @@ to_string(level __level) {
   switch (__level) {
     case level::none:
       return "none";
+    case level::warning:
+      return "warning";
     case level::info:
       return "info";
     case level::verbose:
@@ -89,6 +92,7 @@ to_string(format __format) {
 
 }
 
+#define LOG_WARNING if (logging::__level__ >= logging::level::warning) std::cout
 #define LOG_INFO if (logging::__level__ >= logging::level::info) std::cout
 #define LOG_VERBOSE if (logging::__level__ >= logging::level::verbose) std::cout
 #define LOG_DEBUG if (logging::__level__ >= logging::level::debug) std::cout

@@ -5,14 +5,14 @@ endif()
 
 include_directories(.)
 
-#add_executable(
-#  test_libsdca_prox
-#  test_main.cpp
-#  test_util.h
+add_executable(
+  test_libsdca_prox
+  test_main.cpp
+  test_util.h
 #  prox/lambert.cpp
 #  prox/log_exp.cpp
 #  prox/entropy.cpp
-#  prox/entropy_norm.cpp
+  prox/entropy_norm.cpp
 #  prox/knapsack_eq.cpp
 #  prox/knapsack_le.cpp
 #  prox/knapsack_le_biased.cpp
@@ -23,10 +23,10 @@ include_directories(.)
 #  prox/topk_simplex.cpp
 #  prox/topk_simplex_biased.cpp
 #  prox/two_simplex.cpp
-#  ${libsdca_MATH_SOURCES}
-#  ${libsdca_PROX_SOURCES}
-#  ${libsdca_UTILITY_SOURCES}
-#  )
+  ${libsdca_MATH_SOURCES}
+  ${libsdca_PROX_SOURCES}
+  ${libsdca_UTILITY_SOURCES}
+  )
 
 add_executable(
   test_libsdca_solver
@@ -42,7 +42,7 @@ add_executable(
   ${libsdca_UTILITY_SOURCES}
   )
 
-#target_link_libraries(test_libsdca_prox gtest)
+target_link_libraries(test_libsdca_prox gtest)
 target_link_libraries(test_libsdca_solver gtest ${BLAS_LIBRARIES})
 
 enable_testing()

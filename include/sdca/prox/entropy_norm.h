@@ -23,9 +23,9 @@ sum_w_exp_iter_2(
     ) {
   Result f0(0), f1(0);
   for (auto a = first; a != last; ++a) {
-    Result w = lambert_w_exp(static_cast<Result>(*a) - t);
-    f0 += w;
-    f1 += w / (1 + w);
+    Result v = lambert_w_exp(static_cast<Result>(*a) - t);
+    f0 += v;
+    f1 += v / (1 + v); // minus is absorbed in the update step
   }
   f0 -= rhs;
   return t + f0 / f1;
@@ -48,13 +48,12 @@ sum_w_exp_iter_3(
     ) {
   Result f0(0), f1(0), f2(0);
   for (auto a = first; a != last; ++a) {
-    Result w = lambert_w_exp(static_cast<Result>(*a) - t);
-    Result v = 1 / (w + 1);
-    Result v2 = v * v;
-    Result wv = w * v;
-    f0 += w;
-    f1 += wv;
-    f2 += wv * v2;
+    Result v = lambert_w_exp(static_cast<Result>(*a) - t);
+    Result d = 1 / (1 + v);
+    Result vd = v * d;
+    f0 += v;
+    f1 += vd; // minus is absorbed in the update step
+    f2 += vd * d * d;
   }
   f0 -= rhs;
   return t - 2 * f0 * f1 / (f0 * f2 - 2 * f1 * f1);
@@ -77,15 +76,15 @@ sum_w_exp_iter_4(
     ) {
   Result f0(0), f1(0), f2(0), f3(0);
   for (auto a = first; a != last; ++a) {
-    Result w = lambert_w_exp(static_cast<Result>(*a) - t);
-    Result v = 1 / (w + 1);
-    Result v2 = v * v;
-    Result wv = w * v;
-    Result wv3 = wv * v2;
-    f0 += w;
-    f1 += wv;
-    f2 += wv3;
-    f3 += wv3 * ((1 - 2 * w) * v2);
+    Result v = lambert_w_exp(static_cast<Result>(*a) - t);
+    Result d = 1 / (1 + v);
+    Result d2 = d * d;
+    Result v1 = v * d;
+    Result v2 = v1 * d2;
+    f0 += v;
+    f1 += v1; // minus is absorbed in the update step
+    f2 += v2;
+    f3 += v2 * (1 - 2 * v) * d2;
   }
   f0 -= rhs;
   Result f02 = f0 * f2, f11 = f1 * f1;

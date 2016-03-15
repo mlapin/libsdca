@@ -10,9 +10,14 @@ set(libsdca_VERSION
 add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
 
 # Use either fast or accurate math
-#   TRUE  enables -Ofast (with GCC)
-#   FALSE defines SDCA_ACCURATE_MATH (and no -Ofast)
-set(USE_FAST_MATH FALSE)
+#   TRUE    enables -Ofast (with GCC) and disables SDCA_ACCURATE_MATH
+#   FALSE   disables -Ofast and enables SDCA_ACCURATE_MATH
+set(USE_FAST_MATH TRUE)
+
+# Whether to use <chrono>
+#   TRUE    use std::chrono::high_resolution_clock to measure wall-clock time
+#   FALSE   use gettimeofday from <sys/time.h>
+set(USE_CHRONO TRUE)
 
 ###############################################################################
 #
@@ -149,6 +154,12 @@ if(NOT ${USE_FAST_MATH})
   add_definitions(-DSDCA_ACCURATE_MATH)
 endif()
 
+if(${USE_CHRONO})
+  # If defind, std::chrono::high_resolution_clock is used in stopwatch
+  add_definitions(-DSDCA_USE_CHRONO)
+endif()
+
+
 # Set SDCA specific flags after 3rd party code is built
 set(CMAKE_CXX_FLAGS
   "${CMAKE_CXX_FLAGS} -std=c++11 ${WARN_FLAGS}")
@@ -194,9 +205,8 @@ set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/types.h
   ${libsdca_INCLUDE_PATH}/solver/context.h
   ${libsdca_INCLUDE_PATH}/solver/dataset.h
-  ${libsdca_INCLUDE_PATH}/solver/eval/begin.h
+  ${libsdca_INCLUDE_PATH}/solver/eval/core.h
   ${libsdca_INCLUDE_PATH}/solver/eval/dual.h
-  ${libsdca_INCLUDE_PATH}/solver/eval/end.h
   ${libsdca_INCLUDE_PATH}/solver/eval/primal.h
   ${libsdca_INCLUDE_PATH}/solver/eval/regularizer.h
   ${libsdca_INCLUDE_PATH}/solver/eval/scores.h
@@ -235,6 +245,3 @@ if(POLICY CMP0063)
   cmake_policy(SET CMP0063 NEW)
 endif()
 #find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
-
-# Whether to use the std::chrono namespace in the stopwatch
-#add_definitions(-DUSE_CHRONO=1)

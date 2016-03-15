@@ -26,10 +26,11 @@
 #endif
 
 template <typename IntType,
+          typename UIntType,
           typename RealType>
 inline void
 test_populate_real(
-    const IntType n,
+    const UIntType n,
     const IntType pow_from,
     const IntType pow_to,
     const RealType coeff,
@@ -40,24 +41,25 @@ test_populate_real(
   for (IntType p = pow_from; p < pow_to; ++p) {
     RealType x = static_cast<RealType>(std::pow(base, p));
     std::uniform_real_distribution<RealType> d(x, x*base);
-    for (IntType i = 0; i < n; ++i) {
+    for (UIntType i = 0; i < n; ++i) {
       v.push_back(coeff * d(gen));
     }
   }
 }
 
 
-template <typename Type>
+template <typename Type,
+          typename UIntType>
 inline void
 test_populate_int(
-    const Type n,
+    const UIntType n,
     const Type a,
     const Type b,
     std::mt19937& gen,
     std::vector<Type>& v
   ) {
   std::uniform_int_distribution<Type> d(a, b);
-  for (Type i = 0; i < n; ++i) {
+  for (UIntType i = 0; i < n; ++i) {
     v.push_back(d(gen));
   }
 }

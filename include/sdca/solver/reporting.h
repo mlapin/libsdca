@@ -5,31 +5,6 @@
 #include "sdca/utility/logging.h"
 
 namespace sdca {
-
-inline std::string
-to_string(
-    solver_status __status
-  ) {
-  switch (__status) {
-    case solver_status::none:
-      return "none";
-    case solver_status::solving:
-      return "solving";
-    case solver_status::solved:
-      return "solved";
-    case solver_status::no_progress:
-      return "no_progress";
-    case solver_status::max_epoch:
-      return "max_epoch";
-    case solver_status::max_cpu_time:
-      return "max_cpu_time";
-    case solver_status::max_wall_time:
-      return "max_wall_time";
-    case solver_status::failed:
-      return "failed";
-  }
-}
-
 namespace reporting {
 
 template <typename Context>
@@ -37,12 +12,7 @@ inline void
 begin_solve(
     const Context& ctx
   ) {
-  LOG_INFO <<
-    "Started: " <<
-    ctx.objective.to_string() << ", " <<
-    ctx.train.to_string() << ", "
-    "stopping_criteria (" << ctx.criteria.to_string() << ")" <<
-    std::endl;
+  LOG_INFO << "Solve: " << ctx.to_string() << std::endl;
 }
 
 
@@ -51,17 +21,14 @@ inline void
 end_solve(
     const Context& ctx
   ) {
-  LOG_INFO <<
-    "Completed: "
-    "status: " << to_string(ctx.status) << ", "
-    "epoch: " << ctx.epoch << ", "
-    "wall_time: " << ctx.wall_time() <<
-    " (solve: " << ctx.solve_time.wall.elapsed <<
-    ", eval: " << ctx.eval_time.wall.elapsed << "), "
-    "cpu_time: " << ctx.cpu_time() <<
-    " (solve: " << ctx.solve_time.cpu.elapsed <<
-    ", eval: " << ctx.eval_time.cpu.elapsed << ")" <<
-    std::endl;
+  if (ctx.status == solver_status::solved) {
+    LOG_INFO << "Solution: " << ctx.status_string() << std::endl;
+  } else {
+    if (logging::get_level() < logging::level::info) {
+      LOG_WARNING << "Solve: " << ctx.to_string() << std::endl;
+    }
+    LOG_WARNING << "Solution: " << ctx.status_string() << std::endl;
+  }
 }
 
 
@@ -83,159 +50,53 @@ end_epoch(
 }
 
 
-template <typename Result,
-          typename Context>
+template <typename Context,
+          typename Evaluation>
 inline void
 eval_created(
     const Context& ctx,
-    const eval_train<Result, multiclass_output>& eval
+    const Evaluation& eval
   ) {
-  std::ostringstream str;
-  long offset = std::min(5L, static_cast<long>(eval.accuracy.size()));
-  std::copy(eval.accuracy.begin(), eval.accuracy.begin() + offset,
-    std::ostream_iterator<Result>(str, ", "));
   LOG_VERBOSE <<
     "  "
-    "epoch: " << std::setw(3) << ctx.epoch << std::setw(0) << ", "
-    "accuracy: " << str.str() <<
-    "relative_gap: " << eval.relative_gap() << ", "
-    "absolute_gap: " << eval.primal - eval.dual << ", "
-    "primal: " << eval.primal << ", "
-    "dual: " << eval.dual << ", "
-    "primal_loss: " << eval.primal_loss << ", "
-    "dual_loss: " << eval.dual_loss << ", "
-    "regularizer: " << eval.regularizer << ", "
+    "epoch: " << std::setw(3) << ctx.epoch << std::setw(0) << ", " <<
+    eval.to_string() <<
     "wall_time: " << ctx.wall_time_now() << ", "
     "cpu_time: " << ctx.cpu_time_now() <<
     std::endl;
 }
 
 
-template <typename Result,
-          typename Context>
+template <typename Result>
 inline void
-eval_created(
-    const Context& ctx,
-    const eval_test<Result, multiclass_output>& eval
+solver_stop_failed(
+    const Result absolute_gap,
+    const Result eps_machine,
+    const Result eps_user
   ) {
-  std::ostringstream str;
-  long offset = std::min(5L, static_cast<long>(eval.accuracy.size()));
-  std::copy(eval.accuracy.begin(), eval.accuracy.begin() + offset,
-    std::ostream_iterator<Result>(str, ", "));
-  LOG_VERBOSE <<
-    "  "
-    "epoch: " << std::setw(3) << ctx.epoch << std::setw(0) << ", "
-    "accuracy: " << str.str() <<
-    "primal_loss: " << eval.primal_loss << ", "
-    "wall_time: " << ctx.wall_time_now() << ", "
-    "cpu_time: " << ctx.cpu_time_now() <<
-    std::endl;
-}
-
-
-template <typename Result,
-          typename Output,
-          typename Context>
-inline void
-stop_solved(
-    const Context& ctx,
-    const eval_train<Result, Output>& eval
-  ) {
-  assert(ctx.status == solver_status::solved);
   LOG_DEBUG <<
-    "  "
-    "stop: " << to_string(ctx.status) << ", "
-    "relative_gap: " << eval.relative_gap() << ", "
-    "epsilon: " << ctx.criteria.epsilon <<
+    "absolute_gap: " << absolute_gap << ", "
+    "eps_machine: " << eps_machine << ", "
+    "eps_user: " << eps_user <<
     std::endl;
 }
 
 
 template <typename Result,
-          typename Output,
-          typename Context>
+          typename Output>
 inline void
-stop_failed(
-    const Context& ctx,
-    const eval_train<Result, Output>& eval
-  ) {
-  assert(ctx.status == solver_status::failed);
-  LOG_DEBUG <<
-    "  "
-    "stop: " << to_string(ctx.status) << ", "
-    "primal: " << eval.primal << ", "
-    "dual: " << eval.dual << ", "
-    "absolute_gap: " << eval.primal - eval.dual <<
-    std::endl;
-}
-
-
-template <typename Result,
-          typename Output,
-          typename Context>
-inline void
-stop_no_progress(
-    const Context& ctx,
+solver_stop_no_progress(
     const eval_train<Result, Output>& eval,
     const eval_train<Result, Output>& before
   ) {
-  assert(ctx.status == solver_status::no_progress);
   LOG_DEBUG <<
-    "  "
-    "stop: " << to_string(ctx.status) << ", "
     "dual: " << eval.dual << ", "
     "dual_before: " << before.dual << ", "
     "difference: " << eval.dual - before.dual <<
     std::endl;
 }
 
-
-template <typename Context>
-inline void
-stop_max_epoch(
-    const Context& ctx
-  ) {
-  assert(ctx.status == solver_status::max_epoch);
-  LOG_DEBUG <<
-    "  "
-    "stop: " << to_string(ctx.status) << ", "
-    "epoch: " << ctx.epoch << ", "
-    "max_epoch: " << ctx.criteria.max_epoch <<
-    std::endl;
 }
-
-
-template <typename Context>
-inline void
-stop_max_cpu_time(
-    const Context& ctx
-  ) {
-  assert(ctx.status == solver_status::max_cpu_time);
-  LOG_DEBUG <<
-    "  "
-    "stop: " << to_string(ctx.status) << ", "
-    "cpu_time: " << ctx.cpu_time() << ", "
-    "max_cpu_time: " << ctx.criteria.max_cpu_time <<
-    std::endl;
-}
-
-
-template <typename Context>
-inline void
-stop_max_wall_time(
-    const Context& ctx
-  ) {
-  assert(ctx.status == solver_status::max_wall_time);
-  LOG_DEBUG <<
-    "  "
-    "stop: " << to_string(ctx.status) << ", "
-    "wall_time: " << ctx.wall_time() << ", "
-    "max_wall_time: " << ctx.criteria.max_wall_time <<
-    std::endl;
-}
-
-}
-
 }
 
 #endif
