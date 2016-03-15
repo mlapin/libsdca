@@ -67,7 +67,7 @@ test_solver_multiclass_basic_feature_in(
   test_solver_multiclass_basic<Data>(expected_accuracy, ctx_warm);
   EXPECT_TRUE(ctx_warm.epoch == 0UL);
 
-  // Zero the dual variables are train from scratch
+  // Zero the dual variables and train from scratch
   std::fill(A.begin(), A.end(), static_cast<Data>(0));
   auto ctx_ker = sdca::make_context_multiclass(
     std::move(ctx_warm.objective),
