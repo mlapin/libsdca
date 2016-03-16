@@ -98,11 +98,13 @@ test_solver_multiclass_basic(
 
   // OR
   Y = {0, 1, 1, 1};
-  test_solver_multiclass_basic_feature_in(objective, X, Y, static_cast<Result>(1));
+  test_solver_multiclass_basic_feature_in(
+    objective, X, Y, static_cast<Result>(1));
 
   // AND
   Y = {0, 0, 0, 1};
-  test_solver_multiclass_basic_feature_in(objective, X, Y, static_cast<Result>(1));
+  test_solver_multiclass_basic_feature_in(
+    objective, X, Y, static_cast<Result>(1));
 
   // XOR
   // Perturb the last point to break symmetry
@@ -113,7 +115,8 @@ test_solver_multiclass_basic(
        1, 0, 1,
        1 - eps, 1 - eps, 1};
   Y = {0, 1, 1, 0};
-  test_solver_multiclass_basic_feature_in(objective, X, Y, static_cast<Result>(0.75));
+  test_solver_multiclass_basic_feature_in(
+    objective, X, Y, static_cast<Result>(0.75));
 }
 
 
