@@ -98,6 +98,16 @@ make_input_kernel(
   return kernel_input<Data>(num_train_examples, num_examples, kernel);
 }
 
+
+template <typename Data>
+inline kernel_input<Data>
+make_input_kernel(
+    const size_type num_examples,
+    const Data* kernel
+  ) {
+  return kernel_input<Data>(num_examples, num_examples, kernel);
+}
+
 }
 
 #endif

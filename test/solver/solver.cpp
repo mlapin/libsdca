@@ -46,9 +46,11 @@ test_solver_multiclass_basic_feature_in(
   std::vector<Data> A(m * n); // dual vars
 
   // Use features
-  auto ctx = sdca::make_context_multiclass(
+  auto ctx = sdca::make_context(
+    sdca::make_input_feature(d, n, &X[0]),
+    sdca::make_output_multiclass(Y.begin(), Y.end()),
     std::move(objective),
-    d, n, &X[0], Y.begin(), &A[0], &W[0]);
+    &A[0], &W[0]);
 
   test_solver_multiclass_basic<Data>(expected_accuracy, ctx);
 
@@ -59,9 +61,11 @@ test_solver_multiclass_basic_feature_in(
   sdca::sdca_blas_gemm(N, N, D, &X[0], D, &X[0], D, &K[0], CblasTrans);
 
   // Warm restart - use the same dual variables as above
-  auto ctx_warm = sdca::make_context_multiclass(
+  auto ctx_warm = sdca::make_context(
+    sdca::make_input_kernel(n, &K[0]),
+    sdca::make_output_multiclass(Y.begin(), Y.end()),
     std::move(ctx.objective),
-    n, &K[0], Y.begin(), &A[0]);
+    &A[0]);
 
   ctx_warm.criteria.eval_on_start = true;
   test_solver_multiclass_basic<Data>(expected_accuracy, ctx_warm);
@@ -69,9 +73,11 @@ test_solver_multiclass_basic_feature_in(
 
   // Zero the dual variables and train from scratch
   std::fill(A.begin(), A.end(), static_cast<Data>(0));
-  auto ctx_ker = sdca::make_context_multiclass(
+  auto ctx_ker = sdca::make_context(
+    sdca::make_input_kernel(n, &K[0]),
+    sdca::make_output_multiclass(Y.begin(), Y.end()),
     std::move(ctx_warm.objective),
-    n, &K[0], Y.begin(), &A[0]);
+    &A[0]);
 
   ctx_ker.criteria.eval_on_start = true;
   test_solver_multiclass_basic<Data>(expected_accuracy, ctx_ker);

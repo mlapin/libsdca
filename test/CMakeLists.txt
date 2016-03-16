@@ -12,7 +12,7 @@ add_executable(
 #  prox/lambert.cpp
 #  prox/log_exp.cpp
 #  prox/entropy.cpp
-  prox/entropy_norm.cpp
+#  prox/entropy_norm.cpp
 #  prox/knapsack_eq.cpp
 #  prox/knapsack_le.cpp
 #  prox/knapsack_le_biased.cpp
@@ -32,9 +32,9 @@ add_executable(
   test_libsdca_solver
   test_main.cpp
   test_util.h
-#  solver/objective.cpp
-#  solver/dataset.cpp
-#  solver/context.cpp
+  solver/objective.cpp
+  solver/dataset.cpp
+  solver/context.cpp
   solver/solver.cpp
   ${libsdca_MATH_SOURCES}
   ${libsdca_PROX_SOURCES}

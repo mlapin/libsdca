@@ -62,8 +62,8 @@ struct solver_context {
   typedef eval_train<Result, Output> train_eval_type;
   typedef eval_test<Result, Output> test_eval_type;
 
-  typedef eval_dataset<input_type, output_type, train_eval_type> train_set_type;
-  typedef eval_dataset<input_type, output_type, test_eval_type> test_set_type;
+  typedef dataset<input_type, output_type, train_eval_type> train_set_type;
+  typedef dataset<input_type, output_type, test_eval_type> test_set_type;
 
   train_set_type train;
   std::vector<test_set_type> test;
@@ -121,7 +121,9 @@ struct solver_context {
   }
 
 
-  void add_test(test_set_type&& d) { test.push_back(std::move(d)); }
+  void add_test(input_type&& in, output_type&& out) {
+    test.emplace_back(std::move(in), std::move(out));
+  }
 
 
   bool is_dual() const { return primal_variables == nullptr; }
@@ -151,48 +153,37 @@ struct solver_context {
 
 template <typename Data,
           typename Result,
-          typename Iterator,
+          template <typename> class Input,
+          typename Output,
           template <typename, typename> class Objective>
-inline solver_context<Data, Result,
-                      feature_input, multiclass_output, Objective>
-make_context_multiclass(
+inline solver_context<Data, Result, Input, Output, Objective>
+make_context(
+    Input<Data>&& in,
+    Output&& out,
     Objective<Data, Result>&& objective,
-    const size_type num_dimensions,
-    const size_type num_examples,
-    const Data* features,
-    Iterator labels,
     Data* dual_variables,
     Data* primal_variables
   ) {
-  return solver_context<Data, Result,
-                        feature_input, multiclass_output, Objective>(
-    make_dataset_train_feature_in_multiclass_out<Result>(
-      num_dimensions, num_examples, features, labels),
-    std::move(objective),
-    dual_variables,
-    primal_variables);
+  return solver_context<Data, Result, Input, Output, Objective>(
+    make_dataset_train<Result>(std::move(in), std::move(out)),
+    std::move(objective), dual_variables, primal_variables);
 }
 
 
 template <typename Data,
           typename Result,
-          typename Iterator,
+          typename Output,
           template <typename, typename> class Objective>
-inline solver_context<Data, Result,
-                      kernel_input, multiclass_output, Objective>
-make_context_multiclass(
+inline solver_context<Data, Result, kernel_input, Output, Objective>
+make_context(
+    kernel_input<Data>&& in,
+    Output&& out,
     Objective<Data, Result>&& objective,
-    const size_type num_examples,
-    const Data* kernel,
-    Iterator labels,
     Data* dual_variables
   ) {
-  return solver_context<Data, Result,
-                        kernel_input, multiclass_output, Objective>(
-    make_dataset_train_kernel_in_multiclass_out<Result>(
-      num_examples, kernel, labels),
-    std::move(objective),
-    dual_variables);
+  return solver_context<Data, Result, kernel_input, Output, Objective>(
+    make_dataset_train<Result>(std::move(in), std::move(out)),
+    std::move(objective), dual_variables);
 }
 
 }

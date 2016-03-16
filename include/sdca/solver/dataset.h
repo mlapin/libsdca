@@ -8,13 +8,16 @@
 namespace sdca {
 
 template <typename Input,
-          typename Output>
+          typename Output,
+          typename Evaluation>
 struct dataset {
   typedef Input input_type;
   typedef Output output_type;
+  typedef Evaluation eval_type;
 
   input_type in;
   output_type out;
+  std::vector<eval_type> evals;
 
 
   dataset(
@@ -43,145 +46,31 @@ struct dataset {
 };
 
 
-template <typename Input,
-          typename Output,
-          typename Evaluation>
-struct eval_dataset
-    : public dataset<Input, Output> {
-  typedef dataset<Input, Output> base;
-
-  typedef Input input_type;
-  typedef Output output_type;
-  typedef Evaluation eval_type;
-
-  std::vector<eval_type> evals;
-
-
-  eval_dataset(
-      Input&& __in,
-      Output&& __out
-    ) :
-      base::dataset(std::move(__in), std::move(__out))
-  {}
-};
-
-
-template <typename Data,
-          typename Iterator>
-inline dataset<feature_input<Data>,
-               multiclass_output>
-make_dataset_feature_in_multiclass_out(
-    const size_type num_dimensions,
-    const size_type num_examples,
-    const Data* features,
-    Iterator labels
+template <typename Result = double,
+          typename Data,
+          template <typename> class Input,
+          typename Output>
+inline dataset<Input<Data>, Output, eval_train<Result, Output>>
+make_dataset_train(
+    Input<Data>&& in,
+    Output&& out
   ) {
-  return dataset<feature_input<Data>,
-                 multiclass_output>(
-    make_input_feature(num_dimensions, num_examples, features),
-    make_output_multiclass(labels, labels +
-                           static_cast<diff_type>(num_examples)));
-}
-
-
-template <typename Data,
-          typename Iterator>
-inline dataset<kernel_input<Data>,
-               multiclass_output>
-make_dataset_kernel_in_multiclass_out(
-    const size_type num_train_examples,
-    const size_type num_examples,
-    const Data* kernel,
-    Iterator labels
-  ) {
-  return dataset<kernel_input<Data>,
-                 multiclass_output>(
-    make_input_kernel(num_train_examples, num_examples, kernel),
-    make_output_multiclass(labels, labels +
-                           static_cast<diff_type>(num_examples)));
+  return dataset<Input<Data>, Output, eval_train<Result, Output>>(
+    std::move(in), std::move(out));
 }
 
 
 template <typename Result = double,
           typename Data,
-          typename Iterator>
-inline eval_dataset<feature_input<Data>,
-                    multiclass_output,
-                    eval_train<Result, multiclass_output>>
-make_dataset_train_feature_in_multiclass_out(
-    const size_type num_dimensions,
-    const size_type num_examples,
-    const Data* features,
-    Iterator labels
+          template <typename> class Input,
+          typename Output>
+inline dataset<Input<Data>, Output, eval_test<Result, Output>>
+make_dataset_test(
+    Input<Data>&& in,
+    Output&& out
   ) {
-  return eval_dataset<feature_input<Data>,
-                      multiclass_output,
-                      eval_train<Result, multiclass_output>>(
-    make_input_feature(num_dimensions, num_examples, features),
-    make_output_multiclass(labels, labels +
-                           static_cast<diff_type>(num_examples)));
-}
-
-
-template <typename Result = double,
-          typename Data,
-          typename Iterator>
-inline eval_dataset<kernel_input<Data>,
-                    multiclass_output,
-                    eval_train<Result, multiclass_output>>
-make_dataset_train_kernel_in_multiclass_out(
-    const size_type num_examples,
-    const Data* kernel,
-    Iterator labels
-  ) {
-  return eval_dataset<kernel_input<Data>,
-                      multiclass_output,
-                      eval_train<Result, multiclass_output>>(
-    make_input_kernel(num_examples, num_examples, kernel),
-    make_output_multiclass(labels, labels +
-                           static_cast<diff_type>(num_examples)));
-}
-
-
-template <typename Result = double,
-          typename Data,
-          typename Iterator>
-inline eval_dataset<feature_input<Data>,
-                    multiclass_output,
-                    eval_test<Result, multiclass_output>>
-make_dataset_test_feature_in_multiclass_out(
-    const size_type num_dimensions,
-    const size_type num_examples,
-    const Data* features,
-    Iterator labels
-  ) {
-  return eval_dataset<feature_input<Data>,
-                      multiclass_output,
-                      eval_test<Result, multiclass_output>>(
-    make_input_feature(num_dimensions, num_examples, features),
-    make_output_multiclass(labels, labels +
-                           static_cast<diff_type>(num_examples)));
-}
-
-
-template <typename Result = double,
-          typename Data,
-          typename Iterator>
-inline eval_dataset<kernel_input<Data>,
-                    multiclass_output,
-                    eval_test<Result, multiclass_output>>
-make_dataset_test_kernel_in_multiclass_out(
-    const size_type num_train_examples,
-    const size_type num_examples,
-    const Data* kernel,
-    Iterator labels
-  ) {
-  return eval_dataset<kernel_input<Data>,
-                      multiclass_output,
-                      eval_test<Result, multiclass_output>>(
-    make_input_kernel(num_train_examples, num_examples, kernel),
-    make_output_multiclass(labels, labels +
-                           static_cast<diff_type>(num_examples)));
+  return dataset<Input<Data>, Output, eval_test<Result, Output>>(
+    std::move(in), std::move(out));
 }
 
 }

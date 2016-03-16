@@ -13,7 +13,7 @@ template <typename Result,
           template <typename, typename> class Evaluation>
 inline Evaluation<Result, multiclass_output>&
 eval_begin(
-    eval_dataset<Input, multiclass_output,
+    dataset<Input, multiclass_output,
                  Evaluation<Result, multiclass_output>>& d
   ) {
   // Create a new eval using the default c'tor
@@ -105,7 +105,7 @@ eval_recompute_primal(
 #else
   const Int,
   const Int,
-  const eval_dataset<feature_input<Data>, Output,
+  const dataset<feature_input<Data>, Output,
                      eval_train<Result, Output>>&,
   const Data*,
   Data*
