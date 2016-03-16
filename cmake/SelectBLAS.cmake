@@ -80,6 +80,7 @@ elseif(BLAS_FOUND)
   else()
     add_definitions(-DBLAS_DEFAULT_LOCAL_HEADER)
   endif()
+  list(APPEND BLAS_LIBRARIES "-lcblas")
 
 endif()
 

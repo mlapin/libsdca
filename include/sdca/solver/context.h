@@ -41,6 +41,8 @@ status_name(
       return "max_wall_time";
     case solver_status::failed:
       return "failed";
+    default:
+      return "unknown";
   }
 }
 
