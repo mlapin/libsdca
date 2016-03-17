@@ -8,8 +8,7 @@ template <typename Data,
           typename Result,
           typename Context>
 inline void
-test_solver_multiclass_basic(
-    const Result expected_accuracy,
+test_solver_check_converged(
     Context& ctx
   ) {
   ctx.criteria.epsilon = 64 * std::max(
@@ -20,7 +19,16 @@ test_solver_multiclass_basic(
   solver.solve();
 
   EXPECT_TRUE(ctx.status == sdca::solver_status::solved);
+}
 
+
+template <typename Result,
+          typename Context>
+inline void
+test_solver_check_accuracy(
+    const Context& ctx,
+    const Result expected_accuracy
+  ) {
   const Result accuracy = ctx.train.evals.back().accuracy[0];
   if (accuracy != expected_accuracy) {
     std::printf("%s\n", ctx.to_string().c_str());
@@ -52,7 +60,8 @@ test_solver_multiclass_basic_feature_in(
     std::move(objective),
     &A[0], &W[0]);
 
-  test_solver_multiclass_basic<Data>(expected_accuracy, ctx);
+  test_solver_check_converged<Data, Result>(ctx);
+  test_solver_check_accuracy(ctx, expected_accuracy);
 
   // Kernel (Gram) matrix
   std::vector<Data> K(n * n);
@@ -68,7 +77,8 @@ test_solver_multiclass_basic_feature_in(
     &A[0]);
 
   ctx_warm.criteria.eval_on_start = true;
-  test_solver_multiclass_basic<Data>(expected_accuracy, ctx_warm);
+  test_solver_check_converged<Data, Result>(ctx_warm);
+  test_solver_check_accuracy(ctx_warm, expected_accuracy);
   EXPECT_TRUE(ctx_warm.epoch == 0UL);
 
   // Zero the dual variables and train from scratch
@@ -80,7 +90,8 @@ test_solver_multiclass_basic_feature_in(
     &A[0]);
 
   ctx_ker.criteria.eval_on_start = true;
-  test_solver_multiclass_basic<Data>(expected_accuracy, ctx_ker);
+  test_solver_check_converged<Data, Result>(ctx_ker);
+  test_solver_check_accuracy(ctx_ker, expected_accuracy);
   EXPECT_TRUE(ctx_ker.epoch > 0UL);
 }
 
