@@ -285,6 +285,46 @@ prox(
 }
 
 
+///**
+// * Computes the squared Euclidean distance
+// *    ||prox(x) - x||^2
+// * without computing prox(x) explicitly.
+// **/
+//template <typename Result,
+//          typename Iterator>
+//inline Result
+//prox_distance(
+//    const thresholds<Result, Iterator>& t,
+//    Iterator first,
+//    Iterator last
+//    ) {
+//  auto num_mi = std::distance(t.first, t.last);
+//  Result dist = t.t * t.t * static_cast<Result>(num_mi);
+
+//  auto num_hi = std::distance(first, t.first);
+//  if (num_hi > 0) {
+//    dist += static_cast<Result>(
+//      sdca_blas_dot(static_cast<blas_int>(num_hi), first, first));
+//    if (t.hi != 0) {
+//      Result sum_hi = std::accumulate(first, t.first, static_cast<Result>(0));
+//      dist += t.hi * (t.hi * static_cast<Result>(num_hi) - 2 * sum_hi);
+//    }
+//  }
+
+//  auto num_lo = std::distance(t.last, last);
+//  if (num_lo > 0) {
+//    dist += static_cast<Result>(
+//      sdca_blas_dot(static_cast<blas_int>(num_lo), t.last, t.last));
+//    if (t.lo != 0) {
+//      Result sum_lo = std::accumulate(t.last, last, static_cast<Result>(0));
+//      dist += t.lo * (t.lo * static_cast<Result>(num_lo) - 2 * sum_lo);
+//    }
+//  }
+
+//  return dist;
+//}
+
+
 /**
  * Computes the dot product
  *    <prox(x), prox(x)>
