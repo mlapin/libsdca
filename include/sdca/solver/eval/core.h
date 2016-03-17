@@ -10,11 +10,25 @@ namespace sdca {
 
 template <typename Result,
           typename Input,
+          typename Output,
+          template <typename, typename> class Evaluation>
+inline Evaluation<Result, Output>&
+eval_begin(
+    dataset<Input, Output, Evaluation<Result, Output>>& d
+  ) {
+  // Create a new eval using the default c'tor
+  d.evals.resize(d.evals.size() + 1);
+  return d.evals.back();
+}
+
+
+template <typename Result,
+          typename Input,
           template <typename, typename> class Evaluation>
 inline Evaluation<Result, multiclass_output>&
 eval_begin(
     dataset<Input, multiclass_output,
-                 Evaluation<Result, multiclass_output>>& d
+            Evaluation<Result, multiclass_output>>& d
   ) {
   // Create a new eval using the default c'tor
   d.evals.resize(d.evals.size() + 1);
@@ -53,6 +67,24 @@ template <typename Int,
           template <typename, typename> class Objective>
 inline void
 eval_end(
+    const Int,
+    const Int num_examples,
+    const Objective<Data, Result>& obj,
+    eval_train<Result, multilabel_output>& e
+  ) {
+  // Compute the overall primal/dual objectives and their individual terms
+  obj.update_all(e.primal, e.dual, e.primal_loss, e.dual_loss, e.regularizer);
+
+  e.rank_loss /= static_cast<Result>(num_examples);
+}
+
+
+template <typename Int,
+          typename Data,
+          typename Result,
+          template <typename, typename> class Objective>
+inline void
+eval_end(
     const Int num_classes,
     const Int num_examples,
     const Objective<Data, Result>& obj,
@@ -65,6 +97,24 @@ eval_end(
   std::partial_sum(e.accuracy.begin(), e.accuracy.end(), e.accuracy.begin());
   Result coeff(1 / static_cast<Result>(num_examples));
   sdca_blas_scal(static_cast<blas_int>(num_classes), coeff, &e.accuracy[0]);
+}
+
+
+template <typename Int,
+          typename Data,
+          typename Result,
+          template <typename, typename> class Objective>
+inline void
+eval_end(
+    const Int,
+    const Int num_examples,
+    const Objective<Data, Result>& obj,
+    eval_test<Result, multilabel_output>& e
+  ) {
+  // Compute the overall primal/dual objectives and their individual terms
+  obj.update_primal_loss(e.primal_loss);
+
+  e.rank_loss /= static_cast<Result>(num_examples);
 }
 
 

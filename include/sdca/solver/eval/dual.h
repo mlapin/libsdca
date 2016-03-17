@@ -37,11 +37,30 @@ eval_dual_loss(
   std::swap(dual_variables[0], dual_variables[label]);
 
   // The dual loss computation must not modify the variables
-  eval.dual_loss += obj.dual_loss(
-    out.num_classes, const_cast<const Data*>(dual_variables));
+  eval.dual_loss += obj.dual_loss(out.num_classes,
+                                  const_cast<const Data*>(dual_variables));
 
   // Put back the ground truth
   std::swap(dual_variables[0], dual_variables[label]);
+}
+
+
+template <typename Int,
+          typename Data,
+          typename Result,
+          template <typename, typename> class Objective>
+inline void
+eval_dual_loss(
+    const Int i,
+    const multilabel_output& out,
+    const Objective<Data, Result>& obj,
+    Data* dual_variables,
+    eval_train<Result, multilabel_output>& eval
+  ) {
+  out.move_front(i, dual_variables);
+  eval.dual_loss += obj.dual_loss(out.num_classes, out.num_labels(i),
+                                  const_cast<const Data*>(dual_variables));
+  out.move_back(i, dual_variables);
 }
 
 }

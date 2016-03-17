@@ -49,7 +49,7 @@ struct objective_base {
   template <typename Int>
   inline Result
   dual_loss(
-      const Int,
+      const Int,  // num_classes
       const Data* variables
     ) const {
     return static_cast<Result>(variables[0]);

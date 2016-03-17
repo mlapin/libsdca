@@ -69,17 +69,15 @@ protected:
                   ? solver_status::solving
                   : solver_status::max_epoch;
 
+    scratch_.init(ctx_.train);
     if (ctx_.criteria.eval_on_start) {
-      scratch_.init(ctx_.train);
       evaluate_solution();
       check_stopping_criteria<Data, Result>(ctx_);
     }
 
     if (ctx_.status == solver_status::solving) {
-      scratch_.init(ctx_.train);
-      examples_.resize(ctx_.train.num_examples());
-
       generator_.seed();
+      examples_.resize(ctx_.train.num_examples());
       std::iota(examples_.begin(), examples_.end(), 0);
 
       ctx_.solve_time.resume();

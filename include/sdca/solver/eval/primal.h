@@ -52,6 +52,38 @@ eval_primal_loss(
   eval.primal_loss += obj.primal_loss(out.num_classes, scores);
 }
 
+
+template <typename Int,
+          typename Data,
+          typename Result,
+          template <typename, typename> class Objective,
+          template <typename, typename> class Evaluation>
+inline void
+eval_primal_loss(
+    const Int i,
+    const multilabel_output& out,
+    const Objective<Data, Result>& obj,
+    Data* scores,
+    Evaluation<Result, multilabel_output>& eval
+  ) {
+  out.move_front(i, scores);
+
+  size_type num_classes = out.num_classes, num_labels = out.num_labels(i);
+  Data *pos_first(scores), *pos_last(scores + num_labels);
+  Data *neg_first(scores + num_labels), *neg_last(scores + num_classes);
+
+  // Compute the ranking loss
+  for (Data* gt = pos_first; gt != pos_last; ++gt) {
+    auto it = std::partition(neg_first, neg_last,
+      [=](const Data& x){ return x >= *gt; });
+    eval.rank_loss += static_cast<Result>(std::distance(neg_first, it));
+  }
+  eval.rank_loss /= static_cast<Result>(num_classes * num_labels);
+
+  // Increment the primal loss (may re-order the scores)
+  eval.primal_loss += obj.primal_loss(num_classes, num_labels, scores);
+}
+
 }
 
 #endif

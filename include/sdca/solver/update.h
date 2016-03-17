@@ -29,6 +29,25 @@ update_dual_variables(
 
 
 template <typename Data,
+          typename Result,
+          template <typename, typename> class Objective>
+inline void
+update_dual_variables(
+    const size_type i,
+    const size_type m,
+    const Data norm2,
+    const multilabel_output& out,
+    const Objective<Data, Result>& obj,
+    Data* variables,
+    Data* scores
+  ) {
+  out.move_front(i, variables, scores);
+  obj.update_dual_variables(m, out.num_labels(i), norm2, variables, scores);
+  out.move_back(i, variables);
+}
+
+
+template <typename Data,
           typename Context>
 inline void
 update_variables(

@@ -215,6 +215,7 @@ set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver/input.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy_topk.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_hinge_topk.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_hinge.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_topk_hinge.h
   ${libsdca_INCLUDE_PATH}/solver/objective/objective_base.h
   ${libsdca_INCLUDE_PATH}/solver/objective.h

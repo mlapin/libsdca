@@ -102,7 +102,6 @@ struct l2_hinge_topk_smooth
   const Result gamma;
   const size_type k;
 
-  const Result c_div_gamma;
   const Result gamma_div_c;
   const Result gamma_div_2c;
 
@@ -116,7 +115,6 @@ struct l2_hinge_topk_smooth
       c(__c),
       gamma(__gamma),
       k(__k),
-      c_div_gamma(__c / __gamma),
       gamma_div_c(__gamma / __c),
       gamma_div_2c(__gamma / (2 * __c))
   {}
@@ -124,8 +122,8 @@ struct l2_hinge_topk_smooth
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_hinge_topk (c: " << c << ", gamma: " << gamma << ", "
-           "k: " << k << ", precision: " << type_name<Result>() << ")";
+    str << "l2_hinge_topk (c: " << c << ", gamma: " << gamma <<
+           ", k: " << k << ", precision: " << type_name<Result>() << ")";
     return str.str();
   }
 

@@ -127,8 +127,8 @@ struct l2_topk_hinge_smooth
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_topk_hinge (c: " << c << ", gamma: " << gamma << ", "
-           "k: " << k << ", precision: " << type_name<Result>() << ")";
+    str << "l2_topk_hinge (c: " << c << ", gamma: " << gamma <<
+           ", k: " << k << ", precision: " << type_name<Result>() << ")";
     return str.str();
   }
 

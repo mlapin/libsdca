@@ -122,6 +122,7 @@ struct solver_context {
 
 
   void add_test(input_type&& in, output_type&& out) {
+    // TODO: verify dimensions
     test.emplace_back(std::move(in), std::move(out));
   }
 
