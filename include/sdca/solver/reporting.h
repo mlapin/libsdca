@@ -60,7 +60,7 @@ eval_created(
   LOG_VERBOSE <<
     "  "
     "epoch: " << std::setw(3) << ctx.epoch << std::setw(0) << ", " <<
-    eval.to_string() <<
+    eval.to_string() << ", "
     "wall_time: " << ctx.wall_time_now() << ", "
     "cpu_time: " << ctx.cpu_time_now() <<
     std::endl;
@@ -74,7 +74,8 @@ solver_stop_failed(
     const Result eps_machine,
     const Result eps_user
   ) {
-  LOG_DEBUG <<
+  LOG_WARNING <<
+    "Warning: negative duality gap. "
     "absolute_gap: " << absolute_gap << ", "
     "eps_machine: " << eps_machine << ", "
     "eps_user: " << eps_user <<
@@ -89,7 +90,8 @@ solver_stop_no_progress(
     const eval_train<Result, Output>& eval,
     const eval_train<Result, Output>& before
   ) {
-  LOG_DEBUG <<
+  LOG_WARNING <<
+    "Warning: dual objective decreased. "
     "dual: " << eval.dual << ", "
     "dual_before: " << before.dual << ", "
     "difference: " << eval.dual - before.dual <<

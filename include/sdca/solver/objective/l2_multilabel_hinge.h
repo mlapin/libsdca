@@ -147,10 +147,12 @@ struct l2_multilabel_hinge_smooth
     Data *neg_first(variables + num_labels), *neg_last(variables + num_classes);
     Data *pos_scores(scores), *neg_scores(scores + num_labels);
     Data a = static_cast<Data>(1 / (static_cast<Result>(norm2) + gamma_div_c));
+    Data b = static_cast<Data>(static_cast<Result>(norm2)
+                               / (static_cast<Result>(norm2) + gamma_div_c));
 
     // 1. Prepare a vector to project in 'variables'.
     sdca_blas_axpby(
-      static_cast<blas_int>(num_classes), a, scores, -1, variables);
+      static_cast<blas_int>(num_classes), a, scores, -b, variables);
     a /= 2;
     std::for_each(pos_first, pos_last, [=](Data &x){ x = a - x; });
     std::for_each(neg_first, neg_last, [=](Data &x){ x += a; });
@@ -201,7 +203,7 @@ struct l2_multilabel_hinge_smooth
     Result loss = static_cast<Result>(std::accumulate(
       variables, variables + num_labels, static_cast<Result>(0)));
     Result smoothing = gamma_div_2c * static_cast<Result>(sdca_blas_dot(
-      static_cast<blas_int>(num_classes), variables, variables + num_classes));
+      static_cast<blas_int>(num_classes), variables, variables));
     return loss - smoothing;
   }
 

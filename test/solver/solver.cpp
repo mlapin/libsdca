@@ -15,6 +15,7 @@ test_solver_check_converged(
     static_cast<double>(std::numeric_limits<Data>::epsilon()),
     static_cast<double>(std::numeric_limits<Result>::epsilon()));
 
+  ctx.criteria.eval_epoch = 1;
   auto solver = sdca::make_solver(ctx);
   solver.solve();
 
@@ -138,6 +139,104 @@ test_solver_multiclass_basic(
 
 
 template <typename Data,
+          typename Result,
+          template <typename, typename> class Objective>
+inline void
+test_solver_multilabel_basic_feature_in(
+    Objective<Data, Result>& objective,
+    const std::vector<Data>& X,
+    const std::vector<sdca::size_type>& Y
+  ) {
+  sdca::size_type dn = X.size(), n = Y.size(), m = 2;
+  sdca::size_type d = dn / n;
+  std::vector<Data> W(d * m); // primal vars
+  std::vector<Data> A(m * n); // dual vars
+
+  std::vector<sdca::size_type> offsets(Y.size() + 1);
+  std::iota(offsets.begin(), offsets.end(), 0);
+
+  // Use features
+  auto ctx = sdca::make_context(
+    sdca::make_input_feature(d, n, &X[0]),
+    sdca::make_output_multilabel(Y.begin(), Y.end(),
+                                 offsets.cbegin(), offsets.cend()),
+    std::move(objective),
+    &A[0], &W[0]);
+
+  test_solver_check_converged<Data, Result>(ctx);
+
+  // Kernel (Gram) matrix
+  std::vector<Data> K(n * n);
+  sdca::blas_int D = static_cast<sdca::blas_int>(d);
+  sdca::blas_int N = static_cast<sdca::blas_int>(n);
+  sdca::sdca_blas_gemm(N, N, D, &X[0], D, &X[0], D, &K[0], CblasTrans);
+
+  // Warm restart - use the same dual variables as above
+  auto ctx_warm = sdca::make_context(
+    sdca::make_input_kernel(n, &K[0]),
+    sdca::make_output_multilabel(Y.begin(), Y.end(),
+                                 offsets.cbegin(), offsets.cend()),
+    std::move(ctx.objective),
+    &A[0]);
+
+  ctx_warm.criteria.eval_on_start = true;
+  test_solver_check_converged<Data, Result>(ctx_warm);
+  EXPECT_TRUE(ctx_warm.epoch == 0UL);
+
+  // Zero the dual variables and train from scratch
+  std::fill(A.begin(), A.end(), static_cast<Data>(0));
+  auto ctx_ker = sdca::make_context(
+    sdca::make_input_kernel(n, &K[0]),
+    sdca::make_output_multilabel(Y.begin(), Y.end(),
+                                 offsets.cbegin(), offsets.cend()),
+    std::move(ctx_warm.objective),
+    &A[0]);
+
+  ctx_ker.criteria.eval_on_start = true;
+  test_solver_check_converged<Data, Result>(ctx_ker);
+  EXPECT_TRUE(ctx_ker.epoch > 0UL);
+}
+
+
+template <typename Data,
+          typename Result,
+          template <typename, typename> class Objective>
+inline void
+test_solver_multilabel_basic(
+    Objective<Data, Result> objective
+  ) {
+  sdca::size_type d = 3, n = 4;
+  std::vector<Data> X(d * n); // features
+  std::vector<sdca::size_type> Y(n); // labels
+
+  // Last column is the offset (bias) feature
+  X = {0, 0, 1,
+       0, 1, 1,
+       1, 0, 1,
+       1, 1, 1};
+
+  // OR
+  Y = {0, 1, 1, 1};
+  test_solver_multilabel_basic_feature_in(objective, X, Y);
+
+  // AND
+  Y = {0, 0, 0, 1};
+  test_solver_multilabel_basic_feature_in(objective, X, Y);
+
+  // XOR
+  // Perturb the last point to break symmetry
+  // (otherwise test fails due to (?) regularized bias term)
+  Data eps = static_cast<Data>(0.15);
+  X = {0, 0, 1,
+       0, 1, 1,
+       1, 0, 1,
+       1 - eps, 1 - eps, 1};
+  Y = {0, 1, 1, 0};
+  test_solver_multilabel_basic_feature_in(objective, X, Y);
+}
+
+
+template <typename Data,
           typename Result>
 inline void
 test_solver_multiclass_basic_all() {
@@ -154,6 +253,11 @@ test_solver_multiclass_basic_all() {
     sdca::make_objective_l2_topk_hinge<Data, Result>(C));
   test_solver_multiclass_basic(
     sdca::make_objective_l2_topk_hinge_smooth<Data, Result>(C));
+
+  test_solver_multilabel_basic(
+    sdca::make_objective_l2_multilabel_hinge<Data, Result>(C));
+  test_solver_multilabel_basic(
+    sdca::make_objective_l2_multilabel_hinge_smooth<Data, Result>(C));
 }
 
 

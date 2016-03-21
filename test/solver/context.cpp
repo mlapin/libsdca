@@ -66,7 +66,7 @@ TEST(SolverContextTest, feature_in_multilabel_out) {
   test_populate_real(n * d, pow_from, pow_to, 1.0f, gen, features);
   test_populate_int<sdca::size_type>(n, 1, m, gen, labels);
   offsets.resize(n + 1);
-  std::iota(offsets.begin(), offsets.end(), static_cast<sdca::size_type>(0));
+  std::iota(offsets.begin(), offsets.end(), 0);
 
   auto ctx = sdca::make_context(
     sdca::make_input_feature(d, n, &features[0]),
@@ -162,7 +162,7 @@ TEST(SolverContextTest, kernel_in_multilabel_out) {
   test_populate_real(n * n, pow_from, pow_to, 1.0, gen, kernel);
   test_populate_int<sdca::size_type>(n, 1, m, gen, labels);
   offsets.resize(n + 1);
-  std::iota(offsets.begin(), offsets.end(), static_cast<sdca::size_type>(0));
+  std::iota(offsets.begin(), offsets.end(), 0);
 
   auto ctx = sdca::make_context(
     sdca::make_input_kernel(n, &kernel[0]),
