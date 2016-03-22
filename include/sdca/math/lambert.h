@@ -213,6 +213,102 @@ lambert_w_exp_inverse(const Type w) {
   return w + std::log(w);
 }
 
+
+/**
+ * Evaluates the function
+ *    f0 = f(t) = sum_i W(exp(a_i + t))
+ * and its derivatives
+ *    f1 = df/dt,
+ *    f2 = d^2f/dt^2,
+ *    ...
+ *
+ * Note: the variables f0, f1, ... must be properly initialized
+ * (e.g., set to 0) before calling this function.
+ **/
+template <typename Type,
+          typename Iterator>
+inline void
+sum_lambert_w_exp_derivatives(
+    const Iterator first,
+    const Iterator last,
+    const Type t,
+    Type& f0,
+    Type& f1
+  ) {
+  for (auto a = first; a != last; ++a) {
+    Type v = lambert_w_exp(static_cast<Type>(*a) + t);
+    f0 += v;
+    f1 += v / (1 + v);
+  }
+}
+
+
+/**
+ * Evaluates the function
+ *    f0 = f(t) = sum_i W(exp(a_i + t))
+ * and its derivatives
+ *    f1 = df/dt,
+ *    f2 = d^2f/dt^2,
+ *    ...
+ *
+ * Note: the variables f0, f1, ... must be properly initialized
+ * (e.g., set to 0) before calling this function.
+ **/
+template <typename Type,
+          typename Iterator>
+inline void
+sum_lambert_w_exp_derivatives(
+    const Iterator first,
+    const Iterator last,
+    const Type t,
+    Type& f0,
+    Type& f1,
+    Type& f2
+  ) {
+  for (auto a = first; a != last; ++a) {
+    Type v = lambert_w_exp(static_cast<Type>(*a) + t);
+    Type d = 1 + v;
+    f0 += v;
+    f1 += v / d;
+    f2 += v / (d * d * d);
+  }
+}
+
+
+/**
+ * Evaluates the function
+ *    f0 = f(t) = sum_i W(exp(a_i + t))
+ * and its derivatives
+ *    f1 = df/dt,
+ *    f2 = d^2f/dt^2,
+ *    ...
+ *
+ * Note: the variables f0, f1, ... must be properly initialized
+ * (e.g., set to 0) before calling this function.
+ **/
+template <typename Type,
+          typename Iterator>
+inline void
+sum_lambert_w_exp_derivatives(
+    const Iterator first,
+    const Iterator last,
+    const Type t,
+    Type& f0,
+    Type& f1,
+    Type& f2,
+    Type& f3
+  ) {
+  for (auto a = first; a != last; ++a) {
+    Type v = lambert_w_exp(static_cast<Type>(*a) + t);
+    Type d = 1 + v;
+    Type d3 = d * d * d;
+    f0 += v;
+    f1 += v / d;
+    f2 += v / d3;
+    f3 += v * (1 - 2 * v) / (d3 * d * d);
+  }
+}
+
 }
 
 #endif

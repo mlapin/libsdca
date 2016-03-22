@@ -22,11 +22,8 @@ sum_w_exp_iter_2(
     const Result t
     ) {
   Result f0(0), f1(0);
-  for (auto a = first; a != last; ++a) {
-    Result v = lambert_w_exp(static_cast<Result>(*a) - t);
-    f0 += v;
-    f1 += v / (1 + v); // minus is absorbed in the update step
-  }
+  // Minus is absorbed in the update step
+  sum_lambert_w_exp_derivatives(first, last, -t, f0, f1);
   f0 -= rhs;
   return t + f0 / f1;
 }
@@ -47,14 +44,8 @@ sum_w_exp_iter_3(
     const Result t
     ) {
   Result f0(0), f1(0), f2(0);
-  for (auto a = first; a != last; ++a) {
-    Result v = lambert_w_exp(static_cast<Result>(*a) - t);
-    Result d = 1 / (1 + v);
-    Result vd = v * d;
-    f0 += v;
-    f1 += vd; // minus is absorbed in the update step
-    f2 += vd * d * d;
-  }
+  // Minus is absorbed in the update step
+  sum_lambert_w_exp_derivatives(first, last, -t, f0, f1, f2);
   f0 -= rhs;
   return t - 2 * f0 * f1 / (f0 * f2 - 2 * f1 * f1);
 }
@@ -75,17 +66,8 @@ sum_w_exp_iter_4(
     const Result t
     ) {
   Result f0(0), f1(0), f2(0), f3(0);
-  for (auto a = first; a != last; ++a) {
-    Result v = lambert_w_exp(static_cast<Result>(*a) - t);
-    Result d = 1 / (1 + v);
-    Result d2 = d * d;
-    Result v1 = v * d;
-    Result v2 = v1 * d2;
-    f0 += v;
-    f1 += v1; // minus is absorbed in the update step
-    f2 += v2;
-    f3 += v2 * (1 - 2 * v) * d2;
-  }
+  // Minus is absorbed in the update step
+  sum_lambert_w_exp_derivatives(first, last, -t, f0, f1, f2, f3);
   f0 -= rhs;
   Result f02 = f0 * f2, f11 = f1 * f1;
   return t - 3 * f0 * (2 * f11 - f02) / (6 * f1 * (f02 - f11) - f0 * (f0 * f3));
