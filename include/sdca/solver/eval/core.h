@@ -140,8 +140,7 @@ eval_recompute_primal(
 #ifdef SDCA_ACCURATE_MATH
     const Int num_classes,
     const Int num_examples,
-    const eval_dataset<feature_input<Data>, Output,
-                       eval_train<Result, Output>>& d,
+    const dataset<feature_input<Data>, Output, eval_train<Result, Output>>& d,
     const Data* dual_variables,
     Data* primal_variables
   ) {
@@ -155,8 +154,7 @@ eval_recompute_primal(
 #else
   const Int,
   const Int,
-  const dataset<feature_input<Data>, Output,
-                     eval_train<Result, Output>>&,
+  const dataset<feature_input<Data>, Output, eval_train<Result, Output>>&,
   const Data*,
   Data*
 ) {

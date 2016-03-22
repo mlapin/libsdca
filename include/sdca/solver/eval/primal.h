@@ -78,7 +78,8 @@ eval_primal_loss(
       [=](const Data& x){ return x >= *gt; });
     eval.rank_loss += static_cast<Result>(std::distance(neg_first, it));
   }
-  eval.rank_loss /= static_cast<Result>(num_classes * num_labels);
+  eval.rank_loss /=
+    static_cast<Result>(num_labels * (num_classes - num_labels));
 
   // Increment the primal loss (may re-order the scores)
   eval.primal_loss += obj.primal_loss(num_classes, num_labels, scores);

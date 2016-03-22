@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -200,6 +201,23 @@ make_output_multilabel(
     v.insert(v.end(), yi.begin(), yi.end());
     u.push_back(u.back() + yi.size());
   });
+  auto minmax = validate_labels(v.begin(), v.end());
+  const size_type num_classes = *minmax.second + 1;
+  validate_labels_and_offsets(num_classes, v, u);
+  return multilabel_output(num_classes, v, u);
+}
+
+
+// Special case: multiclass setting
+template <typename Iterator>
+inline multilabel_output
+make_output_multilabel(
+    Iterator first,
+    Iterator last
+  ) {
+  std::vector<size_type> v(first, last);
+  std::vector<sdca::size_type> u(v.size() + 1);
+  std::iota(u.begin(), u.end(), 0);
   auto minmax = validate_labels(v.begin(), v.end());
   const size_type num_classes = *minmax.second + 1;
   validate_labels_and_offsets(num_classes, v, u);
