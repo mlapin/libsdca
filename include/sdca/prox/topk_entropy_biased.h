@@ -14,41 +14,27 @@ namespace sdca {
  **/
 template <typename Result,
           typename Iterator>
-inline Result
+inline void
 alpha_sum_w_exp_iter_4(
     const Iterator first,
     const Iterator last,
     const Result alpha,
-    const Result t,
-    Result& s
+    Result& s,
+    Result& t
     ) {
-  // alpha term
-  Result v = lambert_w_exp(alpha - t);
-  Result d = 1 / (1 + v);
-  Result d2 = d * d;
-  Result v1 = v * d;
-  Result v2 = v1 * d2;
+  Result f0(0), f1(0), f2(0), f3(0);
+  sum_lambert_w_exp_derivatives(first, last, -t, f0, f1, f2, f3);
+  s = f0 / alpha;
 
-  Result f0(v), f1(v1), f2(v2), f3(v2 * (1 - 2 * v) * d2);
-
-  // the sum
-  s = 0;
-  for (auto a = first; a != last; ++a) {
-    v = lambert_w_exp(static_cast<Result>(*a) - t);
-    d = 1 / (1 + v);
-    d2 = d * d;
-    v1 = v * d;
-    v2 = v1 * d2;
-    s += v;
-    f0 += v;
-    f1 += v1; // minus is absorbed in the update step
-    f2 += v2;
-    f3 += v2 * (1 - 2 * v) * d2;
-  }
-  s /= alpha;
+  sum_lambert_w_exp_derivatives(&alpha, &alpha + 1, -t, f0, f1, f2, f3);
   f0 -= alpha;
+
   Result f02 = f0 * f2, f11 = f1 * f1;
-  return t - 3 * f0 * (2 * f11 - f02) / (6 * f1 * (f02 - f11) - f0 * (f0 * f3));
+  Result D = 6 * f1 * (f02 - f11) - f0 * (f0 * f3);
+  Result eps = 64 * std::numeric_limits<Result>::min();
+  if (std::abs(D) > eps) {
+    t -= 3 * f0 * (2 * f11 - f02) / D;
+  }
 }
 
 
@@ -64,19 +50,15 @@ inline void
 solve_alpha_sum_w_exp_iterate(
     const Iterator first,
     const Iterator last,
-    const Result max,   // max in [first, last)
     const Result alpha,
     Result& s,
     Result& t,
     const std::size_t max_num_iter = 32
     ) {
-  // A guard to prevent exp underflow which results in division by zero
-  Result ub = max - exp_traits<Result>::min_arg();
-
-  Result eps = 1 * std::numeric_limits<Result>::epsilon();
+  Result eps = std::numeric_limits<Result>::epsilon();
   for (std::size_t iter = 0; iter < max_num_iter; ++iter) {
     Result t1(t);
-    t = alpha_sum_w_exp_iter_4(first, last, alpha, std::min(t, ub), s);
+    alpha_sum_w_exp_iter_4(first, last, alpha, s, t);
     if (std::abs(t1 - t) <= eps) break;
   }
 }
@@ -91,48 +73,43 @@ template <typename Result,
           typename Iterator>
 inline void
 topk_entropy_biased_kkt_iter_2(
-    const Iterator m_first,
+    const Iterator first,
     const Iterator last,
     const Result K,
-    const Result alpha,
-    const Result num_U,
-    const Result beta,  // sum_U + num_U * (1 - log(alpha / k)) + k * log(alpha)
+    const Result U,
+    const Result C0, // K * (U - 1) * log(alpha) - U * K * log(K) - sum_U
+    const Result C1, // U * K;
+    const Result C2, // (K + U) * alpha;
+    const Result C3, // (K - U) * (U - 1) * alpha;
+    const Result C4, // K * (U - 1);
+    const Result C5, // (1 - U / K) * alpha;
     Result &s,
     Result &t
     ) {
-  // Compute the sum of x_i(t) and their derivatives over the set M
-  Result sum0(0), sum1(0);
-  for (auto a = m_first; a != last; ++a) {
-    Result v = lambert_w_exp(static_cast<Result>(*a) - t);
-    sum0 += v;
-    sum1 += v / (1 + v);
-  }
+  Result S0(0), S1(0);
+  sum_lambert_w_exp_derivatives(first, last, -t, S0, S1);
+  Result E = S0 + t * S1;
 
   // It is numerically more stable to consider s -> 0 and s -> 1 separately
-  Result A, B, C;
+  Result z, Az, Bz;
   if (s < static_cast<Result>(0.5)) {
     // s -> 0
-    Result a_s = alpha * s, s_1_s = s / (1 - s);
-    A = K * K * (a_s + s_1_s) + num_U * (a_s + K);
-    B = s * (beta + K * (s_1_s + std::log1p(-s))) - num_U * x_log_x(s);
-    C = s;
+    z = s;
+    Az = K * (z * (U + std::log1p(-z) + z / (1 - z)) - U * x_log_x(z)) - C0 * z;
+    Bz = z * (C2 + K / (1 - z)) + C1;
   } else {
     // s -> 1
-    Result z = 1 - s, uz = num_U * (1 - s);
-    A = K * K * (1 + alpha * z) + uz * (alpha + K);
-    B = z * beta + K * (1 - z + x_log_x(z)) - uz * std::log1p(-z);
-    C = z;
+    z = 1 - s;
+    Az = K * (z * (U - U * std::log1p(-z) - 1) + x_log_x(z) + 1) - C0 * z;
+    Bz = z * (C2 + C1 / (1 - z)) + K;
   }
 
-  Result sum0_t_sum1 = sum0 + t * sum1;
-  Result k_u = K - num_U;
-  Result denom = A * sum1 + (k_u * k_u) * alpha * C;
-
   // Updated variables (the update step is absorbed)
-  assert(denom != 0);
-  if (denom != 0) {
-    s = K * (sum0_t_sum1 * k_u * C + B * sum1) / denom;
-    t = (A * sum0_t_sum1 - alpha * k_u * B) / denom;
+  Result Dz = C3 * z - Bz * S1;
+  Result eps = 64 * std::numeric_limits<Result>::min();
+  if (std::abs(Dz) > eps) {
+    s = (C4 * E * z - Az * S1) / Dz;
+    t = (C5 * Az - E * Bz) / Dz;
   }
 }
 
@@ -144,26 +121,19 @@ topk_entropy_biased_kkt_iter_2(
  *    F(s,t) = 0,
  * where
  *    F = (f1, f2),
- *    f1(s,t) = V^{-1}(alpha * (1 - s)) - rho * V^{-1}(alpha * s / k)
- *            + (1 - rho) * t - alpha + sum_U a_i / k,
- *    f2(s,t) = (1 - rho) * alpha * s - sum_M V(a_i - t),
- * and,
- *    rho = num_U / k,
+ *    f1 = (k - u) * alpha * s - k * sum_M V(a_i - t),
+ *    f2 = (k + u) * alpha * s + k * (u * log(s) - log(1 - s) + (u - 1) * t)
+ *       + c,
+ *    c = k * ((u - 1) * log(alpha) - u * log(k)) - sum_U a_i.
+ *
+ * Note that:
  *    V(x) = W(exp(x)),
  *    V'(x) = V(x) / (1 + V(x)),
  *    V^{-1}(x) = x + log(x).
  *
  * The Newton's step d = (d1, d2) is computed from
  *    J * d = - F,
- * where J is the Jacobian matrix:
- *    J11 = - alpha * (1 + rho / k) - rho / s - 1 / (1 - s),
- *    J12 = 1 - rho,
- *    J21 = (1 - rho) * alpha,
- *    J22 = sum_M V(a_i - t) / (1 + V(a_i - t)).
- * We have
- *    d1 = (J12 * f2 - J22 * f1) / (J11 * J22 - J12 * J21),
- *    d2 = (J21 * f1 - J11 * f2) / (J11 * J22 - J12 * J21),
- * and
+ * and the update is given by
  *    s <- s + d1,
  *    t <- t + d2.
  **/
@@ -173,22 +143,31 @@ inline void
 topk_entropy_biased_kkt_iterate(
     const Iterator m_first,
     const Iterator last,
+    const Result ,
     const Result K,
     const Result alpha,
+    const Result log_k,
     const Result log_alpha,
-    const Result log_alpha_k,
-    const Result num_U,
+    const Result U,
     const Result sum_U,
     Result &s,
     Result &t,
     const std::size_t max_num_iter = 32
     ) {
   Result lb(0), ub(1), eps = 16 * std::numeric_limits<Result>::epsilon();
-  Result beta = sum_U + num_U * (1 - log_alpha_k) + K * log_alpha;
+
+  Result C1 = U * K;
+  Result C2 = (K + U) * alpha;
+  Result C3 = (K - U) * (U - 1) * alpha;
+  Result C4 = K * (U - 1);
+  Result C5 = (1 - U / K) * alpha;
+  Result C0 = C4 * log_alpha - C1 * log_k - sum_U;
+
   for (std::size_t iter = 0; iter < max_num_iter; ++iter) {
     Result s1(s), t1(t);
     s = std::min(std::max(lb, s), ub);
-    topk_entropy_biased_kkt_iter_2(m_first, last, K, alpha, num_U, beta, s, t);
+    topk_entropy_biased_kkt_iter_2(m_first, last, K, U, C0, C1, C2, C3, C4, C5,
+                                   s, t);
 
     if (std::abs(s1 - s) + std::abs(t1 - t)<= eps) break;
   }
@@ -233,7 +212,7 @@ thresholds_topk_entropy_biased(
   //    V(alpha - t) + sum_i V(a_i - t) = alpha
   // also, compute the corresponding s as
   //    s = sum_i V(a_i - t) / alpha
-  solve_alpha_sum_w_exp_iterate(first, last, max, alpha, s, t);
+  solve_alpha_sum_w_exp_iterate(first, last, alpha, s, t);
 
   // Auxiliary variables
   const Result lo(0), K(static_cast<Result>(k));
@@ -242,12 +221,13 @@ thresholds_topk_entropy_biased(
 
   // If k = 1, done.
   if (k == 1) {
-    return make_thresholds(t, lo, s / K, first, last, map);
+    return make_thresholds(t, lo, s, first, last, map);
   }
 
   // If k > 1, check feasibility.
   const Result alpha_k(alpha / K);
-  Result tt = lambert_w_exp_inverse(alpha_k * s) + t;
+  Result tt = t + std::max(lambert_w_exp_inverse(alpha_k * s),
+                           exp_traits<Result>::min_arg());
   if (max - eps <= tt) {
     return make_thresholds(t, lo, s / K, first, last, map);
   }
@@ -255,29 +235,31 @@ thresholds_topk_entropy_biased(
   // Case 2: U is not empty (some x_i's are at the upper bound).
   // Grow U by adding the largest elements in [first, last)
   std::swap(*first, *max_el);
+  const Result log_k = std::log(K);
   const Result log_alpha = std::log(alpha);
-  const Result log_alpha_k = std::log(alpha_k);
   Result min_U(max), sum_U(max);
   Iterator m_first = first + 1;
   typedef typename std::iterator_traits<Iterator>::difference_type diff_t;
   for (diff_t num_U = 1; m_first != last;) {
-    // Recompute s and t
-    topk_entropy_biased_kkt_iterate(
-      m_first, last, K, alpha, log_alpha, log_alpha_k,
-      static_cast<Result>(num_U), sum_U, s, t);
-
-    // No need to check feasibility if that was the last possibility
-    if (++num_U >= k) break;
-
-    // Check feasibility
     max_el = std::max_element(m_first, last);
     max = static_cast<Result>(*max_el);
-    tt = lambert_w_exp_inverse(alpha_k * s) + t;
+
+    // Compute s and t starting from some initial guess
+    s = static_cast<Result>(0.999);
+    t = max;
+    topk_entropy_biased_kkt_iterate(
+      m_first, last, max, K, alpha, log_k, log_alpha,
+      static_cast<Result>(num_U), sum_U, s, t);
+
+    // Check feasibility
+    tt = t + std::max(lambert_w_exp_inverse(alpha_k * s),
+                      exp_traits<Result>::min_arg());
     if (max - eps <= tt && tt <= min_U + eps) {
       break;
     }
 
     // Increment U
+    if (++num_U > k) break;
     min_U = max;
     sum_U += max;
     std::swap(*m_first, *max_el);

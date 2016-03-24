@@ -61,9 +61,16 @@ thresholds_topk_entropy(
   }
 
   Result tmp = ((K - k_u) * log_z + k_u * std::log(k_u) - sum_U) / K;
-  Result B = std::exp(tmp - static_cast<Result>(*max_el)) / K;
-  t = static_cast<Result>(*max_el) + std::log1p(z + B) - std::log(k_u / K);
-  hi = (1 + z) / ((1 + z + B) * K);
+  Result max = static_cast<Result>(*max_el);
+  if (tmp > max) {
+    Result a = (1 + z) * std::exp(max - tmp);
+    t = tmp + std::log1p(a * K) - std::log(k_u);
+    hi = a / (1 + a * K);
+  } else {
+    Result a = std::exp(tmp - max) / K;
+    t = max + std::log1p(z + a) - std::log(k_u / K);
+    hi = (1 + z) / ((1 + z + a) * K);
+  }
 
   return make_thresholds(t, lo, hi, m_first, last, map);
 }

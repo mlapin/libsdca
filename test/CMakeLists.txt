@@ -6,30 +6,30 @@ endif()
 include_directories(.)
 
 add_executable(
-  test_libsdca_prox
+  testprox
   test_main.cpp
   test_util.h
-#  prox/lambert.cpp
-#  prox/log_exp.cpp
-#  prox/entropy.cpp
-#  prox/entropy_norm.cpp
-#  prox/knapsack_eq.cpp
-#  prox/knapsack_le.cpp
-#  prox/knapsack_le_biased.cpp
-#  prox/topk_cone.cpp
-#  prox/topk_cone_biased.cpp
-#  prox/topk_entropy.cpp
-#  prox/topk_entropy_biased.cpp
-#  prox/topk_simplex.cpp
-#  prox/topk_simplex_biased.cpp
-#  prox/two_simplex.cpp
+  prox/lambert.cpp
+  prox/log_exp.cpp
+  prox/entropy.cpp
+  prox/entropy_norm.cpp
+  prox/knapsack_eq.cpp
+  prox/knapsack_le.cpp
+  prox/knapsack_le_biased.cpp
+  prox/topk_cone.cpp
+  prox/topk_cone_biased.cpp
+  prox/topk_entropy.cpp
+  prox/topk_entropy_biased.cpp
+  prox/topk_simplex.cpp
+  prox/topk_simplex_biased.cpp
+  prox/two_simplex.cpp
   ${libsdca_MATH_SOURCES}
   ${libsdca_PROX_SOURCES}
   ${libsdca_UTILITY_SOURCES}
   )
 
 add_executable(
-  test_libsdca_solver
+  testsolver
   test_main.cpp
   test_util.h
   solver/objective.cpp
@@ -42,12 +42,5 @@ add_executable(
   ${libsdca_UTILITY_SOURCES}
   )
 
-target_link_libraries(test_libsdca_prox gtest)
-target_link_libraries(test_libsdca_solver gtest ${BLAS_LIBRARIES})
-
-enable_testing()
-
-add_test(test
-  ${PROJECT_BINARY_DIR}/test_libsdca_prox
-  ${PROJECT_BINARY_DIR}/test_libsdca_solver
-  )
+target_link_libraries(testprox gtest)
+target_link_libraries(testsolver gtest ${BLAS_LIBRARIES})

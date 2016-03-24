@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <iterator>
 #include <limits>
 #include <numeric>
@@ -100,6 +101,7 @@ make_thresholds(
     const Result lo,
     const Result hi
   ) {
+  assert(std::isfinite(t));
   return thresholds<Result, Result*>(t, lo, hi);
 }
 
@@ -114,6 +116,7 @@ make_thresholds(
     const Iterator first,
     const Iterator last
   ) {
+  assert(std::isfinite(t));
   return thresholds<Result, Iterator>(t, lo, hi, first, last);
 }
 
@@ -127,6 +130,7 @@ make_thresholds(
     const Result hi,
     Mapping map
   ) {
+  assert(std::isfinite(t));
   return generalized_thresholds<Result, Result*, Mapping>(t, lo, hi, map);
 }
 
@@ -143,6 +147,7 @@ make_thresholds(
     const Iterator last,
     Mapping map
   ) {
+  assert(std::isfinite(t));
   return generalized_thresholds<Result, Iterator, Mapping>(
     t, lo, hi, first, last, map);
 }

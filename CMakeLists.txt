@@ -17,7 +17,7 @@ set(USE_FAST_MATH TRUE)
 # Whether to use <chrono>
 #   TRUE    use std::chrono::high_resolution_clock to measure wall-clock time
 #   FALSE   use gettimeofday from <sys/time.h>
-set(USE_CHRONO TRUE)
+set(USE_CHRONO FALSE)
 
 ###############################################################################
 #
@@ -232,10 +232,16 @@ set(libsdca_UTILITY_SOURCES
   ${libsdca_INCLUDE_PATH}/utility/type_name.h
   )
 
+
 #------------------------------------------------------------------------------
 # Unit tests
 #------------------------------------------------------------------------------
 add_subdirectory(test)
+
+enable_testing()
+add_test(test_prox test/testprox)
+add_test(test_solver test/testsolver)
+
 
 #------------------------------------------------------------------------------
 # Matlab Interface

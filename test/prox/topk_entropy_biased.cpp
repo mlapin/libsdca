@@ -8,8 +8,8 @@ test_prox_topk_entropy_biased_check_feasible(const ptrdiff_t k,
   sdca::prox_topk_entropy_biased(v.begin(), v.end(), k, alpha);
 
   Type sum = std::accumulate(v.begin(), v.end(), static_cast<Type>(0));
-
   Type lo(0), hi(sum / static_cast<Type>(k)), rhs(1);
+
   std::for_each(v.begin(), v.end(), [=](const Type x){
     ASSERT_GE(x, lo); });
   std::for_each(v.begin(), v.end(), [=](const Type x){
