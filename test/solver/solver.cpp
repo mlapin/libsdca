@@ -217,6 +217,10 @@ test_solver_multiclass_basic_all() {
 
   test_solver_multiclass_basic(
     multilabel_output_maker,
+    sdca::make_objective_l2_multilabel_entropy<Data, Result>(C));
+
+  test_solver_multiclass_basic(
+    multilabel_output_maker,
     sdca::make_objective_l2_multilabel_hinge<Data, Result>(C));
 
   test_solver_multiclass_basic(
@@ -230,6 +234,9 @@ template <typename Data,
 inline void
 test_solver_multilabel_basic_all() {
   Result C = 4;
+  test_solver_multilabel_basic(
+    sdca::make_objective_l2_multilabel_entropy<Data, Result>(C));
+
   test_solver_multilabel_basic(
     sdca::make_objective_l2_multilabel_hinge<Data, Result>(C));
 

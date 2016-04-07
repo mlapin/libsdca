@@ -83,8 +83,8 @@ thresholds_two_entropy(
   const std::size_t max_num_iter = 32;
   Result eps = std::numeric_limits<Result>::epsilon();
   Result c = alpha / static_cast<Result>(std::distance(a_first, a_last));
-  Result t = std::max(*std::max_element(a_first, a_last),
-                      *std::max_element(b_first, b_last) - c);
+  Result t = std::max(static_cast<Result>(*std::max_element(a_first, a_last)),
+               static_cast<Result>(*std::max_element(b_first, b_last)) - c);
 
   // Householder's method
   for (std::size_t iter = 0; iter < max_num_iter; ++iter) {

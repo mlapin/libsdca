@@ -3,6 +3,7 @@
 
 #include "sdca/solver/objective/l2_entropy_topk.h"
 #include "sdca/solver/objective/l2_hinge_topk.h"
+#include "sdca/solver/objective/l2_multilabel_entropy.h"
 #include "sdca/solver/objective/l2_multilabel_hinge.h"
 #include "sdca/solver/objective/l2_topk_hinge.h"
 
@@ -62,6 +63,16 @@ make_objective_l2_topk_hinge_smooth(
     const size_type k = 1
   ) {
   return l2_topk_hinge_smooth<Data, Result>(c, gamma, k);
+}
+
+
+template <typename Data,
+          typename Result = double>
+inline l2_multilabel_entropy<Data, Result>
+make_objective_l2_multilabel_entropy(
+    const Result c = 1
+  ) {
+  return l2_multilabel_entropy<Data, Result>(c);
 }
 
 

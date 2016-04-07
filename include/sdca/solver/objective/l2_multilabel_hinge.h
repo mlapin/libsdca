@@ -91,8 +91,8 @@ struct l2_multilabel_hinge
       const Int num_labels,
       const Data* variables
     ) const {
-    return static_cast<Result>(std::accumulate(
-      variables, variables + num_labels, static_cast<Result>(0)));
+    return std::accumulate(variables, variables + num_labels,
+                           static_cast<Result>(0));
   }
 
 };
@@ -148,7 +148,7 @@ struct l2_multilabel_hinge_smooth
     Data *pos_scores(scores), *neg_scores(scores + num_labels);
     Data a = static_cast<Data>(1 / (static_cast<Result>(norm2) + gamma_div_c));
     Data b = static_cast<Data>(static_cast<Result>(norm2)
-                               / (static_cast<Result>(norm2) + gamma_div_c));
+                                 / (static_cast<Result>(norm2) + gamma_div_c));
 
     // 1. Prepare a vector to project in 'variables'.
     sdca_blas_axpby(
@@ -200,8 +200,8 @@ struct l2_multilabel_hinge_smooth
       const Int num_labels,
       const Data* variables
     ) const {
-    Result loss = static_cast<Result>(std::accumulate(
-      variables, variables + num_labels, static_cast<Result>(0)));
+    Result loss = std::accumulate(variables, variables + num_labels,
+                                  static_cast<Result>(0));
     Result smoothing = gamma_div_2c * static_cast<Result>(sdca_blas_dot(
       static_cast<blas_int>(num_classes), variables, variables));
     return loss - smoothing;
