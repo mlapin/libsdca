@@ -76,8 +76,8 @@ struct multilabel_output {
       Data* x
     ) const {
     size_type offset = offsets[i];
-    size_type num_labels = offsets[i + 1] - offset;
-    for (size_type j = 0; j < num_labels; ++j) {
+    size_type num_labels_local = offsets[i + 1] - offset;
+    for (size_type j = 0; j < num_labels_local; ++j) {
       size_type label = labels[offset + j];
       std::swap(x[j], x[label]);
     }
@@ -92,8 +92,8 @@ struct multilabel_output {
       Data* y
     ) const {
     size_type offset = offsets[i];
-    size_type num_labels = offsets[i + 1] - offset;
-    for (size_type j = 0; j < num_labels; ++j) {
+    size_type num_labels_local = offsets[i + 1] - offset;
+    for (size_type j = 0; j < num_labels_local; ++j) {
       size_type label = labels[offset + j];
       std::swap(x[j], x[label]);
       std::swap(y[j], y[label]);
@@ -108,8 +108,8 @@ struct multilabel_output {
       Data* x
     ) const {
     size_type offset = offsets[i];
-    size_type num_labels = offsets[i + 1] - offset;
-    for (size_type j = num_labels - 1;;) {
+    size_type num_labels_local = offsets[i + 1] - offset;
+    for (size_type j = num_labels_local - 1;;) {
       size_type label = labels[offset + j];
       std::swap(x[j], x[label]);
       if (j-- == 0) break;

@@ -156,7 +156,7 @@ TEST(LogExpTest, log_sum_exp_extensive) {
 }
 
 TEST(LogExpTest, log_sum_exp_special_cases) {
-//  test_log_sum_exp_special_cases<float, double>(-16, 16);
+  test_log_sum_exp_special_cases<float, double>(-16, 16);
   test_log_sum_exp_special_cases<double, double>(-16, 16);
-//  test_log_sum_exp_special_cases<long double, long double>(-24, 24);
+  test_log_sum_exp_special_cases<long double, long double>(-24, 24);
 }

@@ -22,8 +22,8 @@ add_executable(
   prox/topk_entropy_biased.cpp
   prox/topk_simplex.cpp
   prox/topk_simplex_biased.cpp
-  prox/two_simplex.cpp
   prox/two_entropy.cpp
+  prox/two_simplex.cpp
   ${libsdca_MATH_SOURCES}
   ${libsdca_PROX_SOURCES}
   ${libsdca_UTILITY_SOURCES}

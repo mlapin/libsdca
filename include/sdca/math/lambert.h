@@ -217,6 +217,28 @@ lambert_w_exp_inverse(const Type w) {
 /**
  * Evaluates the function
  *    f0 = f(t) = sum_i W(exp(a_i + t))
+ *
+ * Note: the variable f0 must be properly initialized
+ * (e.g., set to 0) before calling this function.
+ **/
+template <typename Type,
+          typename Iterator>
+inline void
+sum_lambert_w_exp(
+    const Iterator first,
+    const Iterator last,
+    const Type t,
+    Type& f0
+  ) {
+  for (auto a = first; a != last; ++a) {
+    f0 += lambert_w_exp(static_cast<Type>(*a) + t);
+  }
+}
+
+
+/**
+ * Evaluates the function
+ *    f0 = f(t) = sum_i W(exp(a_i + t))
  * and its derivatives
  *    f1 = df/dt,
  *    f2 = d^2f/dt^2,
