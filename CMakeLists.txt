@@ -86,6 +86,7 @@ set(USE_SEQUENTIAL FALSE)
 # Whether to add a suffix (e.g. st/mt) for single-/multi-threaded versions
 set(USE_THREADING_SUFFIX FALSE)
 
+
 #------------------------------------------------------------------------------
 # Auxiliary Cmake Configuration
 #------------------------------------------------------------------------------
@@ -150,7 +151,27 @@ set(CMAKE_SHARED_LINKER_FLAGS
 # At this point, we only need googletest, not googlemock
 set(GOOGLETEST_PATH ${CMAKE_SOURCE_DIR}/vendor/googletest/googletest)
 
-add_subdirectory(${GOOGLETEST_PATH})
+#add_subdirectory(${GOOGLETEST_PATH})
+
+find_package(Threads REQUIRED)
+
+include(ExternalProject)
+ExternalProject_Add(googletest
+  SOURCE_DIR "${GOOGLETEST_PATH}"
+  BINARY_DIR "${CMAKE_BINARY_DIR}/googletest-build"
+  PREFIX "${CMAKE_BINARY_DIR}/googletest"
+  INSTALL_COMMAND   ""
+  )
+
+ExternalProject_Get_Property(googletest source_dir binary_dir)
+add_library(gtest UNKNOWN IMPORTED)
+set_target_properties(gtest PROPERTIES
+  IMPORTED_LOCATION ${binary_dir}/libgtest.a
+  IMPORTED_LINK_INTERFACE_LIBRARIES "${CMAKE_THREAD_LIBS_INIT}"
+  INTERFACE_INCLUDE_DIRECTORIES "${source_dir}/include"
+)
+
+add_dependencies(gtest googletest)
 
 
 ###############################################################################
@@ -246,8 +267,21 @@ set(libsdca_UTILITY_SOURCES
 
 
 #------------------------------------------------------------------------------
-# Matlab Libraries
+# Interfaces
 #------------------------------------------------------------------------------
+set(SDCA_BINARY_SUFFIX)
+if(${USE_THREADING_SUFFIX})
+  if(${USE_SEQUENTIAL})
+    set(SDCA_BINARY_SUFFIX _st)
+  else()
+    set(SDCA_BINARY_SUFFIX _mt)
+  endif()
+endif()
+
+set(SDCA_MATLAB_PREFIX matsdca_)
+set(SDCA_MATLAB_INSTALL_DIR matlab)
+
+add_subdirectory(src)
 
 
 #------------------------------------------------------------------------------

@@ -218,13 +218,13 @@ set_variables(
     solver_context<Data>& context,
     model_info<mxArray*>& info
   ) {
-  mxArray *mxA = mxDuplicateFieldOrCreateMatrix(opts, "A",
+  mxArray *mxA = mxDuplicateOrCreateMatrixField(opts, "A",
     trn_data.num_classes, trn_data.num_examples, mex_class<Data>::id());
   context.dual_variables = static_cast<Data*>(mxGetData(mxA));
   info.add("A", mxA);
 
   if (!context.is_dual) {
-    mxArray *mxW = mxDuplicateFieldOrCreateMatrix(opts, "W",
+    mxArray *mxW = mxDuplicateOrCreateMatrixField(opts, "W",
       trn_data.num_dimensions, trn_data.num_classes, mex_class<Data>::id());
     context.primal_variables = static_cast<Data*>(mxGetData(mxW));
     info.add("W", mxW);
