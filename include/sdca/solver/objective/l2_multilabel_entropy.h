@@ -1,7 +1,6 @@
 #ifndef SDCA_SOLVER_OBJECTIVE_L2_MULTILABEL_ENTROPY_H
 #define SDCA_SOLVER_OBJECTIVE_L2_MULTILABEL_ENTROPY_H
 
-#include "sdca/types.h"
 #include "sdca/math/log_exp.h"
 #include "sdca/prox/two_entropy.h"
 #include "sdca/solver/objective/objective_base.h"

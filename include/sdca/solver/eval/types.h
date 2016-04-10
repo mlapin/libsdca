@@ -2,10 +2,10 @@
 #define SDCA_SOLVER_EVAL_TYPES_H
 
 #include <iterator>
-#include <iostream>
 #include <limits>
+#include <iostream>
 
-#include "sdca/solver/output.h"
+#include "sdca/solver/data/output.h"
 
 namespace sdca {
 

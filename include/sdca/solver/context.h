@@ -1,51 +1,12 @@
 #ifndef SDCA_SOLVER_CONTEXT_H
 #define SDCA_SOLVER_CONTEXT_H
 
-#include "sdca/solver/dataset.h"
+#include "sdca/solver/data.h"
 #include "sdca/solver/objective.h"
-#include "sdca/solver/stopping.h"
+#include "sdca/solver/solverdef.h"
 #include "sdca/utility/stopwatch.h"
 
 namespace sdca {
-
-enum class solver_status {
-  none = 0,
-  solving,
-  solved,
-  no_progress,
-  max_epoch,
-  max_cpu_time,
-  max_wall_time,
-  failed
-};
-
-
-inline std::string
-status_name(
-    solver_status __status
-  ) {
-  switch (__status) {
-    case solver_status::none:
-      return "none";
-    case solver_status::solving:
-      return "solving";
-    case solver_status::solved:
-      return "solved";
-    case solver_status::no_progress:
-      return "no_progress";
-    case solver_status::max_epoch:
-      return "max_epoch";
-    case solver_status::max_cpu_time:
-      return "max_cpu_time";
-    case solver_status::max_wall_time:
-      return "max_wall_time";
-    case solver_status::failed:
-      return "failed";
-  }
-  assert(false);
-  return "unknown";
-}
-
 
 template <typename Data,
           typename Result,

@@ -28,7 +28,7 @@ template <typename Type>
 struct exp_traits {
   /**
    * The minimal argument of the given Type such that
-   * the exponent value is finite and normal.
+   * the exponent value is finite and normal (and > 0).
    **/
   static constexpr Type
   min_arg() { return std::log(std::numeric_limits<Type>::min()); }

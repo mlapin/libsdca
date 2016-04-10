@@ -1,10 +1,9 @@
-#ifndef SDCA_SOLVER_INPUT_H
-#define SDCA_SOLVER_INPUT_H
+#ifndef SDCA_SOLVER_DATA_INPUT_H
+#define SDCA_SOLVER_DATA_INPUT_H
 
 #include <sstream>
 
-#include "sdca/types.h"
-#include "sdca/utility/type_name.h"
+#include "sdca/utility/types.h"
 
 namespace sdca {
 
@@ -74,39 +73,6 @@ struct kernel_input {
   }
 
 };
-
-
-
-template <typename Data>
-inline feature_input<Data>
-make_input_feature(
-    const size_type num_dimensions,
-    const size_type num_examples,
-    const Data* features
-  ) {
-  return feature_input<Data>(num_dimensions, num_examples, features);
-}
-
-
-template <typename Data>
-inline kernel_input<Data>
-make_input_kernel(
-    const size_type num_train_examples,
-    const size_type num_examples,
-    const Data* kernel
-  ) {
-  return kernel_input<Data>(num_train_examples, num_examples, kernel);
-}
-
-
-template <typename Data>
-inline kernel_input<Data>
-make_input_kernel(
-    const size_type num_examples,
-    const Data* kernel
-  ) {
-  return kernel_input<Data>(num_examples, num_examples, kernel);
-}
 
 }
 

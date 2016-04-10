@@ -1,9 +1,9 @@
 #ifndef SDCA_SOLVER_OBJECTIVE_L2_MULTILABEL_HINGE_H
 #define SDCA_SOLVER_OBJECTIVE_L2_MULTILABEL_HINGE_H
 
-#include "sdca/types.h"
 #include "sdca/prox/two_simplex.h"
 #include "sdca/solver/objective/objective_base.h"
+#include "sdca/utility/types.h"
 
 namespace sdca {
 

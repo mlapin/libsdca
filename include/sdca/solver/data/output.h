@@ -1,14 +1,14 @@
-#ifndef SDCA_SOLVER_OUTPUT_H
-#define SDCA_SOLVER_OUTPUT_H
+#ifndef SDCA_SOLVER_DATA_OUTPUT_H
+#define SDCA_SOLVER_DATA_OUTPUT_H
 
 #include <algorithm>
 #include <cassert>
-#include <numeric>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
 
-#include "sdca/types.h"
+#include "sdca/utility/types.h"
 
 namespace sdca {
 
@@ -157,71 +157,6 @@ validate_labels_and_offsets(
                                   "distinct and sorted.");
     }
   }
-}
-
-
-template <typename Iterator>
-inline multiclass_output
-make_output_multiclass(
-    Iterator first,
-    Iterator last
-  ) {
-  std::vector<size_type> v(first, last);
-  auto minmax = validate_labels(v.begin(), v.end());
-  return multiclass_output(*minmax.second + 1, v);
-}
-
-
-template <typename Iterator>
-inline multilabel_output
-make_output_multilabel(
-    Iterator label_first,
-    Iterator label_last,
-    Iterator offset_first,
-    Iterator offset_last
-  ) {
-  std::vector<size_type> v(label_first, label_last);
-  std::vector<size_type> u(offset_first, offset_last);
-  auto minmax = validate_labels(v.begin(), v.end());
-  const size_type num_classes = *minmax.second + 1;
-  validate_labels_and_offsets(num_classes, v, u);
-  return multilabel_output(num_classes, v, u);
-}
-
-
-template <typename Type>
-inline multilabel_output
-make_output_multilabel(
-    std::vector<std::vector<Type>>& labels
-  ) {
-  std::vector<size_type> v;
-  std::vector<size_type> u;
-  u.push_back(0); // zero offset
-  std::for_each(labels.begin(), labels.end(), [&](std::vector<Type>& yi){
-    v.insert(v.end(), yi.begin(), yi.end());
-    u.push_back(u.back() + yi.size());
-  });
-  auto minmax = validate_labels(v.begin(), v.end());
-  const size_type num_classes = *minmax.second + 1;
-  validate_labels_and_offsets(num_classes, v, u);
-  return multilabel_output(num_classes, v, u);
-}
-
-
-// Special case: multiclass setting
-template <typename Iterator>
-inline multilabel_output
-make_output_multilabel(
-    Iterator first,
-    Iterator last
-  ) {
-  std::vector<size_type> v(first, last);
-  std::vector<sdca::size_type> u(v.size() + 1);
-  std::iota(u.begin(), u.end(), 0);
-  auto minmax = validate_labels(v.begin(), v.end());
-  const size_type num_classes = *minmax.second + 1;
-  validate_labels_and_offsets(num_classes, v, u);
-  return multilabel_output(num_classes, v, u);
 }
 
 }

@@ -86,7 +86,7 @@ solve_sum_w_exp_iterate(
     const Iterator last,
     const Result rhs,
     const Result t0,
-    const std::size_t max_num_iter = 32
+    const std::size_t max_num_iter = numeric_defaults<Result>::max_num_iter()
     ) {
   // A guard to prevent exp underflow which results in division by zero
   Result ub = static_cast<Result>(*std::max_element(first, last))

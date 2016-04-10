@@ -1,5 +1,3 @@
-#include <typeinfo>
-
 #include "sdca/solver/objective.h"
 #include "test_util.h"
 

@@ -23,12 +23,6 @@ struct numeric_defaults {
   max_num_iter() { return 32; }
 };
 
-template <>
-struct numeric_defaults<float> {
-  static constexpr std::size_t
-  max_num_iter() { return 32; }
-};
-
 template <typename Result,
           typename Iterator>
 struct thresholds {

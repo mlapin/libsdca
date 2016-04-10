@@ -1,9 +1,10 @@
 #ifndef SDCA_SOLVER_UPDATE_H
 #define SDCA_SOLVER_UPDATE_H
 
-#include "sdca/solver/context.h"
+#include "sdca/solver/data/input.h"
+#include "sdca/solver/data/output.h"
+#include "sdca/solver/data/scratch.h"
 #include "sdca/solver/eval/scores.h"
-#include "sdca/solver/scratch.h"
 
 namespace sdca {
 

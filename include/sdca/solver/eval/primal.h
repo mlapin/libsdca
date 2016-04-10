@@ -5,7 +5,7 @@
 #include <cassert>
 #include <iterator>
 
-#include "sdca/solver/output.h"
+#include "sdca/solver/data/output.h"
 
 namespace sdca {
 

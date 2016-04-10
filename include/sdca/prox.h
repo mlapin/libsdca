@@ -15,5 +15,7 @@
 #include "sdca/prox/topk_entropy_biased.h"
 #include "sdca/prox/topk_simplex.h"
 #include "sdca/prox/topk_simplex_biased.h"
+#include "sdca/prox/two_entropy.h"
+#include "sdca/prox/two_simplex.h"
 
 #endif

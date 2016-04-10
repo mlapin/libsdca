@@ -118,6 +118,16 @@ set(CMAKE_INSTALL_RPATH "\\\$ORIGIN")
 ###############################################################################
 
 #------------------------------------------------------------------------------
+# Matlab Libraries
+#------------------------------------------------------------------------------
+# Honor the visibility properties set for targets of type OBJECT
+# (visibility is set to 'hidden' for mex files, see FindMatlab.cmake)
+if(POLICY CMP0063)
+  cmake_policy(SET CMP0063 NEW)
+endif()
+find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
+
+#------------------------------------------------------------------------------
 # BLAS Libraries
 #------------------------------------------------------------------------------
 # BLAS libraries from various vendors (e.g. Atlas or Accelerate)
@@ -203,9 +213,13 @@ set(libsdca_PROX_SOURCES
 
 set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver.h
-  ${libsdca_INCLUDE_PATH}/types.h
+  ${libsdca_INCLUDE_PATH}/solver/solverdef.h
   ${libsdca_INCLUDE_PATH}/solver/context.h
-  ${libsdca_INCLUDE_PATH}/solver/dataset.h
+  ${libsdca_INCLUDE_PATH}/solver/data/dataset.h
+  ${libsdca_INCLUDE_PATH}/solver/data/input.h
+  ${libsdca_INCLUDE_PATH}/solver/data/output.h
+  ${libsdca_INCLUDE_PATH}/solver/data/scratch.h
+  ${libsdca_INCLUDE_PATH}/solver/data.h
   ${libsdca_INCLUDE_PATH}/solver/eval/core.h
   ${libsdca_INCLUDE_PATH}/solver/eval/dual.h
   ${libsdca_INCLUDE_PATH}/solver/eval/primal.h
@@ -213,25 +227,27 @@ set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver/eval/scores.h
   ${libsdca_INCLUDE_PATH}/solver/eval/types.h
   ${libsdca_INCLUDE_PATH}/solver/eval.h
-  ${libsdca_INCLUDE_PATH}/solver/input.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy_topk.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_hinge_topk.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_entropy.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_hinge.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_topk_hinge.h
   ${libsdca_INCLUDE_PATH}/solver/objective/objective_base.h
   ${libsdca_INCLUDE_PATH}/solver/objective.h
-  ${libsdca_INCLUDE_PATH}/solver/output.h
   ${libsdca_INCLUDE_PATH}/solver/reporting.h
-  ${libsdca_INCLUDE_PATH}/solver/scratch.h
-  ${libsdca_INCLUDE_PATH}/solver/stopping.h
   ${libsdca_INCLUDE_PATH}/solver/update.h
   )
 
 set(libsdca_UTILITY_SOURCES
   ${libsdca_INCLUDE_PATH}/utility/logging.h
   ${libsdca_INCLUDE_PATH}/utility/stopwatch.h
-  ${libsdca_INCLUDE_PATH}/utility/type_name.h
+  ${libsdca_INCLUDE_PATH}/utility/types.h
   )
+
+
+#------------------------------------------------------------------------------
+# Matlab Libraries
+#------------------------------------------------------------------------------
 
 
 #------------------------------------------------------------------------------
@@ -242,14 +258,3 @@ add_subdirectory(test)
 enable_testing()
 add_test(test_prox test/testprox)
 add_test(test_solver test/testsolver)
-
-
-#------------------------------------------------------------------------------
-# Matlab Interface
-#------------------------------------------------------------------------------
-# Honor the visibility properties set for targets of type OBJECT
-# (visibility is set to 'hidden' for mex files, see FindMatlab.cmake)
-if(POLICY CMP0063)
-  cmake_policy(SET CMP0063 NEW)
-endif()
-#find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)

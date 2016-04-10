@@ -7,8 +7,6 @@
 
 #include "sdca/solver/context.h"
 #include "sdca/solver/eval.h"
-#include "sdca/solver/reporting.h"
-#include "sdca/solver/scratch.h"
 #include "sdca/solver/update.h"
 
 namespace sdca {

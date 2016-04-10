@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <limits>
 #include <random>
+#include <typeinfo>
 #include <vector>
 
 #if defined(__clang__)

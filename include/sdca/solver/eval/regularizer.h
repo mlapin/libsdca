@@ -1,7 +1,7 @@
 #ifndef SDCA_SOLVER_EVAL_REGULARIZER_H
 #define SDCA_SOLVER_EVAL_REGULARIZER_H
 
-#include "sdca/solver/input.h"
+#include "sdca/solver/data/input.h"
 #include "sdca/solver/eval/types.h"
 
 namespace sdca {

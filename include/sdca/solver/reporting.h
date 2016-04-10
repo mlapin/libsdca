@@ -1,7 +1,7 @@
 #ifndef SDCA_SOLVER_REPORTING_H
 #define SDCA_SOLVER_REPORTING_H
 
-#include "sdca/solver/context.h"
+#include "sdca/solver/solverdef.h"
 #include "sdca/utility/logging.h"
 
 namespace sdca {

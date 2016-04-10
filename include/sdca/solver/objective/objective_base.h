@@ -4,7 +4,7 @@
 #include <sstream>
 
 #include "sdca/math/blas.h"
-#include "sdca/utility/type_name.h"
+#include "sdca/utility/types.h"
 
 namespace sdca {
 

@@ -1,7 +1,14 @@
-#ifndef SDCA_UTILITY_TYPE_NAME_H
-#define SDCA_UTILITY_TYPE_NAME_H
+#ifndef SDCA_UTILITY_TYPES_H
+#define SDCA_UTILITY_TYPES_H
+
+#include <cstddef>
 
 namespace sdca {
+
+typedef typename std::size_t size_type;
+
+typedef typename std::ptrdiff_t diff_type;
+
 
 template <typename Type>
 inline constexpr const char*

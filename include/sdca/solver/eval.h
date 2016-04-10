@@ -1,7 +1,7 @@
 #ifndef SDCA_SOLVER_EVAL_H
 #define SDCA_SOLVER_EVAL_H
 
-#include "sdca/solver/context.h"
+#include "sdca/solver/data/scratch.h"
 #include "sdca/solver/eval/core.h"
 #include "sdca/solver/eval/dual.h"
 #include "sdca/solver/eval/primal.h"
@@ -9,7 +9,6 @@
 #include "sdca/solver/eval/scores.h"
 #include "sdca/solver/eval/types.h"
 #include "sdca/solver/reporting.h"
-#include "sdca/solver/scratch.h"
 
 namespace sdca {
 

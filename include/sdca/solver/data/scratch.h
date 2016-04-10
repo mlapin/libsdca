@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "sdca/math/blas.h"
-#include "sdca/solver/dataset.h"
+#include "sdca/solver/data/input.h"
 
 namespace sdca {
 

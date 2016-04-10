@@ -2,7 +2,7 @@
 #define SDCA_SOLVER_EVAL_SCORES_H
 
 #include "sdca/math/blas.h"
-#include "sdca/solver/input.h"
+#include "sdca/solver/data/input.h"
 
 namespace sdca {
 

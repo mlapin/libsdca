@@ -1,6 +1,4 @@
-#include <typeinfo>
-
-#include "sdca/solver/dataset.h"
+#include "sdca/solver/data.h"
 #include "test_util.h"
 
 

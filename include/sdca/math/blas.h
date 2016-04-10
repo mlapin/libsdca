@@ -7,6 +7,8 @@
 #elif defined(BLAS_ACCELERATE)
   #include <Accelerate/Accelerate.h>
 #elif defined(BLAS_MATLAB)
+  #include <cstddef>
+  typedef std::ptrdiff_t ptrdiff_t; // Matlab's blas.h needs ptrdiff_t
   #include <blas.h>
 #elif defined(BLAS_DEFAULT)
   #include <cblas.h>

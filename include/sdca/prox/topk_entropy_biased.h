@@ -53,7 +53,7 @@ solve_alpha_sum_w_exp_iterate(
     const Result alpha,
     Result& s,
     Result& t,
-    const std::size_t max_num_iter = 32
+    const std::size_t max_num_iter = numeric_defaults<Result>::max_num_iter()
     ) {
   Result eps = std::numeric_limits<Result>::epsilon();
   for (std::size_t iter = 0; iter < max_num_iter; ++iter) {
@@ -152,7 +152,7 @@ topk_entropy_biased_kkt_iterate(
     const Result sum_U,
     Result &s,
     Result &t,
-    const std::size_t max_num_iter = 32
+    const std::size_t max_num_iter = numeric_defaults<Result>::max_num_iter()
     ) {
   Result lb(0), ub(1), eps = 16 * std::numeric_limits<Result>::epsilon();
 

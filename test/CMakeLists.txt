@@ -33,9 +33,9 @@ add_executable(
   testsolver
   test_main.cpp
   test_util.h
-  solver/objective.cpp
-  solver/dataset.cpp
   solver/context.cpp
+  solver/dataset.cpp
+  solver/objective.cpp
   solver/solver.cpp
   ${libsdca_MATH_SOURCES}
   ${libsdca_PROX_SOURCES}

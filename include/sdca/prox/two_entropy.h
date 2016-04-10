@@ -63,7 +63,9 @@ two_sum_w_exp(
 
 
 /**
- * Compute an initial point for the iterative scheme based on two guesses.
+ * Find the root of
+ *    sum_i W_0(exp(a_i - t)) + sum_i W_0(exp(b_i - t - c)) - alpha = 0
+ * using bisection.
  **/
 template <typename Result,
           typename Iterator>
