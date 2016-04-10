@@ -3,6 +3,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <iostream>
+#include <iomanip>
 #include <limits>
 #include <random>
 #include <vector>

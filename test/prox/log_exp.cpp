@@ -102,7 +102,8 @@ test_log_sum_exp(const int pow_from, const int pow_to) {
 template <typename Type,
           typename Result = Type>
 inline void
-test_log_sum_exp_special_cases(const int pow_from, const int pow_to) {
+test_log_sum_exp_special_cases(const int pow_from, const int pow_to,
+                               const short int eps_tol = 1) {
   std::mt19937 gen(1);
   std::vector<Type> v;
 
@@ -115,7 +116,7 @@ test_log_sum_exp_special_cases(const int pow_from, const int pow_to) {
   ASSERT_TRUE(sdca::log_1_sum_exp(v.begin(), v.begin()) == 0);
 
   // Single element
-  Type eps = 4 * std::numeric_limits<Type>::epsilon();
+  Type eps = eps_tol * std::numeric_limits<Type>::epsilon();
   for (int p = pow_from; p < pow_to; ++p) {
     v.clear();
     test_populate_real(1, p, p + 1, static_cast<Type>(1), gen, v);
@@ -158,5 +159,5 @@ TEST(LogExpTest, log_sum_exp_extensive) {
 TEST(LogExpTest, log_sum_exp_special_cases) {
   test_log_sum_exp_special_cases<float, double>(-16, 16);
   test_log_sum_exp_special_cases<double, double>(-16, 16);
-  test_log_sum_exp_special_cases<long double, long double>(-24, 24);
+  test_log_sum_exp_special_cases<long double, long double>(-24, 24, 1024);
 }
