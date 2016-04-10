@@ -12,6 +12,13 @@ set(MEX_GD
 if(${Matlab_FOUND})
   include_directories(matlab)
 
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -Wno-switch-enum")  # to_string(mxClassID)
+    set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -Wno-weak-vtables") # mat_streambuf
+  endif()
+
   add_definitions(
     -DMEX_PROX="${MEX_PROX}"
     -DMEX_SOLVE="${MEX_SOLVE}"

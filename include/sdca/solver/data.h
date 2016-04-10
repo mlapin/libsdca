@@ -1,6 +1,8 @@
 #ifndef SDCA_SOLVER_DATA_H
 #define SDCA_SOLVER_DATA_H
 
+#include <numeric>
+
 #include "sdca/solver/data/dataset.h"
 #include "sdca/solver/data/input.h"
 #include "sdca/solver/data/output.h"

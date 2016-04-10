@@ -9,7 +9,18 @@
 #include <utility>
 
 // Matlab
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreserved-id-macro"
+#pragma clang diagnostic ignored "-Wc++98-compat-pedantic"
+#pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
+#endif
+
 #include <mex.h>
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 // SDCA
 #include "sdca/solver/solverdef.h"
@@ -18,8 +29,41 @@
 namespace sdca {
 
 //-----------------------------------------------------------------------------
+// Type names
+//-----------------------------------------------------------------------------
+
+inline const char*
+to_string(mxClassID class_id) {
+  switch (class_id) {
+    case mxDOUBLE_CLASS: return "double";
+    case mxSINGLE_CLASS: return "single";
+    default: return "unknown";
+  }
+}
+
+template <typename Type>
+struct mex_class {
+  static constexpr mxClassID
+  id() { return mxUNKNOWN_CLASS; }
+};
+
+template <>
+struct mex_class<float> {
+  static constexpr mxClassID
+  id() { return mxSINGLE_CLASS; }
+};
+
+template <>
+struct mex_class<double> {
+  static constexpr mxClassID
+  id() { return mxDOUBLE_CLASS; }
+};
+
+
+//-----------------------------------------------------------------------------
 // Errors and messages
 //-----------------------------------------------------------------------------
+
 
 enum err_index {
   err_arg = 0,
@@ -115,33 +159,6 @@ static const char* err_msg[] = {
   "Unknown log_format '%s'.",
   "Unknown help argument '%s'.",
   "%s is not implemented yet."
-};
-
-inline const char*
-to_string(mxClassID class_id) {
-  switch (class_id) {
-    case mxDOUBLE_CLASS: return "double";
-    case mxSINGLE_CLASS: return "single";
-    default: return "unknown";
-  }
-}
-
-template <typename Type>
-struct mex_class {
-  static constexpr mxClassID
-  id() { return mxUNKNOWN_CLASS; }
-};
-
-template <>
-struct mex_class<float> {
-  static constexpr mxClassID
-  id() { return mxSINGLE_CLASS; }
-};
-
-template <>
-struct mex_class<double> {
-  static constexpr mxClassID
-  id() { return mxDOUBLE_CLASS; }
 };
 
 
