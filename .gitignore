@@ -1,4 +1,5 @@
 build*
 matlab/*.mex*
+matlab/data/
 CMakeLists.txt.user
 .DS_Store

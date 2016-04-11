@@ -83,6 +83,10 @@ make_output_multiclass(
 }
 
 
+// Most efficient: A vector of labels and a vector of offsets per example
+// Directly corresponds to Matlab's sparse matrix format as follows:
+//    labels:  ir array (row index = class label);
+//    offsets: jc array (num_labels per example = jc[j+1] - jc[j]).
 template <typename Iterator>
 inline multilabel_output
 make_output_multilabel(
@@ -100,6 +104,7 @@ make_output_multilabel(
 }
 
 
+// A vector of labels per example (i.e., a vector of vectors)
 template <typename Type>
 inline multilabel_output
 make_output_multilabel(
@@ -119,7 +124,7 @@ make_output_multilabel(
 }
 
 
-// Special case: multiclass setting
+// Special case: multiclass setting (a vector of one label per example)
 template <typename Iterator>
 inline multilabel_output
 make_output_multilabel(

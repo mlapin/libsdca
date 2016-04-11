@@ -35,18 +35,18 @@ if(${Matlab_FOUND})
       ${libsdca_UTILITY_SOURCES}
     )
 
-#  matlab_add_mex(
-#    NAME ${MEX_SOLVE}
-#    SRC
-#      matlab/mex_solve.cpp
-#      matlab/mex_util.h
-#      ${libsdca_MATH_SOURCES}
-#      ${libsdca_PROX_SOURCES}
-#      ${libsdca_SOLVER_SOURCES}
-#      ${libsdca_UTILITY_SOURCES}
-#    LINK_TO
-#      ${BLAS_LIBRARIES}
-#    )
+  matlab_add_mex(
+    NAME ${MEX_SOLVE}
+    SRC
+      matlab/mex_solve.cpp
+      matlab/mex_util.h
+      ${libsdca_MATH_SOURCES}
+      ${libsdca_PROX_SOURCES}
+      ${libsdca_SOLVER_SOURCES}
+      ${libsdca_UTILITY_SOURCES}
+    LINK_TO
+      ${BLAS_LIBRARIES}
+    )
 
 #  matlab_add_mex(
 #    NAME ${MEX_GD}
@@ -63,7 +63,7 @@ if(${Matlab_FOUND})
   install(
     TARGETS
       ${MEX_PROX}
-#      ${MEX_SOLVE}
+      ${MEX_SOLVE}
 #      ${MEX_GD}
     DESTINATION
       ${SDCA_MATLAB_INSTALL_DIR}

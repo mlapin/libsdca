@@ -66,7 +66,8 @@ struct mex_class<double> {
 
 
 enum err_index {
-  err_arg = 0,
+  err_exception = 0,
+  err_arg,
   err_arg_count,
   err_arg_single,
   err_arg_double,
@@ -98,6 +99,7 @@ enum err_index {
 };
 
 static const char* err_id[] = {
+  "LIBSDCA:exception",
   "LIBSDCA:arg",
   "LIBSDCA:arg_count",
   "LIBSDCA:arg_single",
@@ -130,6 +132,7 @@ static const char* err_id[] = {
 };
 
 static const char* err_msg[] = {
+  "Exception: %s.",
   "Invalid input.",
   "Invalid number of input or output arguments.",
   "'%s' must be single.",
@@ -471,7 +474,7 @@ mxCreateStruct(
 }
 
 inline mxArray*
-mxDuplicateOrCreateMatrixField(
+mxDuplicateFieldOrCreateMatrix(
     const mxArray* pa,
     const char* field,
     const std::size_t m,
@@ -491,9 +494,20 @@ mxDuplicateOrCreateMatrixField(
 
 
 //-----------------------------------------------------------------------------
-// Helper methods for solvers
+// Helper methods and structs for solvers
 //-----------------------------------------------------------------------------
 
+template <typename Field>
+struct model_info {
+  typedef Field field_type;
+  std::vector<std::pair<const char*, field_type>> fields;
+
+  inline void add(
+      const char* name,
+      const field_type value) {
+    fields.emplace_back(std::make_pair(name, value));
+  }
+};
 
 //-----------------------------------------------------------------------------
 // Logging in Matlab
