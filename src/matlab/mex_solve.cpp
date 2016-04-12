@@ -787,7 +787,8 @@ mexFunction(
   } else {
     mxCheckArgNum(nrhs, 2, 3, printUsage);
 
-    logging::format_push();
+    std::ios ios_state(nullptr);
+    ios_state.copyfmt(std::cout);
     mat_cout_hijack mat_cout;
     try {
       if (mxIsDouble(prhs[0])
@@ -806,6 +807,6 @@ mexFunction(
         err_id[err_exception], err_msg[err_exception], e.what());
     }
     mat_cout.release();
-    logging::format_pop();
+    std::cout.copyfmt(ios_state);
   }
 }
