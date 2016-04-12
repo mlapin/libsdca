@@ -73,13 +73,14 @@ eval_primal_loss(
   Data *neg_first(scores + num_labels), *neg_last(scores + num_classes);
 
   // Compute the ranking loss
+  Result rank_loss(0);
   for (Data* gt = pos_first; gt != pos_last; ++gt) {
     auto it = std::partition(neg_first, neg_last,
       [=](const Data& x){ return x >= *gt; });
-    eval.rank_loss += static_cast<Result>(std::distance(neg_first, it));
+    rank_loss += static_cast<Result>(std::distance(neg_first, it));
   }
-  eval.rank_loss /=
-    static_cast<Result>(num_labels * (num_classes - num_labels));
+  eval.rank_loss += rank_loss / static_cast<Result>(
+                                num_labels * (num_classes - num_labels));
 
   // Increment the primal loss (may re-order the scores)
   eval.primal_loss += obj.primal_loss(num_classes, num_labels, scores);

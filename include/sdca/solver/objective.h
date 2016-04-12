@@ -9,6 +9,47 @@
 
 namespace sdca {
 
+template <typename Objective>
+struct has_param_k : std::false_type {};
+
+template <typename Data,
+          typename Result>
+struct has_param_k<l2_entropy_topk<Data, Result>> : std::true_type {};
+
+template <typename Data,
+          typename Result>
+struct has_param_k<l2_hinge_topk<Data, Result>> : std::true_type {};
+
+template <typename Data,
+          typename Result>
+struct has_param_k<l2_hinge_topk_smooth<Data, Result>> : std::true_type {};
+
+template <typename Data,
+          typename Result>
+struct has_param_k<l2_topk_hinge<Data, Result>> : std::true_type {};
+
+template <typename Data,
+          typename Result>
+struct has_param_k<l2_topk_hinge_smooth<Data, Result>> : std::true_type {};
+
+
+template <typename Objective>
+struct has_param_gamma : std::false_type {};
+
+template <typename Data,
+          typename Result>
+struct has_param_gamma<l2_hinge_topk_smooth<Data, Result>> : std::true_type {};
+
+template <typename Data,
+          typename Result>
+struct has_param_gamma<l2_topk_hinge_smooth<Data, Result>> : std::true_type {};
+
+template <typename Data,
+          typename Result>
+struct has_param_gamma<l2_multilabel_hinge_smooth<Data, Result>>
+  : std::true_type {};
+
+
 template <typename Data,
           typename Result = double>
 inline l2_entropy_topk<Data, Result>

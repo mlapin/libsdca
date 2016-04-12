@@ -12,6 +12,8 @@
 
 using namespace sdca;
 
+static constexpr char default_objective[] = "msvm_smooth";
+
 inline void
 printUsage() {
   mexPrintf("Usage: model = %s(data, labels, opts);\n"
@@ -33,25 +35,26 @@ printHelp(const mxArray* opts) {
 "\n"
 "  opts is a struct with the following fields (defaults in [brackets]):\n"
 "\n"
-"    objective ['topk_svm']  - the objective to optimize;\n"
-"    C         [1]           - the regularization parameter;\n"
+"    objective ['%s'] - the objective to optimize;\n"
+"    c         [1]           - the regularization parameter;\n"
 "    k         [1]           - the k in top-k optimization;\n"
 "    gamma     [1]           - the smoothing parameter for hinge losses;\n"
 "    is_dual   [false]       - whether data is given as Gram matrix;\n"
 "\n"
-"    eval_on_start [false]   - whether to check the duality gap on start;\n"
-"    eval_epoch    [10]      - how often to check the gap;\n"
+"    epsilon        [1e-3]   - relative duality gap bound, stop if\n"
+"      (primal - dual) <= epsilon * max(abs(primal), abs(dual))\n"
 "    max_epoch      [1000]   - epochs limit;\n"
 "    max_cpu_time   [0]      - CPU time limit (0: no limit);\n"
 "    max_wall_time  [0]      - wall time limit (0: no limit);\n"
-"    epsilon        [1e-3]   - relative duality gap bound, stop if\n"
-"      (primal - dual) <= epsilon * max(abs(primal), abs(dual))\n"
+"    eval_on_start  [false]  - whether to check the duality gap on start;\n"
+"    eval_epoch     [10]     - how often to check the gap;\n"
 "\n"
-"    log_level  ['info']     - logging verbosity\n"
-"                              ('none', 'info', 'verbose', 'debug')\n"
-"    log_format ['short_e']  - numeric format (4/16 digits; float/exp format)\n"
-"                              ('short_f', 'short_e', 'long_f', 'long_e')\n"
-"    precision  ['double']   - intermediate floating-point precision;\n"
+"    log_level  ['info']     - logging verbosity:\n"
+"                              'none', 'warning', 'info', 'verbose', 'debug';\n"
+"    log_format ['short_e']  - numeric format:\n"
+"                              'short_f', 'short_e', 'long_f', 'long_e';\n"
+"    precision  ['double']   - floating-point precision for intermediate\n"
+"                              computations (e.g. proximal update steps);\n"
 "\n"
 "    A [none] - initial dual variables for warm restart;\n"
 "    W [none] - initial primal variables (only if opts.is_dual=false);\n"
@@ -64,7 +67,7 @@ printHelp(const mxArray* opts) {
 "  supported input data formats.\n"
 "  See %s('help', 'objective') for more information on\n"
 "  currently supported training objectives.\n",
-    MEX_SOLVE, MEX_SOLVE, MEX_SOLVE);
+      MEX_SOLVE, default_objective, MEX_SOLVE, MEX_SOLVE);
     return;
   }
 
@@ -84,34 +87,38 @@ printHelp(const mxArray* opts) {
 "      while the rest is used for evaluation only\n"
 "      (e.g., can be used to monitor performance on a validation set).\n"
 "      The Gram matrices for testing should be computed as\n"
-"        Ktst = Xtrn' * Xtst.\n"
+"        Ktst = Xtrn' * Xtst\n"
+"      and should be num_train_examples-by-num_test_examples.\n"
 "\n"
 "  labels can be:\n"
 "    - a n-by-1 or a 1-by-n vector of class labels;\n"
 "      labels must be in the range 0:(m-1) or 1:m,\n"
 "      where m is the number of classes.\n"
+"    - a sparse m-by-n matrix (for multilabel setting only),\n"
+"      where m is the number of classes,\n"
+"      with nonzero entries indicating class membership.\n"
 "    - a cell array with the same number of elements as in data\n"
-"      containing vectors of labels as above.\n"
+"      containing labels as above.\n"
 "\n"
 "  data matrices must be non-sparse and of type single or double\n"
 "\n"
-"  labels vectors must be of type double\n"
+"  labels must be of type double\n"
       );
   } else if (arg == "obj" || arg == "objective") {
     mexPrintf(
 "opts.objective - the training objective to optimize.\n"
 "  Multiclass:\n"
-"    msvm (synonym: l2_multiclass_hinge)\n"
+"    msvm (synonyms: l2_multiclass_hinge, l2_topk_hinge)\n"
 "      - l2 regularized multiclass SVM of Crammer and Singer\n"
-"    msvm_smooth (synonym: l2_multiclass_hinge_smooth)\n"
+"    msvm_smooth (synonyms: l2_multiclass_hinge_smooth, l2_topk_hinge)\n"
 "      - l2 regularized multiclass SVM with smoothed hinge loss\n"
-"    softmax (synonym: l2_multiclass_entropy)\n"
+"    softmax (synonyms: l2_multiclass_entropy, l2_entropy_topk)\n"
 "      - l2 regularized multiclass cross-entropy loss\n"
 "    l2_hinge_topk (synonyms: topk_hinge_alpha)\n"
-"      - l2 regularized hinge-of-top-k loss (top-k hinge alpha)\n"
+"      - l2 regularized top-k hinge alpha loss (hinge-of-top-k)\n"
 "        (both smooth and non-smooth depending on gamma)\n"
 "    l2_topk_hinge (synonym: topk_hinge_beta)\n"
-"      - l2 regularized top-k-of-hinge loss (top-k hinge beta)\n"
+"      - l2 regularized top-k hinge beta loss (top-k-of-hinge)\n"
 "        (both smooth and non-smooth depending on gamma)\n"
 "    l2_entropy_topk\n"
 "      - l2 regularized entropy-on-top-k-simplex loss\n"
@@ -126,12 +133,231 @@ printHelp(const mxArray* opts) {
 "      - l2 regularized multilabel cross-entropy loss\n"
 "\n"
 "  Default value:\n"
-"    mlsvm_smooth\n"
-      );
+"    %s\n",
+      default_objective);
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_help_arg], err_msg[err_help_arg], arg.c_str());
   }
+}
+
+
+template <typename Result>
+inline void
+add_train_evals(
+    const std::vector<eval_train<Result, multiclass_output>>& evals,
+    model_info<mxArray*>& info
+  ) {
+  const char* names[] = {"epoch", "accuracy", "relative_gap",
+    "primal", "dual", "primal_loss", "dual_loss", "regularizer",
+    "solve_time_cpu", "solve_time_wall", "eval_time_cpu", "eval_time_wall",
+    "accuracies"};
+  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 13, names);
+  mxCheckCreated(pa, "train");
+  size_type i(0);
+  for (auto& a : evals) {
+    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.epoch));
+    mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.topk_accuracy(0)));
+    mxSetFieldByNumber(pa, i, 2, mxCreateScalar(a.relative_gap()));
+    mxSetFieldByNumber(pa, i, 3, mxCreateScalar(a.primal));
+    mxSetFieldByNumber(pa, i, 4, mxCreateScalar(a.dual));
+    mxSetFieldByNumber(pa, i, 5, mxCreateScalar(a.primal_loss));
+    mxSetFieldByNumber(pa, i, 6, mxCreateScalar(a.dual_loss));
+    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.regularizer));
+    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.solve_time_cpu));
+    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_time_wall));
+    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.eval_time_cpu));
+    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_time_wall));
+    mxSetFieldByNumber(pa, i, 12, mxCreateVector(a.accuracy, "accuracies"));
+    ++i;
+  }
+  info.add("train", pa);
+}
+
+template <typename Result>
+inline void
+add_train_evals(
+    const std::vector<eval_train<Result, multilabel_output>>& evals,
+    model_info<mxArray*>& info
+  ) {
+  const char* names[] = {"epoch", "rank_loss", "relative_gap",
+    "primal", "dual", "primal_loss", "dual_loss", "regularizer",
+    "solve_time_cpu", "solve_time_wall", "eval_time_cpu", "eval_time_wall"};
+  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 12, names);
+  mxCheckCreated(pa, "train");
+  size_type i = 0;
+  for (auto& a : evals) {
+    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.epoch));
+    mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.rank_loss));
+    mxSetFieldByNumber(pa, i, 2, mxCreateScalar(a.relative_gap()));
+    mxSetFieldByNumber(pa, i, 3, mxCreateScalar(a.primal));
+    mxSetFieldByNumber(pa, i, 4, mxCreateScalar(a.dual));
+    mxSetFieldByNumber(pa, i, 5, mxCreateScalar(a.primal_loss));
+    mxSetFieldByNumber(pa, i, 6, mxCreateScalar(a.dual_loss));
+    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.regularizer));
+    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.solve_time_cpu));
+    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_time_wall));
+    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.eval_time_cpu));
+    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_time_wall));
+    ++i;
+  }
+  info.add("train", pa);
+}
+
+template <typename Result,
+          typename Input>
+inline void
+add_test_evals(
+    const std::vector<dataset<Input, multiclass_output,
+                              eval_test<Result, multiclass_output>>>& sets,
+    model_info<mxArray*>& info
+  ) {
+  if (sets.size() == 0) return;
+
+  const char* names[] = {"accuracy", "primal_loss", "accuracies"};
+  mxArray* pa = mxCreateStructMatrix(
+    sets[0].evals.size(), sets.size(), 3, names);
+  mxCheckCreated(pa, "test");
+  size_type i = 0;
+  for (auto& testset : sets) {
+    for (auto& a : testset.evals) {
+      mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.topk_accuracy(0)));
+      mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.primal_loss));
+      mxSetFieldByNumber(pa, i, 2, mxCreateVector(a.accuracy, "accuracies"));
+      ++i;
+    }
+  }
+  info.add("test", pa);
+}
+
+template <typename Result,
+          typename Input>
+inline void
+add_test_evals(
+    const std::vector<dataset<Input, multilabel_output,
+                              eval_test<Result, multilabel_output>>>& sets,
+    model_info<mxArray*>& info
+  ) {
+  if (sets.size() == 0) return;
+
+  const char* names[] = {"rank_loss", "primal_loss"};
+  mxArray* pa = mxCreateStructMatrix(
+    sets[0].evals.size(), sets.size(), 2, names);
+  mxCheckCreated(pa, "test");
+  size_type i = 0;
+  for (auto& testset : sets) {
+    for (auto& a : testset.evals) {
+      mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.rank_loss));
+      mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.primal_loss));
+      ++i;
+    }
+  }
+  info.add("test", pa);
+}
+
+template <typename Context>
+inline void
+add_info_solution(
+    const Context& ctx,
+    model_info<mxArray*>& info
+  ) {
+  info.add("status", mxCreateString(ctx.status_name().c_str()));
+  info.add("epoch", mxCreateScalar(ctx.epoch));
+  info.add("cpu_time", mxCreateScalar(ctx.cpu_time()));
+  info.add("wall_time", mxCreateScalar(ctx.wall_time()));
+
+  const auto& evals = ctx.train.evals;
+  if (evals.size() > 0) {
+    info.add("relative_gap", mxCreateScalar(evals.back().relative_gap()));
+  }
+
+  add_train_evals(evals, info);
+  add_test_evals(ctx.test, info);
+}
+
+template <typename Input>
+inline void
+add_info_input(const Input&, model_info<mxArray*>&) {}
+
+template <typename Data>
+inline void
+add_info_input(
+    const feature_input<Data>& in,
+    model_info<mxArray*>& info
+  ) {
+  info.add("num_dimensions", mxCreateScalar(in.num_dimensions));
+}
+
+template <typename Objective>
+inline void
+add_info_k(
+    const Objective&,
+    model_info<mxArray*>&,
+    typename std::enable_if<!has_param_k<Objective>::value>::type* = 0
+  ) {}
+
+template <typename Objective>
+inline void
+add_info_k(
+    const Objective& obj,
+    model_info<mxArray*>& info,
+    typename std::enable_if<has_param_k<Objective>::value>::type* = 0
+  ) {
+  info.add("k", mxCreateScalar(obj.k));
+}
+
+template <typename Objective>
+inline void
+add_info_gamma(
+    const Objective&,
+    model_info<mxArray*>&,
+    typename std::enable_if<!has_param_gamma<Objective>::value>::type* = 0
+  ) {}
+
+template <typename Objective>
+inline void
+add_info_gamma(
+    const Objective& obj,
+    model_info<mxArray*>& info,
+    typename std::enable_if<has_param_gamma<Objective>::value>::type* = 0
+  ) {
+  info.add("gamma", mxCreateScalar(obj.gamma));
+}
+
+template <typename Context>
+inline void
+add_info(
+    const mxArray* opts,
+    const Context& ctx,
+    model_info<mxArray*>& info
+  ) {
+  add_info_input(ctx.train.in, info);
+  info.add("num_examples", mxCreateScalar(ctx.train.num_examples()));
+  info.add("num_classes", mxCreateScalar(ctx.train.num_classes()));
+  info.add("is_dual", mxCreateScalar(ctx.is_dual()));
+
+  std::string obj = mxGetFieldValueOrDefault(
+    opts, "objective", std::string(default_objective));
+  info.add("objective", mxCreateString(obj.c_str()));
+  info.add("c", mxCreateScalar(ctx.objective.c));
+  add_info_k(ctx.objective, info);
+  add_info_gamma(ctx.objective, info);
+
+  info.add("epsilon", mxCreateScalar(ctx.criteria.epsilon));
+  info.add("max_epoch", mxCreateScalar(ctx.criteria.max_epoch));
+  info.add("max_cpu_time", mxCreateScalar(ctx.criteria.max_cpu_time));
+  info.add("max_wall_time", mxCreateScalar(ctx.criteria.max_wall_time));
+  info.add("eval_on_start", mxCreateScalar(ctx.criteria.eval_on_start));
+  info.add("eval_epoch", mxCreateScalar(ctx.criteria.eval_epoch));
+
+  info.add("data_precision",
+           mxCreateString(type_name<typename Context::data_type>()));
+  info.add("precision",
+           mxCreateString(type_name<typename Context::result_type>()));
+  info_add_opts_field(opts, "log_level", info);
+  info_add_opts_field(opts, "log_format", info);
+
+  add_info_solution(ctx, info);
 }
 
 template <typename Data>
@@ -240,6 +466,7 @@ set_test_data(
     const mxArray* all_labels,
     solver_context<Data, Result, Input, Output, Objective>& ctx
   ) {
+  // The first dataset is for training
   size_type num_datasets = mxGetNumberOfElements(all_data);
   for (size_type i = 1; i < num_datasets; ++i) {
     auto data = mxGetCell(all_data, i);
@@ -265,13 +492,15 @@ set_stopping_criteria(
     Context& ctx
   ) {
   auto c = &ctx.criteria;
+  mxSetFieldValue(opts, "epsilon", c->epsilon);
   mxSetFieldValue(opts, "eval_on_start", c->eval_on_start);
   mxSetFieldValue(opts, "eval_epoch", c->eval_epoch);
   mxSetFieldValue(opts, "max_epoch", c->max_epoch);
   mxSetFieldValue(opts, "max_cpu_time", c->max_cpu_time);
   mxSetFieldValue(opts, "max_wall_time", c->max_wall_time);
-  mxSetFieldValue(opts, "epsilon", c->epsilon);
 
+  mxCheck<double>(std::greater_equal<double>(),
+    c->epsilon, 0, "epsilon");
   mxCheck<size_type>(std::greater_equal<size_type>(),
     c->eval_epoch, 0, "eval_epoch");
   mxCheck<size_type>(std::greater_equal<size_type>(),
@@ -280,8 +509,6 @@ set_stopping_criteria(
     c->max_cpu_time, 0, "max_cpu_time");
   mxCheck<double>(std::greater_equal<double>(),
     c->max_wall_time, 0, "max_wall_time");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->epsilon, 0, "epsilon");
 }
 
 template <typename Data,
@@ -353,6 +580,7 @@ set_context(
   auto solver = sdca::make_solver(ctx);
   solver.solve();
 
+  add_info(opts, ctx, info);
   plhs[0] = mxCreateStruct(info.fields, "model");
 }
 
@@ -368,14 +596,14 @@ set_objective(
     Input<Data>&& in,
     multiclass_output&& out
   ) {
-  auto c = mxGetFieldValueOrDefault<Result>(opts, "C", 1);
-  mxCheck<Result>(std::greater<Result>(), c, 0, "C");
-
-  auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
-  mxCheckRange<size_type>(k, 1, out.num_classes - 1, "k");
+  auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
+  mxCheck<Result>(std::greater<Result>(), c, 0, "c");
 
   auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 1);
   mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
+
+  auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
+  mxCheckRange<size_type>(k, 1, out.num_classes - 1, "k");
 
   if (obj == "msvm" ||
       obj == "l2_multiclass_hinge") {
@@ -468,7 +696,7 @@ set_output(
   ) {
   validate_labels(labels, in.num_examples);
   std::string obj = mxGetFieldValueOrDefault(
-    opts, "objective", std::string("mlsvm_smooth"));
+    opts, "objective", std::string(default_objective));
   if ((obj == "mlsoftmax") || (obj == "l2_multilabel_entropy")
       || (obj == "mlsvm") || (obj == "l2_multilabel_hinge")
       || (obj == "mlsvm_smooth") || (obj == "l2_multilabel_hinge_smooth")) {

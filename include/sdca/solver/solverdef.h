@@ -1,6 +1,7 @@
 #ifndef SDCA_SOLVER_SOLVERDEF_H
 #define SDCA_SOLVER_SOLVERDEF_H
 
+#include <cassert>
 #include <sstream>
 
 #include "sdca/utility/types.h"
@@ -20,7 +21,7 @@ enum class solver_status {
 
 
 inline std::string
-status_name(
+solver_status_name(
     solver_status __status
   ) {
   switch (__status) {

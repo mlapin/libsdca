@@ -132,7 +132,7 @@ static const char* err_id[] = {
 };
 
 static const char* err_msg[] = {
-  "Exception: %s.",
+  "Error: %s.",
   "Invalid input.",
   "Invalid number of input or output arguments.",
   "'%s' must be single.",
@@ -447,10 +447,7 @@ mxCreateVector(
   ) {
   mxArray* pa = mxCreateDoubleMatrix(vec.size(), 1, mxREAL);
   mxCheckCreated(pa, name);
-  double* data = mxGetPr(pa);
-  for (Type v : vec) {
-    *data++ = static_cast<double>(v);
-  }
+  std::copy(vec.begin(), vec.end(), mxGetPr(pa));
   return pa;
 }
 
@@ -508,6 +505,18 @@ struct model_info {
     fields.emplace_back(std::make_pair(name, value));
   }
 };
+
+inline void
+info_add_opts_field(
+    const mxArray* opts,
+    const char* field,
+    model_info<mxArray*>& info
+  ) {
+  const mxArray* p = mxGetField(opts, 0, field);
+  if (p != nullptr) {
+    info.add(field, mxDuplicateArray(p));
+  }
+}
 
 //-----------------------------------------------------------------------------
 // Logging in Matlab

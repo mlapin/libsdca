@@ -41,18 +41,25 @@ eval_begin(
 
 
 template <typename Int,
-          typename Data,
           typename Result,
-          template <typename, typename> class Objective>
+          typename Context>
 inline void
 eval_end(
     const Int num_classes,
     const Int num_examples,
-    const Objective<Data, Result>& obj,
+    const Context& ctx,
     eval_train<Result, multiclass_output>& e
   ) {
+  // Set epoch and timings
+  e.epoch = ctx.epoch;
+  e.solve_time_cpu = ctx.solve_time.cpu.elapsed_now();
+  e.solve_time_wall = ctx.solve_time.wall.elapsed_now();
+  e.eval_time_cpu = ctx.eval_time.cpu.elapsed_now();
+  e.eval_time_wall = ctx.eval_time.wall.elapsed_now();
+
   // Compute the overall primal/dual objectives and their individual terms
-  obj.update_all(e.primal, e.dual, e.primal_loss, e.dual_loss, e.regularizer);
+  ctx.objective.update_all(
+    e.primal, e.dual, e.primal_loss, e.dual_loss, e.regularizer);
 
   // Top-k accuracies for all k
   std::partial_sum(e.accuracy.begin(), e.accuracy.end(), e.accuracy.begin());
@@ -62,36 +69,42 @@ eval_end(
 
 
 template <typename Int,
-          typename Data,
           typename Result,
-          template <typename, typename> class Objective>
+          typename Context>
 inline void
 eval_end(
     const Int,
     const Int num_examples,
-    const Objective<Data, Result>& obj,
+    const Context& ctx,
     eval_train<Result, multilabel_output>& e
   ) {
+  // Set epoch and timings
+  e.epoch = ctx.epoch;
+  e.solve_time_cpu = ctx.solve_time.cpu.elapsed_now();
+  e.solve_time_wall = ctx.solve_time.wall.elapsed_now();
+  e.eval_time_cpu = ctx.eval_time.cpu.elapsed_now();
+  e.eval_time_wall = ctx.eval_time.wall.elapsed_now();
+
   // Compute the overall primal/dual objectives and their individual terms
-  obj.update_all(e.primal, e.dual, e.primal_loss, e.dual_loss, e.regularizer);
+  ctx.objective.update_all(
+    e.primal, e.dual, e.primal_loss, e.dual_loss, e.regularizer);
 
   e.rank_loss /= static_cast<Result>(num_examples);
 }
 
 
 template <typename Int,
-          typename Data,
           typename Result,
-          template <typename, typename> class Objective>
+          typename Context>
 inline void
 eval_end(
     const Int num_classes,
     const Int num_examples,
-    const Objective<Data, Result>& obj,
+    const Context& ctx,
     eval_test<Result, multiclass_output>& e
   ) {
   // Compute the overall primal/dual objectives and their individual terms
-  obj.update_primal_loss(e.primal_loss);
+  ctx.objective.update_primal_loss(e.primal_loss);
 
   // Top-k accuracies for all k
   std::partial_sum(e.accuracy.begin(), e.accuracy.end(), e.accuracy.begin());
@@ -101,18 +114,17 @@ eval_end(
 
 
 template <typename Int,
-          typename Data,
           typename Result,
-          template <typename, typename> class Objective>
+          typename Context>
 inline void
 eval_end(
     const Int,
     const Int num_examples,
-    const Objective<Data, Result>& obj,
+    const Context& ctx,
     eval_test<Result, multilabel_output>& e
   ) {
   // Compute the overall primal/dual objectives and their individual terms
-  obj.update_primal_loss(e.primal_loss);
+  ctx.objective.update_primal_loss(e.primal_loss);
 
   e.rank_loss /= static_cast<Result>(num_examples);
 }

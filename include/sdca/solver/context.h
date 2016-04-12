@@ -67,17 +67,16 @@ struct solver_context {
   inline std::string status_string() const {
     std::ostringstream str;
     str.copyfmt(std::cout);
-    str << "status: " << status_name(status) << ", "
-           "epoch: " << epoch << ", ";
+    str << "status: " << solver_status_name(status);
     if (train.evals.size() > 0) {
-      str << "eval: " << train.evals.back().to_string() << ", ";
+      str << ", " << train.evals.back().to_string(true);
     }
-    str << "wall_time: " << wall_time() <<
-           " (solve: " << solve_time.wall.elapsed <<
-           ", eval: " << eval_time.wall.elapsed << "), "
-           "cpu_time: " << cpu_time() <<
-           " (solve: " << solve_time.cpu.elapsed <<
-           ", eval: " << eval_time.cpu.elapsed << ")";
+    str << ", cpu_time: " << cpu_time() <<
+             " (solve: " << solve_time.cpu.elapsed <<
+             ", eval: " << eval_time.cpu.elapsed << ")"
+           ", wall_time: " << wall_time() <<
+             " (solve: " << solve_time.wall.elapsed <<
+             ", eval: " << eval_time.wall.elapsed << ")";
     return str.str();
   }
 
@@ -86,6 +85,9 @@ struct solver_context {
     // TODO: verify dimensions
     test.emplace_back(std::move(in), std::move(out));
   }
+
+
+  std::string status_name() const { return solver_status_name(status); }
 
 
   bool is_dual() const { return primal_variables == nullptr; }

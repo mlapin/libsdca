@@ -109,7 +109,8 @@ protected:
     }
 
     check_stopping_criteria<Data, Result>(ctx_);
-    reporting::end_epoch(ctx_);
+
+    reporting::end_epoch(ctx_, is_evaluated_);
 
     ctx_.solve_time.resume();
   }
@@ -119,8 +120,10 @@ protected:
     ctx_.eval_time.resume();
 
     evaluate_dataset(ctx_, ctx_.train, scratch_);
+
+    size_type id(0);
     for (auto& test_set : ctx_.test) {
-      evaluate_dataset(ctx_, test_set, scratch_);
+      evaluate_dataset(ctx_, test_set, scratch_, id++);
     }
 
     is_evaluated_ = true;

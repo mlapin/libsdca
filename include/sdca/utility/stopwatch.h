@@ -80,6 +80,7 @@ struct stopwatch_wall {
 #else
     mark = now();
 #endif
+    is_running = true;
   }
 
   double elapsed_now() const {

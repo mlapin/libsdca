@@ -2,6 +2,7 @@
 #define SDCA_SOLVER_REPORTING_H
 
 #include "sdca/solver/solverdef.h"
+#include "sdca/solver/eval/types.h"
 #include "sdca/utility/logging.h"
 
 namespace sdca {
@@ -35,35 +36,44 @@ end_solve(
 template <typename Context>
 inline void
 end_epoch(
-    const Context& ctx
+    const Context& ctx,
+    const bool is_evaluated
   ) {
+  if (is_evaluated) return;
   LOG_DEBUG <<
     "  "
-    "epoch: " << std::setw(3) << ctx.epoch << std::setw(0) << ", "
-    "wall_time: " << ctx.wall_time() <<
-    " (" << ctx.solve_time.wall.elapsed <<
-    " + " << ctx.eval_time.wall.elapsed << "), "
+    "epoch: " << ctx.epoch << ", "
     "cpu_time: " << ctx.cpu_time() <<
     " (" << ctx.solve_time.cpu.elapsed <<
-    " + " << ctx.eval_time.cpu.elapsed << ")" <<
+    " + " << ctx.eval_time.cpu.elapsed << "), "
+    "wall_time: " << ctx.wall_time() <<
+    " (" << ctx.solve_time.wall.elapsed <<
+    " + " << ctx.eval_time.wall.elapsed << ")" <<
     std::endl;
 }
 
 
-template <typename Context,
-          typename Evaluation>
+template <typename Result,
+          typename Output>
 inline void
 eval_created(
-    const Context& ctx,
-    const Evaluation& eval
+    const eval_train<Result, Output>& eval,
+    const size_type
   ) {
   LOG_VERBOSE <<
-    "  "
-    "epoch: " << std::setw(3) << ctx.epoch << std::setw(0) << ", " <<
-    eval.to_string() << ", "
-    "wall_time: " << ctx.wall_time_now() << ", "
-    "cpu_time: " << ctx.cpu_time_now() <<
-    std::endl;
+    "  " << eval.to_string() << std::endl;
+}
+
+
+template <typename Result,
+          typename Output>
+inline void
+eval_created(
+    const eval_test<Result, Output>& eval,
+    const size_type id
+  ) {
+  LOG_VERBOSE <<
+    "  eval on set #" << id << ": " << eval.to_string() << std::endl;
 }
 
 

@@ -20,7 +20,8 @@ inline void
 evaluate_dataset(
     const Context& ctx,
     Dataset& d,
-    solver_scratch<Data, Input>& scratch
+    solver_scratch<Data, Input>& scratch,
+    size_type id = 0
   ) {
   const size_type m = d.num_classes();
   const size_type n = d.num_examples();
@@ -45,8 +46,8 @@ evaluate_dataset(
 
   }
 
-  eval_end(m, n, ctx.objective, eval);
-  reporting::eval_created(ctx, eval);
+  eval_end(m, n, ctx, eval);
+  reporting::eval_created(eval, id);
 }
 
 
