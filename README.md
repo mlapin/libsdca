@@ -2,7 +2,7 @@
 
 libsdca is a library for multiclass classification based on stochastic dual coordinate ascent (SDCA).
 
-Below is a brief overview of supported training objectives*, inputs, proximal operators, and interfaces.
+Below is a brief overview of supported training objectives, inputs, proximal operators, and interfaces.
 
 Multiclass objectives:
 - Multiclass SVM of Crammer and Singer [1]
@@ -13,12 +13,12 @@ Multiclass objectives:
 - Multiclass cross-entropy loss (softmax loss)
 - Top-k entropy loss [5]
 
-Multilabel objectives**:
+Multilabel objectives:
 - Multilabel SVM of Crammer and Singer [2]
 - Multilabel SVM with smoothed hinge loss
 - Multilabel cross-entropy loss
 
-Inputs***:
+Inputs:
 - features
 - kernels
 - float or double precision
@@ -39,11 +39,8 @@ Interfaces:
 
 For the truncated top-k entropy loss [5], see `libsdca_gd` in a previous release [v0.2.0](https://github.com/mlapin/libsdca/releases/tag/v0.2.0).
 
-<sup>* All objectives employ L2 regularization.</sup>  
-<sup>** Multilabel objectives are currently experimental.</sup>  
-<sup>*** Only dense inputs are currently supported.</sup>  
 <sup>[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.</sup>  
-<sup>[2] K. Crammer and Y. Singer. A family of additive online algorithms for category ranking. In JMLR, 2003.  
+<sup>[2] K. Crammer and Y. Singer. A family of additive online algorithms for category ranking. In JMLR, 2003.</sup>  
 <sup>[3] K.C. Kiwiel. Variable fixing algorithms for the continuous quadratic knapsack problem. In JOTA, 2008.</sup>  
 <sup>[4] M. Lapin, M. Hein, and B. Schiele. Top-k multiclass SVM. In NIPS, 2015.</sup>  
 <sup>[5] M. Lapin, M. Hein, and B. Schiele. Loss Functions for Top-k Error: Analysis and Insights. In CVPR, 2016.</sup>  
@@ -63,34 +60,29 @@ run matlab/make.m
 mkdir build && cd build && cmake .. && make install -j4
 ```
 
-Once libsdca is compiled, add the corresponding directory to the Matlab search path:
-```
-addpath matlab
-```
-
-## Quick start
-
-The Matlab interface is installed in the directory `matlab`, which should contain two mex files:
-
+The Matlab interface is installed in the directory `matlab` and provides two mex files:
 - `matsdca_fit` - solvers;
 - `matsdca_prox` - proximal operators.
+
+The directory should be added to Matlab search path with `addpath matlab`.
+
+
+## Quick start
 
 Using the library is as easy as running
 ```
 model = matsdca_fit(X, Y, opts);
 ```
 
-A quick demo script is at `matlab/demo.m`. Just type
-```
-demo
-```
+A quick demo script is available at `matlab/demo.m`.
 
 Type `matsdca_fit('help')` and `matsdca_prox('help')` for further information.
 
+
 ## Citation
 
-Please cite libsdca in your publications if it helps your research:
-- Top-k Multiclass SVM (top-k hinge alpha and beta):
+Please cite libsdca in your publications if it helps your research.
+- Top-k Multiclass SVM (top-k hinge loss alpha and beta):
 ```
 @inproceedings{lapin2015topk,
   title = {Top-k Multiclass {SVM}},
@@ -101,7 +93,7 @@ Please cite libsdca in your publications if it helps your research:
 ```
 - Smooth top-k losses and cross-entropy losses:
 ```
-@inproceedings{lapin2015topk,
+@inproceedings{lapin2016loss,
   title = {Loss Functions for Top-k Error: Analysis and Insights},
   author = {Lapin, Maksim and Hein, Matthias and Schiele, Bernt},
   booktitle = {CVPR},
