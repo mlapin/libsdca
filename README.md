@@ -35,7 +35,7 @@ Below is a brief overview of supported training objectives, inputs, proximal ope
 **Interfaces**:
 - C++11 headers (simply include and use; no additional libraries to compile and link)
 - Matlab mex files
-- Python support is only partial at the moment, see PR#2
+- Python support is only partial at the moment, see PR #2
 
 For the *truncated top-k entropy loss* [5], see `libsdca_gd` in a previous release [v0.2.0](https://github.com/mlapin/libsdca/releases/tag/v0.2.0).
 
