@@ -1,13 +1,12 @@
 language: cpp
-
+sudo: required
+dist: trusty
 compiler:
 - clang
 - gcc
-
 os:
 - linux
 - osx
-
 script:
 - mkdir build
 - cd build
