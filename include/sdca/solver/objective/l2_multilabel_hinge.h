@@ -112,7 +112,6 @@ struct l2_multilabel_hinge_smooth
   const Result gamma;
 
   const Result gamma_div_c;
-  const Result gamma_div_2c;
 
 
   l2_multilabel_hinge_smooth(
@@ -122,8 +121,7 @@ struct l2_multilabel_hinge_smooth
       base::objective_base(__c / __gamma),
       c(__c),
       gamma(__gamma),
-      gamma_div_c(__gamma / __c),
-      gamma_div_2c(__gamma / (2 * __c))
+      gamma_div_c(__gamma / __c)
   {}
 
 
@@ -155,7 +153,7 @@ struct l2_multilabel_hinge_smooth
       static_cast<blas_int>(num_classes), a, scores, -b, variables);
     a /= 2;
     std::for_each(pos_first, pos_last, [=](Data &x){ x = a - x; });
-    std::for_each(neg_first, neg_last, [=](Data &x){ x += a; });
+    std::for_each(neg_first, neg_last, [=](Data &x){ x = a + x; });
 
     // 2. Proximal step (project 'variables', use 'scores' as scratch space)
     prox_two_simplex(pos_first, pos_last, neg_first, neg_last,
@@ -200,11 +198,13 @@ struct l2_multilabel_hinge_smooth
       const Int num_labels,
       const Data* variables
     ) const {
-    Result loss = std::accumulate(variables, variables + num_labels,
-                                  static_cast<Result>(0));
-    Result smoothing = gamma_div_2c * static_cast<Result>(sdca_blas_dot(
+    Result loss1 = std::accumulate(
+      variables, variables + num_labels, static_cast<Result>(0));
+    Result loss2 = std::accumulate(
+      variables + num_labels, variables + num_classes, static_cast<Result>(0));
+    Result smoothing = gamma_div_c * static_cast<Result>(sdca_blas_dot(
       static_cast<blas_int>(num_classes), variables, variables));
-    return loss - smoothing;
+    return static_cast<Result>(0.5) * (loss1 - loss2 - smoothing);
   }
 
 };
