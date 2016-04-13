@@ -4,7 +4,7 @@ libsdca is a library for multiclass classification based on stochastic dual coor
 
 Below is a brief overview of supported training objectives, inputs, proximal operators, and interfaces.
 
-Multiclass objectives:
+**Multiclass objectives**:
 - Multiclass SVM of Crammer and Singer [1]
 - Multiclass SVM with smoothed hinge loss
 - Top-k Multiclass SVM [4]
@@ -13,37 +13,31 @@ Multiclass objectives:
 - Multiclass cross-entropy loss (softmax loss)
 - Top-k entropy loss [5]
 
-Multilabel objectives:
+**Multilabel objectives**:
 - Multilabel SVM of Crammer and Singer [2]
 - Multilabel SVM with smoothed hinge loss
 - Multilabel cross-entropy loss
 
-Inputs:
+**Input data**:
 - features
 - kernels
 - float or double precision
 - multiple datasets at once (e.g. to monitor performance on a validation set)
 
-Proximal operators and more (e.g. compute projections onto various sets):
+**Proximal operators** and more (e.g. compute projections onto various sets):
 - simplex (implements the algorithm of [3])
 - top-k simplex
 - top-k cone
 - entropic projections
 - Lambert W function of the exponent (computes W(exp(x))
-- Further details: matsdca_prox('help','prox')
+- Further details: `matsdca_prox('help','prox')`
 
-Interfaces:
+**Interfaces**:
 - C++11 headers (simply include and use; no additional libraries to compile and link)
 - Matlab mex files
 - Python support is only partial at the moment, see PR#2
 
-For the truncated top-k entropy loss [5], see `libsdca_gd` in a previous release [v0.2.0](https://github.com/mlapin/libsdca/releases/tag/v0.2.0).
-
-<sup>[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.</sup>  
-<sup>[2] K. Crammer and Y. Singer. A family of additive online algorithms for category ranking. In JMLR, 2003.</sup>  
-<sup>[3] K.C. Kiwiel. Variable fixing algorithms for the continuous quadratic knapsack problem. In JOTA, 2008.</sup>  
-<sup>[4] M. Lapin, M. Hein, and B. Schiele. Top-k multiclass SVM. In NIPS, 2015.</sup>  
-<sup>[5] M. Lapin, M. Hein, and B. Schiele. Loss Functions for Top-k Error: Analysis and Insights. In CVPR, 2016.</sup>  
+For the *truncated top-k entropy loss* [5], see `libsdca_gd` in a previous release [v0.2.0](https://github.com/mlapin/libsdca/releases/tag/v0.2.0).
 
 
 ## Installation instructions
@@ -64,22 +58,22 @@ The Matlab interface is installed in the directory `matlab` and provides two mex
 - `matsdca_fit` - solvers;
 - `matsdca_prox` - proximal operators.
 
-The directory should be added to Matlab search path with `addpath matlab`.
+The directory should be added to the Matlab search path with `addpath matlab`.
 
 
 ## Quick start
 
-Using the library is as easy as running
+Using the library is as easy as
 ```
 model = matsdca_fit(X, Y, opts);
 ```
 
 A quick demo script is available at `matlab/demo.m`.
 
-Type `matsdca_fit('help')` and `matsdca_prox('help')` for further information.
+Type `matsdca_fit('help')` and `matsdca_prox('help')` for help.
 
 
-## Citation
+## References and citation
 
 Please cite libsdca in your publications if it helps your research.
 - Top-k Multiclass SVM (top-k hinge loss alpha and beta):
@@ -100,3 +94,11 @@ Please cite libsdca in your publications if it helps your research.
   year = {2016}
 }
 ```
+
+**References**
+
+<sup>[1] K. Crammer and Y. Singer. On the Algorithmic Implementation of Multiclass Kernel-based Vector Machines. In JMLR, 2001.</sup>  
+<sup>[2] K. Crammer and Y. Singer. A family of additive online algorithms for category ranking. In JMLR, 2003.</sup>  
+<sup>[3] K.C. Kiwiel. Variable fixing algorithms for the continuous quadratic knapsack problem. In JOTA, 2008.</sup>  
+<sup>[4] M. Lapin, M. Hein, and B. Schiele. Top-k multiclass SVM. In NIPS, 2015.</sup>  
+<sup>[5] M. Lapin, M. Hein, and B. Schiele. Loss Functions for Top-k Error: Analysis and Insights. In CVPR, 2016.</sup>  
