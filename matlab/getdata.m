@@ -14,7 +14,6 @@ seg_class = [...
   0, 0, .5,  0, 1; ... % class 3
   ];
 num_segments = numel(seg_length);
-num_classes = size(seg_class,1);
 
 seg_offsets = [0, cumsum(seg_length)];
 seg_cdf = cumsum(seg_class);
@@ -41,9 +40,12 @@ Yval = Y(num_trn+1:num_trn+num_val);
 Xtst = X(:,num_trn+num_val+1:end);
 Ytst = Y(num_trn+num_val+1:end);
 
+if 0
 fprintf('Class probabilities:\n');
 fprintf('  %.3f\n', seg_class * ones(num_segments,1) / num_segments);
 
+num_classes = size(seg_class,1);
 num_per_class = hist(Y, 1:num_classes);
 fprintf('Empirical class probabilities:\n');
 fprintf('  %.3f\n', num_per_class / num_examples);
+end
