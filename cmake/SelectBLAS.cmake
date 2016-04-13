@@ -6,7 +6,7 @@
 #
 # Selects a BLAS library and sets up C and C++ to use it.
 #
-# Use
+# Use (in any order)
 #     find_package(BLAS)
 #     find_package(MKL)
 #     find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
@@ -17,7 +17,7 @@
 #     Intel MKL
 #     Accelerate Framework
 #     BLAS shipped with Matlab
-#     BLAS found by FindBLAS
+#     BLAS found by FindBLAS (e.g., ATLAS)
 #
 # Intel MKL setup depends on the flags
 #     USE_ILP64
@@ -26,8 +26,10 @@
 # The following variables are set by this script
 #     BLAS_FOUND
 #     BLAS_LIBRARIES
+#
+# If BLAS is found, certain definitions and include_directories are also set.
 
-# Copyright 2015 Maksim Lapin.
+# Copyright 2016 Maksim Lapin.
 
 if(MKL_FOUND)
 
@@ -70,6 +72,7 @@ elseif(BLAS_Accelerate_LIBRARY)
 elseif(Matlab_BLAS_LIBRARY)
 
   add_definitions(-DBLAS_MATLAB)
+  include_directories("${Matlab_INCLUDE_DIRS}")
   set(BLAS_LIBRARIES "${Matlab_BLAS_LIBRARY}")
 
 elseif(BLAS_FOUND)
@@ -80,6 +83,7 @@ elseif(BLAS_FOUND)
   else()
     add_definitions(-DBLAS_DEFAULT_LOCAL_HEADER)
   endif()
+  list(APPEND BLAS_LIBRARIES "-lcblas")
 
 endif()
 

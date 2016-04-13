@@ -1,92 +1,74 @@
-include_directories(.)
-
-set(PROX_SRCS
-  prox/prox.h
-  prox/proxdef.h
-  prox/entropy.h
-  prox/knapsack_eq.h
-  prox/knapsack_le.h
-  prox/knapsack_le_biased.h
-  prox/topk_cone.h
-  prox/topk_cone_biased.h
-  prox/topk_entropy.h
-  prox/topk_entropy_biased.h
-  prox/topk_simplex.h
-  prox/topk_simplex_biased.h
+set(MEX_PROX
+  "${SDCA_MATLAB_PREFIX}prox${SDCA_BINARY_SUFFIX}"
   )
-
-set(SOLVE_SRCS
-  solve/solve.h
-  solve/solvedef.h
-  solve/solver.h
-  solve/dual_solver.h
-  solve/primal_solver.h
-  solve/objective_base.h
-  solve/l2_entropy_topk.h
-  solve/l2_hinge_topk.h
-  solve/l2_topk_hinge.h
+set(MEX_SOLVE
+  "${SDCA_MATLAB_PREFIX}fit${SDCA_BINARY_SUFFIX}"
   )
-
-set(UTIL_SRCS
-  util/util.h
-  util/blas.h
-  util/fmath.h
-  util/lambert.h
-  util/logging.h
-  util/numeric.h
-  util/stopwatch.h
+set(MEX_GD
+  "${SDCA_MATLAB_PREFIX}gd${SDCA_BINARY_SUFFIX}"
   )
-
-if(${USE_THREADING_SUFFIX})
-  if(${USE_SEQUENTIAL})
-    set(MEX_PROX libsdca_prox_st)
-    set(MEX_SOLVE libsdca_solve_st)
-    set(MEX_GD libsdca_gd_st)
-  else()
-    set(MEX_PROX libsdca_prox_mt)
-    set(MEX_SOLVE libsdca_solve_mt)
-    set(MEX_GD libsdca_gd_mt)
-  endif()
-else()
-  set(MEX_PROX libsdca_prox)
-  set(MEX_SOLVE libsdca_solve)
-  set(MEX_GD libsdca_gd)
-endif()
 
 # Matlab interface
 if(${Matlab_FOUND})
   include_directories(matlab)
 
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -Wno-switch-enum")  # to_string(mxClassID)
+    set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -Wno-weak-vtables") # mat_streambuf
+  endif()
+
   add_definitions(
-    -DMEX_GD="${MEX_GD}"
     -DMEX_PROX="${MEX_PROX}"
     -DMEX_SOLVE="${MEX_SOLVE}"
-    )
-
-  matlab_add_mex(
-    NAME ${MEX_GD}
-    SRC matlab/mex_gd.cpp
-      matlab/mex_util.h ${SOLVE_SRCS} ${UTIL_SRCS}
-    LINK_TO ${BLAS_LIBRARIES}
+    -DMEX_GD="${MEX_GD}"
     )
 
   matlab_add_mex(
     NAME ${MEX_PROX}
-    SRC matlab/mex_prox.cpp
-      matlab/mex_util.h ${PROX_SRCS} ${UTIL_SRCS}
+    SRC
+      matlab/mex_prox.cpp
+      matlab/mex_util.h
+      ${libsdca_MATH_SOURCES}
+      ${libsdca_PROX_SOURCES}
+      ${libsdca_UTILITY_SOURCES}
     )
 
   matlab_add_mex(
     NAME ${MEX_SOLVE}
-    SRC matlab/mex_solve.cpp
-      matlab/mex_util.h ${SOLVE_SRCS} ${PROX_SRCS} ${UTIL_SRCS}
-    LINK_TO ${BLAS_LIBRARIES}
+    SRC
+      matlab/mex_solve.cpp
+      matlab/mex_util.h
+      ${libsdca_MATH_SOURCES}
+      ${libsdca_PROX_SOURCES}
+      ${libsdca_SOLVER_SOURCES}
+      ${libsdca_UTILITY_SOURCES}
+    LINK_TO
+      ${BLAS_LIBRARIES}
     )
 
+#  matlab_add_mex(
+#    NAME ${MEX_GD}
+#    SRC
+#      matlab/mex_gd.cpp
+#      matlab/mex_util.h
+#      ${libsdca_MATH_SOURCES}
+#      ${libsdca_SOLVER_SOURCES}
+#      ${libsdca_UTILITY_SOURCES}
+#    LINK_TO
+#      ${BLAS_LIBRARIES}
+#    )
+
   install(
-    TARGETS ${MEX_GD} ${MEX_PROX} ${MEX_SOLVE}
-    DESTINATION ${MATLAB_API_INSTALL_DIR}
+    TARGETS
+      ${MEX_PROX}
+      ${MEX_SOLVE}
+#      ${MEX_GD}
+    DESTINATION
+      ${SDCA_MATLAB_INSTALL_DIR}
     )
+
 else()
-  message(STATUS "Matlab interface is not compiled.")
+  message(STATUS "Matlab not found, mex files will not be compiled.")
 endif()

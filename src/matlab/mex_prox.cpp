@@ -1,5 +1,5 @@
 #include "mex_util.h"
-#include "prox/prox.h"
+#include "sdca/prox.h"
 
 #ifndef MEX_PROX
 #define MEX_PROX "mex_prox"
@@ -36,148 +36,63 @@ printHelp(const mxArray* opts) {
 "    hi    [1] - the upper bound;\n"
 "    rhs   [1] - the right hand side in the sum constraint;\n"
 "    rho   [1] - the regularization parameter in biased projections;\n"
-"    alpha [1] - the parameter in the topk_entropy_biased projection;\n"
+"    alpha [1] - the alpha parameter in entropic projections;\n"
 "    k     [1] - the k in the top-k cone and the top-k simplex;\n"
-"    precision ['double']   - intermediate floating-point precision;\n"
-"    summation ['standard'] - summation method (Kahan or standard).\n"
+"    precision ['double']   - intermediate floating-point precision.\n"
 "\n"
-"  See %s('help', <field>) for more information on a particular field, e.g.\n"
-"  %s('help', 'prox')\n",
-      MEX_PROX, MEX_PROX, MEX_PROX);
+"  See %s('help', 'prox') for more information on possible operators.\n",
+      MEX_PROX, MEX_PROX);
     return;
   }
 
   std::string arg = mxGetString(opts, "help argument");
   if (arg == "prox") {
     mexPrintf(
-"opts.prox - the proximal operator or the projection to apply.\n"
-"  Possible values:\n"
+"opts.prox - an operator to apply.\n"
+"  Proximal and projection operators (columnwise):\n"
+"    entropy\n"
+"        min_x <x, log(x)> - <a, x>\n"
+"        s.t.  <1, x> = rhs, 0 <= x_i <= hi\n"
+"    entropy_norm\n"
+"        min_x 0.5 * <x, x> + <x, log(x)> - <a, x>\n"
+"        s.t.  <1, x> = rhs, 0 <= x_i <= hi\n"
 "    knapsack (synonym: knapsack_eq)\n"
-"      - continuous quadratic knapsack problem with the equality constraint\n"
+"        min_x 0.5 * <x, x> - <a, x>\n"
+"        s.t.  <1, x> = rhs, lo <= x_i <= hi\n"
 "    knapsack_le\n"
-"      - knapsack problem with the inequality constraint\n"
+"        min_x 0.5 * <x, x> - <a, x>\n"
+"        s.t.  <1, x> <= rhs, lo <= x_i <= hi\n"
 "    knapsack_le_biased\n"
-"      - regularized (biased) knapsack problem\n"
-"    topk_simplex\n"
-"      - projection onto the top-k simplex\n"
-"    topk_simplex_biased\n"
-"      - regularized (biased) projection onto the top-k simplex\n"
+"        min_x 0.5 * (<x, x> + rho * <1, x>^2) - <a, x>\n"
+"        s.t.  <1, x> <= rhs, lo <= x_i <= hi\n"
 "    topk_cone\n"
-"      - projection onto the top-k cone\n"
+"        min_x 0.5 * <x, x> - <a, x>\n"
+"        s.t.  0 <= x_i <= <1, x> / k\n"
 "    topk_cone_biased\n"
-"      - regularized (biased) projection onto the top-k cone\n"
+"        min_x 0.5 * (<x, x> + rho * <1, x>^2) - <a, x>\n"
+"        s.t.  0 <= x_i <= <1, x> / k\n"
 "    topk_entropy\n"
-"      - solves\n"
 "        min_{x,s} <x, log(x)> + (1 - s) * log(1 - s) - <a, x>\n"
 "        s.t.      <1, x> = s, s <= 1, 0 <= x_i <= s / k\n"
 "    topk_entropy_biased\n"
-"      - solves\n"
 "        min_{x,s} 0.5 * alpha * (<x, x> + s * s) - <a, x>\n"
 "                  + <x, log(x)> + (1 - s) * log(1 - s)\n"
 "        s.t.      <1, x> = s, s <= 1, 0 <= x_i <= s / k\n"
-"    entropy\n"
-"      - solves\n"
-"        min_x 0.5 * <x, x> - <a, x> + <x, log(x)>\n"
-"        s.t.  <1, x> = rhs, 0 <= x_i <= hi\n"
+"    topk_simplex\n"
+"        min_x 0.5 * <x, x> - <a, x>\n"
+"        s.t.  <1, x> <= rhs, 0 <= x_i <= <1, x> / k\n"
+"    topk_simplex_biased\n"
+"        min_x 0.5 * (<x, x> + rho * <1, x>^2) - <a, x>\n"
+"        s.t.  <1, x> <= rhs, 0 <= x_i <= <1, x> / k\n"
+"\n"
+"  Elementwise operators (not proximal):\n"
 "    lambert_w_exp\n"
-"      - Lambert W function of exp(x) [not a proximal operator!]\n"
+"      - applies the Lambert W function of exponent, i.e. W(exp(x)).\n"
 "        Computed w satisfies the equation\n"
 "        w + log(w) = x\n"
+"\n"
 "  Default value:\n"
 "    knapsack\n"
-      );
-  } else if (arg == "lo" || arg == "hi") {
-    mexPrintf(
-"opts.lo - the lower bound constraint;\n"
-"opts.hi - the upper bound constraint.\n"
-"  Possible values:\n"
-"    any real number such that opts.lo <= opts.hi holds\n"
-"  Default values:\n"
-"    opts.lo = 0\n"
-"    opts.hi = 1\n"
-"  Applies to prox operators:\n"
-"    knapsack (synonym: knapsack_eq)\n"
-"    knapsack_le\n"
-"    knapsack_le_biased\n"
-"    entropy\n"
-      );
-  } else if (arg == "rhs") {
-    mexPrintf(
-"opts.rhs - the right hand side in the sum constraint, the radius of the set.\n"
-"  Possible values:\n"
-"    any nonnegative real number\n"
-"  Default value:\n"
-"    opts.rhs = 1\n"
-"  Applies to prox operators:\n"
-"    knapsack (synonym: knapsack_eq)\n"
-"    knapsack_le\n"
-"    knapsack_le_biased\n"
-"    topk_simplex\n"
-"    topk_simplex_biased\n"
-"    entropy\n"
-      );
-  } else if (arg == "rho") {
-    mexPrintf(
-"opts.rho - the regularization parameter in the biased projection.\n"
-"  Possible values:\n"
-"    any nonnegative real number\n"
-"  Default value:\n"
-"    opts.rho = 1\n"
-"  Applies to prox operators:\n"
-"    knapsack_le_biased\n"
-"    topk_simplex_biased\n"
-"    topk_cone_biased\n"
-      );
-  } else if (arg == "alpha") {
-    mexPrintf(
-"opts.alpha - the regularization parameter in\n"
-"             the top-k entropy biased projection.\n"
-"  Possible values:\n"
-"    any positive real number\n"
-"  Default value:\n"
-"    opts.alpha = 1\n"
-"  Applies to prox operators:\n"
-"    prox_topk_entropy_biased\n"
-      );
-  } else if (arg == "k") {
-    mexPrintf(
-"opts.k - the k in the top-k cone and the top-k simplex.\n"
-"  Possible values:\n"
-"    any integer in [1,d], where d is the problem dimension\n"
-"  Default value:\n"
-"    opts.k = 1\n"
-"  Applies to prox operators:\n"
-"    topk_simplex\n"
-"    topk_simplex_biased\n"
-"    topk_cone\n"
-"    topk_cone_biased\n"
-"    topk_entropy\n"
-"    topk_entropy_biased\n"
-      );
-  } else if (arg == "precision") {
-    mexPrintf(
-"opts.precision - precision in intermediate floating-point operations.\n"
-"  (e.g. can be used to increase the accuracy of computation on float data)\n"
-"  Possible values:\n"
-"    float (synonym: single)\n"
-"    double\n"
-"    long double (synonym: long_double)\n"
-"  Default value:\n"
-"    double\n"
-"  Applies to prox operators:\n"
-"    <all>\n"
-      );
-  } else if (arg == "summation") {
-    mexPrintf(
-"opts.summation - summation method to use.\n"
-"  (Kahan summation is more accurate, but slower than standard)\n"
-"  Possible values:\n"
-"    standard (synonym: default)\n"
-"    kahan\n"
-"  Default value:\n"
-"    standard\n"
-"  Applies to prox operators:\n"
-"    <all>\n"
       );
   } else {
     mexErrMsgIdAndTxt(
@@ -186,15 +101,13 @@ printHelp(const mxArray* opts) {
 }
 
 template <typename Data,
-          typename Result,
-          typename Summation>
+          typename Result>
 void
 mex_main(
     const int nlhs,
     mxArray* plhs[],
     const mxArray* prhs[],
-    const mxArray* opts,
-    const Summation sum
+    const mxArray* opts
     ) {
 
   mxArray* mxX;
@@ -224,70 +137,36 @@ mex_main(
   Data* first = static_cast<Data*>(mxGetData(mxX));
   Data* last = first + m*n;
   Data* aux_first = &aux[0];
-  Data* aux_last = aux_first + m;
 
   std::string prox = mxGetFieldValueOrDefault(
     opts, "prox", std::string("knapsack"));
   if (prox == "knapsack" || prox == "knapsack_eq") {
-    prox_knapsack_eq<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
+    prox_knapsack_eq(m, first, last, aux_first, lo, hi, rhs);
   } else if (prox == "knapsack_le") {
-    prox_knapsack_le<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, lo, hi, rhs, sum);
+    prox_knapsack_le(m, first, last, aux_first, lo, hi, rhs);
   } else if (prox == "knapsack_le_biased") {
-    prox_knapsack_le_biased<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, lo, hi, rhs, rho, sum);
+    prox_knapsack_le_biased(m, first, last, aux_first, lo, hi, rhs, rho);
   } else if (prox == "topk_simplex") {
-    prox_topk_simplex<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, k, rhs, sum);
+    prox_topk_simplex(m, first, last, aux_first, k, rhs);
   } else if (prox == "topk_simplex_biased") {
-    prox_topk_simplex_biased<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, k, rhs, rho, sum);
+    prox_topk_simplex_biased(m, first, last, aux_first, k, rhs, rho);
   } else if (prox == "topk_entropy") {
-    prox_topk_entropy<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, k, sum);
+    prox_topk_entropy(m, first, last, aux_first, k);
   } else if (prox == "topk_entropy_biased") {
-    prox_topk_entropy_biased<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, k, alpha, sum);
+    prox_topk_entropy_biased(m, first, last, aux_first, k, alpha);
   } else if (prox == "entropy") {
-    prox_entropy<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, hi, rhs, sum);
+    prox_entropy(m, first, last, aux_first, hi, rhs);
+  } else if (prox == "entropy_norm") {
+    prox_entropy_norm(m, first, last, aux_first, hi, rhs);
   } else if (prox == "topk_cone") {
-    prox_topk_cone<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, k, sum);
+    prox_topk_cone(m, first, last, aux_first, k);
   } else if (prox == "topk_cone_biased") {
-    prox_topk_cone_biased<Data*, Result, Summation>(
-      m, first, last, aux_first, aux_last, k, rho, sum);
+    prox_topk_cone_biased(m, first, last, aux_first, k, rho);
   } else if (prox == "lambert_w_exp") {
-    apply(m, first, last, lambert_w_exp_functor<Data, Result>());
+    apply(m, first, last, lambert_w_exp_map<Data>());
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_prox], err_msg[err_prox], prox.c_str());
-  }
-}
-
-template <typename Data,
-          typename Result>
-inline void
-mex_main(
-    const int nlhs,
-    mxArray* plhs[],
-    const mxArray* prhs[],
-    const mxArray* opts
-    ) {
-  std::string summation = mxGetFieldValueOrDefault(
-    opts, "summation", std::string("standard"));
-  if (summation == "standard" || summation == "default") {
-    std_sum<Data*, Result> sum;
-    mex_main<Data, Result, std_sum<Data*, Result>>(
-      nlhs, plhs, prhs, opts, sum);
-  } else if (summation == "kahan") {
-    kahan_sum<Data*, Result> sum;
-    mex_main<Data, Result, kahan_sum<Data*, Result>>(
-      nlhs, plhs, prhs, opts, sum);
-  } else {
-    mexErrMsgIdAndTxt(
-      err_id[err_summation], err_msg[err_summation], summation.c_str());
   }
 }
 

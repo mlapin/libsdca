@@ -330,7 +330,7 @@ mex_main(
 
   auto trn_data = context.datasets.front();
 
-  mxArray *mxW = mxDuplicateFieldOrCreateMatrix(opts, "W",
+  mxArray *mxW = mxDuplicateOrCreateMatrixField(opts, "W",
     trn_data.num_dimensions, trn_data.num_classes, mex_class<Data>::id());
   mxCheckCreated(mxW, "W");
   context.primal_variables = static_cast<Data*>(mxGetData(mxW));

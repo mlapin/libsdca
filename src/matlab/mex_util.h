@@ -1,21 +1,73 @@
 #ifndef SDCA_MATLAB_MEX_UTIL_H
 #define SDCA_MATLAB_MEX_UTIL_H
 
+// STL
 #include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <utility>
 
+// Matlab
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreserved-id-macro"
+#pragma clang diagnostic ignored "-Wc++98-compat-pedantic"
+#pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
+#endif
+
 #include <mex.h>
 
-#include "solve/solvedef.h"
-#include "util/logging.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
+// SDCA
+#include "sdca/solver/solverdef.h"
+#include "sdca/utility/logging.h"
 
 namespace sdca {
 
+//-----------------------------------------------------------------------------
+// Type names
+//-----------------------------------------------------------------------------
+
+inline const char*
+to_string(mxClassID class_id) {
+  switch (class_id) {
+    case mxDOUBLE_CLASS: return "double";
+    case mxSINGLE_CLASS: return "single";
+    default: return "unknown";
+  }
+}
+
+template <typename Type>
+struct mex_class {
+  static constexpr mxClassID
+  id() { return mxUNKNOWN_CLASS; }
+};
+
+template <>
+struct mex_class<float> {
+  static constexpr mxClassID
+  id() { return mxSINGLE_CLASS; }
+};
+
+template <>
+struct mex_class<double> {
+  static constexpr mxClassID
+  id() { return mxDOUBLE_CLASS; }
+};
+
+
+//-----------------------------------------------------------------------------
+// Errors and messages
+//-----------------------------------------------------------------------------
+
+
 enum err_index {
-  err_arg = 0,
+  err_exception = 0,
+  err_arg,
   err_arg_count,
   err_arg_single,
   err_arg_double,
@@ -34,7 +86,7 @@ enum err_index {
   err_cell_arrays,
   err_num_dim,
   err_num_classes,
-  err_num_ex,
+  err_num_examples,
   err_command,
   err_prox,
   err_objective,
@@ -47,6 +99,7 @@ enum err_index {
 };
 
 static const char* err_id[] = {
+  "LIBSDCA:exception",
   "LIBSDCA:arg",
   "LIBSDCA:arg_count",
   "LIBSDCA:arg_single",
@@ -79,6 +132,7 @@ static const char* err_id[] = {
 };
 
 static const char* err_msg[] = {
+  "Error: %s.",
   "Invalid input.",
   "Invalid number of input or output arguments.",
   "'%s' must be single.",
@@ -110,32 +164,23 @@ static const char* err_msg[] = {
   "%s is not implemented yet."
 };
 
-inline const char*
-to_string(mxClassID class_id) {
-  switch (class_id) {
-    case mxDOUBLE_CLASS: return "double";
-    case mxSINGLE_CLASS: return "single";
-    default: return "unknown";
+
+//-----------------------------------------------------------------------------
+// mxCheck* methods
+//-----------------------------------------------------------------------------
+
+template <typename Type, typename Compare>
+inline void
+mxCheck(
+    Compare comp,
+    const Type var,
+    const Type value,
+    const char* name
+    ) {
+  if (!comp(var, value)) {
+    mexErrMsgIdAndTxt(err_id[err_arg_range], err_msg[err_arg_range], name);
   }
 }
-
-template <typename Type>
-struct mex_class {
-  static constexpr mxClassID
-  id() { return mxUNKNOWN_CLASS; }
-};
-
-template <>
-struct mex_class<float> {
-  static constexpr mxClassID
-  id() { return mxSINGLE_CLASS; }
-};
-
-template <>
-struct mex_class<double> {
-  static constexpr mxClassID
-  id() { return mxDOUBLE_CLASS; }
-};
 
 template <typename Usage>
 inline void
@@ -160,19 +205,6 @@ mxCheckRange(
     const char* name
     ) {
   if (var < min || var > max) {
-    mexErrMsgIdAndTxt(err_id[err_arg_range], err_msg[err_arg_range], name);
-  }
-}
-
-template <typename Type, typename Compare>
-inline void
-mxCheck(
-    Compare comp,
-    const Type var,
-    const Type value,
-    const char* name
-    ) {
-  if (!comp(var, value)) {
     mexErrMsgIdAndTxt(err_id[err_arg_range], err_msg[err_arg_range], name);
   }
 }
@@ -322,21 +354,10 @@ mxCheckMatrix(
   }
 }
 
-template <typename Type>
-inline const Type
-mxGetFieldValueOrDefault(
-    const mxArray* pa,
-    const char* name,
-    const Type value
-    ) {
-  if (pa != nullptr) {
-    mxArray* field = mxGetField(pa, 0, name);
-    if (field != nullptr) {
-      return static_cast<Type>(mxGetScalar(field));
-    }
-  }
-  return value;
-}
+
+//-----------------------------------------------------------------------------
+// mxGet* methods
+//-----------------------------------------------------------------------------
 
 inline const std::string
 mxGetString(
@@ -351,6 +372,22 @@ mxGetString(
   mexErrMsgIdAndTxt(
     err_id[err_read_failed], err_msg[err_read_failed], name);
   return nullptr;
+}
+
+template <typename Type>
+inline const Type
+mxGetFieldValueOrDefault(
+    const mxArray* pa,
+    const char* name,
+    const Type value
+    ) {
+  if (pa != nullptr) {
+    mxArray* field = mxGetField(pa, 0, name);
+    if (field != nullptr) {
+      return static_cast<Type>(mxGetScalar(field));
+    }
+  }
+  return value;
 }
 
 template <>
@@ -369,6 +406,11 @@ mxGetFieldValueOrDefault(
   return value;
 }
 
+
+//-----------------------------------------------------------------------------
+// mxSet* methods
+//-----------------------------------------------------------------------------
+
 template <typename Type>
 inline void
 mxSetFieldValue(
@@ -383,6 +425,11 @@ mxSetFieldValue(
     }
   }
 }
+
+
+//-----------------------------------------------------------------------------
+// mxCreate* methods
+//-----------------------------------------------------------------------------
 
 template <typename Type>
 inline mxArray*
@@ -400,10 +447,7 @@ mxCreateVector(
   ) {
   mxArray* pa = mxCreateDoubleMatrix(vec.size(), 1, mxREAL);
   mxCheckCreated(pa, name);
-  double* data = mxGetPr(pa);
-  for (Type v : vec) {
-    *data++ = static_cast<double>(v);
-  }
+  std::copy(vec.begin(), vec.end(), mxGetPr(pa));
   return pa;
 }
 
@@ -445,126 +489,38 @@ mxDuplicateFieldOrCreateMatrix(
   return pb;
 }
 
-/**
- * Helper methods for solvers.
- **/
 
-template <typename Data>
+//-----------------------------------------------------------------------------
+// Helper methods and structs for solvers
+//-----------------------------------------------------------------------------
+
+template <typename Field>
+struct model_info {
+  typedef Field field_type;
+  std::vector<std::pair<const char*, field_type>> fields;
+
+  inline void add(
+      const char* name,
+      const field_type value) {
+    fields.emplace_back(std::make_pair(name, value));
+  }
+};
+
 inline void
-set_stopping_criteria(
+info_add_opts_field(
     const mxArray* opts,
-    solver_context<Data>& context
+    const char* field,
+    model_info<mxArray*>& info
   ) {
-  auto c = &context.criteria;
-  mxSetFieldValue(opts, "check_on_start", c->check_on_start);
-  mxSetFieldValue(opts, "check_epoch", c->check_epoch);
-  mxSetFieldValue(opts, "max_epoch", c->max_epoch);
-  mxSetFieldValue(opts, "max_cpu_time", c->max_cpu_time);
-  mxSetFieldValue(opts, "max_wall_time", c->max_wall_time);
-  mxSetFieldValue(opts, "epsilon", c->epsilon);
-  mxCheck<size_type>(std::greater_equal<size_type>(),
-    c->check_epoch, 0, "check_epoch");
-  mxCheck<size_type>(std::greater_equal<size_type>(),
-    c->max_epoch, 0, "max_epoch");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->max_cpu_time, 0, "max_cpu_time");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->max_wall_time, 0, "max_wall_time");
-  mxCheck<double>(std::greater_equal<double>(),
-    c->epsilon, 0, "epsilon");
-}
-
-template <typename Data>
-inline void
-set_labels(
-    const mxArray* labels,
-    dataset<Data>& data_set
-  ) {
-  size_type n = data_set.num_examples;
-  mxCheckVector(labels, "labels", n);
-
-  std::vector<size_type> vec(mxGetPr(labels), mxGetPr(labels) + n);
-  auto minmax = std::minmax_element(vec.begin(), vec.end());
-  if (*minmax.first == 1) {
-    std::for_each(vec.begin(), vec.end(), [](size_type &x){ x -= 1; });
-  } else if (*minmax.first != 0) {
-    mexErrMsgIdAndTxt(err_id[err_labels_range], err_msg[err_labels_range]);
-  }
-
-  data_set.labels = std::move(vec);
-  data_set.num_classes = static_cast<size_type>(*minmax.second) + 1;
-}
-
-template <typename Data>
-inline void
-set_dataset(
-    const mxArray* data,
-    const mxArray* labels,
-    solver_context<Data>& context
-  ) {
-  mxCheckNotSparse(data, "data");
-  mxCheckNotEmpty(data, "data");
-  mxCheckReal(data, "data");
-  mxCheckClass(data, "data", mex_class<Data>::id());
-
-  mxCheckNotSparse(labels, "labels");
-  mxCheckNotEmpty(labels, "labels");
-  mxCheckDouble(labels, "labels");
-
-  dataset<Data> data_set;
-  data_set.data = static_cast<Data*>(mxGetData(data));
-  data_set.num_dimensions = (context.is_dual) ? 0 : mxGetM(data);
-  data_set.num_examples = mxGetN(data);
-  set_labels(labels, data_set);
-
-  context.datasets.emplace_back(data_set);
-}
-
-template <typename Data>
-inline void
-set_datasets(
-    const mxArray* data,
-    const mxArray* labels,
-    solver_context<Data>& context
-  ) {
-  if (mxIsNumeric(data)) {
-    if (context.is_dual) {
-      mxCheckSquare(data, "data");
-    }
-    set_dataset(data, labels, context);
-  } else {
-    mxCheckCellArrays(data, labels);
-    if (context.is_dual) {
-      mxCheckSquare(mxGetCell(data, 0), "data");
-    }
-
-    // Training dataset
-    set_dataset(mxGetCell(data, 0), mxGetCell(labels, 0), context);
-    size_type num_dimensions = context.datasets[0].num_dimensions;
-    size_type num_examples = context.datasets[0].num_examples;
-    size_type num_classes = context.datasets[0].num_classes;
-
-    // Testing datasets
-    size_type num_datasets = mxGetNumberOfElements(data);
-    for (size_type i = 1; i < num_datasets; ++i) {
-      set_dataset(mxGetCell(data, i), mxGetCell(labels, i), context);
-      if (num_dimensions != context.datasets[i].num_dimensions) {
-        mexErrMsgIdAndTxt(err_id[err_num_dim], err_msg[err_num_dim], i + 1);
-      }
-      if (num_classes != context.datasets[i].num_classes) {
-        mexErrMsgIdAndTxt(
-          err_id[err_num_classes], err_msg[err_num_classes], i + 1);
-      }
-      if (context.is_dual && num_examples != mxGetM(mxGetCell(data, i))) {
-        mexErrMsgIdAndTxt(err_id[err_num_ex], err_msg[err_num_ex], i + 1);
-      }
-    }
+  const mxArray* p = mxGetField(opts, 0, field);
+  if (p != nullptr) {
+    info.add(field, mxDuplicateArray(p));
   }
 }
 
-/**
- * Logging in Matlab.
- **/
+//-----------------------------------------------------------------------------
+// Logging in Matlab
+//-----------------------------------------------------------------------------
 
 inline void
 set_logging_options(
@@ -573,13 +529,15 @@ set_logging_options(
   std::string log_level = mxGetFieldValueOrDefault(
     opts, "log_level", std::string("info"));
   if (log_level == "none") {
-    logging::set_level(logging::none);
+    logging::set_level(logging::level::none);
+  } else if (log_level == "warning") {
+    logging::set_level(logging::level::warning);
   } else if (log_level == "info") {
-    logging::set_level(logging::info);
+    logging::set_level(logging::level::info);
   } else if (log_level == "verbose") {
-    logging::set_level(logging::verbose);
+    logging::set_level(logging::level::verbose);
   } else if (log_level == "debug") {
-    logging::set_level(logging::debug);
+    logging::set_level(logging::level::debug);
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_log_level], err_msg[err_log_level], log_level.c_str());
@@ -587,14 +545,14 @@ set_logging_options(
 
   std::string log_format = mxGetFieldValueOrDefault(
     opts, "log_format", std::string("short_e"));
-  if (log_format == "short_f") {
-    logging::set_format(logging::short_f);
-  } else if (log_format == "short_e") {
-    logging::set_format(logging::short_e);
-  } else if (log_format == "long_f") {
-    logging::set_format(logging::long_f);
+  if (log_format == "short_e") {
+    logging::set_format(logging::format::short_e);
+  } else if (log_format == "short_f") {
+    logging::set_format(logging::format::short_f);
   } else if (log_format == "long_e") {
-    logging::set_format(logging::long_e);
+    logging::set_format(logging::format::long_e);
+  } else if (log_format == "long_f") {
+    logging::set_format(logging::format::long_f);
   } else {
     mexErrMsgIdAndTxt(
       err_id[err_log_format], err_msg[err_log_format], log_format.c_str());
