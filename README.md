@@ -1,4 +1,5 @@
 # libsdca
+[![Build Status](https://travis-ci.org/mlapin/libsdca.svg?branch=master)](https://travis-ci.org/mlapin/libsdca)
 
 libsdca is a library for multiclass classification based on stochastic dual coordinate ascent (SDCA).
 
