@@ -659,8 +659,8 @@ set_objective(
     Input<Data>&& in,
     multilabel_output&& out
   ) {
-  auto c = mxGetFieldValueOrDefault<Result>(opts, "C", 1);
-  mxCheck<Result>(std::greater<Result>(), c, 0, "C");
+  auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
+  mxCheck<Result>(std::greater<Result>(), c, 0, "c");
 
   auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 1);
   mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
