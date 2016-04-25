@@ -132,7 +132,7 @@ static const char* err_id[] = {
 };
 
 static const char* err_msg[] = {
-  "Error: %s.",
+  "Error: %s",
   "Invalid input.",
   "Invalid number of input or output arguments.",
   "'%s' must be single.",
