@@ -11,14 +11,13 @@
 #     - MKL_ROOT_DIR            # CMake variable
 #     - MKLROOT                 # environment variable
 #     - /opt/intel/mkl          # default location
+# (note that the MKL root dir contains the 'include' and 'lib' subdirs).
 #
-# for Intel Composer XE,
-#     - COMPOSER_ROOT_DIR       # CMake variable
-#     - PROD_DIR                # environment variable
-#     - CPRO_PATH               # environment variable
-#     - /opt/intel/composerxe   # default location
+# for Intel OMP library,
+#     - INTEL_OMP_DIR           # CMake variable
+#     - /opt/intel/lib          # default location
 
-# Copyright 2015 Maksim Lapin.
+# Copyright 2015-2016 Maksim Lapin.
 
 include(FindPackageHandleStandardArgs)
 
@@ -33,17 +32,13 @@ else()
   file(TO_CMAKE_PATH "/opt/intel/mkl" MKL_ROOT_DIR)
 endif()
 
-set(COMPOSER_ROOT_DIR ${COMPOSER_ROOT_DIR} CACHE PATH
-    "Intel Composer XE installation root path.")
+set(INTEL_OMP_DIR ${INTEL_OMP_DIR} CACHE PATH
+    "Directory containing the Intel OMP library (libiomp5).")
 
-if(COMPOSER_ROOT_DIR)
-  file(TO_CMAKE_PATH ${COMPOSER_ROOT_DIR} COMPOSER_ROOT_DIR)
-elseif($ENV{PROD_DIR})
-  file(TO_CMAKE_PATH $ENV{PROD_DIR} COMPOSER_ROOT_DIR)
-elseif($ENV{CPRO_PATH})
-  file(TO_CMAKE_PATH $ENV{CPRO_PATH} COMPOSER_ROOT_DIR)
+if(INTEL_OMP_DIR)
+  file(TO_CMAKE_PATH ${INTEL_OMP_DIR} INTEL_OMP_DIR)
 else()
-  file(TO_CMAKE_PATH "/opt/intel/composerxe" COMPOSER_ROOT_DIR)
+  file(TO_CMAKE_PATH "/opt/intel/lib" INTEL_OMP_DIR)
 endif()
 
 find_path(
@@ -86,7 +81,7 @@ find_library(
 find_library(
   INTEL_OMP_LIBRARY
   NAMES libiomp5 iomp5
-  PATHS ${COMPOSER_ROOT_DIR}/lib/intel64
+  PATHS ${INTEL_OMP_DIR}/intel64
   )
 
 set(MKL_INCLUDE_DIRS ${MKL_INCLUDE_DIR})
@@ -103,6 +98,7 @@ find_package_handle_standard_args(
   MKL_INTEL_THREAD_LIBRARY
   MKL_GNU_THREAD_LIBRARY
   MKL_SEQUENTIAL_LIBRARY
+  INTEL_OMP_LIBRARY
   )
 
 mark_as_advanced(
