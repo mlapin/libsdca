@@ -1,6 +1,7 @@
 #ifndef SDCA_SOLVER_OBJECTIVE_H
 #define SDCA_SOLVER_OBJECTIVE_H
 
+#include "sdca/solver/objective/l2_entropy.h"
 #include "sdca/solver/objective/l2_entropy_topk.h"
 #include "sdca/solver/objective/l2_hinge_topk.h"
 #include "sdca/solver/objective/l2_multilabel_entropy.h"
@@ -48,6 +49,16 @@ template <typename Data,
           typename Result>
 struct has_param_gamma<l2_multilabel_hinge_smooth<Data, Result>>
   : std::true_type {};
+
+
+template <typename Data,
+          typename Result = double>
+inline l2_entropy<Data, Result>
+make_objective_l2_entropy(
+    const Result c = 1
+  ) {
+  return l2_entropy<Data, Result>(c);
+}
 
 
 template <typename Data,

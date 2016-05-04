@@ -35,6 +35,8 @@ struct solver_context {
   data_type* primal_variables = nullptr;
   data_type* dual_variables = nullptr;
 
+  data_type* primal_initial = nullptr;
+
   solver_status status = solver_status::none;
   size_type epoch = 0;
   stopwatch solve_time;
@@ -59,7 +61,8 @@ struct solver_context {
     str.copyfmt(std::cout);
     str << objective.to_string() << ", " <<
            "stopping_criteria (" << criteria.to_string() << "), " <<
-           train.to_string();
+           train.to_string() << ", "
+           "is_prox: " << is_prox();
     return str.str();
   }
 
@@ -91,6 +94,9 @@ struct solver_context {
 
 
   bool is_dual() const { return primal_variables == nullptr; }
+
+
+  bool is_prox() const { return primal_initial != nullptr; }
 
 
   double cpu_time() const {

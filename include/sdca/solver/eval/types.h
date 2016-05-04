@@ -16,7 +16,8 @@ struct eval_train_base {
   Result dual = Result();
   Result primal_loss = Result();
   Result dual_loss = Result();
-  Result regularizer = Result();
+  Result primal_regularizer = Result();
+  Result dual_regularizer = Result();
 
   double solve_time_cpu = 0;
   double solve_time_wall = 0;
@@ -60,7 +61,8 @@ struct eval_train_base {
     "dual: " << dual << ", "
     "primal_loss: " << primal_loss << ", "
     "dual_loss: " << dual_loss << ", "
-    "regularizer: " << regularizer;
+    "primal_regularizer: " << primal_regularizer << ", "
+    "dual_regularizer: " << dual_regularizer;
     if (!skip_time) {
       str << ", cpu_time: " << cpu_time() <<
                " (solve: " << solve_time_cpu <<

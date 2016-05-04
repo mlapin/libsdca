@@ -7,16 +7,14 @@
 namespace sdca {
 
 template <typename Int,
-          typename Data,
           typename Input,
-          typename Objective,
+          typename Context,
           typename Evaluation>
 inline void
 eval_regularizer_primal(
     const Int,
     const Input&,
-    const Objective&,
-    const Data*,
+    const Context&,
     Evaluation&
   ) {}
 
@@ -25,17 +23,24 @@ template <typename Int,
           typename Data,
           typename Result,
           typename Output,
-          template <typename, typename> class Objective>
+          typename Context>
 inline void
 eval_regularizer_primal(
     const Int num_classes,
     const feature_input<Data>& in,
-    const Objective<Data, Result>& obj,
-    const Data* primal_variables,
+    const Context& ctx,
     eval_train<Result, Output>& eval
   ) {
-  eval.regularizer += obj.regularizer_primal(
-    in.num_dimensions * num_classes, primal_variables);
+  if (ctx.is_prox()) {
+    ctx.objective.regularizers_primal(
+      in.num_dimensions * num_classes,
+      ctx.primal_variables, ctx.primal_initial,
+      eval.primal_regularizer, eval.dual_regularizer);
+  } else {
+    ctx.objective.regularizers_primal(
+      in.num_dimensions * num_classes, ctx.primal_variables,
+      eval.primal_regularizer, eval.dual_regularizer);
+  }
 }
 
 
@@ -69,8 +74,8 @@ eval_regularizer_dual(
     const Data* scores,
     eval_train<Result, Output>& eval
   ) {
-  eval.regularizer += obj.regularizer_dual(
-    num_classes, dual_variables, scores);
+  obj.regularizers_dual(num_classes, dual_variables, scores,
+                        eval.primal_regularizer, eval.dual_regularizer);
 }
 
 }

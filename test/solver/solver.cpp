@@ -102,11 +102,25 @@ test_solver_basic_tests_feature_in(
   test_solver_check_performance(ctx_warm, expected_performance);
   EXPECT_TRUE(ctx_warm.epoch <= ctx_warm.criteria.eval_epoch);
 
+  // Prox restart - use the primal variables from above in the prox regul.
+  std::vector<Data> W0(W); // initial primal vars
+  auto ctx_prox = sdca::make_context(
+    sdca::make_input_feature(d, n, &X[0]),
+    std::move(ctx_warm.train.out), std::move(ctx_warm.objective), &A[0], &W[0]);
+
+  // Note: the solver expects that W = W0 before the first iteration;
+  // therefore, the W is not reset to 0
+  std::fill(A.begin(), A.end(), static_cast<Data>(0)); // reset to 0
+  ctx_prox.primal_initial = &W0[0];
+  ctx_prox.criteria.eval_on_start = true;
+  test_solver_check_converged<Data, Result>(ctx_prox);
+  test_solver_check_performance(ctx_prox, expected_performance);
+
   // Zero the dual variables and train from scratch
   std::fill(A.begin(), A.end(), static_cast<Data>(0));
   auto ctx_ker = sdca::make_context(
     sdca::make_input_kernel(n, &K[0]),
-    std::move(ctx_warm.train.out), std::move(ctx_warm.objective), &A[0]);
+    std::move(ctx_prox.train.out), std::move(ctx_prox.objective), &A[0]);
 
   ctx_ker.criteria.eval_on_start = true;
   test_solver_check_converged<Data, Result>(ctx_ker);
@@ -190,6 +204,10 @@ test_solver_multiclass_basic_all() {
   auto multiclass_output_maker = [](std::vector<sdca::size_type>& Y) {
     return sdca::make_output_multiclass(Y.begin(), Y.end());
   };
+
+  test_solver_multiclass_basic(
+    multiclass_output_maker,
+    sdca::make_objective_l2_entropy<Data, Result>(C));
 
   test_solver_multiclass_basic(
     multiclass_output_maker,

@@ -59,7 +59,8 @@ eval_end(
 
   // Compute the overall primal/dual objectives and their individual terms
   ctx.objective.update_all(
-    e.primal, e.dual, e.primal_loss, e.dual_loss, e.regularizer);
+    e.primal, e.dual, e.primal_loss, e.dual_loss,
+    e.primal_regularizer, e.dual_regularizer);
 
   // Top-k accuracies for all k
   std::partial_sum(e.accuracy.begin(), e.accuracy.end(), e.accuracy.begin());
@@ -87,7 +88,8 @@ eval_end(
 
   // Compute the overall primal/dual objectives and their individual terms
   ctx.objective.update_all(
-    e.primal, e.dual, e.primal_loss, e.dual_loss, e.regularizer);
+    e.primal, e.dual, e.primal_loss, e.dual_loss,
+    e.primal_regularizer, e.dual_regularizer);
 
   e.rank_loss /= static_cast<Result>(num_examples);
 }
@@ -132,47 +134,52 @@ eval_end(
 
 template <typename Int,
           typename Data,
-          typename Dataset>
-inline void
-eval_recompute_primal(
-    const Int,
-    const Int,
-    const Dataset&,
-    const Data*,
-    Data*
-  ) {}
-
-
-template <typename Int,
-          typename Data,
           typename Result,
-          typename Output>
+          typename Output,
+          typename Context>
 inline void
 eval_recompute_primal(
 #ifdef SDCA_ACCURATE_MATH
     const Int num_classes,
     const Int num_examples,
     const dataset<feature_input<Data>, Output, eval_train<Result, Output>>& d,
-    const Data* dual_variables,
-    Data* primal_variables
+    const Context& ctx
   ) {
-  // Let W = X * A'
+  // Let W = W0 + X * A'
   // (recompute W to minimize the accumulated numerical error)
+  // NOTE: this should be done (if at all) for the training dataset only!
   auto D = static_cast<blas_int>(d.num_dimensions());
   auto M = static_cast<blas_int>(num_classes);
   auto N = static_cast<blas_int>(num_examples);
-  sdca_blas_gemm(D, M, N, d.in.features, D, dual_variables, M,
-    primal_variables, CblasNoTrans, CblasTrans);
+  if (ctx.is_prox()) {
+    sdca_blas_copy(D * M, ctx.primal_initial, ctx.primal_variables);
+    sdca_blas_gemm(D, M, N, d.in.features, D, ctx.dual_variables, M,
+      ctx.primal_variables, CblasNoTrans, CblasTrans, 1, 1);
+  } else {
+    sdca_blas_gemm(D, M, N, d.in.features, D, ctx.dual_variables, M,
+      ctx.primal_variables, CblasNoTrans, CblasTrans);
+  }
 #else
-  const Int,
-  const Int,
-  const dataset<feature_input<Data>, Output, eval_train<Result, Output>>&,
-  const Data*,
-  Data*
-) {
+    const Int,
+    const Int,
+    const dataset<feature_input<Data>, Output, eval_train<Result, Output>>&,
+    const Context&
+  ) {
 #endif
 }
 
+
+template <typename Int,
+          typename Dataset,
+          typename Context>
+inline void
+eval_recompute_primal(
+    const Int,
+    const Int,
+    const Dataset&,
+    const Context&
+  ) {
+}
 
 }
 

@@ -28,8 +28,8 @@ evaluate_dataset(
 
   auto& eval = eval_begin(d);
 
-  eval_recompute_primal(m, n, d, ctx.dual_variables, ctx.primal_variables);
-  eval_regularizer_primal(m, d.in, ctx.objective, ctx.primal_variables, eval);
+  eval_recompute_primal(m, n, d, ctx);
+  eval_regularizer_primal(m, d.in, ctx, eval);
 
   assert(m == scratch.scores.size());
   Data* scores = &scratch.scores[0];
@@ -86,7 +86,7 @@ check_stopping_criteria(
     } else if (evals.size() > 1) {
       // Check if the solver is making progress
       const auto& before = evals.rbegin()[1];
-      if (eval.dual + eps * before.dual < before.dual) {
+      if (eval.dual + eps * std::abs(before.dual) < before.dual) {
         ctx.status = solver_status::no_progress;
         reporting::solver_stop_no_progress(eval, before);
       }

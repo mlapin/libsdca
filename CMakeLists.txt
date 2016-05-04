@@ -12,7 +12,7 @@ add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
 # Use either fast or accurate math
 #   TRUE    enables -Ofast (with GCC) and disables SDCA_ACCURATE_MATH
 #   FALSE   disables -Ofast and enables SDCA_ACCURATE_MATH
-set(USE_FAST_MATH TRUE)
+set(USE_FAST_MATH FALSE)
 
 # Whether to use <chrono>
 #   TRUE    use std::chrono::high_resolution_clock to measure wall-clock time
@@ -248,6 +248,7 @@ set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver/eval/scores.h
   ${libsdca_INCLUDE_PATH}/solver/eval/types.h
   ${libsdca_INCLUDE_PATH}/solver/eval.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy_topk.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_hinge_topk.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_entropy.h

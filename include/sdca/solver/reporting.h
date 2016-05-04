@@ -85,7 +85,7 @@ solver_stop_failed(
     const Result eps_user
   ) {
   LOG_WARNING <<
-    "Warning: negative duality gap. "
+    "Warning: negative duality gap; "
     "absolute_gap: " << absolute_gap << ", "
     "eps_machine: " << eps_machine << ", "
     "eps_user: " << eps_user <<
@@ -101,7 +101,7 @@ solver_stop_no_progress(
     const eval_train<Result, Output>& before
   ) {
   LOG_WARNING <<
-    "Warning: dual objective decreased. "
+    "Warning: dual objective decreased; "
     "dual: " << eval.dual << ", "
     "dual_before: " << before.dual << ", "
     "difference: " << eval.dual - before.dual <<

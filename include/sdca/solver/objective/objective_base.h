@@ -57,25 +57,51 @@ struct objective_base {
 
 
   template <typename Int>
-  inline Result
-  regularizer_primal(
+  inline void
+  regularizers_primal(
       const Int num_dimensions,
-      const Data* variables
+      const Data* variables,
+      Result& primal_regularizer,
+      Result& dual_regularizer
     ) const {
-    return static_cast<Result>(sdca_blas_dot(
-      static_cast<blas_int>(num_dimensions), variables, variables));
+    auto regul = static_cast<Result>(sdca_blas_dot(
+      static_cast<blas_int>(num_dimensions), variables, variables)) / 2;
+    primal_regularizer += regul;
+    dual_regularizer += regul;
   }
 
 
   template <typename Int>
-  inline Result
-  regularizer_dual(
+  inline void
+  regularizers_primal(
+      const Int num_dimensions,
+      const Data* variables,
+      const Data* initial_variables,
+      Result& primal_regularizer,
+      Result& dual_regularizer
+    ) const {
+    auto regul = static_cast<Result>(sdca_blas_dot(
+      static_cast<blas_int>(num_dimensions), variables, variables)) / 2;
+    auto prox =  static_cast<Result>(sdca_blas_dot(
+        static_cast<blas_int>(num_dimensions), initial_variables, variables));
+    primal_regularizer += regul - prox;
+    dual_regularizer += regul;
+  }
+
+
+  template <typename Int>
+  inline void
+  regularizers_dual(
       const Int num_classes,
       const Data* variables,
-      const Data* scores
+      const Data* scores,
+      Result& primal_regularizer,
+      Result& dual_regularizer
     ) const {
-    return static_cast<Result>(sdca_blas_dot(
-      static_cast<blas_int>(num_classes), variables, scores));
+    auto regul = static_cast<Result>(sdca_blas_dot(
+      static_cast<blas_int>(num_classes), variables, scores)) / 2;
+    primal_regularizer += regul;
+    dual_regularizer += regul;
   }
 
 
@@ -93,12 +119,12 @@ struct objective_base {
       Result& __dual,
       Result& __primal_loss,
       Result& __dual_loss,
-      Result& __regularizer
+      Result& __primal_regularizer,
+      Result& __dual_regularizer
     ) const {
     __primal_loss *= coeff_primal_loss;
-    __regularizer *= static_cast<Result>(0.5);
-    __primal = __primal_loss + __regularizer;
-    __dual = __dual_loss - __regularizer;
+    __primal = __primal_loss + __primal_regularizer;
+    __dual = __dual_loss - __dual_regularizer;
   }
 
 };

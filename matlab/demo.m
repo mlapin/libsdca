@@ -12,6 +12,7 @@ if 1
 
   A = randn(d,n);
 
+  opts = [];
   opts.prox = 'knapsack';
   B = matsdca_prox(A, opts);
 
@@ -33,7 +34,8 @@ if 1
 
   [Xtrn,Ytrn,Xval,Yval,Xtst,Ytst] = getdata(num_trn,num_val,num_tst);
 
-  opts.objective = 'msvm_smooth';
+  opts = [];
+  opts.objective = 'softmax'; % or 'msvm_smooth'
   opts.c = 0.1;
   opts.epsilon = 1e-3;
   opts.max_epoch = 100;

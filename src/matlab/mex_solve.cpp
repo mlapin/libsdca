@@ -56,8 +56,17 @@ printHelp(const mxArray* opts) {
 "    precision  ['double']   - floating-point precision for intermediate\n"
 "                              computations (e.g. proximal update steps);\n"
 "\n"
-"    A [none] - initial dual variables for warm restart;\n"
-"    W [none] - initial primal variables (only if opts.is_dual=false);\n"
+"  Warm restart:\n"
+"    A [none]  - dual variables for warm restart;\n"
+"    W [none]  - primal variables for warm restart (if opts.is_dual=false);\n"
+"\n"
+"  Proximal regularization:\n"
+"    W0 [none] - primal variables for the regularization\n"
+"                1/2 ||W - W0||^2\n"
+"  Note:\n"
+"    W = W0 + X * A'\n"
+"  In particular, this equality must hold if both W0 and (A, W) are set,\n"
+"  otherwise there is no convergence guarantee.\n"
 "\n"
 "  Prediction scores can be computed as:\n"
 "    scores = model.W' * X;\n"
@@ -112,9 +121,9 @@ printHelp(const mxArray* opts) {
 "      - l2 regularized multiclass SVM of Crammer and Singer\n"
 "    msvm_smooth (synonyms: l2_multiclass_hinge_smooth, l2_topk_hinge)\n"
 "      - l2 regularized multiclass SVM with smoothed hinge loss\n"
-"    softmax (synonyms: l2_multiclass_entropy, l2_entropy_topk)\n"
+"    softmax (synonym: l2_multiclass_entropy)\n"
 "      - l2 regularized multiclass cross-entropy loss\n"
-"    l2_hinge_topk (synonyms: topk_hinge_alpha)\n"
+"    l2_hinge_topk (synonym: topk_hinge_alpha)\n"
 "      - l2 regularized top-k hinge alpha loss (hinge-of-top-k)\n"
 "        (both smooth and non-smooth depending on gamma)\n"
 "    l2_topk_hinge (synonym: topk_hinge_beta)\n"
@@ -149,10 +158,12 @@ add_train_evals(
     model_info<mxArray*>& info
   ) {
   const char* names[] = {"epoch", "accuracy", "relative_gap",
-    "primal", "dual", "primal_loss", "dual_loss", "regularizer",
-    "solve_time_cpu", "solve_time_wall", "eval_time_cpu", "eval_time_wall",
+    "primal", "dual", "primal_loss", "dual_loss",
+    "primal_regularizer", "dual_regularizer",
+    "solve_time_cpu", "solve_time_wall",
+    "eval_time_cpu", "eval_time_wall",
     "accuracies"};
-  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 13, names);
+  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 14, names);
   mxCheckCreated(pa, "train");
   size_type i(0);
   for (auto& a : evals) {
@@ -163,12 +174,13 @@ add_train_evals(
     mxSetFieldByNumber(pa, i, 4, mxCreateScalar(a.dual));
     mxSetFieldByNumber(pa, i, 5, mxCreateScalar(a.primal_loss));
     mxSetFieldByNumber(pa, i, 6, mxCreateScalar(a.dual_loss));
-    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.regularizer));
-    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.solve_time_cpu));
-    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_time_wall));
-    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.eval_time_cpu));
-    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_time_wall));
-    mxSetFieldByNumber(pa, i, 12, mxCreateVector(a.accuracy, "accuracies"));
+    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.primal_regularizer));
+    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.dual_regularizer));
+    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_time_cpu));
+    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.solve_time_wall));
+    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_time_cpu));
+    mxSetFieldByNumber(pa, i, 12, mxCreateScalar(a.eval_time_wall));
+    mxSetFieldByNumber(pa, i, 13, mxCreateVector(a.accuracy, "accuracies"));
     ++i;
   }
   info.add("train", pa);
@@ -181,9 +193,11 @@ add_train_evals(
     model_info<mxArray*>& info
   ) {
   const char* names[] = {"epoch", "rank_loss", "relative_gap",
-    "primal", "dual", "primal_loss", "dual_loss", "regularizer",
-    "solve_time_cpu", "solve_time_wall", "eval_time_cpu", "eval_time_wall"};
-  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 12, names);
+    "primal", "dual", "primal_loss", "dual_loss",
+    "primal_regularizer", "dual_regularizer",
+    "solve_time_cpu", "solve_time_wall",
+    "eval_time_cpu", "eval_time_wall"};
+  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 13, names);
   mxCheckCreated(pa, "train");
   size_type i = 0;
   for (auto& a : evals) {
@@ -194,11 +208,12 @@ add_train_evals(
     mxSetFieldByNumber(pa, i, 4, mxCreateScalar(a.dual));
     mxSetFieldByNumber(pa, i, 5, mxCreateScalar(a.primal_loss));
     mxSetFieldByNumber(pa, i, 6, mxCreateScalar(a.dual_loss));
-    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.regularizer));
-    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.solve_time_cpu));
-    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_time_wall));
-    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.eval_time_cpu));
-    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_time_wall));
+    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.primal_regularizer));
+    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.dual_regularizer));
+    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_time_cpu));
+    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.solve_time_wall));
+    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_time_cpu));
+    mxSetFieldByNumber(pa, i, 12, mxCreateScalar(a.eval_time_wall));
     ++i;
   }
   info.add("train", pa);
@@ -362,9 +377,9 @@ add_info(
 
 template <typename Data>
 inline void
-validate_data(
+validate_matrix(
     const mxArray* data,
-    const bool is_dual
+    const bool is_dual = false
   ) {
   mxCheckNotSparse(data, "data");
   mxCheckNotEmpty(data, "data");
@@ -471,7 +486,7 @@ set_test_data(
   for (size_type i = 1; i < num_datasets; ++i) {
     auto data = mxGetCell(all_data, i);
     auto labels = mxGetCell(all_labels, i);
-    validate_data<Data>(data, false);
+    validate_matrix<Data>(data);
     validate_labels(labels, mxGetN(data));
 
     Input<Data> in = make_test_input(ctx.train.in, data, i + 1);
@@ -520,17 +535,34 @@ set_variables(
     Output& out,
     model_info<mxArray*>& info,
     Data*& A,
-    Data*& W
+    Data*& W,
+    Data*& W0
     ) {
   mxArray *mxA = mxDuplicateFieldOrCreateMatrix(opts, "A",
     out.num_classes, in.num_examples, mex_class<Data>::id());
+  validate_matrix<Data>(mxA);
   info.add("A", mxA);
   A = static_cast<Data*>(mxGetData(mxA));
 
   mxArray *mxW = mxDuplicateFieldOrCreateMatrix(opts, "W",
     in.num_dimensions, out.num_classes, mex_class<Data>::id());
+  validate_matrix<Data>(mxW);
   info.add("W", mxW);
   W = static_cast<Data*>(mxGetData(mxW));
+
+  mxArray *mxW0 = mxGetField(opts, 0, "W0");
+  if (mxW0 != nullptr) {
+    mxCheckMatrix(mxW0, "W0", in.num_dimensions, out.num_classes,
+                  mex_class<Data>::id());
+    validate_matrix<Data>(mxW0);
+    W0 = static_cast<Data*>(mxGetData(mxW0));
+
+    // Initialize W = W0 if no W was provided for warm restart
+    if (!mxIsField(opts, "W")) {
+      sdca_blas_copy(static_cast<blas_int>(in.num_dimensions * out.num_classes),
+        W0, W);
+    }
+  }
 }
 
 template <typename Data,
@@ -543,10 +575,12 @@ set_variables(
     Output& out,
     model_info<mxArray*>& info,
     Data*& A,
+    Data*&,
     Data*&
     ) {
   mxArray *mxA = mxDuplicateFieldOrCreateMatrix(opts, "A",
     out.num_classes, in.num_examples, mex_class<Data>::id());
+  validate_matrix<Data>(mxA);
   info.add("A", mxA);
   A = static_cast<Data*>(mxGetData(mxA));
 }
@@ -565,11 +599,12 @@ set_context(
     Output&& out,
     Objective<Data, Result>&& obj
     ) {
-  Data *A(0), *W(0);
+  Data *A(0), *W(0), *W0(0);
   model_info<mxArray*> info;
-  set_variables(opts, in, out, info, A, W);
+  set_variables(opts, in, out, info, A, W, W0);
 
   auto ctx = make_context(std::move(in), std::move(out), std::move(obj), A, W);
+  ctx.primal_initial = W0;
 
   if (mxIsCell(prhs[0]) && mxIsCell(prhs[1])) {
     set_test_data(prhs[0], prhs[1], ctx);
@@ -619,7 +654,7 @@ set_objective(
              obj == "l2_multiclass_entropy") {
     mxCheckRange<size_type>(k, 1, 1, "k");
     set_context(plhs, prhs, opts, std::move(in), std::move(out),
-      make_objective_l2_entropy_topk<Data>(c, k));
+      make_objective_l2_entropy<Data>(c));
   } else if (obj == "l2_hinge_topk" ||
              obj == "topk_hinge_alpha") {
     if (gamma > 0) {
@@ -730,7 +765,7 @@ set_input(
     labels = mxGetCell(prhs[1], 0);
   }
 
-  validate_data<Data>(data, is_dual);
+  validate_matrix<Data>(data, is_dual);
   Data* p_data = static_cast<Data*>(mxGetData(data));
   if (is_dual) {
     set_output<Data, Result>(plhs, prhs, opts, labels,
