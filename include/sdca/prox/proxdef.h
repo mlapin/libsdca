@@ -21,6 +21,9 @@ template <typename Type>
 struct numeric_defaults {
   static constexpr std::size_t
   max_num_iter() { return 32; }
+
+  static constexpr Type
+  epsilon_relative() { return static_cast<Type>(0.001); }
 };
 
 template <typename Result,

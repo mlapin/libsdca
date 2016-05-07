@@ -32,10 +32,9 @@ struct solver_context {
   objective_type objective;
   stopping_criteria criteria;
 
+  const data_type* primal_initial = nullptr;
   data_type* primal_variables = nullptr;
   data_type* dual_variables = nullptr;
-
-  data_type* primal_initial = nullptr;
 
   solver_status status = solver_status::none;
   size_type epoch = 0;
@@ -47,10 +46,12 @@ struct solver_context {
       train_set_type&& __train_set,
       objective_type&& __objective,
       data_type* __dual_variables,
-      data_type* __primal_variables = nullptr
+      data_type* __primal_variables = nullptr,
+      const data_type* __primal_initial = nullptr
     ) :
       train(std::move(__train_set)),
       objective(std::move(__objective)),
+      primal_initial(__primal_initial),
       primal_variables(__primal_variables),
       dual_variables(__dual_variables)
   {}
@@ -154,6 +155,25 @@ make_context(
   return solver_context<Data, Result, kernel_input, Output, Objective>(
     make_dataset_train<Result>(std::move(in), std::move(out)),
     std::move(objective), dual_variables);
+}
+
+
+template <typename Data,
+          typename Result,
+          typename Output,
+          template <typename, typename> class Objective>
+inline solver_context<Data, Result, model_input, Output, Objective>
+make_context(
+    model_input<Data>&& in,
+    Output&& out,
+    Objective<Data, Result>&& objective,
+    Data* dual_variables,
+    Data* primal_variables,
+    const Data* primal_initial
+  ) {
+  return solver_context<Data, Result, model_input, Output, Objective>(
+    make_dataset_train<Result>(std::move(in), std::move(out)),
+    std::move(objective), dual_variables, primal_variables, primal_initial);
 }
 
 }

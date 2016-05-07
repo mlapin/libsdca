@@ -56,6 +56,36 @@ struct solver_scratch<Data, kernel_input> {
   }
 };
 
+
+template <typename Data>
+struct solver_scratch<Data, model_input> {
+  typedef Data data_type;
+  typedef model_input<Data> input_type;
+
+  std::vector<data_type> norms;
+  std::vector<data_type> scores;
+  std::vector<data_type> r;
+  std::vector<data_type> u;
+
+
+  template <typename Dataset>
+  void init(const Dataset& d) {
+    const auto m = d.num_classes();
+    norms.resize(m);
+    scores.resize(m);
+    r.resize(m);
+    u.resize(m);
+
+    const auto dim = d.num_dimensions();
+    const blas_int D = static_cast<blas_int>(dim);
+    const Data* model = d.in.model;
+    for (size_type j = 0; j < m; ++j) {
+      const Data* w_j = model + dim * j;
+      norms[j] = sdca_blas_dot(D, w_j, w_j);
+    }
+  }
+};
+
 }
 
 #endif

@@ -74,6 +74,45 @@ struct kernel_input {
 
 };
 
+
+template <typename Data>
+struct model_input {
+  typedef Data data_type;
+
+  // The model matrix must be num_dimensions-by-num_classes
+  // in column-major order (i.e. num_dimensions changes fastest).
+  // num_examples is needed to know how many features to produce.
+  size_type num_dimensions = 0;
+  size_type num_examples = 0;
+  size_type num_classes = 0;
+  const data_type* model = nullptr;
+
+
+  model_input(
+      const size_type __num_dimensions,
+      const size_type __num_examples,
+      const size_type __num_classes,
+      const data_type* __model
+    ) :
+      num_dimensions(__num_dimensions),
+      num_examples(__num_examples),
+      num_classes(__num_classes),
+      model(__model)
+  {}
+
+
+  inline std::string
+  to_string() const {
+    std::ostringstream str;
+    str << "model (num_dimensions: " << num_dimensions <<
+           ", num_examples: " << num_examples <<
+           ", num_classes: " << num_classes <<
+           ", precision: " << type_name<Data>() << ")";
+    return str.str();
+  }
+
+};
+
 }
 
 #endif

@@ -34,6 +34,42 @@ struct multiclass_output {
     return str.str();
   }
 
+
+  inline size_type
+  num_labels(const size_type) const { return 1; }
+
+
+  template <typename Data>
+  inline void
+  move_front(
+      const size_type i,
+      Data* x
+    ) const {
+    std::swap(x[0], x[labels[i]]);
+  }
+
+
+  template <typename Data>
+  inline void
+  move_front(
+      const size_type i,
+      Data* x,
+      Data* y
+    ) const {
+    std::swap(x[0], x[labels[i]]);
+    std::swap(y[0], y[labels[i]]);
+  }
+
+
+  template <typename Data>
+  inline void
+  move_back(
+      const size_type i,
+      Data* x
+    ) const {
+    std::swap(x[0], x[labels[i]]);
+  }
+
 };
 
 
@@ -67,6 +103,18 @@ struct multilabel_output {
 
   inline size_type
   num_labels(const size_type i) const { return offsets[i + 1] - offsets[i]; }
+
+
+  inline std::vector<size_type>::const_iterator
+  labels_cbegin(const size_type i) const {
+    return labels.cbegin() + offsets[i];
+  }
+
+
+  inline std::vector<size_type>::const_iterator
+  labels_cend(const size_type i) const {
+    return labels.cbegin() + offsets[i + 1];
+  }
 
 
   template <typename Data>

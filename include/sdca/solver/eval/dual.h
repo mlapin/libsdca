@@ -33,15 +33,14 @@ eval_dual_loss(
     eval_train<Result, multiclass_output>& eval
   ) {
   // Swap the ground truth label and a label at 0
-  size_type label = out.labels[i];
-  std::swap(dual_variables[0], dual_variables[label]);
+  out.move_front(i, dual_variables);
 
   // The dual loss computation must not modify the variables
   eval.dual_loss += obj.dual_loss(out.num_classes,
                                   const_cast<const Data*>(dual_variables));
 
   // Put back the ground truth
-  std::swap(dual_variables[0], dual_variables[label]);
+  out.move_back(i, dual_variables);
 }
 
 

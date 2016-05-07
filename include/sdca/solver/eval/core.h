@@ -133,6 +133,19 @@ eval_end(
 
 
 template <typename Int,
+          typename Dataset,
+          typename Context>
+inline void
+eval_recompute_primal(
+    const Int,
+    const Int,
+    const Dataset&,
+    const Context&
+  ) {
+}
+
+
+template <typename Int,
           typename Data,
           typename Result,
           typename Output,
@@ -170,15 +183,23 @@ eval_recompute_primal(
 
 
 template <typename Int,
-          typename Dataset,
+          typename Data,
+          typename Result,
+          typename Output,
           typename Context>
 inline void
 eval_recompute_primal(
-    const Int,
-    const Int,
-    const Dataset&,
-    const Context&
+    const Int num_classes,
+    const Int num_examples,
+    const dataset<model_input<Data>, Output, eval_train<Result, Output>>& d,
+    const Context& ctx
   ) {
+  // NOTE: this should be done always (not only with SDCA_ACCURATE_MATH),
+  // but only for the training dataset.
+  // (X's maintained prior to this step may be inaccurate,
+  // see the update step for details)
+  ctx.objective.compute_features(d.num_dimensions(), num_examples, num_classes,
+    d.in.model, ctx.dual_variables, ctx.primal_initial, ctx.primal_variables);
 }
 
 }

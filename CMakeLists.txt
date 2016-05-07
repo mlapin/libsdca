@@ -250,6 +250,7 @@ set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver/eval.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy_topk.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy_nn_features.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_hinge_topk.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_entropy.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_hinge.h

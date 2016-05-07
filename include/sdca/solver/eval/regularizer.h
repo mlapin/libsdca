@@ -46,6 +46,25 @@ eval_regularizer_primal(
 
 template <typename Int,
           typename Data,
+          typename Result,
+          typename Output,
+          typename Context>
+inline void
+eval_regularizer_primal(
+    const Int,
+    const model_input<Data>& in,
+    const Context& ctx,
+    eval_train<Result, Output>& eval
+  ) {
+  ctx.objective.regularizers_primal(
+    in.num_dimensions * in.num_examples,
+    ctx.primal_variables, ctx.primal_initial,
+    eval.primal_regularizer, eval.dual_regularizer);
+}
+
+
+template <typename Int,
+          typename Data,
           typename Input,
           typename Objective,
           typename Evaluation>

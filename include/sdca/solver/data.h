@@ -71,6 +71,18 @@ make_input_kernel(
 }
 
 
+template <typename Data>
+inline model_input<Data>
+make_input_model(
+    const size_type num_dimensions,
+    const size_type num_examples,
+    const size_type num_classes,
+    const Data* model
+  ) {
+  return model_input<Data>(num_dimensions, num_examples, num_classes, model);
+}
+
+
 template <typename Iterator>
 inline multiclass_output
 make_output_multiclass(

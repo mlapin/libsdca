@@ -87,6 +87,34 @@ sdca_blas_copy(
 }
 
 inline void
+sdca_blas_swap(
+    const blas_int n,
+    float* X,
+    float* Y
+  ) {
+#if defined(scopy)
+  blas_int inc(1);
+  sswap(const_cast<blas_int*>(&n), X, &inc, Y, &inc);
+#else
+  cblas_sswap(n, X, 1, Y, 1);
+#endif
+}
+
+inline void
+sdca_blas_swap(
+    const blas_int n,
+    double* X,
+    double* Y
+  ) {
+#if defined(dcopy)
+  blas_int inc(1);
+  dswap(const_cast<blas_int*>(&n), X, &inc, Y, &inc);
+#else
+  cblas_dswap(n, X, 1, Y, 1);
+#endif
+}
+
+inline void
 sdca_blas_axpy(
     const blas_int n,
     const float alpha,
