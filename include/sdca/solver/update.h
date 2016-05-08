@@ -7,6 +7,8 @@
 #include "sdca/solver/data/scratch.h"
 #include "sdca/solver/eval/scores.h"
 
+#include <iostream>
+
 namespace sdca {
 
 template <typename Data,
@@ -159,74 +161,60 @@ update_variables(
   const auto& dataset = ctx.train;
   const auto& out = dataset.out;
 
-  const Data lambda = guess_lipschitz_constant(i, out, scratch);
-  if (lambda <= 0) return;
+  const Data lip = scratch.lipschitz;
+  if (lip <= 0) return;
 
   const size_type d = dataset.num_dimensions();
   const size_type m = dataset.num_classes();
+  const blas_int D = static_cast<blas_int>(d);
   const blas_int M = static_cast<blas_int>(m);
 
   const Data* W = dataset.in.model; // d-by-m
   const Data* x_i_0 = ctx.primal_initial + d * i;
 
   // Primal and dual variables to update
-  Data* x_i = ctx.primal_variables + d * i;
-  Data* z = ctx.dual_variables + m * i;
+  Data* x = ctx.dual_variables + m * i;
+  Data* z = ctx.primal_variables + d * i;
 
-  // x, r, u - m-dimensional arrays (scratch space)
-  Data* x = &scratch.scores[0];
-  Data* r = &scratch.r[0];
-  Data* u = &scratch.u[0];
-
-  // Initialize u = 0; x and r are set below
-  Data norm_u(0), r_pri(0), r_duo(0);
-  std::fill(scratch.u.begin(), scratch.u.end(), 0);
+  // Initialization
+  assert(scratch.scores.size() == m);
+  assert(scratch.a.size() == m);
+  assert(scratch.x.size() == d);
+  Data mu(1); // note: obj.prox methods expect the inverted parameter (1/rho)
+  Data* r = &scratch.scores[0]; // m-dim
+  Data* a = &scratch.a[0]; // m-dim
+  Data* u = &scratch.x[0]; // d-dim
+  sdca_blas_copy(D, x_i_0, u);
 
   // The linearized ADMM method, see Section 4.4.2 in [1].
-  Data eps = numeric_defaults<Data>::epsilon_relative();
+  Data eps = static_cast<Data>(ctx.criteria.epsilon);
   std::size_t max_num_iter = numeric_defaults<Data>::max_num_iter();
   for (std::size_t iter = 0; iter < max_num_iter; ++iter) {
-    // p =
+    // p = 1/L W' (Wx - z + u)
+    sdca_blas_axpy(D, -1, u, z); // z = z - u
+    sdca_blas_gemv(D, M, W, x, z, CblasNoTrans, 1, -1); // z = Wx - z
+
     // x = prox_f(x - p)
-    sdca_blas_copy(M, z, x);
-    sdca_blas_axpy(M, -1, u, x); // x = z - u
+    sdca_blas_copy(M, x, a); // a = x_old
+    sdca_blas_gemv(D, M, W, z, x, CblasTrans, -1/lip, 1); // x = x - 1/L W' z
     out.move_front(i, x);
-    obj.prox_f(m, out.num_labels(i), lambda, x, r); // r is scratch space
+    obj.prox_f(m, out.num_labels(i), mu, x, r); // r is scratch space
     out.move_back(i, x);
 
-    Data norm_x = sdca_blas_nrm2(M, x);
-    sdca_blas_copy(M, x, r); // r = x
-
-    // z = prox_g(x + u)
-    sdca_blas_swap(M, x, z); // x = z_old
-    sdca_blas_axpy(M, 1, u, z); // z = x + u
-    obj.prox_g(d, m, lambda, W, x_i_0, z, x_i);
-
-    Data norm_z = sdca_blas_nrm2(M, z);
-
-    // r = r - z = x - z        -- primal residual
-    // x = x - z = z_old - z    -- dual residual
-    sdca_blas_axpy(M, -1, z, r);
-    sdca_blas_axpy(M, -1, z, x);
+    // z = prox_g(Wx + u)
+    sdca_blas_gemv(D, M, W, x, u, CblasNoTrans, 1, 1); // u = Wx + u
+    obj.prox_g(d, lip, x_i_0, const_cast<const Data*>(u), z);
 
     // Stopping criterion (relative suboptimality)
-    r_pri = sdca_blas_nrm2(M, r);
-    r_duo = sdca_blas_nrm2(M, x);
-
+    sdca_blas_axpy(D, -1, x, a); // a = a - x = x_old - x_new
+    Data norm_x = sdca_blas_nrm2(M, x);
+    Data norm_a = sdca_blas_nrm2(M, a); // residual
     Data one(1);
-    bool pri_optimal = r_pri <= eps * std::max(one, std::max(norm_x, norm_z));
-    bool duo_optimal = r_duo <= eps * std::max(one, norm_u);
-    if (pri_optimal && duo_optimal) break;
+    if (norm_a <= eps * std::max(one, norm_x)) break;
 
-    // u = u + x - z = u + r
-    sdca_blas_axpy(M, 1, r, u);
-    norm_u = sdca_blas_nrm2(M, u);
+    // u = u + Wx - z = u - z
+    sdca_blas_axpy(D, -1, z, u);
   }
-
-  // Recompute x_i if the last change in z was significant
-//  if (r_duo > std::numeric_limits<Data>::epsilon()) {
-//    obj.compute_features(d, m, W, x_i_0, z, x_i);
-//  }
 }
 
 }

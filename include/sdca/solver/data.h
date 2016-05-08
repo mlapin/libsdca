@@ -11,6 +11,13 @@
 
 namespace sdca {
 
+template <typename Input>
+struct need_shuffle : std::true_type {};
+
+template <typename Data>
+struct need_shuffle<model_input<Data>> : std::false_type {};
+
+
 template <typename Result = double,
           typename Data,
           template <typename> class Input,

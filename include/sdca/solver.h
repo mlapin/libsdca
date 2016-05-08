@@ -95,7 +95,8 @@ protected:
 
   void begin_epoch() {
     is_evaluated_ = false;
-    std::shuffle(examples_.begin(), examples_.end(), generator_);
+    if (need_shuffle<input_type>::value)
+      std::shuffle(examples_.begin(), examples_.end(), generator_);
   }
 
 

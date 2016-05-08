@@ -75,14 +75,6 @@ struct l2_entropy_nn_features
   }
 
 
-  /*
-   * This is also the gradient of the regularizer, since
-   *    X = grad(g(W * A)),
-   * where X are the features (primal variables),
-   * g(U) = 1/2 ||max{0, X0 + U}||^2 is the regularizer,
-   * W is the model weights matrix,
-   * A is the matrix of dual variables.
-   */
   template <typename Int>
   void compute_features(
       const Int num_dimensions,
@@ -127,30 +119,28 @@ struct l2_entropy_nn_features
 
 
   /*
-   * variables <-
-   *    argmin_a g(a) + lambda/2 ||a - variables||^2,
-   * where
-   *    g(a) = 1/2 ||max{0, x_i^0 + Wa}||^2
+   * x = argmin_x 1/2 ||max{0, a + x}||^2 + t/2 ||x - y||^2
+   *   = y - max{0, 1/(1 + t) (a + y)}
    */
   template <typename Int>
   void prox_g(
       const Int num_dimensions,
-      const Int num_classes,
-      const Data lambda,
-      const Data* W,
-      const Data* x_i_0,
-      Data* variables,
-      Data* x_i
+      const Data t,
+      const Data* a,
+      const Data* y,
+      Data* x
       ) const {
     const blas_int D = static_cast<blas_int>(num_dimensions);
-    const blas_int M = static_cast<blas_int>(num_classes);
 
-    compute_features(num_dimensions, num_classes, W, x_i_0, variables, x_i);
+    sdca_blas_copy(D, y, x); // x = y
+    sdca_blas_axpy(D, 1, a, x); // x = a + y
+    sdca_blas_scal(D, 1/(1 + t), x); // x = 1/(1 + t) (a + y)
 
-    // Apply shrinkage
-    // (note that lambda is inverted here, therefore not lambda / (1 + lambda))
-    Data coeff = - 1 / (1 + lambda);
-    sdca_blas_gemv(D, M, W, x_i, variables, CblasTrans, coeff, 1);
+    std::for_each(x, x + num_dimensions,
+                  [](Data &z){ z = std::max<Data>(0, z); });
+
+    sdca_blas_axpy(D, -1, y, x); // x = x - y
+    sdca_blas_scal(D, -1, x); // x = -x
   }
 
 
