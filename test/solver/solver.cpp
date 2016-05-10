@@ -1,8 +1,6 @@
 #include "sdca/solver.h"
 #include "test_util.h"
 
-#include "sdca/utility/logging.cpp"
-
 
 template <typename Data,
           typename Result,

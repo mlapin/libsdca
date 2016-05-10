@@ -12,7 +12,7 @@ add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
 # Use either fast or accurate math
 #   TRUE    enables -Ofast (with GCC) and disables SDCA_ACCURATE_MATH
 #   FALSE   disables -Ofast and enables SDCA_ACCURATE_MATH
-set(USE_FAST_MATH FALSE)
+set(USE_FAST_MATH TRUE)
 
 # Whether to use <chrono>
 #   TRUE    use std::chrono::high_resolution_clock to measure wall-clock time

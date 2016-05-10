@@ -107,7 +107,7 @@ two_sum_w_exp_bisection(
  * Solve
  *    min_{x,y} 0.5 * alpha * ||x - a / alpha - 1 / p||^2 + <x, log(x)> +
  *              0.5 * alpha * ||y - b / alpha||^2 + <y, log(y)>
- *    s.t.      <1, x> = <1, y> = 1
+ *    s.t.      <1, x> + <1, y> = 1
  *              0 <= x_i,  0 <= y_j
  *
  * where p = dim(a) is the dimensionality (i.e. size) of vector a.
@@ -121,7 +121,7 @@ two_sum_w_exp_bisection(
  * Note that the above is equivalent to
  *    min_{x,y} 0.5 * alpha * ||x - u||^2 + <x, log(x)> +
  *              0.5 * alpha * ||y - v||^2 + <y, log(y)>
- *    s.t.      <1, x> = <1, y> = 1
+ *    s.t.      <1, x> + <1, y> = 1
  *              0 <= x_i,  0 <= y_j
  *
  * whith
@@ -200,8 +200,9 @@ thresholds_two_entropy(
     t = std::max(lb, std::min(std::abs(f1) < std::abs(f2) ? t1 : t2, ub));
 
     // Do bisection for a few iterations to improve the guess
+    Result log2_inv = static_cast<Result>(1.4426950408889634);
     std::size_t num_iter = std::min(max_num_iter,
-      static_cast<std::size_t>(std::log(ub - lb)));
+      static_cast<std::size_t>(std::log(ub - lb) * log2_inv));
     two_sum_w_exp_bisection(a_first, a_last, b_first, b_last, alpha, c,
                             eps, num_iter, t, lb, ub, lf, uf);
   }

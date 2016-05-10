@@ -1,8 +1,6 @@
 #include "sdca/solver.h"
 #include "test_util.h"
 
-#include "sdca/utility/logging.cpp"
-
 
 template <typename Data,
           typename Result,
@@ -19,6 +17,8 @@ test_solver_features_check_converged(
   auto solver = sdca::make_solver(ctx);
   solver.solve();
 
+  // There are convergence problems with l2_entropy_nn_features.
+  // Not using this method for now.
 //  EXPECT_TRUE(ctx.status == sdca::solver_status::solved);
 }
 
@@ -87,26 +87,26 @@ test_solver_features_multiclass_basic(
   std::vector<sdca::size_type> Y(n); // labels
   Result accuracy = 1;
 
-//  // Identity
-//  W = {1, 0, 0,
-//       0, 1, 0,
-//       0, 0, 1};
+  // Identity
+  W = {1, 0, 0,
+       0, 1, 0,
+       0, 0, 1};
 
-//  // Features are row-wise
-//  X0 = {10, 3, 2,
-//        10, -6, 1,
-//        10, -5, 5,
-//        4, 10, -7,
-//        3, 10, 3,
-//        9, 9, 10};
+  // Features are row-wise
+  X0 = {10, 3, 2,
+        10, -6, 1,
+        10, -5, 5,
+        4, 10, -7,
+        3, 10, 3,
+        9, 9, 10};
 
-//  // Labels
-//  Y = {0, 0, 0, 1, 1, 2};
+  // Labels
+  Y = {0, 0, 0, 1, 1, 2};
 
-//  test_solver_features_basic_tests(make_output(Y), obj, n, W, X0, accuracy);
+  test_solver_features_basic_tests(make_output(m, Y), obj, n, W, X0, accuracy);
 
   // Example with a model fitted to random data
-  d = 4; m = 3; n = 10;
+  d = 4; m = 3; n = 1;
   W.resize(d * m);
   X0.resize(d * n);
   Y.resize(n);
@@ -115,21 +115,23 @@ test_solver_features_multiclass_basic(
        -1.61728,0.300705,0.548207,-0.157323,
        0.0562686,0.302226,0.0368759,-0.0259477};
 
-  X0 = {1,2,1,7,
-        9,10,8,3,
-        1,6,8,6,
-        7,6,8,1,
-        9,7,4,5,
-        3,5,1,9,
-        5,9,1,10,
-        6,4,9,9,
-        2,5,4,9,
-        4,5,9,1};
+  X0 = {1,6,8,6};
+//  X0 = {1,2,1,7,
+//        9,10,8,3,
+//        1,6,8,6,
+//        7,6,8,1,
+//        9,7,4,5,
+//        3,5,1,9,
+//        5,9,1,10,
+//        6,4,9,9,
+//        2,5,4,9,
+//        4,5,9,1};
 
-  Y = {3,3,2,1,1,1,1,1,3,3};
+//  Y = {3,3,2,1,1,1,1,1,3,3};
+  Y = {1};
   accuracy = 1;
 
-  test_solver_features_basic_tests(make_output(Y), obj, n, W, X0, accuracy);
+  test_solver_features_basic_tests(make_output(m, Y), obj, n, W, X0, accuracy);
 }
 
 
@@ -138,8 +140,10 @@ template <typename Data,
 inline void
 test_solver_features_multiclass_basic_all() {
   Result C = 4;
-  auto multiclass_output_maker = [](std::vector<sdca::size_type>& Y) {
-    return sdca::make_output_multiclass(Y.begin(), Y.end());
+  auto multiclass_output_maker = [](sdca::size_type m,
+                                    std::vector<sdca::size_type>& Y) {
+//    return sdca::make_output_multiclass(Y.begin(), Y.end());
+    return sdca::multiclass_output(m, Y);
   };
 
   test_solver_features_multiclass_basic(
@@ -149,7 +153,8 @@ test_solver_features_multiclass_basic_all() {
 
 
 TEST(SolverFeaturesTest, multiclass_basic_problems_all_objectives) {
-  sdca::logging::set_level(sdca::logging::level::verbose);
+  // TODO: these tests are not done
+  sdca::logging::set_level(sdca::logging::level::none);
   sdca::logging::set_format(sdca::logging::format::short_e);
   test_solver_features_multiclass_basic_all<float, float>();
   test_solver_features_multiclass_basic_all<float, double>();

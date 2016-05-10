@@ -7,8 +7,6 @@
 #include "sdca/solver/data/scratch.h"
 #include "sdca/solver/eval/scores.h"
 
-#include <iostream>
-
 namespace sdca {
 
 template <typename Data,
@@ -139,6 +137,7 @@ guess_lipschitz_constant(
 
 /*
  * This update step is based on the ADMM splitting scheme.
+ * Warning: slow convergence; the implementation is not well tested
  *
  * [1] Parikh N, Boyd S.
  *     Proximal Algorithms.
@@ -206,11 +205,10 @@ update_variables(
     obj.prox_g(d, lip, x_i_0, const_cast<const Data*>(u), z);
 
     // Stopping criterion (relative suboptimality)
-    sdca_blas_axpy(D, -1, x, a); // a = a - x = x_old - x_new
+    sdca_blas_axpy(M, -1, x, a); // a = a - x = x_old - x_new
     Data norm_x = sdca_blas_nrm2(M, x);
     Data norm_a = sdca_blas_nrm2(M, a); // residual
-    Data one(1);
-    if (norm_a <= eps * std::max(one, norm_x)) break;
+    if (norm_a <= eps * norm_x) break;
 
     // u = u + Wx - z = u - z
     sdca_blas_axpy(D, -1, z, u);
