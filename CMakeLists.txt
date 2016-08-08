@@ -48,7 +48,7 @@ elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(WARN_FLAGS "${WARN_FLAGS} -Wcast-qual")
   set(WARN_FLAGS "${WARN_FLAGS} -Wcast-align")
   set(WARN_FLAGS "${WARN_FLAGS} -Wwrite-strings")
-  set(WARN_FLAGS "${WARN_FLAGS} -Wconversion")
+  #set(WARN_FLAGS "${WARN_FLAGS} -Wconversion")
   set(WARN_FLAGS "${WARN_FLAGS} -Wmissing-declarations")
   set(WARN_FLAGS "${WARN_FLAGS} -Wredundant-decls")
   set(WARN_FLAGS "${WARN_FLAGS} -Wstack-protector")
@@ -57,6 +57,8 @@ elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(WARN_FLAGS "${WARN_FLAGS} -Wvector-operation-performance")
   set(WARN_FLAGS "${WARN_FLAGS} -Wlogical-op")
 endif()
+# TODO: fix the unit tests and enable this warning again
+set(WARN_FLAGS "${WARN_FLAGS} -Wno-conversion")
 
 # Debug flags
 set(DEBUG_FLAGS "-fstack-protector-all")
