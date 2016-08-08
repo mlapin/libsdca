@@ -52,6 +52,17 @@ test_prox_two_simplex_feasible(
   Type rhs, eps;
   std::vector<Type> v;
 
+  // One special case (also test this in debug mode!)
+  p = 1;
+  rhs = 2;
+  v.push_back(static_cast<Type>(-0.49371069182389915));
+  for (int i = 0; i < 158; ++i) {
+    v.push_back(static_cast<Type>(0.49371069182390021));
+  }
+  eps = 4 * std::numeric_limits<Type>::epsilon() * static_cast<Type>(v.size());
+  test_prox_two_simplex_check_feasible(p, rhs, tol * eps, v);
+  v.clear();
+
   for (int pow = pow_from; pow < pow_to; ++pow) {
     v.clear();
     for (int i = 0; i < 100; ++i) {

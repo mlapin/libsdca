@@ -90,11 +90,11 @@ thresholds_two_simplex(
 
     // Check feasibility and fix variables
     Result tt, infeas = sum_x - sum_y - static_cast<Result>(n_x + n_y) * t;
-    if (infeas > eps) {
+    if (n_y > 0 && infeas > eps) {
       y_last = y_it;
       tt = static_cast<Result>(m) * t + sum_y;
       m -= n_y;
-    } else if (infeas < -eps) {
+    } else if (n_x > 0 && infeas < -eps) {
       x_last = x_it;
       tt = static_cast<Result>(m) * t - sum_x;
       m -= n_x;

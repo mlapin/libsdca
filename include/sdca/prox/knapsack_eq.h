@@ -62,11 +62,11 @@ thresholds_knapsack_eq(
     Result s_lo = static_cast<Result>(n_lo) * lo;
     Result infeas = sum_hi + sum_lo - (s_hi + s_lo)
                   - static_cast<Result>(n_hi + n_lo) * t;
-    if (infeas > eps) {
+    if (n_hi > 0 && infeas > eps) {
       m_first = it_hi;
       tt = static_cast<Result>(m) * t - sum_hi + s_hi;
       m -= n_hi;
-    } else if (infeas < -eps) {
+    } else if (n_lo > 0 && infeas < -eps) {
       m_last = it_lo;
       tt = static_cast<Result>(m) * t - sum_lo + s_lo;
       m -= n_lo;
