@@ -107,13 +107,13 @@ struct multilabel_output {
 
   inline std::vector<size_type>::const_iterator
   labels_cbegin(const size_type i) const {
-    return labels.cbegin() + offsets[i];
+    return labels.cbegin() + static_cast<diff_type>(offsets[i]);
   }
 
 
   inline std::vector<size_type>::const_iterator
   labels_cend(const size_type i) const {
-    return labels.cbegin() + offsets[i + 1];
+    return labels.cbegin() + static_cast<diff_type>(offsets[i + 1]);
   }
 
 
