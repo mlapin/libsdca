@@ -1,5 +1,17 @@
+Matlab interfaces:
+------------------
+mex_solve.cpp   - SDCA solver (the main entry point);
+mex_prox.cpp    - proximal operators (for use outside of the solver).
+
+
+Legacy code (not part of libsdca):
+----------------------------------
+mex_gd.cpp - gradient descent for the nonconvex top-k entropy (top-k softmax) loss.
+
+
+
 How to debug mex code in Qt Creator:
---------------------------------------
+------------------------------------
 Debug > Start Debugging > Start and Debug External Application... (Ctrl + F5)
 
 Local executable: /usr/lib/matlab-8.6/bin/glnxa64/MATLAB
