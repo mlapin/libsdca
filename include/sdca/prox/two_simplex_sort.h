@@ -1,6 +1,8 @@
 #ifndef SDCA_PROX_TWO_SIMPLEX_SORT_H
 #define SDCA_PROX_TWO_SIMPLEX_SORT_H
 
+#include <functional>
+
 #include "sdca/prox/proxdef.h"
 
 namespace sdca {
