@@ -196,7 +196,7 @@ lambert_w_exp(
         w = lambert_w_iter_5(w, exp_approx(x - w));
       }
     } else { // (-Inf, -36]
-      return (x > -746) ? std::exp(x) : 0.0;
+      return (x > -746) ? std::exp(x) : 0.0L;
     }
   }
   return lambert_w_iter_5(w, std::exp(x - w));

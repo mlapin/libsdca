@@ -62,7 +62,7 @@ test_objective_l2_entropy_topk() {
     return sdca::make_objective_l2_entropy_topk<Data>(); };
   test_objective_default<Data, double>(maker_default);
 
-  Result c = 3.14f;
+  Result c = static_cast<Result>(3.14);
   std::size_t k = 2;
   auto maker_simple = [=]() -> sdca::l2_entropy_topk<Data, Result> {
     return sdca::make_objective_l2_entropy_topk<Data>(c, k); };
@@ -78,7 +78,7 @@ test_objective_l2_hinge_topk() {
     return sdca::make_objective_l2_hinge_topk<Data>(); };
   test_objective_default<Data, double>(maker_default);
 
-  Result c = 3.14f;
+  Result c = static_cast<Result>(3.14);
   std::size_t k = 2;
   auto maker_simple = [=]() -> sdca::l2_hinge_topk<Data, Result> {
     return sdca::make_objective_l2_hinge_topk<Data>(c, k); };
@@ -94,7 +94,7 @@ test_objective_l2_topk_hinge() {
     return sdca::make_objective_l2_topk_hinge<Data>(); };
   test_objective_default<Data, double>(maker_default);
 
-  Result c = 3.14f;
+  Result c = static_cast<Result>(3.14);
   std::size_t k = 2;
   auto maker_simple = [=]() -> sdca::l2_topk_hinge<Data, Result> {
     return sdca::make_objective_l2_topk_hinge<Data>(c, k); };
@@ -110,7 +110,7 @@ test_objective_l2_hinge_topk_smooth() {
     return sdca::make_objective_l2_hinge_topk_smooth<Data>(); };
   test_objective_default<Data, double>(maker_default);
 
-  Result c = 3.14f, gamma = 2.72f;
+  Result c = static_cast<Result>(3.14), gamma = static_cast<Result>(2.72);
   std::size_t k = 2;
   auto maker_simple = [=]() -> sdca::l2_hinge_topk_smooth<Data, Result> {
     return sdca::make_objective_l2_hinge_topk_smooth<Data>(c, gamma, k); };
@@ -126,7 +126,7 @@ test_objective_l2_topk_hinge_smooth() {
     return sdca::make_objective_l2_topk_hinge_smooth<Data>(); };
   test_objective_default<Data, double>(maker_default);
 
-  Result c = 3.14f, gamma = 2.72f;
+  Result c = static_cast<Result>(3.14), gamma = static_cast<Result>(2.72);
   std::size_t k = 2;
   auto maker_simple = [=]() -> sdca::l2_topk_hinge_smooth<Data, Result> {
     return sdca::make_objective_l2_topk_hinge_smooth<Data>(c, gamma, k); };
