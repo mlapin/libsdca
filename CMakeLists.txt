@@ -3,7 +3,7 @@ project(libsdca)
 
 set(libsdca_MAJOR_VERSION 0)
 set(libsdca_MINOR_VERSION 3)
-set(libsdca_PATCH_VERSION 0)
+set(libsdca_PATCH_VERSION 1)
 set(libsdca_VERSION
   ${libsdca_MAJOR_VERSION}.${libsdca_MINOR_VERSION}.${libsdca_PATCH_VERSION}
   )
@@ -233,6 +233,7 @@ set(libsdca_PROX_SOURCES
   ${libsdca_INCLUDE_PATH}/prox/topk_simplex_biased.h
   ${libsdca_INCLUDE_PATH}/prox/two_entropy.h
   ${libsdca_INCLUDE_PATH}/prox/two_simplex.h
+  ${libsdca_INCLUDE_PATH}/prox/two_simplex_sort.h
 )
 
 set(libsdca_SOLVER_SOURCES

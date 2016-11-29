@@ -298,6 +298,32 @@ prox(
 }
 
 
+template <typename Iterator,
+          typename Algorithm,
+          typename... Types>
+inline void
+prox(
+    const typename std::iterator_traits<Iterator>::difference_type dim,
+    const typename std::iterator_traits<Iterator>::difference_type p,
+    Iterator first,
+    Iterator last,
+    Iterator aux,
+    Algorithm compute,
+    Types... params
+    ) {
+  Iterator vec_mid(first + p), vec_last(first + dim);
+  Iterator aux_mid(aux + p), aux_last(aux + dim);
+  for (; first != last; vec_last += dim) {
+    std::copy(first, vec_last, aux);
+    auto thresholds = compute(aux, aux_mid, aux_mid, aux_last, params...);
+    prox(thresholds.first, first, vec_mid);
+    prox(thresholds.second, vec_mid, vec_last);
+    first = vec_last;
+    vec_mid = vec_last + p;
+  }
+}
+
+
 /**
  * Computes the dot product
  *    <prox(x), prox(x)>

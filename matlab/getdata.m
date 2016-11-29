@@ -1,5 +1,5 @@
 function [Xtrn,Ytrn,Xval,Yval,Xtst,Ytst] = getdata(num_trn,num_val,num_tst)
-% Generate data for a synthetic example from
+% Generate data for the synthetic example presented in
 % Lapin, M., Hein, M. and Schiele, B.
 % Loss Functions for Top-k Error: Analysis and Insights,
 % In CVPR 2016.

@@ -124,6 +124,7 @@ mex_main(
   auto rho = mxGetFieldValueOrDefault<Result>(opts, "rho", 1);
   auto alpha = mxGetFieldValueOrDefault<Result>(opts, "alpha", 1);
   auto k = mxGetFieldValueOrDefault<std::ptrdiff_t>(opts, "k", 1);
+  auto p = mxGetFieldValueOrDefault<std::ptrdiff_t>(opts, "p", 1);
 
   std::ptrdiff_t m = static_cast<std::ptrdiff_t>(mxGetM(mxX));
   std::ptrdiff_t n = static_cast<std::ptrdiff_t>(mxGetN(mxX));
@@ -132,6 +133,7 @@ mex_main(
   mxCheck<Result>(std::greater_equal<Result>(), rho, 0, "rho");
   mxCheck<Result>(std::greater<Result>(), alpha, 0, "alpha");
   mxCheckRange<std::ptrdiff_t>(k, 1, m, "k");
+  mxCheckRange<std::ptrdiff_t>(p, 1, m-1, "p");
 
   std::vector<Data> aux(static_cast<std::size_t>(m));
   Data* first = static_cast<Data*>(mxGetData(mxX));
@@ -150,6 +152,10 @@ mex_main(
     prox_topk_simplex(m, first, last, aux_first, k, rhs);
   } else if (prox == "topk_simplex_biased") {
     prox_topk_simplex_biased(m, first, last, aux_first, k, rhs, rho);
+  } else if (prox == "two_simplex") {
+    prox_two_simplex(m, p, first, last, aux_first, rhs);
+  } else if (prox == "two_simplex_sort") {
+    prox_two_simplex_sort(m, p, first, last, aux_first, rhs);
   } else if (prox == "topk_entropy") {
     prox_topk_entropy(m, first, last, aux_first, k);
   } else if (prox == "topk_entropy_biased") {

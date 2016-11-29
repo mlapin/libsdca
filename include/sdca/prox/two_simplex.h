@@ -169,13 +169,29 @@ template <typename Result = double,
           typename Iterator>
 inline void
 prox_two_simplex(
-    std::ptrdiff_t p,
+    const typename std::iterator_traits<Iterator>::difference_type p,
     Iterator first,
     Iterator last,
     Iterator aux,
     const Result rhs = 1
     ) {
   prox(first, first + p, first + p, last, aux, aux + p,
+       thresholds_two_simplex<Result, Iterator>, rhs);
+}
+
+
+template <typename Result = double,
+          typename Iterator>
+inline void
+prox_two_simplex(
+    const typename std::iterator_traits<Iterator>::difference_type dim,
+    const typename std::iterator_traits<Iterator>::difference_type p,
+    Iterator first,
+    Iterator last,
+    Iterator aux,
+    const Result rhs = 1
+    ) {
+  prox(dim, p, first, last, aux,
        thresholds_two_simplex<Result, Iterator>, rhs);
 }
 
