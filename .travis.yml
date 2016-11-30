@@ -6,7 +6,7 @@ compiler:
 - gcc
 os:
 - linux
-- osx
+#- osx
 script:
 - mkdir build
 - cd build
