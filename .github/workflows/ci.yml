@@ -66,6 +66,8 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-dev.txt numpy scipy mpmath jax scikit-learn ninja
       - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      # Clang's own omp.h: GCC 13's uses attributes that Clang 18 rejects.
+      - run: sudo apt-get update && sudo apt-get install -y libomp-18-dev
       - run: python tools/check_extension_builds.py --compiler g++ --compiler clang++-18
       - run: python tools/coverage.py --collect-python
       - uses: actions/upload-artifact@v7.0.2

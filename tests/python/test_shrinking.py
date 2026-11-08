@@ -150,6 +150,7 @@ def test_invalid_values_are_rejected(value: object):
 
 
 def test_sklearn_takes_the_option():
+    pytest.importorskip("sklearn")
     from libsdca.sklearn import SDCAClassifier
 
     x, y = data(n=200)
