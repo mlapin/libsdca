@@ -1,0 +1,5 @@
+# Start with actionable correctness checks rather than style rewrites of math.
+Checks: '-*,bugprone-infinite-loop,bugprone-misplaced-widening-cast,bugprone-sizeof-expression,bugprone-suspicious-memset-usage,bugprone-use-after-move,performance-for-range-copy,performance-move-const-arg'
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'include/sdca/.*'
+FormatStyle: file

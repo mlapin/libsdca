@@ -1,7 +1,7 @@
 #ifndef SDCA_SOLVER_OBJECTIVE_L2_ENTROPY_H
 #define SDCA_SOLVER_OBJECTIVE_L2_ENTROPY_H
 
-#include "sdca/math/log_exp.h"
+#include "sdca/math/entropy.h"
 #include "sdca/prox/two_entropy.h"
 #include "sdca/solver/objective/objective_base.h"
 
@@ -10,13 +10,9 @@ namespace sdca {
 /*
  * The implementation is really the same as for the multilabel entropy,
  * except that num_labels is always 1.
- * TODO: refactor all objectives into multilabel (?)
  */
-template <typename Data,
-          typename Result>
-struct l2_entropy
-    : public objective_base<Data, Result> {
-
+template <typename Data, typename Result>
+struct l2_entropy : public objective_base<Data, Result> {
   typedef Data data_type;
   typedef Result result_type;
 
@@ -24,97 +20,52 @@ struct l2_entropy
 
   const Result c;
 
-  const Result c_log_c;
+  l2_entropy(const Result c_) : base::objective_base(c_), c(c_) {
+    if (!(c > 0) || !std::isfinite(c)) throw std::invalid_argument("C must be finite and positive");
+  }
 
-
-  l2_entropy(
-      const Result __c
-    ) :
-      base::objective_base(__c),
-      c(__c),
-      c_log_c(x_log_x(__c))
-  {}
-
+  // The same objective in another precision, for the evaluation.
+  template <typename D, typename R>
+  explicit l2_entropy(const l2_entropy<D, R>& other) : l2_entropy(static_cast<Result>(other.c)) {}
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_entropy (c: " << c <<
-           ", precision: " << type_name<Result>() << ")";
+    str << "l2_entropy (c: " << c << ", precision: " << type_name<Result>() << ")";
     return str.str();
   }
 
-
   template <typename Int>
-  void update_dual_variables(
-      const Int num_classes,
-      const Data norm2,
-      Data* variables,
-      Data* scores
-      ) const {
+  void update_dual_variables(const Int num_classes, const Data norm2, Data* variables, Data* scores,
+                             const projection_precision = projection_precision::float64) const {
     const Int num_labels = 1;
-    Data *pos_first(variables), *pos_last(variables + num_labels);
-    Data *neg_first(variables + num_labels), *neg_last(variables + num_classes);
-    Data *pos_scores(scores), *neg_scores(scores + num_labels);
-
-    // 1. Prepare a vector to project in 'variables'.
-    sdca_blas_axpby(
-      static_cast<blas_int>(num_classes), 1, scores, -norm2, variables);
-
-    // 2. Proximal step (project 'variables', use 'scores' as scratch space)
-    Result alpha(c * static_cast<Result>(norm2));
-    prox_two_entropy(pos_first, pos_last, neg_first, neg_last,
-                     pos_scores, neg_scores, alpha);
-
-    // 3. Recover the updated variables
-    Data a(static_cast<Data>(-c));
-    Data b(static_cast<Data>(c / static_cast<Result>(num_labels)));
-    std::for_each(pos_first, pos_last, [=](Data &x){ x = a * x + b; });
-    sdca_blas_scal(static_cast<blas_int>(num_classes - num_labels),
-                   a, neg_first);
+    entropy_update(num_classes, num_labels, c, norm2, variables, scores);
   }
 
-
   template <typename Int>
-  inline Result
-  primal_loss(
-      const Int num_classes,
-      Data* scores
-    ) const {
-    const Int num_labels = 1;
-    Data *pos_first(scores), *pos_last(scores + num_labels);
-    Data *neg_last(scores + num_classes);
-
-    Result lse = log_sum_exp<Result>(pos_first, neg_last);
-    Result avg = std::accumulate(pos_first, pos_last, static_cast<Result>(0))
-               / static_cast<Result>(num_labels);
-    return lse - avg;
+  void zero_scores_dual_variables(const Int num_classes, Data* variables) const {
+    // c (e_y - 1/m), the softmax gradient at zero scores.
+    detail::zero_scores_dual(num_classes, Int(1), c * Result(num_classes - 1) / Result(num_classes),
+                             variables);
   }
 
-
   template <typename Int>
-  inline Result
-  dual_loss(
-      const Int num_classes,
-      const Data* variables
-    ) const {
+  inline Result primal_loss(const Int num_classes, Data* scores) const {
     const Int num_labels = 1;
-    Result d_loss(0), p(static_cast<Result>(num_labels));
-
-    std::for_each(variables, variables + num_labels,
-      [&](const Result a){ d_loss -= x_log_x(c - p * a); });
-    d_loss /= p;
-
-    std::for_each(variables + num_labels, variables + num_classes,
-      [&](const Result a){ d_loss -= x_log_x(-a); });
-
-    Result sum = std::accumulate(variables, variables + num_labels,
-                                 static_cast<Result>(0));
-    d_loss += c_log_c + std::log(p) * (c - sum);
-    return d_loss;
+    return entropy_loss<Result>(num_classes, num_labels, scores);
   }
 
+  template <typename Int, typename T>
+  inline void feasible_dual(const Int num_classes, T* variables) const {
+    feasible::capped(num_classes, variables, T(c), T(c));
+  }
+
+  template <typename Int>
+  inline Result dual_loss(const Int num_classes, const Data* variables) const {
+    const Int num_labels = 1;
+    return entropy_dual_loss(num_classes, num_labels, c, variables);
+  }
 };
 
-}
+}  // namespace sdca
 
 #endif

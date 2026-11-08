@@ -35,9 +35,9 @@ if 1
   [Xtrn,Ytrn,Xval,Yval,Xtst,Ytst] = getdata(num_trn,num_val,num_tst);
 
   opts = [];
-  opts.objective = 'softmax'; % or 'msvm_smooth'
-  opts.c = 0.1;
-  opts.epsilon = 1e-3;
+  opts.objective = 'cross_entropy'; % or 'multiclass_hinge' with opts.gamma = 1
+  opts.C = 0.1;
+  opts.tol = 1e-3;
   opts.max_epoch = 100;
   opts.eval_epoch = 1; % only for demo, in practice would be wasteful
 %   opts.log_level = 'verbose'; % or 'none'

@@ -1,0 +1,192 @@
+name: CI
+on:
+  # Pushes to main or master and pull requests, each run once.
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.10'
+      - run: python -m pip install -r requirements-dev.txt numpy scipy mpmath scikit-learn jax
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python tools/quality.py
+
+  cpp:
+    # Each BLAS backend and each compiler once; tools/release_gate.py runs all four pairs.
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - {backend: BUILTIN, cxx: g++}
+          - {backend: EXTERNAL, cxx: clang++-18}
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y libblas-dev
+      - run: >-
+          cmake -S . -B build -DBUILD_TESTING=ON -DSDCA_WARNINGS_AS_ERRORS=ON
+          -DSDCA_BLAS_BACKEND=${{ matrix.backend }} -DSDCA_BUILD_C_API=ON
+          -DCMAKE_INSTALL_PREFIX=$PWD/build/install
+      - run: cmake --build build --parallel 2
+      - run: ctest --test-dir build --output-on-failure --parallel 2
+      - run: cmake --install build
+      - run: cmake -S examples/cpp -B build/consumer -DCMAKE_PREFIX_PATH=$PWD/build/install
+      - run: cmake --build build/consumer && build/consumer/sdca_example
+      - run: cmake -S examples/c -B build/c-consumer -DCMAKE_PREFIX_PATH=$PWD/build/install
+      - run: >-
+          cmake --build build/c-consumer &&
+          LD_LIBRARY_PATH=$PWD/build/install/lib build/c-consumer/sdca_c_example
+      - run: bash tests/matlab/check_mex_compiles.sh
+      - run: bash tests/matlab/run_gateway_mock.sh
+
+  coverage:
+    name: C++ coverage gate and CPU Python data
+    runs-on: ubuntu-24.04
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt numpy scipy mpmath jax scikit-learn ninja
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python tools/check_extension_builds.py --compiler g++ --compiler clang++-18
+      - run: python tools/coverage.py --collect-python
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: cpu-python-coverage-${{ github.sha }}
+          include-hidden-files: true
+          path: |
+            build/coverage/.coverage
+            build/coverage/.coverage.sources.json
+            build/coverage/python-provisional.json
+            build/coverage/cpp.txt
+
+  sanitizers:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y libblas-dev
+      # Older TSan runtimes need at most 28 bits of mmap randomization.
+      - run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - run: bash tools/run_cpp_tests.sh --sanitize
+        env:
+          SDCA_TSAN_CXX: clang++
+
+  python:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - {python: '3.10', backend: BUILTIN, group: core, cxx: g++}
+          - {python: '3.12', backend: EXTERNAL, group: all, cxx: clang++-18}
+          - {python: '3.13', backend: BUILTIN, group: core, cxx: g++}
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: sudo apt-get update && sudo apt-get install -y libblas-dev libomp-18-dev
+      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist
+      - if: matrix.group == 'all'
+        run: >-
+          python -m pip install scikit-learn triton jax ninja &&
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python python/build.py --blas-backend ${{ matrix.backend }}
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group ${{ matrix.group }}
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group ${{ matrix.group }} -m serial
+      - if: matrix.group == 'all'
+        run: >-
+          CXX=g++ SDCA_CPU_EXTENSION=on PYTHONPATH=python python -m pytest -p no:cacheprovider
+          tests/python/test_softmax_limits.py::SoftmaxLimitTests tests/python/test_torch.py::TorchTests
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - run: >-
+          cmake -S . -B build -DBUILD_TESTING=ON -DSDCA_WARNINGS_AS_ERRORS=ON
+          -DSDCA_BLAS_BACKEND=EXTERNAL -DSDCA_BUILD_C_API=ON
+      - run: cmake --build build --parallel 3
+      - run: ctest --test-dir build --output-on-failure --parallel 3
+      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn torch ninja
+      - run: CXX=c++ python python/build.py --blas-backend EXTERNAL
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group core -m serial
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group torch
+
+  rust:
+    # The tests run under line coverage on stable (no doctests) and in full at the MSRV.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: >-
+          rustup toolchain install stable --profile minimal -c rustfmt,clippy,llvm-tools-preview &&
+          rustup toolchain install 1.74 --profile minimal && rustup default stable
+      - uses: taiki-e/install-action@v2.90.0
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo llvm-cov --fail-under-lines 90
+      - run: cargo run --example train
+      - run: cargo +1.74 test
+
+  rust-blas:
+    # A downstream crate linked against the built-in BLAS and each apt BLAS: every SDCA_BLAS
+    # form with OpenBLAS, a shared and a static link with the others. Each package is
+    # installed just before its links, since a later one takes over the libblas.so alternative.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: rustup toolchain install stable --profile minimal -c rustfmt,clippy && rustup default stable
+      - working-directory: rust/consumer
+        run: cargo fmt --check && cargo clippy -- -D warnings
+      - run: bash rust/consumer/ci.sh builtin
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libblas-dev
+      - run: for form in l static; do bash rust/consumer/ci.sh reference $form; done
+      - run: sudo apt-get install -y --no-install-recommends libopenblas-dev libopenblas-pthread-dev
+      - run: for form in l l-file abs-so static L-l; do bash rust/consumer/ci.sh openblas $form; done
+      - run: sudo apt-get install -y --no-install-recommends libblis-dev libblis-pthread-dev
+      - run: for form in l static; do bash rust/consumer/ci.sh blis $form; done
+
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - run: SDCA_BLAS_BACKEND=BUILTIN python -m pip install .
+      - run: python -m pip install pytest scipy mpmath scikit-learn
+      - run: >-
+          cd /tmp && python -m pytest -p no:cacheprovider $GITHUB_WORKSPACE/tests/python
+          --group core --installed

@@ -1,0 +1,9 @@
+recursive-include include *.h
+include src/c_api.cpp src/tensor_losses.h
+include sdca_build.py
+include python/README.md
+include python/TORCH.md python/JAX.md
+include python/libsdca/_torch_entropy.cpp python/libsdca/_torch_*.h python/libsdca/_jax_ffi.cpp
+include include/sdca/utility/logging.cpp
+include CHANGELOG.md DEPENDENCIES.md
+include tests/python/*.py

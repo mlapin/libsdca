@@ -26,8 +26,8 @@ set(MKL_ROOT_DIR ${MKL_ROOT_DIR} CACHE PATH
 
 if(MKL_ROOT_DIR)
   file(TO_CMAKE_PATH ${MKL_ROOT_DIR} MKL_ROOT_DIR)
-elseif($ENV{MKLROOT})
-  file(TO_CMAKE_PATH $ENV{MKLROOT} MKL_ROOT_DIR)
+elseif(NOT "$ENV{MKLROOT}" STREQUAL "")
+  file(TO_CMAKE_PATH "$ENV{MKLROOT}" MKL_ROOT_DIR)
 else()
   file(TO_CMAKE_PATH "/opt/intel/mkl" MKL_ROOT_DIR)
 endif()
@@ -88,17 +88,23 @@ set(MKL_INCLUDE_DIRS ${MKL_INCLUDE_DIR})
 set(MKL_LIBRARIES ${MKL_CORE_LIBRARY})
 set(MKL_DEFINITIONS)
 
+set(_mkl_required MKL_INCLUDE_DIR MKL_CORE_LIBRARY)
+if(USE_ILP64)
+  list(APPEND _mkl_required MKL_ILP64_LIBRARY)
+else()
+  list(APPEND _mkl_required MKL_LP64_LIBRARY)
+endif()
+if(USE_SEQUENTIAL)
+  list(APPEND _mkl_required MKL_SEQUENTIAL_LIBRARY)
+elseif(INTEL_OMP_LIBRARY)
+  list(APPEND _mkl_required MKL_INTEL_THREAD_LIBRARY)
+else()
+  list(APPEND _mkl_required MKL_GNU_THREAD_LIBRARY)
+endif()
 find_package_handle_standard_args(
   MKL
   DEFAULT_MSG
-  MKL_INCLUDE_DIR
-  MKL_LP64_LIBRARY
-  MKL_ILP64_LIBRARY
-  MKL_CORE_LIBRARY
-  MKL_INTEL_THREAD_LIBRARY
-  MKL_GNU_THREAD_LIBRARY
-  MKL_SEQUENTIAL_LIBRARY
-  INTEL_OMP_LIBRARY
+  ${_mkl_required}
   )
 
 mark_as_advanced(

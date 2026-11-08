@@ -1,104 +1,92 @@
-#.rst:
-# SelectBLAS
-# ----------
-#
-# Select module for BLAS
-#
-# Selects a BLAS library and sets up C and C++ to use it.
-#
-# Use (in any order)
-#     find_package(BLAS)
-#     find_package(MKL)
-#     find_package(Matlab COMPONENTS MX_LIBRARY BLAS_LIBRARY IOMP_LIBRARY)
-# before
-#     include(SelectBLAS)
-#
-# BLAS libraries have the following precedence:
-#     Intel MKL
-#     Accelerate Framework
-#     BLAS shipped with Matlab
-#     BLAS found by FindBLAS (e.g., ATLAS)
-#
-# Intel MKL setup depends on the flags
-#     USE_ILP64
-#     USE_SEQUENTIAL
-#
-# The following variables are set by this script
-#     BLAS_FOUND
-#     BLAS_LIBRARIES
-#
-# If BLAS is found, certain definitions and include_directories are also set.
-
-# Copyright 2016 Maksim Lapin.
-
-if(MKL_FOUND)
-
-  set(BLAS_LIBRARIES)
-  list(APPEND BLAS_LIBRARIES "-Wl,--start-group")
-
-  if(USE_ILP64)
-    add_definitions(-DMKL_ILP64)
-    list(APPEND BLAS_LIBRARIES ${MKL_ILP64_LIBRARY})
-  else()
-    list(APPEND BLAS_LIBRARIES ${MKL_LP64_LIBRARY})
-  endif()
-
-  list(APPEND BLAS_LIBRARIES ${MKL_CORE_LIBRARY})
-
-  if(USE_SEQUENTIAL)
-    list(APPEND BLAS_LIBRARIES ${MKL_SEQUENTIAL_LIBRARY})
-  else()
-    if(INTEL_OMP_LIBRARY)
-      list(APPEND BLAS_LIBRARIES ${MKL_INTEL_THREAD_LIBRARY})
-      list(APPEND BLAS_LIBRARIES ${INTEL_OMP_LIBRARY})
-    elseif(Matlab_IOMP_LIBRARY)
-      message(WARNING "Fallback to Matlab's libiomp5, may be incompatible")
-      list(APPEND BLAS_LIBRARIES ${MKL_INTEL_THREAD_LIBRARY})
-      list(APPEND BLAS_LIBRARIES ${Matlab_IOMP_LIBRARY})
-    else()
-      list(APPEND BLAS_LIBRARIES ${MKL_GNU_THREAD_LIBRARY})
-      add_definitions(-fopenmp)
+# Resolve one backend. BUILTIN must not discover any external libraries.
+string(TOUPPER "${SDCA_BLAS_BACKEND}" SDCA_BLAS_BACKEND)
+if(NOT SDCA_BLAS_BACKEND MATCHES "^(AUTO|EXTERNAL|BUILTIN)$")
+  message(FATAL_ERROR "SDCA_BLAS_BACKEND must be AUTO, EXTERNAL, or BUILTIN")
+endif()
+set(SDCA_BLAS_DEFINITIONS)
+set(SDCA_BLAS_INCLUDE_DIRS)
+set(_sdca_external FALSE)
+if(NOT SDCA_BLAS_BACKEND STREQUAL "BUILTIN")
+  find_package(MKL QUIET)
+  find_package(BLAS QUIET)
+  if(NOT BLAS_LIBRARIES AND NOT CMAKE_DISABLE_FIND_PACKAGE_BLAS)
+    # Runtime-only Linux installations may provide the versioned SONAME but
+    # no development symlink. Validate its CBLAS entry points below.
+    find_library(SDCA_CBLAS_LIBRARY NAMES openblas cblas blas libblas.so.3)
+    if(SDCA_CBLAS_LIBRARY)
+      set(BLAS_LIBRARIES ${SDCA_CBLAS_LIBRARY})
     endif()
   endif()
-
-  list(APPEND BLAS_LIBRARIES "-Wl,--end-group")
-
-  include_directories("${MKL_INCLUDE_DIRS}")
-  add_definitions(-DBLAS_MKL)
-
-elseif(BLAS_Accelerate_LIBRARY)
-
-  add_definitions(-DBLAS_ACCELERATE)
-
-elseif(Matlab_BLAS_LIBRARY)
-
-  add_definitions(-DBLAS_MATLAB)
-  include_directories("${Matlab_INCLUDE_DIRS}")
-  set(BLAS_LIBRARIES "${Matlab_BLAS_LIBRARY}")
-
-elseif(BLAS_FOUND)
-
-  find_file(CBLAS_HEADER cblas.h)
-  if(CBLAS_HEADER)
-    add_definitions(-DBLAS_DEFAULT)
-  else()
-    add_definitions(-DBLAS_DEFAULT_LOCAL_HEADER)
+  if(MKL_FOUND)
+    set(BLAS_LIBRARIES)
+    if(USE_ILP64)
+      list(APPEND SDCA_BLAS_DEFINITIONS MKL_ILP64)
+      list(APPEND BLAS_LIBRARIES ${MKL_ILP64_LIBRARY})
+    else()
+      list(APPEND BLAS_LIBRARIES ${MKL_LP64_LIBRARY})
+    endif()
+    if(USE_SEQUENTIAL)
+      list(APPEND BLAS_LIBRARIES ${MKL_SEQUENTIAL_LIBRARY})
+    else()
+      if(INTEL_OMP_LIBRARY)
+        list(APPEND BLAS_LIBRARIES ${MKL_INTEL_THREAD_LIBRARY} ${INTEL_OMP_LIBRARY})
+      else()
+        find_package(OpenMP REQUIRED COMPONENTS CXX)
+        list(APPEND BLAS_LIBRARIES ${MKL_GNU_THREAD_LIBRARY} OpenMP::OpenMP_CXX)
+      endif()
+    endif()
+    list(APPEND BLAS_LIBRARIES ${MKL_CORE_LIBRARY})
+    if(UNIX AND NOT APPLE)
+      list(INSERT BLAS_LIBRARIES 0 "-Wl,--start-group")
+      list(APPEND BLAS_LIBRARIES "-Wl,--end-group")
+    endif()
+    find_package(Threads REQUIRED)
+    list(APPEND BLAS_LIBRARIES ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+    set(SDCA_BLAS_DEFINITIONS ${SDCA_BLAS_DEFINITIONS} BLAS_MKL)
+    set(SDCA_BLAS_INCLUDE_DIRS ${MKL_INCLUDE_DIRS})
+    set(_sdca_external TRUE)
+  elseif(BLAS_Accelerate_LIBRARY)
+    set(SDCA_BLAS_DEFINITIONS BLAS_ACCELERATE)
+    # The CBLAS interface of macOS 13.3+ (the same calls): the older one is
+    # deprecated. Keep it only for an older deployment target.
+    if(NOT CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET VERSION_GREATER_EQUAL 13.3)
+      list(APPEND SDCA_BLAS_DEFINITIONS ACCELERATE_NEW_LAPACK)
+    endif()
+    set(_sdca_external TRUE)
+  elseif(Matlab_BLAS_LIBRARY)
+    set(BLAS_LIBRARIES ${Matlab_BLAS_LIBRARY})
+    set(SDCA_BLAS_DEFINITIONS BLAS_MATLAB)
+    set(SDCA_BLAS_INCLUDE_DIRS ${Matlab_INCLUDE_DIRS})
+    set(_sdca_external TRUE)
+  elseif(BLAS_FOUND OR BLAS_LIBRARIES)
+    # A Fortran-only BLAS is insufficient for the generic CBLAS wrapper.
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    set(CMAKE_REQUIRED_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/include/sdca/math")
+    unset(SDCA_CBLAS_LINKS CACHE)
+    check_cxx_source_compiles("#include \"cblas.h\"
+int main() { float x=1; double y=1;
+  cblas_sgemm(CblasColMajor,CblasNoTrans,CblasNoTrans,1,1,1,1,&x,1,&x,1,0,&x,1);
+  cblas_dgemm(CblasColMajor,CblasNoTrans,CblasNoTrans,1,1,1,1,&y,1,&y,1,0,&y,1);
+  return cblas_sdot(1,&x,1,&x,1)==cblas_ddot(1,&y,1,&y,1); }" SDCA_CBLAS_LINKS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    unset(CMAKE_REQUIRED_INCLUDES)
+    if(SDCA_CBLAS_LINKS)
+      set(SDCA_BLAS_DEFINITIONS BLAS_DEFAULT_LOCAL_HEADER)
+      set(_sdca_external TRUE)
+    endif()
   endif()
-  #list(APPEND BLAS_LIBRARIES "-lcblas")
-
 endif()
-
-if(BLAS_LIBRARIES AND Threads_FOUND)
-
-  set(BLAS_FOUND TRUE)
-  list(APPEND BLAS_LIBRARIES "-ldl" "-lm")
-  list(APPEND BLAS_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
-  message(STATUS "Selected BLAS libraries: ${BLAS_LIBRARIES}")
-
+if(_sdca_external)
+  set(SDCA_SELECTED_BLAS EXTERNAL)
 else()
-
-  set(BLAS_FOUND FALSE)
-  set(BLAS_LIBRARIES)
-  message(FATAL_ERROR "BLAS or Threads not found.")
-
+  if(SDCA_BLAS_BACKEND STREQUAL "EXTERNAL")
+    message(FATAL_ERROR "No usable external BLAS/CBLAS found. Set BLAS_LIBRARIES or choose BUILTIN.")
+  endif()
+  set(SDCA_SELECTED_BLAS BUILTIN)
+  set(SDCA_BLAS_DEFINITIONS BLAS_BUILTIN)
+  set(SDCA_BLAS_INCLUDE_DIRS)
+  set(BLAS_LIBRARIES "")
+  set(BLAS_LINKER_FLAGS "")
 endif()
+message(STATUS "libsdca BLAS backend: ${SDCA_SELECTED_BLAS} (${BLAS_LIBRARIES})")

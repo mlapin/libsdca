@@ -1,0 +1,14 @@
+# Library functions above the tools/quality.py complexity limits: "<path> <function>".
+# The check fails on a function missing here and on an entry back within the limits.
+python/libsdca/_cross_entropy.py cross_entropy
+python/libsdca/_torch_distill.h distillation_stats
+python/libsdca/_torch_distill.h prox_distillation_row
+python/libsdca/_torch_prox.h prox_entropy_row
+python/libsdca/_torch_topk_hinge.h multilabel_row_forward
+python/libsdca/_torch_topk_hinge.h topk_backward
+python/libsdca/_torch_topk_hinge.h topk_hinge_row
+python/libsdca/_triton_multilabel.py _smooth_forward
+python/libsdca/torch.py explain_backend
+src/matlab/mex_loss.cpp evaluate
+src/matlab/mex_prox.cpp mex_main
+src/matlab/mex_solve.cpp printHelp

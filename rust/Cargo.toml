@@ -1,0 +1,25 @@
+[package]
+name = "libsdca"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.74"
+description = "SDCA solvers and classification losses (bindings to the libsdca C++ library)"
+license = "MIT"
+authors = ["Maksim Lapin"]
+homepage = "https://mlapin.github.io/libsdca/"
+repository = "https://github.com/mlapin/libsdca"
+readme = "README.md"
+keywords = ["sdca", "svm", "softmax", "optimization", "machine-learning"]
+categories = ["science", "mathematics"]
+links = "sdca"
+build = "build.rs"
+include = ["build.rs", "src/**", "tests/**", "examples/**", "native/**", "README.md", "LICENSE"]
+
+[dependencies]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

@@ -9,40 +9,22 @@ namespace sdca {
 
 namespace logging {
 
-enum class level {
-  none = 0,
-  warning,
-  info,
-  verbose,
-  debug
-};
+enum class level { none = 0, warning, info, verbose, debug };
 
-enum class format {
-  short_e = 0,
-  short_f,
-  long_e,
-  long_f
-};
+enum class format { short_e = 0, short_f, long_e, long_f };
 
+extern level current_level;
+extern format current_format;
 
-extern level __level__;
-extern format __format__;
+inline level get_level() { return current_level; }
 
+inline void set_level(level level_) { current_level = level_; }
 
-inline level
-get_level() { return __level__; }
+inline format get_format() { return current_format; }
 
-inline void
-set_level(level __level) { __level__ = __level; }
-
-
-inline format
-get_format() { return __format__; }
-
-inline void
-set_format(format __format) {
-  __format__ = __format;
-  switch (__format) {
+inline void set_format(format format_) {
+  current_format = format_;
+  switch (format_) {
     case format::short_e:
       std::cout << std::setprecision(4) << std::scientific;
       break;
@@ -58,10 +40,8 @@ set_format(format __format) {
   }
 }
 
-
-inline std::string
-to_string(level __level) {
-  switch (__level) {
+inline std::string to_string(level level_) {
+  switch (level_) {
     case level::none:
       return "none";
     case level::warning:
@@ -73,12 +53,11 @@ to_string(level __level) {
     case level::debug:
       return "debug";
   }
+  return "unknown";
 }
 
-
-inline std::string
-to_string(format __format) {
-  switch (__format) {
+inline std::string to_string(format format_) {
+  switch (format_) {
     case format::short_e:
       return "short_e";
     case format::short_f:
@@ -88,15 +67,20 @@ to_string(format __format) {
     case format::long_f:
       return "long_f";
   }
+  return "unknown";
 }
 
-}
+}  // namespace logging
 
-#define LOG_WARNING if (logging::__level__ >= logging::level::warning) std::cout
-#define LOG_INFO if (logging::__level__ >= logging::level::info) std::cout
-#define LOG_VERBOSE if (logging::__level__ >= logging::level::verbose) std::cout
-#define LOG_DEBUG if (logging::__level__ >= logging::level::debug) std::cout
+#define LOG_WARNING \
+  if (logging::current_level >= logging::level::warning) std::cout
+#define LOG_INFO \
+  if (logging::current_level >= logging::level::info) std::cout
+#define LOG_VERBOSE \
+  if (logging::current_level >= logging::level::verbose) std::cout
+#define LOG_DEBUG \
+  if (logging::current_level >= logging::level::debug) std::cout
 
-}
+}  // namespace sdca
 
 #endif

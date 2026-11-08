@@ -1,0 +1,10 @@
+BasedOnStyle: Google
+Standard: Cpp11
+ColumnLimit: 100
+IndentWidth: 2
+PointerAlignment: Left
+DerivePointerAlignment: false
+# Some historical headers depend on include order. Formatting must not change it.
+SortIncludes: Never
+IncludeBlocks: Preserve
+ReflowComments: false

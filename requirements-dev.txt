@@ -1,0 +1,10 @@
+# Development tools only; none are required to build or use the library.
+ruff==0.11.13
+pytest==9.2.0
+pytest-xdist==3.8.0
+basedpyright==1.40.2
+clang-format==18.1.8
+clang-tidy==18.1.8
+lizard==1.17.31
+gcovr==8.7
+coverage[toml]==7.16.2

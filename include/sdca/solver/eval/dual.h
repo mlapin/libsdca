@@ -1,67 +1,46 @@
 #ifndef SDCA_SOLVER_EVAL_DUAL_H
 #define SDCA_SOLVER_EVAL_DUAL_H
 
-#include "sdca/solver/eval/types.h"
+#include "sdca/solver/data/output.h"
 
 namespace sdca {
 
-template <typename Int,
-          typename Data,
-          typename Output,
-          typename Objective,
-          typename Evaluation>
-inline void
-eval_dual_loss(
-    const Int,
-    const Output&,
-    const Objective&,
-    Data*,
-    Evaluation&
-  ) {}
-
-
-template <typename Int,
-          typename Data,
-          typename Result,
-          template <typename, typename> class Objective>
-inline void
-eval_dual_loss(
-    const Int i,
-    const multiclass_output& out,
-    const Objective<Data, Result>& obj,
-    Data* dual_variables,
-    eval_train<Result, multiclass_output>& eval
-  ) {
-  // Swap the ground truth label and a label at 0
-  out.move_front(i, dual_variables);
-
-  // The dual loss computation must not modify the variables
-  eval.dual_loss += obj.dual_loss(out.num_classes,
-                                  const_cast<const Data*>(dual_variables));
-
-  // Put back the ground truth
-  out.move_back(i, dual_variables);
+// The feasible block (class order) of stored duals in the evaluation's
+// arithmetic, and its conjugate loss; the stored duals are not modified.
+template <typename Work, typename Data, typename Objective>
+inline Work eval_dual_block(const size_type i, const multiclass_output& out, const Objective& obj,
+                            const Data* variables, Work* block) {
+  const size_type m = out.num_classes;
+  for (size_type j = 0; j < m; ++j) block[j] = static_cast<Work>(variables[j]);
+  out.move_front(i, block);
+  obj.feasible_dual(m, block);
+  const Work loss = obj.dual_loss(m, const_cast<const Work*>(block));
+  out.move_back(i, block);
+  return loss;
 }
 
-
-template <typename Int,
-          typename Data,
-          typename Result,
-          template <typename, typename> class Objective>
-inline void
-eval_dual_loss(
-    const Int i,
-    const multilabel_output& out,
-    const Objective<Data, Result>& obj,
-    Data* dual_variables,
-    eval_train<Result, multilabel_output>& eval
-  ) {
-  out.move_front(i, dual_variables);
-  eval.dual_loss += obj.dual_loss(out.num_classes, out.num_labels(i),
-                                  const_cast<const Data*>(dual_variables));
-  out.move_back(i, dual_variables);
+template <typename Work, typename Data, typename Objective>
+inline Work eval_dual_block(const size_type i, const multilabel_output& out, const Objective& obj,
+                            const Data* variables, Work* block) {
+  const size_type m = out.num_classes, p = out.num_labels(i);
+  for (size_type j = 0; j < m; ++j) block[j] = static_cast<Work>(variables[j]);
+  out.move_front(i, block);
+  obj.feasible_dual(m, p, block);
+  const Work loss = obj.dual_loss(m, p, const_cast<const Work*>(block));
+  out.move_back(i, block);
+  return loss;
 }
 
+template <typename Work, typename Data, typename Objective>
+inline Work eval_dual_block(const size_type i, const distribution_output& out, const Objective& obj,
+                            const Data* variables, Work* block) {
+  const size_type m = out.num_classes;
+  const double* q = out.row(i);
+  for (size_type j = 0; j < m; ++j) block[j] = static_cast<Work>(variables[j]);
+  obj.feasible_dual(m, q, block);
+  return obj.dual_loss(m, q, const_cast<const Work*>(block));
 }
+
+}  // namespace sdca
 
 #endif
