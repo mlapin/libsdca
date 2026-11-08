@@ -284,6 +284,7 @@ class JaxBackendTests:
                         gradient = jax.jit(jax.grad(loss))(z)
                     np.testing.assert_array_equal(gradient, expected, err_msg=f"{objective} {cpu}")
 
+    @pytest.mark.long
     def test_off_the_cpu_without_its_conditionals(self):
         """Off the CPU (mocked), top_k is lax.top_k and the nonsmooth top-k hinges form every
         margin without the CPU's conditionals (one only where float32 keys pick k > 1 from
@@ -748,6 +749,7 @@ class JaxBackendTests:
                 cross = -(q * jax.nn.log_softmax(z, -1)).sum(-1)
                 assert bool((value <= cross + 1e-14).all())
 
+    @pytest.mark.long
     @pytest.mark.parametrize("part", [(o, c) for o in TENSOR for c in (2, 7, 40)], ids=str)
     def test_float32_precision(self, part: tuple[str, int]):
         """precision="float32" solves in float32, to float32 accuracy against float64."""

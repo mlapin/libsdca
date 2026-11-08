@@ -24,7 +24,7 @@ jobs:
       - run: python tools/quality.py
 
   cpp:
-    # Each BLAS backend and each compiler once; tools/release_gate.py runs all four pairs.
+    # Each BLAS backend and each compiler once; the release gate runs all four pairs.
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -54,7 +54,8 @@ jobs:
       - run: bash tests/matlab/run_gateway_mock.sh
 
   coverage:
-    name: C++ coverage gate and CPU Python data
+    # Python coverage, which needs the GPU host paths too, is left to the release gate.
+    name: C++ coverage gate and extension builds
     runs-on: ubuntu-24.04
     env:
       OPENBLAS_NUM_THREADS: '1'
@@ -64,22 +65,17 @@ jobs:
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-dev.txt numpy scipy mpmath jax scikit-learn ninja
+      - run: python -m pip install -r requirements-dev.txt numpy
       - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       # Clang's own omp.h: GCC 13's uses attributes that Clang 18 rejects.
       - run: sudo apt-get update && sudo apt-get install -y libomp-18-dev
       - run: python tools/check_extension_builds.py --compiler g++ --compiler clang++-18
-      - run: python tools/coverage.py --collect-python
+      - run: python tools/coverage.py --cpp-only
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
-          name: cpu-python-coverage-${{ github.sha }}
-          include-hidden-files: true
-          path: |
-            build/coverage/.coverage
-            build/coverage/.coverage.sources.json
-            build/coverage/python-provisional.json
-            build/coverage/cpp.txt
+          name: cpp-coverage-${{ github.sha }}
+          path: build/coverage/cpp.txt
 
   sanitizers:
     runs-on: ubuntu-22.04
@@ -116,7 +112,7 @@ jobs:
           python -m pip install scikit-learn triton jax ninja &&
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: python python/build.py --blas-backend ${{ matrix.backend }}
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group ${{ matrix.group }}
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group ${{ matrix.group }} -m 'not long'
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group ${{ matrix.group }} -m serial
       - if: matrix.group == 'all'
         run: >-
@@ -140,7 +136,7 @@ jobs:
       - run: CXX=c++ python python/build.py --blas-backend EXTERNAL
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group core -m serial
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group torch
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group torch -m 'not long'
 
   rust:
     # The tests run under line coverage on stable (no doctests) and in full at the MSRV.
@@ -174,11 +170,11 @@ jobs:
         run: cargo fmt --check && cargo clippy -- -D warnings
       - run: bash rust/consumer/ci.sh builtin
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libblas-dev
-      - run: for form in l static; do bash rust/consumer/ci.sh reference $form; done
+      - run: bash rust/consumer/ci.sh reference l static
       - run: sudo apt-get install -y --no-install-recommends libopenblas-dev libopenblas-pthread-dev
-      - run: for form in l l-file abs-so static L-l; do bash rust/consumer/ci.sh openblas $form; done
+      - run: bash rust/consumer/ci.sh openblas l l-file abs-so static L-l
       - run: sudo apt-get install -y --no-install-recommends libblis-dev libblis-pthread-dev
-      - run: for form in l static; do bash rust/consumer/ci.sh blis $form; done
+      - run: bash rust/consumer/ci.sh blis l static
 
   package:
     runs-on: ubuntu-22.04

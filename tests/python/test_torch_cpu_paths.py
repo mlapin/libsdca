@@ -322,7 +322,7 @@ class AutomaticExtensionTests:
     @pytest.mark.skipif(
         not _cpu_entropy.buildable(), reason="needs ninja, a C++ compiler and Python.h"
     )
-    @pytest.mark.slow
+    @pytest.mark.long
     def test_concurrent_first_builds_share_one_complete_library(self) -> None:
         """Processes building at once each load a complete library; one build stays cached."""
         with tempfile.TemporaryDirectory() as directory:

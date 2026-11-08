@@ -154,7 +154,7 @@ class WideFloat32ProxTests:
                     assert grad_error <= BUDGET, "gradient"
                     assert value_error <= BUDGET, "value"
 
-    @pytest.mark.slow
+    @pytest.mark.long
     @pytest.mark.parametrize(
         ("name", "picked"), STREAMED, ids=[n + "".join(f"-{i}" for i in p) for n, p in STREAMED]
     )

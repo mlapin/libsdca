@@ -44,9 +44,10 @@ run through `tests/python/interpreter.py`.
 equal share of the CPUs as `OMP_NUM_THREADS` unless it is set; the CPU
 extension is built once before the workers start. Tests marked `slow` (about a
 minute on a loaded machine) start first, one per worker under
-`--dist worksteal`. A test that needs the machine to itself (thread timing) is
-marked `serial`: `-n` deselects it, even when named, and the `-m serial` run,
-without `-n`, runs it (only `core` and `all` have such tests; for `torch` or
+`--dist worksteal`, and so do those marked `long` (over a minute on a 4-CPU
+runner), which CI deselects with `-m "not long"` and the release gate runs. A
+test that needs the machine to itself (thread timing) is marked `serial`: `-n`
+deselects it, even when named, and the `-m serial` run, without `-n`, runs it (only `core` and `all` have such tests; for `torch` or
 `jax` it selects none and pytest exits with 5). Keep tests safe to run in
 parallel: temporary files in `tmp_path` or `tempfile` directories, environment
 changes through `mock.patch.dict`, and no fixed ports. A loop of many slow cases is split into parametrized parts
@@ -128,13 +129,11 @@ The CPU interpreter needs the development tools, NumPy, SciPy, mpmath, PyTorch,
 JAX, scikit-learn and Ninja. A CPU-only run still reports missing GPU host code;
 it does not weaken the threshold or omit host modules.
 
-GitHub's CPU runner uses `tools/coverage.py --collect-python`: it runs the CPU
-and optional CPU-extension suites, enforces the C++ 90% floor, and uploads raw
-Python coverage, its source manifest, and `python-provisional.json`. The output
-is explicitly provisional because that runner cannot exercise GPU host paths.
-This collection mode does not certify Python's release floor: release
-verification combines compatible CPU/GPU data and still requires 90% Python
-host coverage.
+CI runs `tools/coverage.py --cpp-only`: the C++ suites and their 90% floor.
+`--collect-python` also runs the CPU and CPU-extension suites under coverage and
+writes provisional Python data without evaluating its floor, since a CPU-only
+run cannot exercise the GPU host paths. Release verification combines
+compatible CPU/GPU data and still requires 90% Python host coverage.
 
 `vendor/` and the MATLAB scripts are outside the format and Python lint/type
 gates; tests are exempt from complexity limits. MATLAB gateways have separate

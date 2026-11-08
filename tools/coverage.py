@@ -151,7 +151,9 @@ def python_report(build: Path, additional: list[Path], *, collect_only: bool = F
     return float(json.loads(report_file.read_text())["totals"]["percent_covered"])
 
 
-def report(build: Path, additional: list[Path], *, collect_python: bool = False) -> None:
+def report(
+    build: Path, additional: list[Path], *, collect_python: bool = False, cpp_only: bool = False
+) -> None:
     run(
         sys.executable,
         "-m",
@@ -172,7 +174,8 @@ def report(build: Path, additional: list[Path], *, collect_python: bool = False)
         str(CPP_FLOOR),
         build,
     )
-    python_report(build, additional, collect_only=collect_python)
+    if not cpp_only:
+        python_report(build, additional, collect_only=collect_python)
 
 
 def main() -> None:
@@ -184,6 +187,9 @@ def main() -> None:
         "--collect-python",
         action="store_true",
         help="Enforce C++ coverage and collect provisional Python data without the combined Python floor",
+    )
+    parser.add_argument(
+        "--cpp-only", action="store_true", help="Only the C++ suites and their coverage floor"
     )
     parser.add_argument(
         "--write-python-manifest",
@@ -203,8 +209,9 @@ def main() -> None:
         return
     if not args.report_only:
         cpp_tests(args.build, args.jobs)
-        python_tests(args.build)
-    report(args.build, args.python_data, collect_python=args.collect_python)
+        if not args.cpp_only:
+            python_tests(args.build)
+    report(args.build, args.python_data, collect_python=args.collect_python, cpp_only=args.cpp_only)
 
 
 if __name__ == "__main__":

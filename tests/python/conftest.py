@@ -7,8 +7,8 @@ tree and skips the tests of source-tree helpers.
 
 Under pytest-xdist (-n) each worker gets an equal share of the CPUs as OMP_NUM_THREADS
 (unless set), the CPU extension is built once before the workers start, tests marked slow
-start first (one per worker under --dist worksteal), and tests marked serial are
-deselected: run them in a second pass, -m serial without -n.
+or long start first (one per worker under --dist worksteal), and tests marked serial are
+deselected: run them in a second pass, -m serial without -n. CI passes -m "not long".
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ GROUPS = ("core", "torch", "jax")
 SOURCE_ONLY = {"test_build_config.py"}
 SERIAL = "serial: needs the machine to itself (timing); deselected under -n, run with -m serial"
 SLOW = "slow: takes about a minute on a loaded machine; started first under -n"
+LONG = "long: over a minute on a 4-CPU runner; started first under -n, CI deselects it"
 _LOCATION = pytest.StashKey[Path]()
 # Builds (or loads) the CPU extension as the first CPU loss call of a test would.
 PREBUILD = """
@@ -99,6 +100,7 @@ def pytest_configure(config: pytest.Config) -> None:
         os.environ["OMP_NUM_THREADS"] = str(max(1, available_cpus() // workers))
     config.addinivalue_line("markers", SERIAL)
     config.addinivalue_line("markers", SLOW)
+    config.addinivalue_line("markers", LONG)
     config.stash[_LOCATION] = tested_libsdca(bool(config.getoption("installed")))
 
 
@@ -133,8 +135,12 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 def slow_first(items: list[pytest.Item], workers: int) -> list[pytest.Item]:
     """items with the slow ones at the start of the contiguous runs that --dist worksteal
     hands the workers (run k: the items left over divided by the workers left)."""
-    slow = [item for item in items if item.get_closest_marker("slow")]
-    rest = iter([item for item in items if not item.get_closest_marker("slow")])
+
+    def is_slow(item: pytest.Item) -> bool:
+        return any(item.get_closest_marker(name) for name in ("slow", "long"))
+
+    slow = [item for item in items if is_slow(item)]
+    rest = iter([item for item in items if not is_slow(item)])
     ordered, left = [], len(items)
     for k in range(workers):
         size = left // (workers - k)
