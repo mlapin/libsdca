@@ -22,10 +22,10 @@ $h_j = 1 + z_j - z_y$ ($j \neq y$) sorted as $h_{[1]} \ge h_{[2]} \ge \dots$
 | `topk_hinge_beta` (`topk_hinge`) | $\frac{1}{k}\sum_{i \le k} \max(0, h_{[i]})$ | `k`, `gamma` | Top-$k$ SVM on each of $k$ worst margins [4] |
 | `multilabel_hinge` | $\max\!\big(0, 1 + \max_{j \notin Y} z_j - \min_{y \in Y} z_y\big)$ | `gamma` | Ranked multilabel SVM [2] |
 | `multilabel_cross_entropy` | $\log \sum_j \exp(z_j) - \frac{1}{|Y|}\sum_{y \in Y} z_y$ | — | Softmax cross-entropy to uniform distribution over $Y$ |
-| `proximal_cross_entropy` | $\min_u \big\{\operatorname{CE}(u, y) + \frac{1}{2\alpha}\|u - z\|_2^2\big\}$ | `alpha` | Moreau envelope of cross-entropy [5] (loss evaluation only) |
-| `distillation` | $-\sum_j p_j \log q_j$, with $p = \operatorname{softmax}(t/T)$, $q = \operatorname{softmax}(z/T)$ | `temperature` | Knowledge distillation to teacher logits $t$ [6] |
-| `proximal_distillation` | $\min_u \big\{H(p, \operatorname{softmax}(u)) + \frac{1}{2\alpha}\|u - z/T\|_2^2\big\}$ | `temperature`, `alpha` | Damped distillation step (Moreau envelope in $z/T$) |
-| `linear_cross_entropy` | $\operatorname{CE}(h W^\top + b, y)$ evaluated in row chunks without materializing logits | `chunk_bytes`, `recompute` | Language-model / large-vocabulary classification head (PyTorch) |
+| `proximal_cross_entropy` | $\min_u \big\{\mathrm{CE}(u, y) + \frac{1}{2\alpha}\|u - z\|_2^2\big\}$ | `alpha` | Moreau envelope of cross-entropy [5] (loss evaluation only) |
+| `distillation` | $-\sum_j p_j \log q_j$, with $p = \mathrm{softmax}(t/T)$, $q = \mathrm{softmax}(z/T)$ | `temperature` | Knowledge distillation to teacher logits $t$ [6] |
+| `proximal_distillation` | $\min_u \big\{H(p, \mathrm{softmax}(u)) + \frac{1}{2\alpha}\|u - z/T\|_2^2\big\}$ | `temperature`, `alpha` | Damped distillation step (Moreau envelope in $z/T$) |
+| `linear_cross_entropy` | $\mathrm{CE}(h W^\top + b, y)$ evaluated in row chunks without materializing logits | `chunk_bytes`, `recompute` | Language-model / large-vocabulary classification head (PyTorch) |
 
 - **Hinge smoothing (`gamma`):** `gamma = 0` (default) is the nonsmooth hinge;
   `gamma > 0` is its Moreau envelope $\max_{p \in S} \langle h, p \rangle - \frac{\gamma}{2}\|p\|_2^2$,
@@ -197,9 +197,9 @@ features `(d, n)` and returns `W (d, m)` and `A (m, n)`.
 ## Distillation losses
 
 `distillation_loss` and `proximal_distillation_loss` take student and teacher **logits** of the
-same shape and dtype; the teacher receives no gradient. With $p = \operatorname{softmax}(t/T)$ and
-$q = \operatorname{softmax}(z/T)$, the student gradient is $(q - p)/T$ (or $(\pi - p)/T$ at the
-Moreau-envelope optimum $\pi = \operatorname{softmax}(u^\star)$ for `proximal_distillation_loss`),
+same shape and dtype; the teacher receives no gradient. With $p = \mathrm{softmax}(t/T)$ and
+$q = \mathrm{softmax}(z/T)$, the student gradient is $(q - p)/T$ (or $(\pi - p)/T$ at the
+Moreau-envelope optimum $\pi = \mathrm{softmax}(u^\star)$ for `proximal_distillation_loss`),
 with no $T^2$ multiplier. Because each entry is formed from a centered log-ratio via `expm1`,
 identical student and teacher logits produce an **exact zero gradient** in every dtype
 ([softmax cancellation](softmax-collapse.md#softmax-cancellation)).

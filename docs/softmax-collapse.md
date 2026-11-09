@@ -10,13 +10,13 @@ paper's experiments.
 
 For logits $z$ and target $y$, let $\tau = \sum_{j \neq y} \exp(z_j - z_y)$. Cross-entropy is
 $\log(1 + \tau)$ and its target gradient is $p_y - 1 = -\tau / (1 + \tau)$. When $\tau$ falls
-below $\frac{1}{2}\operatorname{ulp}(1)$ ($2^{-24} \approx 6\times 10^{-8}$ in `float32`,
+below $\frac{1}{2}\mathrm{ulp}(1)$ ($2^{-24} \approx 6\times 10^{-8}$ in `float32`,
 $2^{-53} \approx 1.1\times 10^{-16}$ in `float64`), $1 + \tau$ rounds to $1$: both the loss
 and target gradient collapse to exact zero while competitor gradients remain nonzero, breaking
 the zero-sum gradient invariant. For two classes this occurs at margin $16.6$ (`float32`) or
 $36.7$ (`float64`); with $C - 1$ equal competitors it shifts by $\log(C - 1)$.
 
-`libsdca` evaluates the loss as $\operatorname{log1p}(\tau)$ and forms the target gradient
+`libsdca` evaluates the loss as $\mathrm{log1p}(\tau)$ and forms the target gradient
 from the competitor sum (Eqs. 5–6 of the paper), remaining nonzero down to the output
 dtype's subnormal limit (`104` in `float32`, `745` in `float64` for two classes):
 
@@ -43,14 +43,14 @@ cross-entropy, multilabel cross-entropy, and the hinges) on CPU and CUDA in `flo
 
 ## Softmax cancellation
 
-The knowledge-distillation gradient is $\operatorname{softmax}(z_{\mathrm{S}} / T) - \operatorname{softmax}(z_{\mathrm{T}} / T)$.
+The knowledge-distillation gradient is $\mathrm{softmax}(z_{\mathrm{S}} / T) - \mathrm{softmax}(z_{\mathrm{T}} / T)$.
 As student logits $z_{\mathrm{S}}$ approach teacher logits $z_{\mathrm{T}}$, subtracting the
 two rounded probability vectors loses significant digits: even at $z_{\mathrm{S}} = z_{\mathrm{T}}$,
 PyTorch returns up to $4.6\times 10^{-9}$ in `float32` ($2.2\times 10^{-3}$ in `bfloat16`)
 instead of zero.
 
 `libsdca.distillation_loss` evaluates each entry from the centered log-ratio $z_{\mathrm{S}} - z_{\mathrm{T}}$
-using $\operatorname{expm1}$ (Eq. 9 of the paper), producing an **exact zero gradient** at
+using $\mathrm{expm1}$ (Eq. 9 of the paper), producing an **exact zero gradient** at
 equal logits in every dtype:
 
 ```python
@@ -66,7 +66,7 @@ addition $a + b \bmod 53$ batch of $32 \times 53$ logits).*
 
 ## Relation to the paper
 
-`libsdca` implements the paper's $\operatorname{log1p}$ and centered-$\operatorname{expm1}$
+`libsdca` implements the paper's $\mathrm{log1p}$ and centered-$\mathrm{expm1}$
 formulations inside its own fused CUDA, C++ ATen, JAX and C ABI kernels, independently of
 external framework patches ([numerics.md](numerics.md)).
 

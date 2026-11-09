@@ -4,9 +4,9 @@ What `libsdca` 0.3.0 guarantees in floating point, how it is verified, and its k
 (measured on NVIDIA A100 / H100 GPUs and Linux x86-64 / macOS arm64 CPUs with PyTorch 2.15).
 
 - **No softmax collapse:** Naive cross-entropy rounds $1 + \tau$ ($\tau = \sum_{j \neq y} e^{z_j - z_y}$)
-  to $1$ once $\tau < \frac{1}{2}\operatorname{ulp}(1)$, collapsing both the loss and target
+  to $1$ once $\tau < \frac{1}{2}\mathrm{ulp}(1)$, collapsing both the loss and target
   gradient to zero (near margin `16.6` in `float32` and `36.7` in `float64` for two classes;
-  [softmax collapse](softmax-collapse.md)). `libsdca` evaluates $\operatorname{log1p}(\tau)$
+  [softmax collapse](softmax-collapse.md)). `libsdca` evaluates $\mathrm{log1p}(\tau)$
   and forms the target gradient directly from $-\tau / (1 + \tau)$, staying nonzero down to the
   output dtype's subnormal underflow limit (`104` in `float32`, `745` in `float64`; see
   [aggregate-tail limitations](#aggregate-tail-limitations) for exceptions).
@@ -32,7 +32,7 @@ What `libsdca` 0.3.0 guarantees in floating point, how it is verified, and its k
 | `multiclass_hinge` on standardized `digits`, lowest certified gap (5000 epochs) | `4.7e-6` | `3.5e-7` (`tol=1e-6` in 2132 epochs; `float64` data: 2100) | `< 1e-7` (2610 epochs) |
 
 - Keeping `W` and the duals in `float32` during `fit` loses coordinate updates smaller than
-  $\frac{1}{2}\operatorname{ulp}$ near the optimum (`89%` of weight updates and `75%` of dual
+  $\frac{1}{2}\mathrm{ulp}$ near the optimum (`89%` of weight updates and `75%` of dual
   updates on `digits`), stalling convergence at `4.7e-6`.
 - The default `"float64"` mode maintains `W` and the duals in `double` and certifies their
   rounded `float32` copies at each evaluation, reaching `3.5e-7` in the same epoch count as
@@ -77,7 +77,7 @@ below shows the first margin $g$ at which the returned target gradient becomes `
   (`4.5×` to `20×` wider margin range than unpatched `F.cross_entropy`).
 - **Why naive $\log(1 + \tau)$ collapses early (and differs between CPU and CUDA in PyTorch 2.15):**
   Evaluating $p_0 - 1$ from the normalized probability rounds to `0` as soon as
-  $e^{-g} < \frac{1}{2}\operatorname{ulp}(1)$ (`5.56` in `bfloat16`, `7.63` in `float16`,
+  $e^{-g} < \frac{1}{2}\mathrm{ulp}(1)$ (`5.56` in `bfloat16`, `7.63` in `float16`,
   `16.64` in `float32`, `36.74` in `float64`). On CUDA, PyTorch 2.15 upcasts 16-bit softmax
   internals to `float32`, moving the 16-bit collapse from `5.56–7.63` to the `float32` cliff
   (`~16.7`), while still losing subnormal gradients between `16.7` and `93.0`.
@@ -86,7 +86,7 @@ below shows the first margin $g$ at which the returned target gradient becomes `
 ## How it is verified
 
 Instead of comparing against `float64` `F.cross_entropy` (which collapses at margin `36.7`
-without a $\operatorname{log1p}$ normalizer), the verification suite evaluates every loss
+without a $\mathrm{log1p}$ normalizer), the verification suite evaluates every loss
 value and gradient entry against a 100-digit `mpmath` oracle on the exact represented inputs:
 
 | Verification suite | What it tests | Result |
