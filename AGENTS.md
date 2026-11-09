@@ -1,7 +1,7 @@
 # Using `libsdca` (Guide for AI Coding Assistants)
 
-A short reference for AI coding assistants integrating `libsdca` into user code. Usage
-examples are in the [README](README.md#quick-start); details are in the linked guides.
+A short reference for AI coding assistants integrating `libsdca` into user code; usage
+examples are in the [README](README.md#quick-start) and the linked guides.
 
 ## Installation
 
@@ -24,10 +24,10 @@ cargo add libsdca                # Rust crate (Rust>=1.74 and a C++11 compiler)
 | --- | --- | --- |
 | Replace `torch.nn.CrossEntropyLoss` (integer class labels only, no label smoothing) | `libsdca.CrossEntropyLoss`, `cross_entropy` | [TORCH.md](python/TORCH.md#replace-pytorch-cross-entropy) |
 | Large-vocabulary head + cross-entropy without `(N, V)` logits | `LinearCrossEntropyLoss`, `linear_cross_entropy` | [TORCH.md](python/TORCH.md#linear-layer-and-cross-entropy-without-the-logits) |
-| Top-$k$, hinge and multilabel losses in PyTorch | `TopKCrossEntropyLoss`, `TopKHingeLoss`, `MulticlassHingeLoss`, `MultilabelHingeLoss`, `MultilabelCrossEntropyLoss` | [TORCH.md](python/TORCH.md) |
+| Top-*k*, hinge and multilabel PyTorch losses | `TopKCrossEntropyLoss`, `TopKHingeLoss`, `MulticlassHingeLoss`, `MultilabelHingeLoss`, `MultilabelCrossEntropyLoss` | [TORCH.md](python/TORCH.md) |
 | Logit distillation in PyTorch | `DistillationLoss`, `distillation_loss` | [TORCH.md](python/TORCH.md#teacher-logits-and-distillation) |
 | Losses in JAX (`jit`, `grad`, `vmap`) | `libsdca.jax` | [JAX.md](python/JAX.md) |
-| Linear or kernel SVM / softmax classifier, scikit-learn API | `libsdca.SDCAClassifier` | [python/README.md](python/README.md#classifier) |
+| Linear or kernel SVM / softmax classifier (scikit-learn) | `libsdca.SDCAClassifier` | [python/README.md](python/README.md#classifier) |
 | Same, with duality-gap history and warm starts | `libsdca.fit` | [python/README.md](python/README.md#training) |
 | Rust, C++, C, MATLAB | crate `libsdca`, headers, `libsdca_c`, `matsdca_*` | [Rust](rust/README.md), [C++](docs/CPP.md), [C](docs/C.md), [MATLAB](docs/MATLAB.md) |
 
@@ -43,7 +43,7 @@ cargo add libsdca                # Rust crate (Rust>=1.74 and a C++11 compiler)
   ([TORCH.md](python/TORCH.md#teacher-logits-and-distillation)).
 - **Memory:** CUDA losses can reuse the logits buffer for the gradient when nothing else
   references it ([TORCH.md](python/TORCH.md#memory)).
-- **Solver objective:** $\frac12\|W\|_2^2 + C\sum_i \ell_i$ with no intercept; standardize
+- **Solver objective:** $\frac12\Vert W \Vert_2^2 + C\sum_i \ell_i$ with no intercept; standardize
   features; for $d \gg n$ pass a Gram matrix ([python/README.md](python/README.md#training),
   [API.md](docs/API.md#options)).
 - **Convergence:** only `status == "solved"` certifies the duality gap

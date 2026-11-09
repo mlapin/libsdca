@@ -35,19 +35,19 @@ logits.grad                                          # [[-2.0612e-09, 2.0612e-09
 ![Target gradient error against margin](figures/pytorch-softmax-collapse.png)
 
 *Target-gradient relative error vs. prediction margin (1,000 classes, H100, 100-digit
-reference). At error = 1, the gradient has collapsed to exact zero.*
+reference). At error = 1, the gradient collapses to zero.*
 
-The same formulation is used across every `libsdca` loss (top-$k$ cross-entropy, proximal
+The same formulation is used across every `libsdca` loss (top-*k* cross-entropy, proximal
 cross-entropy, multilabel cross-entropy, and the hinges) on CPU and CUDA in `float16`,
 `bfloat16`, `float32` and `float64`.
 
 ## Softmax cancellation
 
 The knowledge-distillation gradient is $\mathrm{softmax}(z_{\mathrm{S}} / T) - \mathrm{softmax}(z_{\mathrm{T}} / T)$.
-As student logits $z_{\mathrm{S}}$ approach teacher logits $z_{\mathrm{T}}$, subtracting the
-two rounded probability vectors loses significant digits: even at $z_{\mathrm{S}} = z_{\mathrm{T}}$,
-PyTorch returns up to $4.6\times 10^{-9}$ in `float32` ($2.2\times 10^{-3}$ in `bfloat16`)
-instead of zero.
+As student logits $z_{\mathrm{S}}$ approach teacher logits $z_{\mathrm{T}}$, subtracting
+the two rounded probability vectors loses significant digits: even at $z_{\mathrm{S}} = z_{\mathrm{T}}$,
+PyTorch returns up to $4.6\times 10^{-9}$ in `float32` and $2.2\times 10^{-3}$ in `bfloat16`
+instead of exact zero.
 
 `libsdca.distillation_loss` evaluates each entry from the centered log-ratio $z_{\mathrm{S}} - z_{\mathrm{T}}$
 using $\mathrm{expm1}$ (Eq. 9 of the paper), producing an **exact zero gradient** at
@@ -61,20 +61,20 @@ torch.count_nonzero(student.grad)                    # tensor(0)
 
 ![Soft-target gradient as the student approaches the teacher](figures/softmax-cancellation.png)
 
-*Distillation gradient norm as student logits approach teacher logits ($T = 1$, modular
-addition $a + b \bmod 53$ batch of $32 \times 53$ logits).*
+*Distillation gradient norm as student logits approach teacher logits* ($T = 1$, *modular
+addition* $a + b \bmod 53$, *batch* $32 \times 53$).
 
 ## Relation to the paper
 
-`libsdca` implements the paper's $\mathrm{log1p}$ and centered-$\mathrm{expm1}$
-formulations inside its own fused CUDA, C++ ATen, JAX and C ABI kernels, independently of
-external framework patches ([numerics.md](numerics.md)).
+`libsdca` implements the paper's `log1p` and centered `expm1` formulations inside its own
+fused CUDA, C++ ATen, JAX and C ABI kernels, independently of external framework patches
+([numerics.md](numerics.md)).
 
 ## Reproduction
 
 We reproduced Sections 3, 6 and 7 of Barron et al. on an H100 (and verified on an A100):
 - **Grokking on $a + b \bmod 31$ (Table 1, Fig. 5):** A 1-layer ReLU transformer trained for
-  10,000 full-batch epochs with AdamW ($\epsilon \in \{10^{-8}, 10^{-12}, 10^{-16}\}$) on a
+  10,000 full-batch epochs with AdamW ($\epsilon \in \lbrace 10^{-8}, 10^{-12}, 10^{-16} \rbrace$) on a
   50/50 split of the $31^2 = 961$ pairs (**$480$ training examples** and $481$ test examples),
   across 5 random seeds (`0–4`, plus a second set `5–9`). At each epoch, a training example
   (one row of the $480 \times 31$ training logit matrix) is counted as *collapsed* if its
@@ -84,13 +84,13 @@ We reproduced Sections 3, 6 and 7 of Barron et al. on an H100 (and verified on a
 Test accuracy (%) on $a + b \bmod 31$ at Adam $\epsilon = 10^{-8} / 10^{-12} / 10^{-16}$,
 and final logit margin at $\epsilon = 10^{-16}$:
 
-| dtype | Loss | Paper (5 JAX seeds) | Reproduction (seeds 0–4) | Reproduction (seeds 5–9) | Margin ($\epsilon=10^{-16}$) |
+| dtype | Loss | Paper | Seeds 0–4 | Seeds 5–9 | Margin ($\epsilon=10^{-16}$) |
 | --- | --- | --- | --- | --- | ---: |
 | `float32` | Fixed CE (paper) | 100.0 / 99.6 / 99.0 | 98.3 / 97.8 / 97.2 | 100.0 / 99.9 / 100.0 | 36.8 |
 | `float32` | Standard CE (`F.cross_entropy`) | 94.3 / 96.4 / 96.5 | 92.5 / 93.4 / 92.8 | — | 12.9 |
 | `float32` | `libsdca.CrossEntropyLoss` | — | 98.3 / 97.3 / 97.3 | — | 36.8 |
 | `bfloat16` | `libsdca.CrossEntropyLoss` | — | 99.2 / 98.3 / 98.2 | — | 36.9 |
-| `float32` | `libsdca.TopKHingeLoss(k=3, gamma=1, variant="alpha")` | — | **100.0 / 100.0 / 100.0** | **100.0 / 100.0 / 100.0** | 1.0 |
+| `float32` | `TopKHingeAlphaLoss(k=3, gamma=1)` | — | **100.0 / 100.0 / 100.0** | **100.0 / 100.0 / 100.0** | 1.0 |
 
 Key takeaways:
 
@@ -100,17 +100,14 @@ Key takeaways:
   pushing competitor logits down. The batch gradient no longer sums to zero, causing
   margins to stall at `12.9` and test accuracy to drop by `5–6` points (`92.5–93.4%`).
 - **`libsdca.CrossEntropyLoss` matches the paper's Fixed CE (`0 / 480` collapsed examples,
-  identical equilibrium margins `17.9 / 27.4 / 36.8`):** On identical seeds, `libsdca` and
-  the paper's Fixed CE formula produce the same accuracy (`98.3 / 97.3 / 97.3%` vs.
-  `98.3 / 97.8 / 97.2%`). The `1–2` point gap between seeds `0–4` and the paper's
-  `99.0–100.0%` (which used JAX PRNG seeds) comes from a single hard 50/50 data split
-  (seed `2`, which ends at `89.4–94.6%` while seeds `0` and `4` reach `100.0%`, and where
-  `bfloat16` quantization happens to land ~1 point higher); on seeds `5–9`, exact-gradient
-  CE reaches **`99.9–100.0%`**, matching the paper.
-- **Smooth top-$k$ hinge (`TopKHingeLoss`) avoids $\epsilon$-driven margin growth and solves
+  equilibrium margins `17.9 / 27.4 / 36.8`):** On identical seeds, `libsdca` and Fixed CE
+  give the same accuracy (`98.3 / 97.3 / 97.3%` vs. `98.3 / 97.8 / 97.2%`). Seeds `0–4`
+  include one hard 50/50 split (seed `2`: `89.4–94.6%`, vs. `100.0%` on seeds `0` and `4`);
+  on seeds `5–9`, exact-gradient CE reaches **`99.9–100.0%`**, matching the paper.
+- **Smooth top-*k* hinge (`TopKHingeLoss`) avoids $\epsilon$-driven margin growth and solves
   every seed to `100.0%`:** Because cross-entropy gradients never vanish completely, AdamW
   keeps inflating logits until $e^{-m} \approx \epsilon$ (`17.9` $\to$ `36.8`). Smooth
-  top-$k$ hinge ($\gamma = 1$) instead has an exact zero gradient once the margin reaches
+  top-*k* hinge ($\gamma = 1$) instead has an exact zero gradient once the margin reaches
   `1.0`, solving all 10 seeds (including seed `2`) to `100.0%` test accuracy across all $\epsilon$.
 - **Exact cancellation prevents student drift in distillation:** When a student MLP is
   initialized at a `100%`-accurate teacher on $a + b \bmod 53$, standard `bfloat16`

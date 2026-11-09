@@ -1,7 +1,7 @@
 # C interface
 
 `include/sdca/c_api.h` declares the exception-safe C ABI used by the Python and Rust
-bindings and available to any language with a C FFI.
+bindings and available to any language with a C foreign function interface.
 
 ## Building
 
@@ -20,7 +20,12 @@ target_link_libraries(my_program PRIVATE libsdca::sdca_c)
 ```
 
 Without CMake, compile `src/c_api.cpp` directly with any C++11 compiler:
-`c++ -std=c++11 -O2 -shared -fPIC -pthread -fno-fast-math -ffp-contract=off -fvisibility=hidden -fvisibility-inlines-hidden -DBLAS_BUILTIN '-DSDCA_VERSION="0.3.0"' -Iinclude src/c_api.cpp -o libsdca_c.so`.
+
+```bash
+c++ -std=c++11 -O2 -shared -fPIC -pthread -fno-fast-math -ffp-contract=off \
+  -fvisibility=hidden -fvisibility-inlines-hidden -DBLAS_BUILTIN \
+  '-DSDCA_VERSION="0.3.0"' -Iinclude src/c_api.cpp -o libsdca_c.so
+```
 
 ## Usage
 
@@ -69,7 +74,7 @@ Used by the Python and JAX bindings to evaluate losses directly on tensor buffer
 | --- | --- |
 | `sdca_cross_entropy_forward`, `sdca_cross_entropy_backward` | Integer-target cross-entropy with class weights and `ignore_index` |
 | `sdca_loss_gradient_rows` | Any `enum sdca_loss` on integer labels or a `0/1` mask |
-| `sdca_distillation_forward`, `sdca_distillation_backward` | `distillation_loss` on student and teacher logits at temperature `T` |
+| `sdca_distillation_forward`, `sdca_distillation_backward` | `distillation_loss` on student and teacher logits |
 | `sdca_proximal_distillation_rows` | `proximal_distillation_loss` values and gradients |
 
 See [API.md](API.md) for shared option defaults and definitions.

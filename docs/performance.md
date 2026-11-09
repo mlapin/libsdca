@@ -10,7 +10,7 @@ Ratios are `libsdca` time (or memory) divided by the reference's: below `1.0` me
 | | GPU | CPU (Linux) | CPU (macOS) |
 | --- | --- | --- | --- |
 | Hardware | NVIDIA A100-SXM4-80GB | AMD EPYC 7J13 (32 cores) | Apple M5 Pro |
-| Software | PyTorch 2.15.0+cu132, Triton 3.9.0, Liger 0.8.5, JAX 0.12.0.1 | PyTorch 2.15.0, JAX 0.12.0.1, scikit-learn 1.9.1 | PyTorch 2.15.0, JAX 0.12.0.1 |
+| Software | PyTorch 2.15, Triton 3.9, Liger 0.8.5, JAX 0.12 | PyTorch 2.15, JAX 0.12, sklearn 1.9 | PyTorch 2.15, JAX 0.12 |
 | Threads | — | 32 and 1 | 18 and 1 |
 
 CUDA timings use CUDA events after warm-up (excluding compilation); CPU timings measure
@@ -63,8 +63,8 @@ with ratios to compiled PyTorch in `bfloat16` (`float32` in parentheses):
 | Distillation, 65536 × 100 | 0.207 | 0.294 | 0.309 | 0.70 (0.65) |
 | Distillation, 16384 × 1000 | 0.354 | 0.301 | 0.501 | 1.18 (1.21) |
 
-- `libsdca` beats eager PyTorch in all **24 / 24** training cells (up to `38×` faster on
-  top-5 CE) and beats `torch.compile` in **21 / 24** cells (`1.2–3.2×` faster).
+- `libsdca` beats eager PyTorch in all **24 / 24** cells (up to `38×` faster on top-5 CE)
+  and beats `torch.compile` in **21 / 24** (`1.2–3.2×` faster).
 - Only `16384 × 1000` `float32` masked CE (`1.02×`) and `16384 × 1000` distillation
   (`1.18–1.21×`) trail `torch.compile`.
 
@@ -75,7 +75,7 @@ with ratios to compiled PyTorch in `bfloat16` (`float32` in parentheses):
   other reference holds them (`1066 MiB` peak extra allocation on an `8192 × 128256`
   `bfloat16` LLM head step, vs. `2068 MiB` inside `torch.compile` and `8080 MiB` for eager PyTorch).
 - `linear_cross_entropy` never materializes `(N, V)` logits, running in `1.00–1.06×`
-  compiled PyTorch's time on CUDA with `20–24%` less memory in `float32`.
+  compiled PyTorch time on CUDA with `20–24%` less `float32` memory.
 
 ## PyTorch on the CPU
 
@@ -88,10 +88,9 @@ across all four dtypes with the CPU extension:
 | `multiclass_hinge`, top-5 `topk_hinge_alpha` | 0.02–0.18 | 0.04–0.20 | 0.05–0.33 | 0.14–0.42 |
 | `multilabel_cross_entropy`, `distillation_loss` | 0.08–1.15 | 0.32–0.93 | 0.35–1.09 | 0.40–0.91 |
 
-- With the ATen/OpenMP C++ extension, `libsdca` beats `torch.compile` across all families
-  at these shapes: `1.15–3.6×` faster on `cross_entropy`, `2.4–25×` faster on multiclass
-  and top-$k$ hinges, and `1.08–3.1×` faster on `multilabel_cross_entropy` and
-  `distillation_loss`.
+- With the ATen/OpenMP C++ extension, `libsdca` beats `torch.compile` across all families:
+  `1.15–3.6×` faster on `cross_entropy`, `2.4–25×` faster on multiclass and top-*k* hinges,
+  and `1.08–3.1×` faster on `multilabel_cross_entropy` and `distillation_loss`.
 - Peak extra memory for a CPU forward + backward pass is a single gradient-sized tensor.
   On 32 threads (`float32`), `linear_cross_entropy` takes `0.86–0.97×` eager time
   (`0.93–1.07×` compiled) and `0.34–0.56×` eager memory (`0.68–0.79×` compiled) from 4096 rows.
@@ -124,8 +123,7 @@ EPYC 7J13, 1 and 32 threads):
 
 - **`multiclass_hinge` vs. `LinearSVC` (Crammer–Singer):** `libsdca` takes `0.14–0.59×`
   `LinearSVC`'s time. On tall problems (`d < n`), primal SDCA is `2.0–4.4×` faster; on wide
-  problems (`d >= n`), kernel SDCA is up to `44×` faster (`17×` including Gram matrix
-  construction).
+  problems (`d >= n`), kernel SDCA is up to `44×` faster (`17×` with Gram construction).
 - **`cross_entropy` vs. `LogisticRegression` (L-BFGS) and PyTorch L-BFGS:** On tall data,
   scikit-learn's L-BFGS is faster (`libsdca` takes `1.3–14×` its time), while `libsdca`
   primal SDCA is `1.2–2.2×` faster than `torch.optim.LBFGS` for $d \ge 500$. On wide data
@@ -133,10 +131,9 @@ EPYC 7J13, 1 and 32 threads):
   L-BFGS and `30×` faster than PyTorch L-BFGS (when counting fresh Gram construction
   $K = X X^\top$, total time is `1.1–1.9×` scikit-learn L-BFGS).
 
-The two kernel SDCA curves in the figure below measure solve time alone (`Gram reused`,
-when $K = X X^\top$ is precomputed once and reused across a hyperparameter sweep over `C`
-or `gamma`) versus end-to-end time including $K = X X^\top$ (`+ Gram build`, a single cold
-fit starting from features `X`):
+The two kernel SDCA curves below compare solve time alone (`Gram reused`, when $K = X X^\top$
+is precomputed once and reused across a `C` or `gamma` sweep) against end-to-end time
+including $K = X X^\top$ (`+ Gram build`, a single cold fit from features `X`):
 
 ```python
 # 1. Build the (n, n) Gram matrix from features X (n, d):
@@ -153,9 +150,9 @@ gram_plus_build_s = gram_build_s + gram_reused_s  # "libsdca Kernel SDCA (+ Gram
 
 ![Time to a relative suboptimality against d and n](figures/aspect-frontier.png)
 
-*Why the curves bend near $d = n = 2{,}000$:* Each feature column is standardized to unit
-variance without $1/\sqrt{d}$ row normalization, so $\|x_i\|_2^2 \approx d$ and rows become
-nearly orthogonal for $d \ge n$, cutting the required SDCA epochs by $3\times$–$10\times$.
+*Why the curves bend near* $d = n = 2{,}000$: Each feature column is standardized to unit
+variance without $1/\sqrt{d}$ row normalization, so $\Vert x_i \Vert_2^2 \approx d$ and rows become
+nearly orthogonal for $d \ge n$, cutting the required SDCA epochs by `3–10×`.
 In addition, `cross_entropy` converges in 3–6 epochs for $d \ge 2{,}000$, so the default
 `eval_epoch = 10` check bounds its reported time at 10 epochs. We did not tune `eval_epoch`
 during benchmarking, which gives a small advantage to the baselines on wide problems.
@@ -188,6 +185,6 @@ reports the active choice):
 - **Masked CE on CUDA:** `1.06×` compiled PyTorch at `4096 × 32000` (`bfloat16`) and
   `1.02×` at `16384 × 1000` (`float32`).
 - **Small host-bound calls:** Up to ~`10^6` logits on CUDA (`1.2–1.3×` PyTorch) and
-  `256 × 10` forward-only calls on CPU (a few microseconds).
+  `256 × 10` forward-only CPU calls (a few microseconds).
 - **16-bit CPU `linear_cross_entropy` memory:** Uses ~`1.7×` eager PyTorch memory at
   `1024 × 4096 × 128256` (`bfloat16`) to accumulate `grad_weight` in `float32`.
