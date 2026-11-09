@@ -22,21 +22,26 @@ What `libsdca` 0.3.0 guarantees in floating point, how it is verified, and its k
 
 ## What each precision guarantees
 
-| | `"float32"`, `float32` data | `"float64"`, `float32` data (default) | `float64` data |
-| --- | --- | --- | --- |
-| Coordinate steps | `float` (hinge projections in `double`) | `double` | `double` |
-| `fit` iterate (`W`, duals) | `float` | `double`, rounded once into the returned `float32` arrays at each evaluation | `double` |
-| Losses | `float` (`double` when parameters or spread exceed `float`) | `double` | `double` |
-| Evaluation and `solved` | `double` | `double` | `double` |
-| Single-step entropy block error vs. `double` (`tests/cpp/regression.cpp`) | $\le (64n + 16\max|z|)\cdot 2^{-24}$ | $\le 8\cdot 2^{-24}$ (measured `1.86` float ulps) | reference |
-| `multiclass_hinge` on standardized `digits`, lowest certified gap (5000 epochs) | `4.7e-6` | `3.5e-7` (`tol=1e-6` in 2132 epochs; `float64` data: 2100) | `< 1e-7` (2610 epochs) |
+`float64` data always trains in `double`. For `float32` data, `precision` selects the working
+precision of `fit`; evaluation and the [`solved` certificate](#the-solved-certificate) run in
+`double` in both modes.
 
-- Keeping `W` and the duals in `float32` during `fit` loses coordinate updates smaller than
+| `float32` data | `precision="float32"` | `precision="float64"` (default) |
+| --- | --- | --- |
+| Coordinate steps | `float` (hinge projections in `double`) | `double` |
+| `W` and duals during `fit` | `float` | `double`, rounded into the returned arrays at each evaluation |
+| Losses | `float` (`double` when parameters or spread exceed `float`) | `double` |
+| Error of one entropy step vs. `double` | $\le (64n + 16\max_j \lvert z_j \rvert) \cdot 2^{-24}$ | $\le 8 \cdot 2^{-24}$ (measured `1.86` ulps) |
+| Lowest certified gap, `multiclass_hinge` on `digits` | `4.7e-6` | `3.5e-7` |
+
+- With `"float32"`, `W` and the duals lose coordinate updates smaller than
   $\frac{1}{2}\mathrm{ulp}$ near the optimum (`89%` of weight updates and `75%` of dual
-  updates on `digits`), stalling convergence at `4.7e-6`.
-- The default `"float64"` mode maintains `W` and the duals in `double` and certifies their
-  rounded `float32` copies at each evaluation, reaching `3.5e-7` in the same epoch count as
-  `float64` data.
+  updates on standardized `digits`), so convergence stalls at `4.7e-6` within 5000 epochs.
+  In exchange, cross-entropy fits run `1.6–1.9×` faster ([performance](performance.md#solver)).
+- With `"float64"`, the certificate checks the rounded `float32` arrays the caller receives.
+  They reach `tol=1e-6` in 2132 epochs, against 2100 for `float64` data (which certifies below
+  `1e-7` in 2610 epochs), at the cost of `8(d + n)m` extra bytes.
+- The entropy-step bounds are checked in `tests/cpp/regression.cpp`.
 
 ### The `solved` certificate
 
