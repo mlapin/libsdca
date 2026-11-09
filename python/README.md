@@ -42,9 +42,9 @@ clf = SDCAClassifier("topk_cross_entropy", k=2, C=1.0).fit(X, y)
 print(clf.predict(X[:5]), clf.score(X, y))
 ```
 
-`SDCAClassifier` (`libsdca.sklearn`) passes scikit-learn's `check_estimator` suite and
-supports `Pipeline`, `clone`, `cross_val_score`, `GridSearchCV`, arbitrary sortable class
-labels, `predict_proba` / `predict_log_proba` (for `cross_entropy`), and precomputed Gram
+`SDCAClassifier` (`libsdca.sklearn`) passes scikit-learn's `check_estimator` suite (with
+`kernel="precomputed"`, all but the checks that pass invalid Gram matrices) and supports
+`Pipeline`, `clone`, `cross_val_score`, `GridSearchCV`, arbitrary sortable class labels, `predict_proba` / `predict_log_proba` (for `cross_entropy`), and precomputed Gram
 matrices (`kernel="precomputed"`). Fitted attributes: `classes_`, `coef_ (n_classes, n_features)`,
 `dual_coef_ (n_classes, n_samples)`, `n_features_in_`, `n_iter_`, `status_`, `history_`,
 and `model_`.
@@ -114,6 +114,9 @@ fast = libsdca.fit(X32, y_int, precision="float32")    # float32 arrays, float32
 ```
 
 ## PyTorch drop-in cross-entropy
+
+`CrossEntropyLoss` is a drop-in for `torch.nn.CrossEntropyLoss`, except it takes integer class
+labels only and no label smoothing.
 
 ```python
 import torch

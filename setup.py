@@ -36,6 +36,8 @@ if enabled("SDCA_BUILD_NATIVE"):
                 "-g0",
                 "-fno-fast-math",
                 "-ffp-contract=off",
+                "-fvisibility=hidden",
+                "-fvisibility-inlines-hidden",
                 "-pthread",
             ],
             # Loss rows run on std::thread workers.

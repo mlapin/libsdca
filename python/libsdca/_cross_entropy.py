@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import math
 from types import ModuleType
-from typing import Protocol
+from typing import Any, Protocol
 
 import torch
 from torch import nn
@@ -31,6 +31,18 @@ class _Context(Protocol):
     cuda_context: int | None
 
     def save_for_backward(self, *tensors: torch.Tensor) -> None: ...
+
+
+class _TransformContext(Protocol):
+    saved_tensors: tuple[torch.Tensor, ...]
+    reduction: str
+    value_dtype: torch.dtype
+
+    def save_for_backward(self, *tensors: torch.Tensor) -> None: ...
+
+    def save_for_forward(self, *tensors: torch.Tensor) -> None: ...
+
+    def mark_non_differentiable(self, *tensors: torch.Tensor) -> None: ...
 
 
 def _weighted_value(
@@ -199,26 +211,40 @@ def _can_fuse_weighted(
 
 
 class _WeightedEntropy(torch.autograd.Function):
+    """Float64 tensor statistics; composes with torch.func transforms."""
+
+    generate_vmap_rule = True
+
     @staticmethod
     def forward(
-        ctx: _Context,
         logits: torch.Tensor,
         target: torch.Tensor,
         weight: torch.Tensor,
         ignored: torch.Tensor,
         reduction: str,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, ...]:
         stats = _entropy._statistics(logits, target)
-        ctx.save_for_backward(logits, target, weight, ignored, *stats)
-        ctx.reduction = reduction
         dtype = torch.float32 if logits.dtype in (torch.float16, torch.bfloat16) else logits.dtype
-        return _weighted_value(stats, weight, reduction).to(dtype)
+        return _weighted_value(stats, weight, reduction).to(dtype), *stats
+
+    @staticmethod
+    def setup_context(
+        ctx: _TransformContext, inputs: tuple[Any, ...], output: tuple[torch.Tensor, ...]
+    ) -> None:
+        logits, target, weight, ignored, reduction = inputs
+        value, *stats = output
+        ctx.mark_non_differentiable(*stats)
+        ctx.save_for_backward(logits, target, weight, ignored, *stats)
+        ctx.reduction, ctx.value_dtype = reduction, value.dtype
 
     @staticmethod
     def backward(
-        ctx: _Context, *grad_outputs: torch.Tensor
+        ctx: _TransformContext, *grad_outputs: torch.Tensor
     ) -> tuple[torch.Tensor, None, None, None, None]:
-        (upstream,) = grad_outputs
+        return _WeightedEntropy._gradient(ctx, grad_outputs[0]), None, None, None, None
+
+    @staticmethod
+    def _gradient(ctx: _TransformContext, upstream: torch.Tensor) -> torch.Tensor:
         logits, target, weight, ignored, *saved = ctx.saved_tensors
         stats = (
             _entropy._statistics(logits, target, saved[0].isnan())
@@ -229,7 +255,31 @@ class _WeightedEntropy(torch.autograd.Function):
         if ctx.reduction == "mean":
             undefined = (~ignored) & ~(weight > 0).any()
             gradient = gradient.masked_fill(undefined[:, None], torch.nan)
-        return gradient, None, None, None, None
+        return gradient
+
+
+class _TransformedEntropy(_WeightedEntropy):
+    """_WeightedEntropy with forward mode (jvp, hessian): Dynamo cannot trace a custom jvp."""
+
+    @staticmethod
+    def setup_context(
+        ctx: _TransformContext, inputs: tuple[Any, ...], output: tuple[torch.Tensor, ...]
+    ) -> None:
+        _WeightedEntropy.setup_context(ctx, inputs, output)
+        ctx.save_for_forward(*inputs[:4], *output[1:])
+
+    @staticmethod
+    def jvp(
+        ctx: _TransformContext, *tangents: torch.Tensor | None
+    ) -> tuple[torch.Tensor | None, ...]:
+        tangent, nones = tangents[0], (None,) * 4
+        if tangent is None:
+            return None, *nones
+        rows = () if ctx.reduction != "none" else tangent.shape[:1]
+        upstream = tangent.new_ones(rows, dtype=torch.float64)
+        product = _WeightedEntropy._gradient(ctx, upstream).double() * tangent.double()
+        value = product.sum(-1) if ctx.reduction == "none" else product.sum()
+        return value.to(ctx.value_dtype), *nones
 
 
 def _weighted_gradient(
@@ -320,7 +370,9 @@ def cross_entropy(
     Every call keeps float64 row statistics and supports double backward. On the CPU the
     CPU extension or the native library computes weighted and ignored rows too; auto CUDA
     fuses unweighted rows of every supported dtype up to 2**25 classes.
-    Class-weighted float64 CUDA rows use full-range log-domain fused kernels.
+    Class-weighted float64 CUDA rows use full-range log-domain fused kernels. Under
+    torch.func transforms every device takes the tensor operations, with CUDA's NaN
+    validation.
     """
     fast = _fast_cpu(
         input, target, weight, ignore_index, reduction, label_smoothing, backend, precision
@@ -345,6 +397,7 @@ def cross_entropy(
     canonical = mod._check_precision(input, precision)
     if backend not in ("auto", "native", "torch"):
         raise ValueError("Unknown backend")
+    transformed = _ops.transformed()
     dim = 0 if input.ndim == 1 else 1
     classes = input.shape[dim]
     shape = input.shape[:dim] + input.shape[dim + 1 :]
@@ -354,27 +407,30 @@ def cross_entropy(
         raise ValueError(
             "target must contain int64 class indices; probability targets are unsupported"
         )
-    _check_weight(weight, input, classes, check_values=not (input.is_cuda or _ops.is_compiling()))
+    checked = not (input.is_cuda or _ops.is_compiling() or transformed)
+    _check_weight(weight, input, classes, check_values=checked)
     if target.numel() == 0:
         return _empty(input, weight, reduction, dim)
     z = input.movedim(dim, -1) if input.ndim > 2 else input
-    if input.device.type == "cpu" and backend != "torch":
+    if input.device.type == "cpu" and backend != "torch" and not transformed:
         value = _cpu_cross_entropy(z, target, weight, ignore_index, reduction, backend, canonical)
         return value.reshape(shape) if reduction == "none" else value
     # Without ignored rows (a data-dependent test, not traced) the shared entropy op applies.
-    checked = not (input.is_cuda or _ops.is_compiling())
     if checked and weight is None and not bool((target == ignore_index).any()):
         return mod.sdca_loss(
             input, target, dim=dim, reduction=reduction, backend=backend, precision=canonical
         )
-    if backend == "auto":
+    if backend == "auto" and not transformed:
         fp32 = canonical != "float64" and input.dtype != torch.float64
         fused_value = _fused_weighted(input, target, weight, ignore_index, reduction, dim, fp32)
         if fused_value is not None:
             return fused_value.reshape(shape) if reduction == "none" else fused_value
     ignored = target == ignore_index
     if backend == "native":
-        raise ValueError("Native losses require CPU tensors; use backend='torch' on other devices")
+        raise ValueError(
+            "Native losses require CPU tensors outside torch.func transforms; "
+            "use backend='torch' otherwise"
+        )
     labels = target.masked_fill(ignored, 0).reshape(-1)
     if checked:
         mod._raise_failed(
@@ -391,14 +447,15 @@ def cross_entropy(
     )
     row_weight = row_weight.masked_fill(ignored.reshape(-1), 0)
     if not checked:
-        # Without a synchronizing check (CUDA, or traced): invalid rows give NaN.
+        # Without a synchronizing check (CUDA, traced or transformed): invalid rows give NaN.
         bad_row = (~ignored.reshape(-1)) & ((labels < 0) | (labels >= classes))
         if weight is not None:
             valid_w = torch.isfinite(weight).all() & (weight >= 0).all()
             bad_row = bad_row | ~valid_w
         row_weight = row_weight.masked_fill(bad_row, math.nan)
     z = input.movedim(dim, -1).reshape(-1, classes)
-    value = _WeightedEntropy.apply(z, labels, row_weight, ignored.reshape(-1), reduction)
+    entropy = _TransformedEntropy if transformed else _WeightedEntropy
+    value = entropy.apply(z, labels, row_weight, ignored.reshape(-1), reduction)[0]
     return value.reshape(shape) if reduction == "none" else value
 
 
@@ -427,6 +484,7 @@ def _fast_cpu(
         and (weight is None or _extension_rows(input, backend))
         and _plain_target(target, input)
         and not _ops.is_compiling()
+        and not _ops.transformed()
     ):
         return None
     extension = backend == "auto" and _cpu_entropy.enabled()

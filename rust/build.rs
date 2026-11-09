@@ -102,6 +102,8 @@ fn main() {
             "-pthread",
             "-fno-fast-math",
             "-ffp-contract=off",
+            "-fvisibility=hidden",
+            "-fvisibility-inlines-hidden",
         ])
         .arg(format!("-D{macro_name}"))
         .arg("-DSDCA_USE_CHRONO")

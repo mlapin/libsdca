@@ -22,6 +22,7 @@ def build(backend: str | None = None, output: str | Path | None = None) -> Path:
     lib = out / "libsdca_c.so"
     # The flags of the wheel: IEEE semantics keep the finiteness checks.
     flags = ["-O3", "-DNDEBUG", "-fno-fast-math", "-ffp-contract=off"]
+    flags += ["-fvisibility=hidden", "-fvisibility-inlines-hidden"]
     selected, macro, link = blas_config(backend)
     cmd = shlex.split(os.environ.get("CXX", "g++")) + [
         "-std=c++11",

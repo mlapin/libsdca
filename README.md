@@ -22,13 +22,15 @@ zero at equal student and teacher logits (softmax cancellation [6]), across
 ```python
 from libsdca import CrossEntropyLoss
 
-criterion = CrossEntropyLoss()  # drop-in for torch.nn.CrossEntropyLoss()
+criterion = CrossEntropyLoss()  # drop-in for torch.nn.CrossEntropyLoss(), except integer
+                                # class labels only and no label smoothing
 loss = criterion(logits, targets)
 loss.backward()
 ```
 
 - **Certified dual solver:** Training evaluates the duality gap of the returned
-  weights and duals in `double` with a first-order rounding bound $e$;
+  weights and the feasible projection of the returned duals in `double`, with a
+  first-order rounding estimate $e$;
   `status == "solved"` certifies $P(W) - D(A) + e \le \text{tol} \cdot \max(|P|, |D|)$
   ([numerics](docs/numerics.md#the-solved-certificate)).
 - **Verified to the subnormal limit:** Every loss value and gradient entry is
@@ -120,6 +122,17 @@ net = torch.nn.Linear(10, 5)
 criterion = CrossEntropyLoss()  # or TopKHingeLoss(k=2, variant="beta", gamma=0.5)
 loss = criterion(net(torch.randn(32, 10)), torch.randint(0, 5, (32,)))
 loss.backward()
+```
+
+### JAX
+
+```python
+import jax
+import libsdca.jax as sjax
+
+loss_and_grad = jax.jit(jax.value_and_grad(
+    lambda w, x, y: sjax.sdca_loss(x @ w, y, "topk_hinge_beta", k=3, gamma=0.5)
+))
 ```
 
 ### Rust

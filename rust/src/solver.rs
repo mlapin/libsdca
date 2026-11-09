@@ -364,8 +364,8 @@ pub fn coordinate_update<'y, T: Real>(
 /// # Errors
 /// [`Error::InvalidArgument`] for invalid inputs or options (or a precision
 /// that does not store `T`), [`Error::Native`] for a native failure or a
-/// library that does not match the wrapper. Not converging is no error:
-/// see [`Model::status`].
+/// library that does not match the wrapper. Not converging or a numerical
+/// failure of training is no error: see [`Model::status`].
 ///
 /// ```
 /// use libsdca::{fit, FitOptions, Matrix, Precision, Status};

@@ -20,7 +20,7 @@ target_link_libraries(my_program PRIVATE libsdca::sdca_c)
 ```
 
 Without CMake, compile `src/c_api.cpp` directly with any C++11 compiler:
-`c++ -std=c++11 -O2 -shared -fPIC -pthread -DBLAS_BUILTIN '-DSDCA_VERSION="0.3.0"' -Iinclude src/c_api.cpp -o libsdca_c.so`.
+`c++ -std=c++11 -O2 -shared -fPIC -pthread -fno-fast-math -ffp-contract=off -fvisibility=hidden -fvisibility-inlines-hidden -DBLAS_BUILTIN '-DSDCA_VERSION="0.3.0"' -Iinclude src/c_api.cpp -o libsdca_c.so`.
 
 ## Usage
 

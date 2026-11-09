@@ -37,6 +37,11 @@
 extern "C" {
 #endif
 
+/* The library builds with -fvisibility=hidden: only these declarations are exported. */
+#if defined(__GNUC__)
+#pragma GCC visibility push(default)
+#endif
+
 /* Changes with every incompatible change of these declarations; a binding
  * compares it with sdca_abi_version() before any other call. Fields appended
  * to the structs below are compatible changes (see their size). */
@@ -344,6 +349,10 @@ int sdca_proximal_distillation_rows(const struct sdca_options* options, int dtyp
                                     size_t num_classes, const void* student, const void* teacher,
                                     double temperature, double alpha, double* values,
                                     void* gradients);
+
+#if defined(__GNUC__)
+#pragma GCC visibility pop
+#endif
 
 #ifdef __cplusplus
 }

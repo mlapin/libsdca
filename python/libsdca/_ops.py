@@ -42,6 +42,11 @@ def compiling() -> bool:
     return AVAILABLE and _is_compiling()
 
 
+def transformed() -> bool:
+    """Whether a torch.func transform (grad, vmap, jacrev, ...) wraps this call."""
+    return torch._C._are_functorch_transforms_active()
+
+
 def _values(logits: Tensor, reduction: str, dtype: torch.dtype) -> Tensor:
     """Fake loss: per row or reduced."""
     shape = (logits.shape[0],) if reduction == "none" else ()

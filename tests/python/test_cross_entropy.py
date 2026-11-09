@@ -34,7 +34,7 @@ class CrossEntropyTests:
                             ignored = torch.tensor([ignored_row, False])
                             value = _cross_entropy._WeightedEntropy.apply(
                                 z, y, w, ignored, reduction
-                            )
+                            )[0]
                             gradient = torch.autograd.grad(value.sum(), z, create_graph=graph)[0]
                             if reduction == "none":
                                 assert bool(value[0].isnan())

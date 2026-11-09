@@ -19,9 +19,10 @@ fn main() -> libsdca::Result<()> {
 - **Targets:** Single-label objectives take 0-based class slices (`&[usize]`); multilabel
   objectives take label sets (`&[Vec<usize>]` or `&[&[usize]]`), and `fit_distillation`
   takes a target probability `Matrix`.
-- **Errors and convergence:** Invalid inputs return `Error::InvalidArgument`, numerical
-  failures return `Error::Native`, and stopping at `max_epoch` returns `Ok(model)` with
-  `model.status()` (only `Status::Solved` certifies the duality gap).
+- **Errors and convergence:** Invalid inputs return `Error::InvalidArgument` and failures
+  of the native library return `Error::Native`. A fit that fails numerically or stops at
+  `max_epoch` still returns `Ok(model)`: check `model.status()` (`Status::Failed`,
+  `Status::MaxEpoch`; only `Status::Solved` certifies the duality gap).
 - **Losses and coordinate steps:** `loss_and_grad`, `distillation_loss_and_grad`,
   `proximal_distillation_loss_and_grad`, and `coordinate_update` evaluate rows in parallel
   across `num_threads` threads (`None` uses `SDCA_NUM_THREADS` or automatic CPU detection;

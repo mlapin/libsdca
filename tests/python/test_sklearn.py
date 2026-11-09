@@ -110,6 +110,25 @@ class ClassifierTests:
                 warnings.simplefilter("ignore", self.Warning)
                 check_estimator(estimator)
 
+    def test_check_estimator_precomputed(self, subtests: pytest.Subtests):
+        from sklearn.exceptions import SkipTestWarning
+        from sklearn.utils.estimator_checks import check_estimator
+
+        # These checks pass matrices that are no Gram matrix, which fit rejects.
+        invalid = {
+            "check_positive_only_tag_during_fit": "a mean-shifted kernel is not PSD",
+            "check_estimators_dtypes": "an integer-truncated kernel is not PSD",
+        }
+        for objective in ("cross_entropy", "multiclass_hinge"):
+            expected = dict(invalid)
+            if objective == "cross_entropy":
+                expected["check_decision_proba_consistency"] = "fits a non-square matrix"
+            estimator = self.Classifier(objective, kernel="precomputed")
+            with subtests.test(objective=objective), warnings.catch_warnings():
+                warnings.simplefilter("ignore", self.Warning)
+                warnings.simplefilter("ignore", SkipTestWarning)
+                check_estimator(estimator, expected_failed_checks=expected)
+
     def test_labels_scores_and_probabilities(self):
         x, y = blobs()
         names = np.array(["cat", "dog", "emu"])[y]

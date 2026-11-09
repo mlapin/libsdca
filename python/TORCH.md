@@ -6,7 +6,7 @@ functions (`pip install 'libsdca[torch]'`), running on CPU and CUDA tensors in
 
 | Loss | Module | Function | Options / notes |
 | --- | --- | --- | --- |
-| Cross-entropy (drop-in) | `CrossEntropyLoss` | `cross_entropy` | `weight`, `ignore_index`, `(N, C, ...)` shapes |
+| Cross-entropy (drop-in, except integer class labels only and no label smoothing) | `CrossEntropyLoss` | `cross_entropy` | `weight`, `ignore_index`, `(N, C, ...)` shapes |
 | Linear + cross-entropy (unmaterialized logits) | `LinearCrossEntropyLoss` | `linear_cross_entropy` | `class_weight`, `ignore_index`, `chunk_bytes`, `recompute` |
 | Top-$k$ cross-entropy | `TopKCrossEntropyLoss` | `topk_cross_entropy` | `k` (`1 <= k < C`) |
 | Multiclass hinge (Crammer–Singer) | `MulticlassHingeLoss` | `multiclass_hinge_loss` | `gamma=0.0` (`> 0` smooths) |
@@ -49,7 +49,8 @@ one-time warning (`SDCA_CPU_EXTENSION=off` and `SDCA_CUDA_LAUNCHER=off` silence 
 ```python
 from libsdca import CrossEntropyLoss, cross_entropy
 
-criterion = CrossEntropyLoss()           # drop-in for torch.nn.CrossEntropyLoss()
+criterion = CrossEntropyLoss()           # drop-in for torch.nn.CrossEntropyLoss(), except
+                                         # integer class labels only and no label smoothing
 loss = criterion(net(features), target)  # raw logits, int64 class indices
 ```
 

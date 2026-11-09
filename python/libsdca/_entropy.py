@@ -178,8 +178,9 @@ def _gradient(
         # factored roots: later derivatives can rescue initially vanished tails.
         return gradient.to(logits.dtype)
     # Without far rows the selection below returns gradient: skipped where checking synchronizes
-    # (CUDA) or is not traced (compilation).
-    if not (logits.is_cuda or _ops.is_compiling()) and not bool((relative < -37).any()):
+    # (CUDA) or is not traced (compilation, torch.func transforms).
+    unchecked = logits.is_cuda or _ops.is_compiling() or _ops.transformed()
+    if not unchecked and not bool((relative < -37).any()):
         return gradient.to(logits.dtype)
     # Keep an exactly represented gap separate from log(class count). Taking
     # exp(gap + log(count)) loses relative digits for tiny but normal tails.

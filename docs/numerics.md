@@ -41,9 +41,11 @@ What `libsdca` 0.3.0 guarantees in floating point, how it is verified, and its k
 ### The `solved` certificate
 
 `solved` requires $P(W) - D(A) + e \le \text{tol} \cdot \max(|P(W)|, |D(A)|)$
-([API.md](API.md#results)), where $P(W)$ and $D(A)$ are evaluated in `double` at the
-returned arrays and $e$ bounds the evaluation's own rounding (`test_certificate.py` checks
-every `solved` fit against a 50-digit primal). With a regularizer center $W_0$, the
+([API.md](API.md#results)), where $P(W)$ is evaluated in `double` at the returned weights,
+$D(A)$ at the feasible projection of the returned duals (the duals themselves up to rounding
+for the solver's own iterates; farther for an infeasible `initial_dual`), and $e$ is a
+first-order estimate, not a rigorous bound, of the evaluation's own rounding
+(`test_certificate.py` checks every `solved` fit against a 50-digit primal). With a regularizer center $W_0$, the
 evaluator forms $W - W_0$ directly so $\|W_0\|_2^2$ never cancels (`test_centered_certificate.py`).
 
 ### Projection precision

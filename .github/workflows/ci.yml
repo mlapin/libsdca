@@ -143,6 +143,31 @@ jobs:
           CXX=g++ SDCA_CPU_EXTENSION=on PYTHONPATH=python python -m pytest -p no:cacheprovider
           tests/python/test_softmax_limits.py::SoftmaxLimitTests tests/python/test_torch.py::TorchTests
 
+  python-versions:
+    name: Python ${{ matrix.python }} (core)
+    # The other claimed versions run only the core suite: 3.10 runs in Package, the full suite on 3.12.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.13']
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      # Check out repository sources for the core NumPy and scikit-learn test suite.
+      - uses: actions/checkout@v7.0.1
+      # Set up the Python version under test.
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      # Install the core test dependencies only (no PyTorch or JAX).
+      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn
+      # Build the native C ABI library with the built-in BLAS, as in the wheels.
+      - run: python python/build.py --blas-backend BUILTIN
+      # Run the core test group in parallel, skipping multi-minute stress tests.
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core -m 'not long'
+
   macos:
     name: macOS (arm64)
     runs-on: macos-15

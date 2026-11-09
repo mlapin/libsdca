@@ -346,6 +346,25 @@ class Float64CudaEntropyTests:
                 expected = torch.autograd.grad(reference.sum(), x)[0]
                 torch.testing.assert_close(gradient, expected, rtol=2e-12, atol=_QUANTUM)
 
+    def test_class_weighted_float64_higher_derivatives(self, subtests: pytest.Subtests):
+        torch.manual_seed(0)
+        weight = torch.linspace(0.25, 2, 5, device="cuda", dtype=torch.float64)
+        y = torch.tensor([0, 1, -100, 3, 4, 2], device="cuda")
+        for reduction in ("none", "sum", "mean"):
+            with subtests.test(reduction=reduction):
+                x = torch.randn(6, 5, device="cuda", dtype=torch.float64, requires_grad=True)
+                value = cross_entropy(x, y, weight, reduction=reduction)
+                gradient = torch.autograd.grad(value.sum(), x, create_graph=True)[0]
+                direction = torch.randn_like(x)
+                second = torch.autograd.grad((gradient * direction).sum(), x)[0]
+                rx = x.detach().requires_grad_()
+                ref = F.cross_entropy(rx, y, weight, reduction=reduction)
+                ref_gradient = torch.autograd.grad(ref.sum(), rx, create_graph=True)[0]
+                ref_second = torch.autograd.grad((ref_gradient * direction).sum(), rx)[0]
+                torch.testing.assert_close(value, ref, rtol=2e-12, atol=_QUANTUM)
+                torch.testing.assert_close(gradient, ref_gradient, rtol=2e-12, atol=_QUANTUM)
+                torch.testing.assert_close(second, ref_second, rtol=1e-10, atol=1e-14)
+
     def test_weighted_float64_extreme_values_and_upstream(self, subtests: pytest.Subtests):
         from test_weighted_cuda import reference
 

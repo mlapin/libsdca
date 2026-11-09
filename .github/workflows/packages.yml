@@ -2,8 +2,10 @@ name: Packages
 # Builds the sdist, the wheels and the crate archive. A manual run can upload
 # the sdist and wheels to TestPyPI; a v* tag uploads them to PyPI. Uploads use
 # Trusted Publishing in the GitHub environments testpypi and pypi; the
-# one-time setup is in CONTRIBUTING.md (Releases).
+# one-time setup is in CONTRIBUTING.md (Releases). Pull requests only build
+# and test the artifacts: both upload jobs skip them.
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       testpypi:
@@ -14,6 +16,9 @@ on:
     tags: ['v*']
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sdist:

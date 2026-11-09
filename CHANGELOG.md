@@ -16,13 +16,14 @@
   cross-entropy takes `0.93–0.98×` `torch.compile` time (`0.33–0.41×` eager), top-5
   cross-entropy `0.23–0.26×`, and distillation `0.62–0.81×` ([performance](docs/performance.md)).
 - **Certified convergence:** `status == "solved"` requires the duality gap of the returned
-  weights and duals, evaluated in `double` with a first-order rounding estimate, to meet
+  weights and the feasible projection of the returned duals, evaluated in `double` with a
+  first-order rounding estimate, to meet
   `tol` ([API.md](docs/API.md#results)).
 
 ### Interfaces and losses
 
 - **PyTorch (`libsdca`, `libsdca.torch`):** `CrossEntropyLoss` (drop-in for
-  `torch.nn.CrossEntropyLoss`), `TopKCrossEntropyLoss`, `MulticlassHingeLoss`,
+  `torch.nn.CrossEntropyLoss`, except integer class labels only and no label smoothing), `TopKCrossEntropyLoss`, `MulticlassHingeLoss`,
   `TopKHingeLoss` ($\alpha$ and $\beta$), `MultilabelCrossEntropyLoss`,
   `MultilabelHingeLoss`, `ProximalCrossEntropyLoss`, `DistillationLoss`,
   `ProximalDistillationLoss`, `SDCALoss`, and `LinearCrossEntropyLoss` (chunked linear head

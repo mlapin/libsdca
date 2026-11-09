@@ -98,13 +98,6 @@ option(USE_THREADING_SUFFIX "Append the MKL threading mode to binary names" OFF)
 # Custom Cmake modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# Install prefix
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX
-    "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Installation directory." FORCE
-    )
-endif()
-
 # Avoid a warning due to CMP0042
 if(POLICY CMP0042 AND APPLE)
   set(CMAKE_MACOSX_RPATH ON)
@@ -329,7 +322,8 @@ if(SDCA_BUILD_C_API)
   target_include_directories(sdca_c INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
   # The shared library version follows SDCA_ABI_VERSION.
-  set_target_properties(sdca_c PROPERTIES OUTPUT_NAME sdca_c VERSION 5 SOVERSION 5)
+  set_target_properties(sdca_c PROPERTIES OUTPUT_NAME sdca_c VERSION 5 SOVERSION 5
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
   install(TARGETS sdca_c EXPORT libsdcaTargets
     LIBRARY DESTINATION lib ARCHIVE DESTINATION lib RUNTIME DESTINATION bin)
 endif()

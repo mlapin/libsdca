@@ -183,8 +183,8 @@ Training returns a status (`none`, `solving`, `solved`, `no_progress`, `max_epoc
 
 Only `status == "solved"` certifies convergence:
 $$P(W) - D(A) + e \le \text{tol} \cdot \max(|P(W)|, |D(A)|),$$
-where $P(W)$ and $D(A)$ are evaluated in `double` at the returned arrays and $e$ is a
-first-order estimate of evaluation rounding ([numerics.md](numerics.md#the-solved-certificate)).
+where $P(W)$ is evaluated in `double` at the returned weights, $D(A)$ at the feasible
+projection of the returned duals, and $e$ is a first-order estimate of evaluation rounding ([numerics.md](numerics.md#the-solved-certificate)).
 If a numerical step fails or the evaluated gap falls below $-e$, training stops with
 `failed` at the last consistent iterate. With a regularizer center $W_0$, $P(W)$ and
 $D(A)$ evaluate the full centered objective directly from $W - W_0$ without cancelling
