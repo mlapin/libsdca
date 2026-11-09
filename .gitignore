@@ -1,5 +1,25 @@
 build*
+!python/build.py
+!rust/build.rs
 matlab/*.mex*
 matlab/data/
 CMakeLists.txt.user
 .DS_Store
+__pycache__/
+*.pyc
+python/*.so
+python/libsdca/*.so
+*.egg-info/
+.ruff_cache/
+.coverage*
+rust/target/
+rust/Cargo.lock
+rust/consumer/target/
+rust/consumer/Cargo.lock
+rust/native/
+rust/LICENSE
+
+# Packaging outputs
+dist/
+wheelhouse/
+.pytest_cache/

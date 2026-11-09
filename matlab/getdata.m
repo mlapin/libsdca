@@ -28,7 +28,7 @@ for i = 1:num_examples
   Y(i) = find(Y(i) <= seg_cdf(:,seg_id(i)),1);
 end
 
-% Map onto the unit cirlce in 2D
+% Map onto the unit circle in 2D
 t = 2*pi*X/max(seg_offsets);
 X = [cos(t); sin(t)];
 

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.12)
+project(libsdca_consumer LANGUAGES CXX)
+find_package(libsdca CONFIG REQUIRED)
+add_executable(sdca_example train.cpp)
+target_link_libraries(sdca_example PRIVATE libsdca::libsdca)

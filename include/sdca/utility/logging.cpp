@@ -8,8 +8,8 @@
 namespace sdca {
 namespace logging {
 
-level __level__ = level::warning;
-format __format__ = format::short_e;
+level current_level = level::warning;
+format current_format = format::short_e;
 
-}
-}
+}  // namespace logging
+}  // namespace sdca

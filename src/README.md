@@ -1,3 +1,8 @@
-libsdca is a header-only library, see the `include` folder for the source code.
+# Interface sources
 
-This folder contains interfaces to libsdca, e.g. the Matlab API.
+- `c_api.cpp`: the C ABI of [`include/sdca/c_api.h`](../include/sdca/c_api.h),
+  used by the Python and Rust packages ([C guide](../docs/C.md)).
+- `matlab/`: the MATLAB and Octave gateways ([MATLAB guide](../docs/MATLAB.md)).
+
+The library itself is header-only, under [`include/`](../include); see the
+[C++ guide](../docs/CPP.md).

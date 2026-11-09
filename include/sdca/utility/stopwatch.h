@@ -1,10 +1,14 @@
 #ifndef SDCA_UTILITY_STOPWATCH_H
 #define SDCA_UTILITY_STOPWATCH_H
 
+#if !defined(SDCA_USE_CHRONO) && !defined(SDCA_USE_POSIX_CLOCK)
+#define SDCA_USE_CHRONO
+#endif
+
 #ifdef SDCA_USE_CHRONO
-  #include <chrono>
+#include <chrono>
 #else
-  #include <sys/time.h>
+#include <sys/time.h>
 #endif
 
 #include <ctime>
@@ -12,14 +16,13 @@
 namespace sdca {
 
 #ifdef SDCA_USE_CHRONO
-  typedef typename std::chrono::high_resolution_clock wall_clock;
-  typedef typename std::chrono::time_point<wall_clock> wall_time_point;
+typedef typename std::chrono::high_resolution_clock wall_clock;
+typedef typename std::chrono::time_point<wall_clock> wall_time_point;
 #else
-  typedef double wall_time_point;
+typedef double wall_time_point;
 #endif
 
 typedef typename std::clock_t cpu_time_point;
-
 
 struct stopwatch_cpu {
   bool is_running = false;
@@ -36,24 +39,17 @@ struct stopwatch_cpu {
     is_running = false;
   }
 
-  void reset() {
-    elapsed = 0;
-  }
+  void reset() { elapsed = 0; }
 
   void resume() {
     mark = std::clock();
     is_running = true;
   }
 
-  double elapsed_now() const {
-    return elapsed + (is_running ? increment() : 0);
-  }
+  double elapsed_now() const { return elapsed + (is_running ? increment() : 0); }
 
-  double increment() const {
-    return static_cast<double>(std::clock() - mark) / CLOCKS_PER_SEC;
-  }
+  double increment() const { return static_cast<double>(std::clock() - mark) / CLOCKS_PER_SEC; }
 };
-
 
 struct stopwatch_wall {
   bool is_running = false;
@@ -70,9 +66,7 @@ struct stopwatch_wall {
     is_running = false;
   }
 
-  void reset() {
-    elapsed = 0;
-  }
+  void reset() { elapsed = 0; }
 
   void resume() {
 #ifdef SDCA_USE_CHRONO
@@ -83,9 +77,7 @@ struct stopwatch_wall {
     is_running = true;
   }
 
-  double elapsed_now() const {
-    return elapsed + (is_running ? increment() : 0);
-  }
+  double elapsed_now() const { return elapsed + (is_running ? increment() : 0); }
 
   double increment() const {
 #ifdef SDCA_USE_CHRONO
@@ -101,12 +93,10 @@ struct stopwatch_wall {
     if (gettimeofday(&time, NULL)) {
       return 0;
     }
-    return static_cast<double>(time.tv_sec) +
-           static_cast<double>(time.tv_usec) * .000001;
+    return static_cast<double>(time.tv_sec) + static_cast<double>(time.tv_usec) * .000001;
   }
 #endif
 };
-
 
 struct stopwatch {
   stopwatch_cpu cpu;
@@ -133,6 +123,6 @@ struct stopwatch {
   }
 };
 
-}
+}  // namespace sdca
 
 #endif

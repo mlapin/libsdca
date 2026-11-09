@@ -1,0 +1,9 @@
+[package]
+name = "sdca-consumer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "A downstream crate that links libsdca against the BLAS of SDCA_BLAS (see check.sh)"
+
+[dependencies]
+libsdca = { path = ".." }

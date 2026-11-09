@@ -1,0 +1,281 @@
+name: CI
+on:
+  # Pushes to main or master and pull requests, each run once.
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-22.04
+    steps:
+      # Check out repository sources for static analysis and formatting checks.
+      - uses: actions/checkout@v7.0.1
+      # Set up Python 3.10 (the minimum supported version and basedpyright target).
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.10'
+      # Install pinned linters/formatters (ruff, clang-format, clang-tidy, basedpyright, lizard) and scientific stubs.
+      - run: python -m pip install -r requirements-dev.txt numpy scipy mpmath scikit-learn jax
+      # Install CPU PyTorch so basedpyright can resolve torch types across the package and tests.
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      # Run ruff, clang-format, basedpyright, version consistency, complexity ceiling, and clang-tidy.
+      - run: python tools/quality.py
+
+  cpp:
+    name: C++ (${{ matrix.backend }}, ${{ matrix.cxx }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - {backend: BUILTIN, cxx: g++}
+          - {backend: EXTERNAL, cxx: clang++-18}
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      CXX: ${{ matrix.cxx }}
+    steps:
+      # Check out repository sources for CMake build, CTest, and downstream CMake consumer tests.
+      - uses: actions/checkout@v7.0.1
+      # Install system CBLAS headers and library when testing the EXTERNAL BLAS backend.
+      - if: matrix.backend == 'EXTERNAL'
+        run: sudo apt-get update && sudo apt-get install -y libblas-dev
+      # Configure the C++ library, C ABI library, and GoogleTest suite with warnings treated as errors.
+      - run: >-
+          cmake -S . -B build -DBUILD_TESTING=ON -DSDCA_WARNINGS_AS_ERRORS=ON
+          -DSDCA_BLAS_BACKEND=${{ matrix.backend }} -DSDCA_BUILD_C_API=ON
+          -DCMAKE_INSTALL_PREFIX=$PWD/build/install
+      # Compile all C++ test targets and the C ABI shared library.
+      - run: cmake --build build --parallel 2
+      # Run the C++ unit, regression, stress, and C ABI test suites via CTest.
+      - run: ctest --test-dir build --output-on-failure --parallel 2
+      # Install headers, CMake package config, and shared library into a local prefix.
+      - run: cmake --install build
+      # Configure the standalone C++ consumer example against the installed CMake package.
+      - run: cmake -S examples/cpp -B build/consumer -DCMAKE_PREFIX_PATH=$PWD/build/install
+      # Build and run the C++ consumer example to verify exported libsdca::libsdca target usage.
+      - run: cmake --build build/consumer && build/consumer/sdca_example
+      # Configure the standalone C consumer example against the installed CMake package.
+      - run: cmake -S examples/c -B build/c-consumer -DCMAKE_PREFIX_PATH=$PWD/build/install
+      # Build and run the C consumer example to verify exported libsdca::sdca_c ABI linkage.
+      - run: >-
+          cmake --build build/c-consumer &&
+          LD_LIBRARY_PATH=$PWD/build/install/lib build/c-consumer/sdca_c_example
+      # Verify MATLAB MEX gateways compile against the stub mex.h and restore std::cout on error exits.
+      - if: matrix.cxx == 'g++'
+        run: bash tests/matlab/check_mex_compiles.sh && bash tests/matlab/run_gateway_mock.sh
+
+  sanitizers:
+    name: C++ Sanitizers
+    runs-on: ubuntu-22.04
+    steps:
+      # Check out repository sources for sanitizer-instrumented C++ and C ABI test runs.
+      - uses: actions/checkout@v7.0.1
+      # Install reference BLAS required to link the external-BLAS sanitizer binaries.
+      - run: sudo apt-get update && sudo apt-get install -y libblas-dev
+      # Lower mmap ASLR entropy so older Clang ThreadSanitizer runtimes do not abort at startup.
+      - run: sudo sysctl -w vm.mmap_rnd_bits=28
+      # Run regression and C ABI tests under ASan + UBSan (GCC) and multithreaded tests under TSan (Clang).
+      - run: bash tools/run_cpp_tests.sh --sanitize
+        env:
+          SDCA_TSAN_CXX: clang++
+
+  coverage:
+    name: C++ Coverage
+    runs-on: ubuntu-24.04
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      # Check out repository sources for gcov-instrumented C++ build and line-coverage check.
+      - uses: actions/checkout@v7.0.1
+      # Set up Python to run the coverage driver script and gcovr report generator.
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      # Install pinned gcovr to aggregate gcov data and enforce the 90% C++ line-coverage floor.
+      - run: python -m pip install gcovr==8.7
+      # Build C++ tests with --coverage (BUILTIN BLAS), run CTest, and enforce >=90% line coverage.
+      - run: python tools/coverage.py --cpp-only
+      # Upload the per-file C++ coverage summary table as a workflow artifact for inspection.
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: cpp-coverage-${{ github.sha }}
+          path: build/coverage/cpp.txt
+
+  python:
+    name: Python (Linux)
+    runs-on: ubuntu-24.04
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      CXX: clang++-18
+    steps:
+      # Check out repository sources for Python, PyTorch, JAX, and scikit-learn test suites.
+      - uses: actions/checkout@v7.0.1
+      # Set up Python 3.12 to test all Python frontends and runtime C++ extensions.
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      # Install system BLAS and LLVM 18 OpenMP headers (Clang 18 rejects GCC 13's omp.h attributes).
+      - run: sudo apt-get update && sudo apt-get install -y libblas-dev libomp-18-dev
+      # Install core, scikit-learn, JAX, Triton (for CPU interpreter tests), Ninja, and CPU PyTorch.
+      - run: >-
+          python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn triton jax ninja &&
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      # Syntax-check the PyTorch CPU C++ extension across AVX-512, AVX2, and generic ISA flags under GCC and Clang.
+      - run: python tools/check_extension_builds.py --compiler g++ --compiler clang++-18
+      # Build the native C ABI shared library against the external BLAS backend.
+      - run: python python/build.py --blas-backend EXTERNAL
+      # Run all parallel Python test groups (core, torch, jax), skipping multi-minute stress tests.
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group all -m 'not long'
+      # Run thread-scaling and timing tests that require an unloaded machine serially.
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group all -m serial
+      # Compile and test the JIT-built PyTorch CPU C++ extension (SDCA_CPU_EXTENSION=on) with GCC.
+      - run: >-
+          CXX=g++ SDCA_CPU_EXTENSION=on PYTHONPATH=python python -m pytest -p no:cacheprovider
+          tests/python/test_softmax_limits.py::SoftmaxLimitTests tests/python/test_torch.py::TorchTests
+
+  python-versions:
+    name: Python ${{ matrix.python }} (core)
+    # The other claimed versions run only the core suite: 3.10 runs in Package, the full suite on 3.12.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.13']
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      # Check out repository sources for the core NumPy and scikit-learn test suite.
+      - uses: actions/checkout@v7.0.1
+      # Set up the Python version under test.
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      # Install the core test dependencies only (no PyTorch or JAX).
+      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn
+      # Build the native C ABI library with the built-in BLAS, as in the wheels.
+      - run: python python/build.py --blas-backend BUILTIN
+      # Run the core test group in parallel, skipping multi-minute stress tests.
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core -m 'not long'
+
+  macos:
+    name: macOS (arm64)
+    runs-on: macos-15
+    steps:
+      # Check out repository sources to test Apple Silicon (arm64), Apple Clang, and Accelerate BLAS.
+      - uses: actions/checkout@v7.0.1
+      # Set up Python 3.12 for macOS Python and PyTorch test suites.
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      # Configure CMake with Apple Accelerate (EXTERNAL) and strict compiler warnings on Apple Clang.
+      - run: >-
+          cmake -S . -B build -DBUILD_TESTING=ON -DSDCA_WARNINGS_AS_ERRORS=ON
+          -DSDCA_BLAS_BACKEND=EXTERNAL -DSDCA_BUILD_C_API=ON
+      # Build all C++ test executables and the C ABI library on macOS arm64.
+      - run: cmake --build build --parallel 3
+      # Run the C++ and C ABI test suites on macOS arm64 (where long double equals double).
+      - run: ctest --test-dir build --output-on-failure --parallel 3
+      # Install Python test dependencies, scikit-learn, PyTorch, and Ninja for the CPU extension.
+      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn torch ninja
+      # Build the Python C ABI library linked against macOS Accelerate.
+      - run: CXX=c++ python python/build.py --blas-backend EXTERNAL
+      # Run the core NumPy and scikit-learn test suite in parallel across workers.
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core
+      # Run the serial thread-scaling tests on macOS arm64.
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group core -m serial
+      # Run the PyTorch CPU test suite (including the Apple Clang CPU extension) in parallel.
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group torch -m 'not long'
+
+  rust:
+    name: Rust
+    # The tests run under line coverage on stable (no doctests) and in full at the MSRV.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      # Check out repository sources to test the Rust crate and its C++ build script.
+      - uses: actions/checkout@v7.0.1
+      # Install stable Rust (with rustfmt, clippy, llvm-tools) and the 1.74 MSRV toolchain.
+      - run: >-
+          rustup toolchain install stable --profile minimal -c rustfmt,clippy,llvm-tools-preview &&
+          rustup toolchain install 1.74 --profile minimal && rustup default stable
+      # Install cargo-llvm-cov to measure Rust line coverage.
+      - uses: taiki-e/install-action@v2.90.0
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      # Check that all Rust sources follow standard rustfmt formatting.
+      - run: cargo fmt --check
+      # Lint all targets with Clippy, treating warnings and missing public docs as errors.
+      - run: cargo clippy --all-targets -- -D warnings
+      # Run the Rust unit and integration tests under instrumentation and enforce >=90% line coverage.
+      - run: cargo llvm-cov --fail-under-lines 90
+      # Build and execute the standalone Rust training example.
+      - run: cargo run --example train
+      # Run the full test suite (including doctests) on the minimum supported Rust version (1.74).
+      - run: cargo +1.74 test
+
+  rust-blas:
+    name: Rust (BLAS)
+    # A downstream crate linked against the built-in BLAS and each apt BLAS: every SDCA_BLAS
+    # form with OpenBLAS, a shared and a static link with the others. Each package is
+    # installed just before its links, since a later one takes over the libblas.so alternative.
+    runs-on: ubuntu-24.04
+    steps:
+      # Check out repository sources to test downstream crate linkage across BLAS providers.
+      - uses: actions/checkout@v7.0.1
+      # Install stable Rust with rustfmt and clippy for the consumer test crate.
+      - run: rustup toolchain install stable --profile minimal -c rustfmt,clippy && rustup default stable
+      # Check formatting and lints of the downstream consumer crate.
+      - working-directory: rust/consumer
+        run: cargo fmt --check && cargo clippy -- -D warnings
+      # Verify the consumer crate builds and runs with the default built-in BLAS (no external CBLAS).
+      - run: bash rust/consumer/ci.sh builtin
+      # Install Ubuntu's reference Netlib BLAS package.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libblas-dev
+      # Test dynamic (-lblas) and static (.a) linkage against reference BLAS.
+      - run: bash rust/consumer/ci.sh reference l static
+      # Install OpenBLAS development headers and static/shared pthread libraries.
+      - run: sudo apt-get install -y --no-install-recommends libopenblas-dev libopenblas-pthread-dev
+      # Test all five SDCA_BLAS linker forms (-l, -l:file, abs .so, abs .a, -L -l) with OpenBLAS.
+      - run: bash rust/consumer/ci.sh openblas l l-file abs-so static L-l
+      # Install BLIS development headers and static/shared pthread libraries.
+      - run: sudo apt-get install -y --no-install-recommends libblis-dev libblis-pthread-dev
+      # Test dynamic (-lblis) and static (.a) linkage against BLIS.
+      - run: bash rust/consumer/ci.sh blis l static
+
+  package:
+    name: Package (sdist)
+    # Builds and checks the sdist and tests it outside the checkout on the oldest supported Python.
+    runs-on: ubuntu-24.04
+    steps:
+      # Check out repository sources to verify source distribution packaging and MANIFEST.in completeness.
+      - uses: actions/checkout@v7.0.1
+      # Set up Python 3.10 to test installation and runtime compatibility at the requires-python floor.
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.10'
+      # Install PEP 517 build frontend and Twine metadata validator.
+      - run: python -m pip install build==1.6.1 twine==7.0.0
+      # Build the source distribution tarball (.tar.gz) in isolation.
+      - run: python -m build --sdist
+      # Validate package metadata and README rendering with strict Twine checks.
+      - run: python -m twine check --strict dist/*
+      # Install the sdist into a clean venv outside the checkout and run the core suite against the installed package.
+      - run: |
+          python -m venv "$RUNNER_TEMP/env"
+          py="$RUNNER_TEMP/env/bin/python" src="$RUNNER_TEMP/sdist"
+          SDCA_BLAS_BACKEND=BUILTIN "$py" -m pip install dist/*.tar.gz pytest scipy mpmath scikit-learn
+          mkdir "$src" && tar -xzf dist/*.tar.gz -C "$src" --strip-components=1
+          cd "$RUNNER_TEMP" && "$py" -m pytest -p no:cacheprovider "$src/tests/python" --group core --installed

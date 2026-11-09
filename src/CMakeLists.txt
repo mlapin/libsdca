@@ -4,12 +4,10 @@ set(MEX_PROX
 set(MEX_SOLVE
   "${SDCA_MATLAB_PREFIX}fit${SDCA_BINARY_SUFFIX}"
   )
-set(MEX_GD
-  "${SDCA_MATLAB_PREFIX}gd${SDCA_BINARY_SUFFIX}"
-  )
+set(MEX_LOSS "${SDCA_MATLAB_PREFIX}loss${SDCA_BINARY_SUFFIX}")
 
 # Matlab interface
-if(${Matlab_FOUND})
+if(SDCA_BUILD_MATLAB AND Matlab_FOUND)
   include_directories(matlab)
 
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -22,7 +20,6 @@ if(${Matlab_FOUND})
   add_definitions(
     -DMEX_PROX="${MEX_PROX}"
     -DMEX_SOLVE="${MEX_SOLVE}"
-    -DMEX_GD="${MEX_GD}"
     )
 
   matlab_add_mex(
@@ -46,29 +43,28 @@ if(${Matlab_FOUND})
       ${libsdca_UTILITY_SOURCES}
     LINK_TO
       ${BLAS_LIBRARIES}
+      Threads::Threads
     )
 
-#  matlab_add_mex(
-#    NAME ${MEX_GD}
-#    SRC
-#      matlab/mex_gd.cpp
-#      matlab/mex_util.h
-#      ${libsdca_MATH_SOURCES}
-#      ${libsdca_SOLVER_SOURCES}
-#      ${libsdca_UTILITY_SOURCES}
-#    LINK_TO
-#      ${BLAS_LIBRARIES}
-#    )
+  matlab_add_mex(NAME ${MEX_LOSS} SRC matlab/mex_loss.cpp matlab/mex_util.h
+    LINK_TO ${BLAS_LIBRARIES} Threads::Threads)
+
+  # The floating-point flags of the libsdca target (defined after src/).
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    foreach(mex ${MEX_PROX} ${MEX_SOLVE} ${MEX_LOSS})
+      target_compile_options(${mex} PRIVATE -fno-fast-math -ffp-contract=off)
+    endforeach()
+  endif()
 
   install(
     TARGETS
       ${MEX_PROX}
       ${MEX_SOLVE}
-#      ${MEX_GD}
+      ${MEX_LOSS}
     DESTINATION
       ${SDCA_MATLAB_INSTALL_DIR}
     )
 
 else()
-  message(STATUS "Matlab not found, mex files will not be compiled.")
+  message(STATUS "MATLAB interfaces disabled.")
 endif()

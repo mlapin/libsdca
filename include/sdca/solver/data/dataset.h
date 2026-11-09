@@ -4,14 +4,13 @@
 #include <sstream>
 #include <vector>
 #include <utility>
+#include <stdexcept>
 
 #include "sdca/utility/types.h"
 
 namespace sdca {
 
-template <typename Input,
-          typename Output,
-          typename Evaluation>
+template <typename Input, typename Output, typename Evaluation>
 struct dataset {
   typedef Input input_type;
   typedef Output output_type;
@@ -21,15 +20,10 @@ struct dataset {
   output_type out;
   std::vector<eval_type> evals;
 
-
-  dataset(
-      Input&& __in,
-      Output&& __out
-    ) :
-      in(std::move(__in)),
-      out(std::move(__out))
-  {}
-
+  dataset(Input&& in_, Output&& out_) : in(std::move(in_)), out(std::move(out_)) {
+    if (in.num_examples != out.num_examples())
+      throw std::invalid_argument("Number of examples and labels differs");
+  }
 
   inline size_type num_dimensions() const { return in.num_dimensions; }
 
@@ -37,16 +31,13 @@ struct dataset {
 
   inline size_type num_classes() const { return out.num_classes; }
 
-
-  inline std::string
-  to_string() const {
+  inline std::string to_string() const {
     std::ostringstream str;
     str << in.to_string() << ", " << out.to_string();
     return str.str();
   }
-
 };
 
-}
+}  // namespace sdca
 
 #endif

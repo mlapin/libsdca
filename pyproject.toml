@@ -1,0 +1,163 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "libsdca"
+version = "0.3.0"
+description = "Numerically stable multiclass, top-k, multilabel and distillation losses for PyTorch, JAX and NumPy, and certified SDCA solvers for linear and kernel SVM and softmax classifiers, with scikit-learn, C++, C, Rust and MATLAB interfaces"
+readme = "python/README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Max Lapin"}]
+requires-python = ">=3.10"
+keywords = [
+  "sdca",
+  "stochastic dual coordinate ascent",
+  "svm",
+  "support vector machine",
+  "multiclass svm",
+  "linear svm",
+  "kernel svm",
+  "top-k",
+  "top-k svm",
+  "hinge loss",
+  "softmax",
+  "cross-entropy",
+  "log-softmax",
+  "softmax collapse",
+  "softmax cancellation",
+  "numerically stable cross-entropy",
+  "numerical stability",
+  "knowledge distillation",
+  "multilabel",
+  "loss functions",
+  "classification",
+  "machine learning",
+  "optimization",
+  "scikit-learn",
+  "pytorch",
+  "jax",
+  "cuda",
+  "triton",
+  "liblinear",
+  "libsvm",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: GPU :: NVIDIA CUDA",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: C++",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+torch = ["torch>=2.1", "ninja"]
+jax = ["jax>=0.4.35"]
+sklearn = ["scikit-learn>=1.6"]
+test = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath"]
+test-torch = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "torch>=2.1", "ninja", "scikit-learn>=1.6"]
+test-jax = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "jax>=0.4.35"]
+coverage = ["coverage[toml]>=7"]
+
+[project.urls]
+Homepage = "https://mlapin.github.io/libsdca/"
+Documentation = "https://github.com/mlapin/libsdca#documentation"
+Source = "https://github.com/mlapin/libsdca"
+Changelog = "https://github.com/mlapin/libsdca/blob/v0.3.0/CHANGELOG.md"
+Issues = "https://github.com/mlapin/libsdca/issues"
+
+[tool.cibuildwheel]
+# One py3-none wheel per platform (see setup.py), built and tested on one Python:
+# manylinux_2_28 x86_64 and macOS 11+ arm64.
+build = "cp312-*"
+skip = ["*-musllinux_*"]
+# Portable wheels: the built-in BLAS needs no external library.
+# Test with binary dependency wheels only; never compile NumPy or SciPy.
+environment = { SDCA_BLAS_BACKEND = "BUILTIN", PIP_ONLY_BINARY = ":all:" }
+test-requires = ["pytest>=9", "scipy", "mpmath", "scikit-learn"]
+test-command = "python -m pytest -p no:cacheprovider {project}/tests/python --group core --installed"
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests/python"]
+# Test classes are named *Tests.
+python_classes = ["Test*", "*Tests"]
+addopts = ["--strict-markers", "--strict-config"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+include = [
+  "python/*.py", "python/libsdca/*.py", "tests/python/*.py", "tools/*.py",
+  "examples/python/*.py",
+  "sdca_build.py", "setup.py",
+]
+extend-exclude = ["vendor", "build"]
+
+[tool.coverage.report]
+# Device code executes outside Python's tracer; its host wrappers remain counted.
+exclude_also = ['^\s*@triton\.jit(?:\s*\(|\s*$)']
+
+[tool.coverage.paths]
+libsdca = ["python/libsdca", "*/python/libsdca"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+# These entry points put the source tree on sys.path before importing it.
+"setup.py" = ["E402"]
+"python/build.py" = ["E402"]
+# Test closures are called within the iteration that defines them.
+"tests/python/test_*.py" = ["B023", "C90"]
+
+[tool.basedpyright]
+# Current PyTorch needs Python 3.10 to type-check.
+pythonVersion = "3.10"
+include = [
+  "python/libsdca", "python/build.py", "tests/python", "examples/python", "tools",
+  "sdca_build.py", "setup.py",
+]
+exclude = ["build", "**/__pycache__", "**/.*"]
+extraPaths = ["python", "tests/python"]
+# Triton is treated as untyped: its JIT DSL does not follow Python typing.
+stubPath = "tools/typings"
+# The stubs stand in for Triton where it is not installed (CPU-only setups).
+reportMissingModuleSource = "none"
+typeCheckingMode = "standard"
+failOnWarnings = true
+# Only rule-scoped "# pyright: ignore[rule]" comments suppress a diagnostic.
+enableTypeIgnoreComments = false
+reportIgnoreCommentWithoutRule = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnnecessaryCast = "error"
+reportMissingParameterType = "error"
+# Triton kernels may leave parameters unannotated.
+executionEnvironments = [
+  { root = "python/libsdca/_triton_distillation.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/_triton_entropy.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/_triton_hinge.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/_triton_linear.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/_triton_multilabel.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/_triton_prox.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/_triton_reduce.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/_triton_topk.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/_triton_weighted_entropy.py", reportMissingParameterType = "none" },
+]
