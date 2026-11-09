@@ -16,17 +16,23 @@ $h_j = 1 + z_j - z_y$ ($j \neq y$) sorted as $h_{[1]} \ge h_{[2]} \ge \dots$
 | Name | Formula | Parameters | Use case |
 | --- | --- | --- | --- |
 | `cross_entropy` | $\log \sum_j \exp(z_j) - z_y$ | — | Standard multiclass classification |
-| `topk_cross_entropy` | $\max_{p \in \Delta_k} \langle a, p \rangle - (1 - s)\log(1 - s) - \sum_j p_j \log p_j$, where $a_j = z_j - z_y$, $s = \sum_j p_j$, $\Delta_k = \{p \ge 0 : s \le 1,\, p_j \le s/k\}$ over $j \neq y$ | `k` | Top-$k$ entropy classification [4] (`cross_entropy` at $k=1$) |
+| `topk_cross_entropy` | $\max_{p \in \Delta_k} \langle a, p \rangle + H(\bar p)$ | `k` | Top-$k$ entropy classification [4] (`cross_entropy` at $k=1$) |
 | `multiclass_hinge` | $\max(0, h_{[1]})$ | `gamma` | Crammer–Singer multiclass SVM [1] |
 | `topk_hinge_alpha` | $\max\!\big(0, \frac{1}{k}\sum_{i \le k} h_{[i]}\big)$ | `k`, `gamma` | Top-$k$ SVM on average of $k$ worst margins [3] |
 | `topk_hinge_beta` (`topk_hinge`) | $\frac{1}{k}\sum_{i \le k} \max(0, h_{[i]})$ | `k`, `gamma` | Top-$k$ SVM on each of $k$ worst margins [4] |
 | `multilabel_hinge` | $\max\!\big(0, 1 + \max_{j \notin Y} z_j - \min_{y \in Y} z_y\big)$ | `gamma` | Ranked multilabel SVM [2] |
 | `multilabel_cross_entropy` | $\log \sum_j \exp(z_j) - \frac{1}{|Y|}\sum_{y \in Y} z_y$ | — | Softmax cross-entropy to uniform distribution over $Y$ |
-| `proximal_cross_entropy` | $\min_u \big\{\mathrm{CE}(u, y) + \frac{1}{2\alpha}\|u - z\|_2^2\big\}$ | `alpha` | Moreau envelope of cross-entropy [5] (loss evaluation only) |
+| `proximal_cross_entropy` | $\mathrm{env}_\alpha[\mathrm{CE}(\cdot, y)](z)$ | `alpha` | Moreau envelope of cross-entropy [5] (loss evaluation only) |
 | `distillation` | $-\sum_j p_j \log q_j$, with $p = \mathrm{softmax}(t/T)$, $q = \mathrm{softmax}(z/T)$ | `temperature` | Knowledge distillation to teacher logits $t$ [6] |
-| `proximal_distillation` | $\min_u \big\{H(p, \mathrm{softmax}(u)) + \frac{1}{2\alpha}\|u - z/T\|_2^2\big\}$ | `temperature`, `alpha` | Damped distillation step (Moreau envelope in $z/T$) |
+| `proximal_distillation` | $\mathrm{env}_\alpha[H(p, \mathrm{softmax}(\cdot))](z/T)$ | `temperature`, `alpha` | Damped distillation step (Moreau envelope in $z/T$) |
 | `linear_cross_entropy` | $\mathrm{CE}(h W^\top + b, y)$ evaluated in row chunks without materializing logits | `chunk_bytes`, `recompute` | Language-model / large-vocabulary classification head (PyTorch) |
 
+- **Top-$k$ entropy:** Over $j \neq y$, $a_j = z_j - z_y$, $s = \sum_j p_j$ and
+  $\Delta_k = \{p \ge 0 : s \le 1,\, p_j \le s/k\}$;
+  $H(\bar p) = -(1 - s)\log(1 - s) - \sum_j p_j \log p_j$ is the entropy of $\bar p = (1 - s, p)$.
+- **Moreau envelope:**
+  $\mathrm{env}_\alpha[f](x) = \min_u \big\{f(u) + \frac{1}{2\alpha}\|u - x\|_2^2\big\}$;
+  $H(p, q)$ is the cross-entropy $-\sum_j p_j \log q_j$.
 - **Hinge smoothing (`gamma`):** `gamma = 0` (default) is the nonsmooth hinge;
   `gamma > 0` is its Moreau envelope $\max_{p \in S} \langle h, p \rangle - \frac{\gamma}{2}\|p\|_2^2$,
   which is within $\gamma / 2$ of the nonsmooth loss and has a $(1/\gamma)$-Lipschitz gradient [4].
