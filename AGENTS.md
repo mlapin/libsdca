@@ -37,14 +37,14 @@ cargo add libsdca                # Rust crate (requires Rust >=1.74 and a C++11 
 
 ## 3. Critical Rules & Pitfalls to Avoid
 
-1. **Class axis convention in PyTorch (`dim=1` vs. `dim=-1`):**
-   - `CrossEntropyLoss` and `libsdca.cross_entropy` follow `torch.nn.CrossEntropyLoss`:
-     classes are on **`dim=1`** for `(N, C, ...)` inputs (or `dim=0` for 1-D `(C,)` inputs).
-   - **All other PyTorch losses** (`TopKCrossEntropyLoss`, `TopKHingeLoss`,
-     `MulticlassHingeLoss`, `MultilabelCrossEntropyLoss`, `MultilabelHingeLoss`,
-     `ProximalCrossEntropyLoss`, `DistillationLoss`, `sdca_loss`) and **all JAX losses** put
-     classes on the **last axis (`dim=-1` / `axis=-1`)** by default. Pass `dim=1` explicitly
-     when feeding `(N, C, H, W)` tensors to non-CE losses.
+1. **Class axis on 3-D+ tensors in PyTorch (`dim=1` vs. `dim=-1`):**
+   - For standard **2-D `(N, C)`** (and 1-D `(C,)`) logits, `dim=1` and `dim=-1` are the
+     same axis, so all losses work identically without specifying `dim`.
+   - For **3-D+ tensors**, `CrossEntropyLoss` and `libsdca.cross_entropy` follow
+     `torch.nn.CrossEntropyLoss` with classes on **`dim=1`** (`(N, C, ...)`), whereas all
+     other PyTorch losses (`TopKCrossEntropyLoss`, `TopKHingeLoss`, `MulticlassHingeLoss`,
+     `DistillationLoss`, `sdca_loss`) and all JAX losses default to **`dim=-1`** (`(B, T, C)`).
+     Pass `dim=1` explicitly when feeding `(N, C, H, W)` tensors to non-CE losses.
 2. **Label smoothing and probability targets in PyTorch:**
    - `CrossEntropyLoss` only supports integer `int64` class indices and `label_smoothing=0.0`.
    - For label smoothing or soft probability targets $q$, pass log-probabilities as the

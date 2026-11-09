@@ -107,10 +107,10 @@ mask with `cross_entropy` selects `multilabel_cross_entropy`.
 bounds (entropy objectives have strictly positive probabilities and ignore the option):
 
 - `"heuristic"` (`Shrinking::Heuristic`, `SDCA_SHRINKING_HEURISTIC`): LIBLINEAR-style
-  shrinking. Epochs between full passes skip examples whose dual block did not change
+  shrinking [7]. Epochs between full passes skip examples whose dual block did not change
   and restrict single-label updates to the target and nonzero-dual classes; full passes
   and evaluations run after `eval_epoch` full-pass equivalents of work (at most 50 epochs).
-- `"safe"` (`Shrinking::Safe`, `SDCA_SHRINKING_SAFE`): Gap-safe screening on feature
+- `"safe"` (`Shrinking::Safe`, `SDCA_SHRINKING_SAFE`): Gap-safe screening [8] on feature
   inputs. Uses strong convexity $\|W - W^\star\|_2 \le \sqrt{2\,\text{gap}}$ to permanently
   prune dual variables proven to be zero at the optimum.
 - `"both"` / `"auto"` (default): Combines `"heuristic"` and `"safe"`.
@@ -287,3 +287,7 @@ CMake options (`cmake -D<option>=<value>`): `SDCA_BLAS_BACKEND` (`AUTO|EXTERNAL|
    regularized loss minimization. *JMLR*, 2013.
 6. G. Hinton, O. Vinyals and J. Dean. Distilling the knowledge in a neural
    network. arXiv:1503.02531, 2015.
+7. R.-E. Fan, K.-W. Chang, C.-J. Hsieh, X.-R. Wang and C.-J. Lin. LIBLINEAR:
+   A library for large linear classification. *JMLR*, 2008.
+8. E. Ndiaye, O. Fercoq, A. Gramfort and J. Salmon. Gap safe screening rules
+   for sparsity enforcing penalties. *JMLR*, 2017.
