@@ -17,7 +17,7 @@
 #     - INTEL_OMP_DIR           # CMake variable
 #     - /opt/intel/lib          # default location
 
-# Copyright 2015-2016 Maksim Lapin.
+# Copyright 2015-2016 Max Lapin.
 
 include(FindPackageHandleStandardArgs)
 

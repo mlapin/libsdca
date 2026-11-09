@@ -29,8 +29,10 @@ loss.backward()
   weights and duals in `double` with a first-order rounding bound $e$;
   `status == "solved"` certifies $P(W) - D(A) + e \le \text{tol} \cdot \max(|P|, |D|)$
   ([numerics](docs/numerics.md#the-solved-certificate)).
-- **Verified to the subnormal limit:** Passes `43,865` loss and gradient checks
-  against 100-digit `mpmath` references across CPU and CUDA with `0` failures
+- **Verified to the subnormal limit:** Every loss value and gradient entry is
+  verified within `64` output-dtype eps against 100-digit `mpmath` references across
+  `2` to `32,769` classes, subnormal tails (where standard `F.cross_entropy`
+  collapses to `0`), cancellation offsets and `±finfo.max`
   ([verification](docs/numerics.md#how-it-is-verified)).
 - **Fused CUDA and CPU kernels:** On an A100 at `8192 × 32000` and `8192 × 128256`
   (`bfloat16` / `float32`), `CrossEntropyLoss` takes `0.33–0.41×` eager

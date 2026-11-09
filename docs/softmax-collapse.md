@@ -46,7 +46,7 @@ cross-entropy, multilabel cross-entropy, and the hinges) on CPU and CUDA in `flo
 The knowledge-distillation gradient is $\operatorname{softmax}(z_{\mathrm{S}} / T) - \operatorname{softmax}(z_{\mathrm{T}} / T)$.
 As student logits $z_{\mathrm{S}}$ approach teacher logits $z_{\mathrm{T}}$, subtracting the
 two rounded probability vectors loses significant digits: even at $z_{\mathrm{S}} = z_{\mathrm{T}}$,
-PyTorch returns up to $4.6\times 10^{-9}$ in `float32` (`2.2\times 10^{-3}` in `bfloat16`)
+PyTorch returns up to $4.6\times 10^{-9}$ in `float32` ($2.2\times 10^{-3}$ in `bfloat16`)
 instead of zero.
 
 `libsdca.distillation_loss` evaluates each entry from the centered log-ratio $z_{\mathrm{S}} - z_{\mathrm{T}}$
@@ -73,29 +73,51 @@ external framework patches ([numerics.md](numerics.md)).
 ## Reproduction
 
 We reproduced Sections 3, 6 and 7 of Barron et al. on an H100 (and verified on an A100):
-modular addition grokking on `a + b mod 31` (Table 1, Fig. 5; 5 seeds $\times$ 10,000 epochs),
-four grokking tasks (Fig. 6), and teacher-initialized distillation on `a + b mod 53` (Fig. 7).
+- **Grokking on $a + b \bmod 31$ (Table 1, Fig. 5):** A 1-layer ReLU transformer trained for
+  10,000 full-batch epochs with AdamW ($\epsilon \in \{10^{-8}, 10^{-12}, 10^{-16}\}$) on a
+  50/50 split of the $31^2 = 961$ pairs (**$480$ training examples** and $481$ test examples),
+  across 5 random seeds (`0–4`, plus a second set `5–9`). At each epoch, a training example
+  (one row of the $480 \times 31$ training logit matrix) is counted as *collapsed* if its
+  target-class gradient has rounded to exact `0` while competitor gradients remain nonzero.
+- **Additional grokking tasks (Fig. 6) and teacher-initialized distillation on $a + b \bmod 53$ (Fig. 7).**
 
-Test accuracy (%) on `a + b mod 31` at Adam $\epsilon \in \{10^{-8}, 10^{-12}, 10^{-16}\}$
+Test accuracy (%) on $a + b \bmod 31$ at Adam $\epsilon = 10^{-8} / 10^{-12} / 10^{-16}$,
 and final logit margin at $\epsilon = 10^{-16}$:
 
-| dtype | Loss | Paper | Reproduction | Margin |
-| --- | --- | --- | --- | ---: |
-| `float32` | Fixed CE (paper) | 100.0 / 99.6 / 99.0 | 98.3 / 97.8 / 97.2 | 36.8 |
-| `float32` | Standard CE | 94.3 / 96.4 / 96.5 | 92.5 / 93.4 / 92.8 | 12.9 |
-| `float32` | `libsdca.CrossEntropyLoss` | — | 98.3 / 97.3 / 97.3 | 36.8 |
-| `bfloat16` | `libsdca.CrossEntropyLoss` | — | 99.2 / 98.3 / 98.2 | 36.9 |
-| `float32` | `libsdca.TopKHingeLoss(k=3, gamma=1, variant="alpha")` | — | 100.0 / 100.0 / 100.0 | 1.0 |
+| dtype | Loss | Paper (5 JAX seeds) | Reproduction (seeds 0–4) | Reproduction (seeds 5–9) | Margin ($\epsilon=10^{-16}$) |
+| --- | --- | --- | --- | --- | ---: |
+| `float32` | Fixed CE (paper) | 100.0 / 99.6 / 99.0 | 98.3 / 97.8 / 97.2 | 100.0 / 99.9 / 100.0 | 36.8 |
+| `float32` | Standard CE (`F.cross_entropy`) | 94.3 / 96.4 / 96.5 | 92.5 / 93.4 / 92.8 | — | 12.9 |
+| `float32` | `libsdca.CrossEntropyLoss` | — | 98.3 / 97.3 / 97.3 | — | 36.8 |
+| `bfloat16` | `libsdca.CrossEntropyLoss` | — | 99.2 / 98.3 / 98.2 | — | 36.9 |
+| `float32` | `libsdca.TopKHingeLoss(k=3, gamma=1, variant="alpha")` | — | **100.0 / 100.0 / 100.0** | **100.0 / 100.0 / 100.0** | 1.0 |
 
-- **Collapse and fix reproduce:** Standard `float32` CE collapses on `73–88%` of training rows
-  and stalls at margin `12.9`, whereas Fixed CE and `libsdca.CrossEntropyLoss` have zero
-  collapsed rows and reach the theoretical equilibrium margins (`17.9 / 27.4 / 36.8`).
-- **Cancellation reproduces:** Initialized at the teacher, standard `bfloat16` soft-target CE
-  drifts to `17%` test accuracy (`KL -> 1.74`), whereas `DistillationLoss` and
-  `ProximalDistillationLoss` have exact zero initial gradients and stay at `100%`.
-- **Not reproduced from the paper:** StableMax (`77–81%` vs. paper's `95.6–97.4%`), standard
-  CE in `bfloat16` (`80–83%` vs. `93–95%`), and `float64` standard CE margin at
-  $\epsilon = 10^{-16}$ (`36.5` vs. `30.1`).
+Key takeaways:
+
+- **Standard `float32` CE loses target gradients on `73–88%` of the 480 training examples
+  (`350–422` examples per batch):** Once margins approach the `16.6` `float32` cliff,
+  `F.cross_entropy` zeroes out the target gradient on most training examples while still
+  pushing competitor logits down. The batch gradient no longer sums to zero, causing
+  margins to stall at `12.9` and test accuracy to drop by `5–6` points (`92.5–93.4%`).
+- **`libsdca.CrossEntropyLoss` matches the paper's Fixed CE (`0 / 480` collapsed examples,
+  identical equilibrium margins `17.9 / 27.4 / 36.8`):** On identical seeds, `libsdca` and
+  the paper's Fixed CE formula produce the same accuracy (`98.3 / 97.3 / 97.3%` vs.
+  `98.3 / 97.8 / 97.2%`). The `1–2` point gap between seeds `0–4` and the paper's
+  `99.0–100.0%` (which used JAX PRNG seeds) comes from a single hard 50/50 data split
+  (seed `2`, which ends at `89.4–94.6%` while seeds `0` and `4` reach `100.0%`, and where
+  `bfloat16` quantization happens to land ~1 point higher); on seeds `5–9`, exact-gradient
+  CE reaches **`99.9–100.0%`**, matching the paper.
+- **Smooth top-$k$ hinge (`TopKHingeLoss`) avoids $\epsilon$-driven margin growth and solves
+  every seed to `100.0%`:** Because cross-entropy gradients never vanish completely, AdamW
+  keeps inflating logits until $e^{-m} \approx \epsilon$ (`17.9` $\to$ `36.8`). Smooth
+  top-$k$ hinge ($\gamma = 1$) instead has an exact zero gradient once the margin reaches
+  `1.0`, solving all 10 seeds (including seed `2`) to `100.0%` test accuracy across all $\epsilon$.
+- **Exact cancellation prevents student drift in distillation:** When a student MLP is
+  initialized at a `100%`-accurate teacher on $a + b \bmod 53$, standard `bfloat16`
+  soft-target CE has a nonzero cancellation floor at $z_{\mathrm{S}} = z_{\mathrm{T}}$ that
+  drives the student down to `17%` test accuracy ($\mathrm{KL} \to 1.74$). `DistillationLoss`
+  and `ProximalDistillationLoss` have an exact zero gradient at equal logits and keep the
+  student at `100%` accuracy ($\mathrm{KL} = 0$) across all 2,000 steps.
 
 Full tables, training curves and the StableMax analysis are on the
 [project page](https://mlapin.github.io/libsdca/).
