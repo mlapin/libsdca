@@ -381,41 +381,39 @@ nonfinite inputs. The working arithmetic is chosen at run time with
 
 ## Threads
 
-The loss functions (`loss_and_grad`, `matsdca_loss`, `sdca_loss_gradient`)
-and the coordinate steps (`coordinate_update`, `sdca_update_objective`)
-compute each row alone, on up to `num_threads` threads of the calling
-process, so their results are bitwise identical for every thread count.
-Without `num_threads` (Python `None`, Rust `None`, no `opts.num_threads`, C
-`SDCA_THREADS_DEFAULT`) a call takes the `SDCA_NUM_THREADS` environment
-variable (read at the first call), else 0: automatic. An explicit
-`num_threads` wins over the variable; 1 runs on the calling thread. A count is
-an upper limit: a call runs its first rows on the calling thread, timing them,
-and adds threads only when the rest would take at least 1 ms on one thread
-(0.2 ms when a loaded OpenMP runtime's team runs them), one per eighth of
-that, so small inputs stay on the calling thread and no call is slower than
-on one thread. Automatic takes the CPUs the
-process may run on (its affinity mask on Linux; on macOS the performance and
-efficiency cores, which are faster together), at most the thread count of a
-loaded OpenMP runtime (as `torch.set_num_threads` sets it) or else
-`OMP_NUM_THREADS` (as joblib sets it in its workers), split evenly among the
-calls in flight (`OMP_NUM_THREADS=1` thus keeps automatic calls serial).
-Calls inside the rows of a call running on several threads, and automatic
-calls inside an OpenMP parallel region, run serially; calls inside the rows
-of a serial call may take threads; a Python call in a PyTorch
-`DataLoader` worker takes PyTorch's count there (1). On an OpenMP team the rows split as
-an OpenMP static loop (as PyTorch's loops), so a following PyTorch pass finds them in its
-threads' caches. Training (`fit`) runs its epochs on one thread; only its gap
-evaluations and kernel check use these threads (`SDCA_NUM_THREADS`). The PyTorch native backend (CPU tensors) uses
-them with at most `torch.get_num_threads()` threads unless `SDCA_NUM_THREADS` is set;
-the CPU extension ([`SDCA_CPU_EXTENSION`](#environment-variables)) uses ATen's intra-op pool
-(`torch.set_num_threads`) instead.
+Loss functions (`loss_and_grad`, `matsdca_loss`, `sdca_loss_gradient`) and
+coordinate steps (`coordinate_update`, `sdca_update_objective`) evaluate each
+row independently across up to `num_threads` threads, producing bitwise-identical
+results for every thread count:
 
-Every computing function of the C ABI (so Python, Rust and the native JAX
-losses) runs in the default IEEE environment, with subnormals kept even
-under a caller's flush-to-zero (as XLA:CPU and `torch.set_flush_denormal` set),
-round to nearest and no traps, and restores the caller's modes on return, also
-after an error (raised exception flags stay raised); its threads take the
-calling thread's modes. The C++ headers and MATLAB use the caller's modes.
+- **Default thread count:** When `num_threads` is omitted (`None` in Python/Rust,
+  `SDCA_THREADS_DEFAULT` in C), the library reads `SDCA_NUM_THREADS` once on first
+  use and otherwise defaults to `0` (automatic). Automatic uses the CPUs available
+  to the process (affinity mask on Linux; performance + efficiency cores on macOS),
+  capped by a loaded OpenMP runtime's thread count (such as `torch.set_num_threads`)
+  or `OMP_NUM_THREADS`, divided evenly across concurrent calls in flight. Passing
+  `num_threads=1` (or `OMP_NUM_THREADS=1` under automatic) runs serially on the
+  calling thread.
+- **Small-input threshold:** A call times its first rows on the calling thread and
+  spawns worker threads only when the remaining work is estimated at `>= 1 ms`
+  (`>= 0.2 ms` on a loaded OpenMP team), so small inputs stay on the calling
+  thread without thread-launch overhead.
+- **OpenMP and PyTorch integration:** When an OpenMP team is active, rows are
+  partitioned like an OpenMP static loop to preserve cache locality with
+  surrounding PyTorch ops. Calls nested inside a multithreaded call or an OpenMP
+  parallel region run serially. The PyTorch native CPU backend caps automatic
+  threads at `torch.get_num_threads()`; the PyTorch CPU extension
+  ([`SDCA_CPU_EXTENSION`](#environment-variables)) uses ATen's intra-op pool
+  directly.
+- **Training (`fit`):** Coordinate-ascent epochs are sequential (1 thread); only
+  duality-gap evaluations and the initial kernel check run in parallel.
+
+Every C ABI compute entry point (Python, Rust, and native JAX) executes in the
+default IEEE floating-point environment—keeping subnormals enabled even if the
+caller enabled flush-to-zero (`XLA:CPU` or `torch.set_flush_denormal`), with
+round-to-nearest and traps disabled—and restores the caller's environment on
+return (including on error). Direct C++ header and MATLAB callers use the
+caller's floating-point environment.
 
 ## Precision
 
@@ -557,24 +555,32 @@ parameter.
 
 ## Environment variables
 
-Read at run time: `SDCA_NUM_THREADS` and `OMP_NUM_THREADS` once, at the first
-native call that needs them; `SDCA_CUDA_LAUNCHER` once per process, at the first
-fused CUDA loss call; `SDCA_CPU_EXTENSION` at every CPU loss call and `SDCA_JAX_FFI`
-whenever a native JAX loss is traced (`auto` tries the build once per process):
+Read at run time (`SDCA_NUM_THREADS` and `OMP_NUM_THREADS` once on first native
+call; `SDCA_CUDA_LAUNCHER` once on first fused CUDA call; `SDCA_CPU_EXTENSION` on
+CPU loss calls; `SDCA_JAX_FFI` when tracing a native JAX CPU loss).
+
+For the three runtime-compiled extension switches (`SDCA_CPU_EXTENSION`,
+`SDCA_CUDA_LAUNCHER`, `SDCA_JAX_FFI`), `auto` (the default) compiles and caches the
+extension on first use when its build tools are present, or falls back with a
+one-time warning naming what is missing (a failed build warns once, writes a
+`*.build-failed.txt` marker, and is skipped by subsequent processes for 24 h); `on`
+(`1`) requires the extension and raises `RuntimeError` if tools are missing or the
+build fails; `off` (`0`) disables it without warning; any other value raises
+`ValueError`:
 
 | Variable | Default | Values | What it does |
 | --- | --- | --- | --- |
-| `SDCA_NUM_THREADS` | unset: automatic | integer below 4096; 0 is automatic (the CPUs the process may run on), 1 the calling thread, any other count an upper limit | Threads of the native loss rows, coordinate steps and fit evaluations of every call that passes no `num_threads` ([Threads](#threads)); other values are ignored. With it unset, the PyTorch native backend takes at most `torch.get_num_threads()`. |
-| `SDCA_CPU_EXTENSION` | `auto` | `auto`, `on`, `off` (`1`, `0` alike); others raise `ValueError` | PyTorch CPU losses. `auto` builds the CPU extension on the first CPU loss call (cached for later processes) where ninja, a C++17 compiler (C++20 for PyTorch 2.12 and later) with OpenMP and the Python headers are found, else uses the prebuilt native library with one warning naming what is missing; a failed build warns once and is recorded, and later processes skip it for 24 h. `on` requires the extension (missing tools or a failed build raise `RuntimeError`), `off` never builds it. `explain_backend` reports the reason. |
-| `SDCA_CUDA_LAUNCHER` | `auto` | `auto`, `on`, `off` (`1`, `0` alike); others raise `ValueError` | The C++ launcher of the fused CUDA kernels. `auto` builds and caches it on the first fused CUDA loss call with Triton 3.3 to 3.9 where ninja, a C++ compiler, the Python headers, the CUDA headers (`CUDA_HOME`) and `libcuda.so.1` are found; otherwise, or if that build fails, the same kernels launch through Triton, with the one-time warning, failed-build record and 24 h retry of `SDCA_CPU_EXTENSION` (outside that Triton range silently). `on` skips the Triton version check and requires the launcher (missing tools or a failed build raise `RuntimeError`); `off` never builds it. A kernel that needs more than the launcher passes (Triton scratch memory, clusters) launches through Triton with one warning, also with `on`. `explain_backend` reports the reason. |
-| `SDCA_JAX_FFI` | `auto` | `auto`, `on`, `off` (`1`, `0` alike); others raise `ValueError` | The native JAX losses on the CPU. `auto` builds and caches the XLA FFI handlers (a few seconds) when a native loss is first traced for the CPU where `jax.ffi`, jaxlib's FFI headers and a C++17 compiler are found, and then calls the native library inside the compiled computation; otherwise, or if that build fails, the losses run through `jax.pure_callback` (the same results), with the one-time warning, failed-build record and 24 h retry of `SDCA_CPU_EXTENSION`. `on` requires the handlers (missing tools or a failed build raise `RuntimeError`), `off` never builds them. Already traced functions keep their path. |
-| `SDCA_CACHE_DIR` | `$XDG_CACHE_HOME/libsdca`, else `~/.cache/libsdca` | directory | Where the JAX FFI handlers are built and cached (one directory per source, jaxlib and its headers, platform, compiler and its version, and flags), with their `*.build-failed.txt` records. |
-| `OMP_NUM_THREADS` | unset | integer below 4096 (the first of a list) | Caps automatic threads where no OpenMP runtime is loaded in the process (as joblib sets it in its workers); a loaded runtime's own count caps them instead ([Threads](#threads)). Not libsdca's own variable. |
-| `SDCA_LIBRARY_DIR` | unset | directory | Where the Python package loads `libsdca_c.so` from, instead of `build/python` of a source checkout or the installed package's library. |
-| `TORCH_EXTENSIONS_DIR` | PyTorch's extension cache | directory | Where the CPU extension and the CUDA launcher are built and cached (one directory per source, PyTorch, Python, compiler and its version, flags, and for the launcher CUDA and Triton versions), with their `*.build-failed.txt` records (PyTorch's own variable). |
-| `CXX` | `c++` (`g++` for `python/build.py`) | compiler command, may include flags | The C++ compiler of the PyTorch extensions, the JAX FFI handlers, `python/build.py` and the Rust build. |
-| `CUDA_HOME` | PyTorch's detection, else `/usr/local/cuda` | CUDA toolkit directory | The CUDA headers and libraries of the launcher build (PyTorch's own variable). |
-| `TRITON_INTERPRET` | unset | `1` | Runs the Triton kernels in Triton's CPU interpreter, for tests; libsdca's kernels then take Triton's math functions instead of `libdevice` (Triton's own variable). |
+| `SDCA_NUM_THREADS` | unset: automatic | integer `< 4096`; `0` = automatic, `1` = calling thread, `> 1` = upper limit | Threads for native loss rows, coordinate steps, and fit evaluations when `num_threads` is not passed ([Threads](#threads)); out-of-range values are ignored. In the PyTorch native CPU backend, unset caps at `torch.get_num_threads()`. |
+| `SDCA_CPU_EXTENSION` | `auto` | `auto`, `on`, `off` (`1`, `0`) | PyTorch CPU C++ extension (needs `ninja`, a C++17/C++20 compiler with OpenMP, and Python headers); falls back to the prebuilt native library. `explain_backend` reports the active path and reason. |
+| `SDCA_CUDA_LAUNCHER` | `auto` | `auto`, `on`, `off` (`1`, `0`) | C++ `cuLaunchKernel` launcher for fused CUDA kernels on Triton 3.3–3.9 (needs `ninja`, a C++ compiler, Python headers, `CUDA_HOME` headers, and `libcuda.so.1`; `on` skips the Triton version check); falls back to launching the same kernels through Triton. |
+| `SDCA_JAX_FFI` | `auto` | `auto`, `on`, `off` (`1`, `0`) | XLA FFI custom-call handlers for native JAX CPU losses (needs `jax.ffi`, `jaxlib` FFI headers, and a C++17 compiler); falls back to `jax.pure_callback` with identical results. |
+| `SDCA_CACHE_DIR` | `$XDG_CACHE_HOME/libsdca` or `~/.cache/libsdca` | directory | Cache directory for compiled JAX FFI handlers (keyed by source, `jaxlib`, platform, compiler, and flags) and their `*.build-failed.txt` markers. |
+| `OMP_NUM_THREADS` | unset | integer `< 4096` (first of list) | Caps automatic threads when no OpenMP runtime is loaded in the process; a loaded runtime's thread count takes precedence ([Threads](#threads)). |
+| `SDCA_LIBRARY_DIR` | unset | directory | Directory from which Python loads `libsdca_c.so`, overriding `build/python` or the installed package library. |
+| `TORCH_EXTENSIONS_DIR` | PyTorch's extension cache | directory | PyTorch cache directory for the CPU extension and CUDA launcher builds and their `*.build-failed.txt` markers. |
+| `CXX` | `c++` (`g++` for `python/build.py`) | compiler command (may include flags) | C++ compiler for PyTorch extensions, JAX FFI handlers, `python/build.py`, and the Rust build. |
+| `CUDA_HOME` | PyTorch's detection or `/usr/local/cuda` | CUDA toolkit directory | CUDA headers and libraries for the launcher build. |
+| `TRITON_INTERPRET` | unset | `1` | Runs Triton kernels in Triton's CPU interpreter for testing (uses Triton math functions instead of `libdevice`). |
 
 Read when building the native library (`pip install`, `python/build.py`, the
 Rust crate's `build.rs`):

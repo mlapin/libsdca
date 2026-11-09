@@ -88,11 +88,12 @@ default linker on x86-64 Linux since 1.90) never runs; link it with GNU ld:
 uses the host's tools, so cross compilation needs `CXX` and `AR` set to the
 target's.
 
-The crate is not on crates.io yet; depend on the repository instead:
-`cargo add libsdca --git https://github.com/mlapin/libsdca --tag v0.3.0`. In a
-checkout, or as a git dependency, the crate builds the C++ sources around it
-(or those under `SDCA_SOURCE_DIR`). `rust/package.sh` vendors them into
-`rust/native/` to build a self-contained crate archive.
+Install from crates.io with `cargo add libsdca` (or from git with
+`cargo add libsdca --git https://github.com/mlapin/libsdca --tag v0.3.0`).
+Published crates vendor the C++ sources in `native/`; in a repository checkout
+or git dependency, `build.rs` compiles the surrounding C++ sources (or
+`SDCA_SOURCE_DIR`). `rust/package.sh` vendors them into `rust/native/` to build
+a self-contained `.crate` archive.
 
 ```bash
 cargo test --manifest-path rust/Cargo.toml

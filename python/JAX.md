@@ -52,94 +52,45 @@ and the [top-k hinge convention](../docs/API.md#top-k-hinge-convention) apply.
 | `cross_entropy`, `multilabel_cross_entropy`, `topk_cross_entropy` with `k=1` | jax | any order, forward and reverse |
 | the other `LOSSES` | jax where its arithmetic is available (below): on a GPU or TPU, and on the CPU for calls of at most 16,384 scores except `proximal_cross_entropy` (and without the FFI handlers also the nonsmooth `multiclass_hinge`, top-k hinges at `k=1` and `multilabel_hinge`); else native | first order, reverse mode |
 
-- `"jax"` computes every loss with `jax.numpy` on any device: XLA
-  operations only, so no host round trip, and `jax.export` works. Entropy
-  of integer labels makes the passes of a composed log-softmax; it keeps
-  tiny losses and the target gradient of confident rows (minus the mass of
-  the other classes) to rounding. On the CPU, the entropy and distillation
-  losses sum a row and count its tied maxima (and labels) in one variadic
-  reduction, which XLA:CPU fuses: a plain reduction of a computed or boolean
-  row first writes it to memory and reduces it in a slower reduce-window.
-  The variadic reduction adds runs of at most 256 entries in order and the
-  runs' sums pairwise, which rounds as a pairwise sum. Entropy
-  of a mask keeps small logit differences exact in its gradient, as the
-  PyTorch tensor entropy. Top-k entropy takes its k largest competitors from
-  `lax.top_k`. The other losses are the algorithms of the PyTorch tensor
-  backend (`include/sdca/loss.h`) in float64, rounded to the dtype of the
-  scores; with `precision="float32"`, in float32 where float32 holds
-  `gamma`, `alpha` and the spread of every row. float64 needs
-  `jax_enable_x64`: without it, `backend="jax"` raises for these losses
-  unless `precision="float32"`, and `"auto"` takes the native backend.
-  The smooth and multilabel hinges solve from the 16 (then 64) largest
-  margins, chosen by `lax.top_k` on the scores, and sort whole rows only
-  when some row's solution reaches past them. Top-k entropy sums the
-  competitors below its k largest in one pass. On the CPU, nonsmooth
-  top-k hinges form margins only at the k + 1 largest scores (margins
-  grow with the scores), and every margin only for the subgradient of a
-  batch where rounding makes a smaller score's margin equal to the k-th
-  largest one; `lax.top_k` takes float32 keys there: jaxlib 0.6's XLA:CPU
-  sorts whole rows for any other dtype, 50 to 100 times slower; float64
-  entries are ordered exactly among k + 1 candidates, and rows whose
-  float32 keys tie unequal entries at the k-th take the exact `lax.top_k`.
-  On a GPU or TPU, where each of these conditionals would wait for its
-  predicate on the host, the hinges form every margin and `lax.top_k`
-  takes the entries themselves. Under `vmap` every stage runs.
-- `"native"` runs the C++ loss with a custom VJP, on the available CPUs
-  (automatic threads) unless `SDCA_NUM_THREADS` is set. On the CPU it is an
-  XLA FFI custom call: a small handler, compiled on the first native call
-  against the running jaxlib's headers (a few seconds, then cached; see
-  `SDCA_JAX_FFI` in [API.md](../docs/API.md#environment-variables)), runs the
-  native rows on XLA's buffers inside the compiled computation, with no host
-  round trip or copy. Elsewhere, and where the handler cannot be built (no C++
-  compiler, a jax without `jax.ffi`, `SDCA_JAX_FFI=off`), it runs through
-  `jax.pure_callback` with the same results; on a GPU or TPU the scores are
-  copied to the host and back. Under `vmap` the whole batch goes to one call,
-  and a forward call returns only the losses. The FFI call costs about 0.03 ms
-  beyond the loss; through the callback a 256×10 call took 0.45–0.48 ms, and
-  its copies, label mask and checks ran on one thread (Linux, jaxlib 0.12, 32
-  threads: 4096×32000 multiclass hinge forward and backward in 55 ms against
-  1067 ms; [performance](../docs/performance.md#jax)). float32 scores are
-  solved in double, as by `loss_and_grad`. float64 scores stay in float64,
-  and float16/bfloat16 scores are computed in float32. `jax.export` cannot
-  serialize a host callback, and rejects the FFI call as a custom call without
-  a compatibility guarantee.
-- XLA on the CPU flushes subnormal results to zero and reads subnormal
-  operands as zero, also in its custom calls and on the host callback's thread. The native loss
-  computes with IEEE subnormals (every C ABI call runs with them, and the
-  wrapper checks `gamma` and `alpha` by their bits), but its subnormal values
-  and gradient entries reach XLA as zero: on the CPU every backend's losses
-  and entries are zero below the smallest normal number (float32 `exp(-87.3)`,
-  float64 `exp(-708.4)`), where the PyTorch frontend keeps them to the
-  [subnormal limit](../docs/numerics.md#representation-limits). The top-k target mass is computed independently of the competitor entries, so
-  their flushing does not erase a normal target entry. The jax backend
-  gives `nan` there for a subnormal `gamma` or `alpha` (it computes them
-  on a GPU); distillation handles any temperature on every device.
-- On the GPU, default FP32 work can lose individually underflowed exponentials
-  before their representable aggregate is formed. Masked CE and distillation
-  probes expose this at losses around `6.8e-43`; explicit `precision="float64"`
-  passes those probes. See the [aggregate-tail limits](../docs/numerics.md#aggregate-tail-limitations)
-  for the inputs and distinction from CPU output flushing.
-- On CPU, `"auto"` uses JAX for entropy (also `topk_cross_entropy` with
-  `k=1`, the entropy of its one target). Where the jax arithmetic of the
-  other losses is available (`jax_enable_x64`, or `precision="float32"`),
-  it also uses JAX for calls of at most 16,384 scores except
-  `proximal_cross_entropy` (a 256×10 top-k entropy takes 0.14 ms in jax
-  and 0.25 ms native), and where the FFI handlers are unavailable also for
-  the nonsmooth `multiclass_hinge`, top-k hinges at `k=1` and
-  `multilabel_hinge`. With the FFI handlers, all larger non-entropy calls
-  (the nonsmooth hinges included: at 32 threads the FFI call of
-  `multiclass_hinge` takes 0.44–0.68 of the jax time from 4096×1000) stay
-  native. Without float64 (JAX's default) these losses stay native at
-  `precision=None`.
-- The first-order losses of the table, and every loss with `backend="native"`, raise
-  under `jvp`, `jacfwd` and `hessian`. The distillation
-  losses raise under `jvp` and `jacfwd`, but their gradient is `jax.numpy` code:
-  `jax.hessian` and reverse over reverse differentiate it again (tested against
-  `jax.nn` for `distillation_loss` on the CPU).
-- jaxlib 0.6's XLA:CPU miscompiled the smooth hinges given a constant boolean
-  mask whose class axis was moved (a NumPy mask under `jit`, `axis=0`): before
-  jaxlib 0.12 the jax backend keeps every mask an operand
-  (`lax.optimization_barrier`); jaxlib 0.12 computes them right without it.
+- `"jax"` computes every loss in `jax.numpy` on any device: pure XLA operations, no
+  host round trip, and `jax.export` support. Entropy losses use a composed
+  `log1p` log-softmax (fused variadic row reductions on the CPU) and keep tiny
+  losses and target gradients to rounding; masked entropy preserves small logit
+  differences in the gradient. The other losses follow the PyTorch tensor
+  algorithms (`include/sdca/loss.h`) in float64 (or float32 with
+  `precision="float32"` where float32 holds `gamma`, `alpha` and the row spread),
+  selecting the top competitors via `lax.top_k` and sorting full rows only when a
+  smooth/multilabel hinge threshold extends past the top candidates. Float64 work
+  requires `jax_enable_x64`; without it, `backend="jax"` raises for non-entropy
+  losses unless `precision="float32"`, and `"auto"` routes them to `"native"`.
+- `"native"` runs the C++ loss with a custom VJP on the available CPUs
+  (or `SDCA_NUM_THREADS`). On the CPU it uses an XLA FFI custom call compiled on
+  first use against the running `jaxlib`'s headers (`SDCA_JAX_FFI` in
+  [API.md](../docs/API.md#environment-variables)), operating directly on XLA's
+  buffers without a host round trip or copy. Where the FFI handler cannot be
+  built (no C++ compiler, `SDCA_JAX_FFI=off`, or on a GPU/TPU), it falls back to
+  `jax.pure_callback` with identical results. Float32 scores are solved in double
+  (as in `loss_and_grad`), float64 in float64, and 16-bit scores in float32.
+  `jax.export` does not support `"native"` calls.
+- `"auto"` on the CPU uses `"jax"` for entropy (`cross_entropy`,
+  `multilabel_cross_entropy`, and `topk_cross_entropy` at `k=1`). When the required
+  `"jax"` arithmetic is enabled (`jax_enable_x64` or `precision="float32"`), `"auto"`
+  also uses `"jax"` on accelerators and, on the CPU, for calls of at most 16,384
+  scores (except `proximal_cross_entropy`, plus nonsmooth `k=1` / multilabel hinges
+  when the FFI handler is unavailable); larger non-entropy CPU calls use `"native"`
+  ([performance](../docs/performance.md#jax)).
+- **Subnormal and GPU tail limits:** XLA on the CPU flushes subnormal inputs and
+  outputs to zero across all backends (including FFI custom calls and host
+  callbacks), so CPU losses and gradients vanish below the smallest normal number
+  (float32 `exp(-87.3)`, float64 `exp(-708.4)`). The top-k target mass is formed
+  independently of competitor entries, so competitor flushing does not zero a
+  normal target entry. On the GPU, default FP32 work can lose individually
+  underflowed exponentials before their sum is formed (`precision="float64"`
+  retains them; see [aggregate-tail limits](../docs/numerics.md#aggregate-tail-limitations)).
+- **Higher derivatives:** The first-order losses in the table above, and all losses
+  with `backend="native"`, raise under `jvp`, `jacfwd` and `hessian`. Distillation
+  losses raise under `jvp` and `jacfwd`, while `jax.hessian` and reverse-over-reverse
+  work through their `jax.numpy` gradient.
 
 The jax backend is `jax.numpy` rather than a Triton or XLA FFI kernel: it
 needs no dependency or build beyond `jax`, runs on every jaxlib, and
@@ -158,21 +109,19 @@ Targets are integer class indices of the logits shape without `axis`, or a
 boolean mask of the logits shape, as in `libsdca.torch.sdca_loss`. `axis`
 takes the place of `dim`.
 
-Shapes and options are always checked. Concrete (untraced) logits and
-targets are also checked before the call, and errors raise `ValueError`.
-Inside `jit` or `vmap`, the native loss checks them when it runs (the FFI
-handler and the host callback alike, with the same messages), and JAX
-raises a `JaxRuntimeError` carrying its message. The jax backend cannot
-raise for traced values: an example with an invalid target or nonfinite logits
-gives `nan` loss and gradients, as
-does a `proximal_cross_entropy` solve that does not converge. With
-`backend="auto"` the outcome follows the backend it picks: on the CPU with
-float64 (or `precision="float32"`) that depends on the objective and, for
-most losses, on the size, so an invalid traced target of such a loss raises
-a `JaxRuntimeError` above 16,384 scores and gives `nan` at or below it.
-Under `vmap` the size of one example decides, not that of the batch.
-`proximal_cross_entropy` with a traced mask target solves for every class as a possible label,
-which is slower than integer targets or a concrete mask.
+Shapes and options are always validated statically. Concrete (untraced) logits
+and targets are also checked before the call, raising `ValueError` on invalid
+inputs. Under `jit` or `vmap`:
+- `"native"` validates values at execution time and raises `JaxRuntimeError`
+  with the native error message.
+- `"jax"` cannot raise on traced values and instead returns `nan` loss and
+  gradients for invalid targets, nonfinite logits, or non-convergent
+  `proximal_cross_entropy` rows.
+- `"auto"` follows the selected backend (on CPU with float64 or
+  `precision="float32"`, calls of `<= 16,384` scores per example use `"jax"` and
+  return `nan`, while larger calls use `"native"` and raise `JaxRuntimeError`).
+- `proximal_cross_entropy` with a traced mask solves for every class as a
+  candidate label and is slower than with integer targets or a concrete mask.
 
 For `proximal_cross_entropy`, finite float64 inputs whose within-row spread
 overflows float64 are outside the supported numerical range. The JAX backend

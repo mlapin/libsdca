@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   quality:
+    name: Quality
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7.0.1
@@ -24,7 +25,7 @@ jobs:
       - run: python tools/quality.py
 
   cpp:
-    # Each BLAS backend and each compiler once; the release gate runs all four pairs.
+    name: C++ (${{ matrix.backend }}, ${{ matrix.cxx }})
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -36,7 +37,8 @@ jobs:
       CXX: ${{ matrix.cxx }}
     steps:
       - uses: actions/checkout@v7.0.1
-      - run: sudo apt-get update && sudo apt-get install -y libblas-dev
+      - if: matrix.backend == 'EXTERNAL'
+        run: sudo apt-get update && sudo apt-get install -y libblas-dev
       - run: >-
           cmake -S . -B build -DBUILD_TESTING=ON -DSDCA_WARNINGS_AS_ERRORS=ON
           -DSDCA_BLAS_BACKEND=${{ matrix.backend }} -DSDCA_BUILD_C_API=ON
@@ -50,34 +52,11 @@ jobs:
       - run: >-
           cmake --build build/c-consumer &&
           LD_LIBRARY_PATH=$PWD/build/install/lib build/c-consumer/sdca_c_example
-      - run: bash tests/matlab/check_mex_compiles.sh
-      - run: bash tests/matlab/run_gateway_mock.sh
-
-  coverage:
-    # Python coverage, which needs the GPU host paths too, is left to the release gate.
-    name: C++ coverage gate and extension builds
-    runs-on: ubuntu-24.04
-    env:
-      OPENBLAS_NUM_THREADS: '1'
-      OMP_NUM_THREADS: '1'
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.1.0
-        with:
-          python-version: '3.12'
-      - run: python -m pip install -r requirements-dev.txt numpy
-      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      # Clang's own omp.h: GCC 13's uses attributes that Clang 18 rejects.
-      - run: sudo apt-get update && sudo apt-get install -y libomp-18-dev
-      - run: python tools/check_extension_builds.py --compiler g++ --compiler clang++-18
-      - run: python tools/coverage.py --cpp-only
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: cpp-coverage-${{ github.sha }}
-          path: build/coverage/cpp.txt
+      - if: matrix.cxx == 'g++'
+        run: bash tests/matlab/check_mex_compiles.sh && bash tests/matlab/run_gateway_mock.sh
 
   sanitizers:
+    name: C++ Sanitizers
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7.0.1
@@ -88,39 +67,52 @@ jobs:
         env:
           SDCA_TSAN_CXX: clang++
 
-  python:
+  coverage:
+    name: C++ Coverage
     runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        include:
-          - {python: '3.10', backend: BUILTIN, group: core, cxx: g++}
-          - {python: '3.12', backend: EXTERNAL, group: all, cxx: clang++-18}
-          - {python: '3.13', backend: BUILTIN, group: core, cxx: g++}
     env:
       OPENBLAS_NUM_THREADS: '1'
       OMP_NUM_THREADS: '1'
-      CXX: ${{ matrix.cxx }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.1.0
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.12'
+      - run: python -m pip install gcovr==8.7
+      - run: python tools/coverage.py --cpp-only
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: cpp-coverage-${{ github.sha }}
+          path: build/coverage/cpp.txt
+
+  python:
+    name: Python (Linux)
+    runs-on: ubuntu-24.04
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      # Clang's own omp.h: GCC 13's uses attributes that Clang 18 rejects.
       - run: sudo apt-get update && sudo apt-get install -y libblas-dev libomp-18-dev
-      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist
-      - if: matrix.group == 'all'
-        run: >-
-          python -m pip install scikit-learn triton jax ninja &&
+      - run: >-
+          python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn triton jax ninja &&
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: python python/build.py --blas-backend ${{ matrix.backend }}
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group ${{ matrix.group }} -m 'not long'
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group ${{ matrix.group }} -m serial
-      - if: matrix.group == 'all'
-        run: >-
+      - run: python tools/check_extension_builds.py --compiler g++ --compiler clang++-18
+      - run: python python/build.py --blas-backend EXTERNAL
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group all -m 'not long'
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group all -m serial
+      - run: >-
           CXX=g++ SDCA_CPU_EXTENSION=on PYTHONPATH=python python -m pytest -p no:cacheprovider
           tests/python/test_softmax_limits.py::SoftmaxLimitTests tests/python/test_torch.py::TorchTests
 
   macos:
-    name: macOS arm64
+    name: macOS (arm64)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7.0.1
@@ -139,6 +131,7 @@ jobs:
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group torch -m 'not long'
 
   rust:
+    name: Rust
     # The tests run under line coverage on stable (no doctests) and in full at the MSRV.
     runs-on: ubuntu-24.04
     defaults:
@@ -159,6 +152,7 @@ jobs:
       - run: cargo +1.74 test
 
   rust-blas:
+    name: Rust (BLAS)
     # A downstream crate linked against the built-in BLAS and each apt BLAS: every SDCA_BLAS
     # form with OpenBLAS, a shared and a static link with the others. Each package is
     # installed just before its links, since a later one takes over the libblas.so alternative.
@@ -177,14 +171,20 @@ jobs:
       - run: bash rust/consumer/ci.sh blis l static
 
   package:
-    runs-on: ubuntu-22.04
+    name: Package (sdist)
+    # Builds and checks the sdist and tests it outside the checkout on the oldest supported Python.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.1.0
         with:
-          python-version: '3.12'
-      - run: SDCA_BLAS_BACKEND=BUILTIN python -m pip install .
-      - run: python -m pip install pytest scipy mpmath scikit-learn
-      - run: >-
-          cd /tmp && python -m pytest -p no:cacheprovider $GITHUB_WORKSPACE/tests/python
-          --group core --installed
+          python-version: '3.10'
+      - run: python -m pip install build==1.6.1 twine==7.0.0
+      - run: python -m build --sdist
+      - run: python -m twine check --strict dist/*
+      - run: |
+          python -m venv "$RUNNER_TEMP/env"
+          py="$RUNNER_TEMP/env/bin/python" src="$RUNNER_TEMP/sdist"
+          SDCA_BLAS_BACKEND=BUILTIN "$py" -m pip install dist/*.tar.gz pytest scipy mpmath scikit-learn
+          mkdir "$src" && tar -xzf dist/*.tar.gz -C "$src" --strip-components=1
+          cd "$RUNNER_TEMP" && "$py" -m pytest -p no:cacheprovider "$src/tests/python" --group core --installed

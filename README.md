@@ -14,10 +14,8 @@ are numerically stable where standard implementations are not: the loss and
 target gradient of a confident prediction stay nonzero to the subnormal limit
 instead of collapsing to zero (softmax collapse [6]), and the distillation
 gradient is exactly zero at equal student and teacher logits (softmax
-cancellation [6]), in float16, bfloat16, float32 and float64 on CPU and CUDA.
-The [known limits](docs/numerics.md#known-limits) list the exceptions: JAX on
-the CPU flushes results below the smallest normal number to zero, and default
-float32 work on a GPU can lose tails whose sum is representable.
+cancellation [6]), in float16, bfloat16, float32 and float64 on CPU and CUDA
+([known limits](docs/numerics.md#known-limits)).
 
 The core is a header-only C++11 library with a CMake package and a C ABI. It
 powers the NumPy, scikit-learn, Rust and MATLAB interfaces, and all of them
@@ -51,16 +49,12 @@ training classifiers directly.
   references on CPU and CUDA without a failure.
 - **Precision control.** `precision="float32"` or `"float64"` selects working
   arithmetic independently of storage. Native training uses float32 or float64
-  storage and defaults to float64 arithmetic. PyTorch and JAX also accept float16
-  and bfloat16 logits. Gradients keep the logits dtype; every loss value has
-  dtype `promote(logits dtype, float32)`, so float32 for 16-bit logits, as
-  under `torch.autocast`. Default arithmetic depends on the
-  loss and backend: in PyTorch, cross-entropy (integer targets, boolean masks
-  and top-k cross-entropy) uses float32 exponentials with float64 row
-  statistics, while the hinge paths use float64; the entropy losses of the
-  jax backend compute narrower scores in float32
-  ([JAX.md](python/JAX.md#backends)).
-  See the [support matrix](docs/API.md#precision) and
+  storage and defaults to float64 arithmetic; PyTorch and JAX also accept
+  float16 and bfloat16 logits, returning gradients in the logits dtype and
+  loss values in `promote(logits dtype, float32)` (as under `torch.autocast`).
+  By default, narrow entropy losses use float32 exponentials with float64 row
+  statistics while hinge paths use float64; see the
+  [support matrix](docs/API.md#precision) and
   [numerical limits](docs/numerics.md#what-each-precision-guarantees).
 - **Fits into existing code.** `SDCAClassifier` is a scikit-learn estimator
   that passes scikit-learn's own conformance suite (`check_estimator`), so it
@@ -104,26 +98,15 @@ exponent.
 | scikit-learn estimator | `pip install 'libsdca[sklearn]'` | [python/README.md](python/README.md#classifier) |
 | PyTorch losses | `pip install 'libsdca[torch]'` | [python/TORCH.md](python/TORCH.md) |
 | JAX losses | `pip install 'libsdca[jax]'` | [python/JAX.md](python/JAX.md) |
-| Rust | `cargo add libsdca --git https://github.com/mlapin/libsdca --tag v0.3.0` (crates.io release to follow) | [rust/README.md](rust/README.md) |
+| Rust | `cargo add libsdca` | [rust/README.md](rust/README.md) |
 | C++ (header-only) | CMake package `libsdca::libsdca` | [docs/CPP.md](docs/CPP.md) |
 | C | CMake package `libsdca::sdca_c` (`-DSDCA_BUILD_C_API=ON`) | [docs/C.md](docs/C.md) |
 | MATLAB | `run matlab/make.m` | [docs/MATLAB.md](docs/MATLAB.md) |
 | GNU Octave | `OCTAVE_HOME=<prefix> tests/matlab/run_octave_tests.sh` | [docs/MATLAB.md](docs/MATLAB.md) |
 
-Python wheels for Linux x86-64 (manylinux_2_28) and macOS 11+ on Apple
-silicon are self-contained; elsewhere pip builds the sdist, which needs a
-C++11 compiler. The PyTorch losses compile their fastest CPU and CUDA paths on
-first use: install a C++17 compiler with OpenMP (C++20 for PyTorch 2.12 and
-later; checked with GCC 11, Clang 14 and 18, Apple clang 21; Linux:
-`build-essential` or `gcc-c++`; macOS: `xcode-select --install`) and the Python
-headers (Debian/Ubuntu: `python3-dev`); ninja comes with `libsdca[torch]`. Without them the losses still
-run, more slowly, with one warning ([build tools](python/TORCH.md#build-tools),
-[environment variables](docs/API.md#environment-variables)). The native JAX
-losses likewise compile a small XLA FFI handler on first use (C++17 compiler
-only) and otherwise use a host callback. CMake 3.12 or newer is needed only for the CMake packages. See
-[DEPENDENCIES.md](DEPENDENCIES.md) for the BLAS options. Linux x86-64 is
-validated in full, macOS arm64 for the C++ tests and the core and PyTorch CPU suites
-([tested configurations](DEPENDENCIES.md#tested-configurations)).
+- **Python wheels:** Linux x86-64 (`manylinux_2_28`) and macOS 11+ (`arm64`) wheels are self-contained; other platforms build from the sdist with a C++11 compiler.
+- **PyTorch and JAX acceleration:** The fastest CPU and CUDA paths compile small C++ extensions on first use (`build-essential` and `python3-dev` on Debian/Ubuntu, or `xcode-select --install` on macOS; `ninja` is included in `libsdca[torch]`). Without a compiler, the losses still run with a one-time warning ([build tools](python/TORCH.md#build-tools), [environment variables](docs/API.md#environment-variables)).
+- **CMake and BLAS:** CMake 3.12+ is needed only for the C++ and C packages. See [DEPENDENCIES.md](DEPENDENCIES.md) for BLAS options and [tested configurations](DEPENDENCIES.md#tested-configurations).
 
 ```bash
 git clone https://github.com/mlapin/libsdca && cd libsdca

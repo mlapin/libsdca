@@ -70,27 +70,19 @@
 - **JAX on the GPU:** masked CE, and distillation on rows of bounded logit range, read
   the logits three times instead of five.
 - **PyTorch on the CPU:** an ATen/OpenMP extension for every loss, built on first
-  use for the ISA of PyTorch's own kernels; the prebuilt native library otherwise.
-  Every CPU loss is captured by `torch.compile(fullgraph=True)`; calls on the
-  extension record a C++ autograd node, with fast paths for plain 2-D tensors,
-  so no Python runs between forward and backward. Cross-entropy rows (also with a
-  boolean mask) and top-k cross-entropy rows (`k <= 64`) of 16- and 32-bit logits
-  take one sweep of float32 exponentials with float64 row statistics
-  (`precision="float64"`: float64); float64 cross-entropy rows of at most 32
-  classes take the extension too. Distillation forms every gradient entry on its
-  own. The native library takes top-k cross-entropy in closed form from its k
-  largest scores and boolean-mask rows in place, and splits its rows over
-  PyTorch's OpenMP threads as PyTorch's static loops do, so the next PyTorch
-  pass finds them in its caches.
+  use for the ISA of PyTorch's own kernels, with C++ autograd nodes and
+  `torch.compile(fullgraph=True)` support; the prebuilt native library serves as the
+  fallback. Narrow cross-entropy, masked cross-entropy and top-k cross-entropy
+  (`k <= 64`) rows use one sweep of float32 exponentials with float64 row statistics,
+  and distillation forms every gradient entry independently
+  ([details](python/TORCH.md#devices-and-backends)).
 - **Proximal losses on the CPU:** the root of each row from a Taylor model of the
   probabilities about the last evaluation, in 1.0–1.3 evaluations of the row on
   average at `alpha <= 10`.
-- **Shrinking:** hinge fits skip the examples whose duals stay unchanged, step the others on
-  their classes of nonzero dual, and leave out the duals that the certified gap proves zero.
-  Their epochs between full passes are cheap, so a scheduled evaluation (with the full pass
-  of its epoch) waits until the epochs since the last one took `eval_epoch` full passes'
-  steps, at most 50 epochs: full passes and evaluations every 10 epochs took 84% of a fit
-  to 1e-6 on synthetic-20k ([performance](docs/performance.md#solver)).
+- **Shrinking:** hinge fits skip examples whose duals stay unchanged, step active
+  examples only on their nonzero-dual classes, and screen out duals that the certified
+  gap proves zero. Scheduled evaluations adapt to the shrunk epoch cost, cutting the
+  evaluation overhead of tight fits ([performance](docs/performance.md#solver)).
 - **Solver:** per-example steps update only the classes whose dual changed (epochs
   up to 4.5× faster with an external BLAS); entropy steps reuse their root solve
   (cross-entropy epochs 15–29% faster); `fit` stops at the epoch the gap reaches
@@ -139,18 +131,17 @@ Details and tested regimes: [numerics.md](docs/numerics.md).
 - One build with IEEE semantics (`-fno-fast-math -ffp-contract=off`):
   `USE_FAST_MATH` and `SDCA_ACCURATE_MATH` are removed;
   `recompute_primal` replaces the latter at run time.
-- `precision` is the precision of the solve: arithmetic and the solver's iterate.
-  `<float, float>` solves in float; `<float, double>` (the default `"float64"` for
-  float32 data) keeps `W` and the duals in double, `8 (d + n) m` bytes beyond the
-  returned float32 arrays, and certifies the returned values, rounded once at each
-  evaluation. Float storage of the iterate lost the small updates near the optimum:
-  float32 `multiclass_hinge` fits stalled at a relative gap of a few 1e-6 (digits
-  4.7e-6) and now reach the tolerances of float64 data in as many epochs, to 3.5e-7 on
-  digits ([numerics](docs/numerics.md#what-each-precision-guarantees)). The iterates,
-  and so the returned arrays of float32 fits, differ from earlier trees; float64 and
-  `"float32"` fits are unchanged bit for bit. In C++, `context.primal_variables` and
-  `context.dual_variables` of `<float, double>` are the double iterate; the results are
-  in the caller's buffers.
+- `precision` controls both working arithmetic and the solver's iterate. For
+  float32 data, the default `precision="float64"` now keeps `W` and the duals in
+  double (`8 (d + n) m` additional bytes), rounding them once into the caller's
+  float32 arrays at each evaluation and certifying the rounded values. This avoids
+  float32 iterate stalling near the optimum (reaching `3.5e-7` relative gap on
+  `digits`, vs. `4.7e-6` previously; [numerics](docs/numerics.md#what-each-precision-guarantees)).
+  Consequently, float32 fits with default `precision` return tighter iterates than
+  earlier trees; float64 fits and explicit `precision="float32"` fits are bitwise
+  unchanged. In C++, `context.primal_variables` and `context.dual_variables` hold
+  the double iterate for `<float, double>`, while the rounded results are written
+  to the caller's buffers.
 - Every loss checks that `k` is an integer in `[1, classes − 1]`.
 - PyTorch: empty inputs return `torch.nn.functional`'s results instead of raising;
   `backend="torch"` always means tensor operations.

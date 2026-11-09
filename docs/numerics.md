@@ -222,23 +222,21 @@ exactly zero gradient (PyTorch: up to 4.6e-9 in float32; `test_distillation.py`)
   (`test_distillation.py`). Aggregate-tail exceptions are documented below.
 - **Hinge margins** are formed relative to the label's score: differences between other
   scores below the resolution of a huge gap to the label are lost.
-- **Top-k cross-entropy at large score spreads:** where some but not all competitors are
-  capped (`k < C - 1`), the log-odds add score differences to the largest competitor and
-  logarithms of order one in the working precision, so their error grows with the spread
-  of the scores (not with a common offset). For `[0, S, -S, -S]`, label 0, `k = 2` (loss
-  `log1p(2 sqrt(2))` = 1.3425 for every S), the float64 relative error is 5e-13 at S = 1e4,
-  5e-10 at 1e8 and 9e-6 at 1e12; at 1e16 the result is `log 3` = 1.0986, and where the
-  differences overflow (finfo.max) the loss is 0. Float32 results stay within float32
-  resolution up to S = 1e8. The solver's primal loss (`fit` with `"topk_cross_entropy"`)
-  is the same value, and the top-k entropy projection (`prox_topk_entropy`, used by the
-  solver) computes its threshold the same way: for `[S, -S, -S]`, `k = 2`, its relative
-  error is 2e-13 at S = 1e4 and 4e-6 at 1e12, and at `DBL_MAX` it returns 0. These
-  values are pinned in `tests/cpp/stress.cpp` (`StressLimit`). With `k = C - 1` every
-  competitor is capped and the loss takes the mean of the score differences: it avoids
-  intermediate overflow when the exact mean is representable, and its double-double sum
-  resolves about twice the working precision. Differences spanning more lose their small
-  part: for `[M/4, H, M, 1, -H]`, `H = 2^200`, `M = 2^100`, label 0, `k = 4` (exact mean
-  1/4), every route returns `log 5` = 1.6094 instead of 1.8142.
+- **Top-k cross-entropy at large score spreads (`StressLimit` in `tests/cpp/stress.cpp`):**
+  - *Partially capped rows (`k < C - 1`):* The log-odds combine score differences to the
+    largest competitor with order-one logarithms in working precision, so accuracy degrades
+    as the competitor spread grows (common offsets still cancel). For `[0, S, -S, -S]`,
+    label `0`, `k = 2` (exact loss `log1p(2 sqrt(2)) = 1.3425`), the float64 relative error
+    is `5e-13` at `S = 1e4`, `5e-10` at `1e8`, and `9e-6` at `1e12` (float32 stays within
+    float32 resolution up to `1e8`), reaching `log 3 = 1.0986` at `1e16` and `0` when the
+    differences overflow (`finfo.max`). The solver primal (`fit` with
+    `"topk_cross_entropy"`) and `prox_topk_entropy` share the same threshold behavior
+    (for `[S, -S, -S]`, `k = 2`: `2e-13` at `1e4`, `4e-6` at `1e12`, `0` at `DBL_MAX`).
+  - *All-capped rows (`k = C - 1`):* The loss uses a scaled double-double mean of the
+    score differences, avoiding intermediate overflow when the exact mean is representable
+    and resolving about twice the working precision; spreads spanning more than ~106 bits
+    lose their smallest terms (for `[M/4, H, M, 1, -H]` with `H = 2^200`, `M = 2^100`,
+    `k = 4`, every route returns `log 5 = 1.6094` instead of `1.8142`).
 - **Top-k and proximal cross-entropy tails** retain the target mass independently of
   rounded competitor entries. A representable loss or target gradient can survive even
   when every individual competitor rounds to zero. JAX CPU still flushes subnormal

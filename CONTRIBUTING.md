@@ -40,19 +40,16 @@ subprocesses use `tests/python/child_process.py`, so a child imports the same
 package as the test, whatever the working directory; Triton interpreter checks
 run through `tests/python/interpreter.py`.
 
-`-n auto` (pytest-xdist) runs the tests in one worker per CPU, each with an
-equal share of the CPUs as `OMP_NUM_THREADS` unless it is set; the CPU
-extension is built once before the workers start. Tests marked `slow` (about a
-minute on a loaded machine) start first, one per worker under
-`--dist worksteal`, and so do those marked `long` (over a minute on a 4-CPU
-runner), which CI deselects with `-m "not long"` and the release gate runs. A
-test that needs the machine to itself (thread timing) is marked `serial`: `-n`
-deselects it, even when named, and the `-m serial` run, without `-n`, runs it (only `core` and `all` have such tests; for `torch` or
-`jax` it selects none and pytest exits with 5). Keep tests safe to run in
-parallel: temporary files in `tmp_path` or `tempfile` directories, environment
-changes through `mock.patch.dict`, and no fixed ports. A loop of many slow cases is split into parametrized parts
-(`part`) so the workers share it: every part runs the whole loop, drawing the
-same random inputs, and checks only its own cases.
+`-n auto` (pytest-xdist) runs one worker per CPU, each with an equal share of the
+CPUs in `OMP_NUM_THREADS` unless set; the CPU extension is built once before workers
+start. Tests marked `slow` (~1 minute on a loaded machine) or `long` (>1 minute on a
+4-CPU runner; deselected in CI with `-m "not long"`) are scheduled first under
+`--dist worksteal`. Tests that need the machine to themselves (thread timing) are
+marked `serial`: `-n` deselects them, and `-m serial` (without `-n`) runs them
+(`core` and `all` only). Keep tests safe for parallel runs: use `tmp_path` or
+`tempfile`, patch environment variables with `mock.patch.dict`, and avoid fixed
+ports. Slow loops are split into parametrized `part` slices that draw the same
+random inputs and check disjoint subsets.
 
 Most of the JAX tests' time is XLA compilation. For repeated local runs,
 `JAX_COMPILATION_CACHE_DIR=<dir>` with `JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS=0`
@@ -139,11 +136,9 @@ compatible CPU/GPU data and still requires 90% Python host coverage.
 gates; tests are exempt from complexity limits. MATLAB gateways have separate
 compile and runtime checks.
 
-The complexity baseline may only shrink by project policy. The current check
-rejects unlisted offenders and stale entries, but records function names rather
-than per-function complexity or line ceilings. Review must therefore enforce
-the policy against new baseline entries and growth within existing exceptions;
-the gate does not enforce those two restrictions automatically.
+The complexity baseline may only shrink by project policy. `tools/quality.py`
+rejects unlisted offenders and stale entries, while code review enforces that no
+new baseline entries are added and existing exceptions do not grow.
 
 ## C++ guidelines
 
@@ -234,16 +229,17 @@ The version lives in `CMakeLists.txt`, `pyproject.toml`, `setup.py`,
 `.github/workflows/packages.yml` builds and checks the sdist, the wheels
 (cibuildwheel, built-in BLAS: manylinux_2_28 x86-64 and macOS 11+ arm64,
 each tested with `pytest tests/python --group core --installed`) and the
-crate (`rust/package.sh`, `cargo publish --dry-run`), and keeps them as
-artifacts. Uploads use PyPI Trusted Publishing (no API tokens):
+crate (`rust/package.sh`, unpacked and tested with `cargo test` and
+`cargo run --example train`), and keeps them as artifacts. Uploads use PyPI
+Trusted Publishing (no API tokens):
 
 - A manual run (*Actions → Packages → Run workflow*) with *Upload to
   TestPyPI* checked uploads the sdist and wheels to TestPyPI. A version can
   be uploaded only once; bump it (e.g. `0.3.0rc1`) to upload again.
 - Pushing a tag `v<version>` checks that the tag matches `pyproject.toml`
   and uploads to PyPI after the `pypi` environment's approval.
-- The crate is not published by the workflow; `cargo publish` from
-  `rust/` after `rust/package.sh` remains a manual step.
+- Publish the Rust crate to crates.io from `rust/` after running
+  `rust/package.sh` (`cd rust && cargo publish --allow-dirty`).
 
 One-time setup:
 

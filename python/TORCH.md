@@ -151,67 +151,46 @@ loss = linear_cross_entropy(hidden, model.lm_head.weight, labels)    # labels (B
 loss.backward()
 ```
 
-The rows go through in chunks of at most `chunk_bytes` of logits (at least one row). The
-default is 256 MiB or 2048 rows, whichever is more: shorter chunks slowed the CPU GEMMs by up
-to 18% at 128,256 classes (32 threads), and 2048 rows of 128,256 float32 logits take 1 GiB.
-CUDA BF16 uses at least 8192 rows by default: larger GEMMs improved measured A100 runtime
-at 32,000 and 128,256 classes. An explicit `chunk_bytes` retains the memory limit, for example
-`chunk_bytes=256 << 20` for 256 MiB of logits (at least one row).
-A chunk's logits come
-from a GEMM; `cross_entropy`'s fused row kernels give their row losses and statistics and turn
-them into their gradient `G` in place, which adds `grad_hidden = G W`, `grad_weight += Gᵀ h`
-and `grad_bias += Σ G`; then the chunk is dropped. With a mean or a sum whose gradients are
-needed, the forward does all of this at upstream derivative 1 and keeps the float32
-gradients, which the backward multiplies by the upstream derivative (exactly, at 1): three
-GEMMs of the logits' size, as PyTorch's. With `recompute=True`, `reduction="none"` or float16
-logits (whose gradient would be rounded before a `GradScaler` factor), the forward keeps only
-the loss and one scalar, and the backward recomputes each chunk's logits and statistics: one
-GEMM more, nothing held between forward and backward. Peak memory above the inputs is the
-gradients plus one chunk, instead of a few `(N, V)` tensors. On the CPU, rows with
-`ignore_index` are skipped before their GEMMs; on CUDA they pass through the kernels with zero
-gradients, so that nothing synchronizes with the host. With an invalid target or nonfinite
-logits on CUDA, a `"mean"` or `"sum"` loss and all its gradients are NaN, as with
-`cross_entropy`.
+**Chunking and memory.** Rows are processed in chunks of at most `chunk_bytes` of logits (at
+least one row; default `256 MiB` or `2048` rows on CPU / CUDA FP32, and at least `8192` rows
+on CUDA BF16). For each chunk, a GEMM computes the logits, `cross_entropy`'s fused kernels
+turn them into their gradient `G` in place, and three GEMMs accumulate `grad_hidden = G W`,
+`grad_weight += Gᵀ h` and `grad_bias += Σ G` before the chunk is discarded:
+- **Saved gradients (default for `"mean"` / `"sum"` on BF16/FP32/FP64):** Forward computes and
+  stores the float32 parameter gradients at upstream derivative `1`, and backward scales them by
+  the upstream derivative (3 GEMMs total, peak memory = parameter gradients + one chunk).
+- **Recomputed gradients (`recompute=True`, `reduction="none"`, or `float16`):** Forward keeps
+  only the loss and one scalar; backward recomputes each chunk's logits and gradients (4 GEMMs
+  total, nothing held between forward and backward).
+- On the CPU, `ignore_index` rows are skipped before their GEMMs; on CUDA they produce zero
+  gradients without host synchronization. Invalid targets or nonfinite logits on CUDA make a
+  `"mean"` or `"sum"` loss and all its gradients `NaN`.
 
-Precision. The loss and the logits' gradient have `cross_entropy`'s guarantees relative to the
-logits the GEMM computed: no softmax collapse, row losses accumulated in float64
-before conversion to the output dtype (with scaled full-range reduction for float64
-outputs), and every gradient entry scaled by the class weight and the upstream
-derivative before its one rounding. When the forward computes the gradients, it does so
-at upstream derivative 1, and the backward's factor then multiplies the float32
-accumulators: exact at 1, else one float32 rounding more. Entries that underflow at
-upstream derivative 1 stay zero after any scale: with bfloat16 operands `h = [[1]]`,
-`W = [[0], [-94]]`, target 0 and a scale of 65536, the saved gradients are 0, where
-`recompute=True` gives `dW = ±9.8e-37` (float32 at gap 105 alike). Pass `recompute=True`
-when a `GradScaler` must recover such tails. The logits' own rounding is the GEMM's,
-PyTorch's or the BLAS's (its accumulation order depends on the chunk), as are the GEMMs
-of the gradient:
+**Precision and `GradScaler`.** The loss and logit gradients keep `cross_entropy`'s guarantees
+relative to the chunk GEMM's logits (no softmax collapse, float64 row-loss accumulation, and
+single rounding after class weights and upstream scaling). When forward saves the gradients at
+upstream derivative `1`, entries that already underflow float32 at scale `1` cannot be recovered
+by a later `GradScaler` factor (for example, bfloat16 gap `94` or float32 gap `105` with scale
+`65536` gives `0` when saved, vs. `±9.8e-37` / `±1.6e-41` with `recompute=True`). Pass
+`recompute=True` when using a `GradScaler` that must preserve subnormal tails:
 
-| | dtype |
+| Quantity | dtype |
 | --- | --- |
-| Compute dtype | that of `hidden`, `weight` and `bias`, which must agree; under autocast the autocast dtype (float64 tensors stay float64), as `F.linear` casts them |
-| Logits | the GEMM of compute-dtype operands with float32 accumulation, rounded into the compute dtype, as `F.linear` computes them |
-| Loss | `promote(compute dtype, float32)`, from float64 row losses |
-| Logits' gradient | the compute dtype; working arithmetic as `cross_entropy`'s (`precision`) |
-| `grad_hidden`, `grad_weight`, `grad_bias` | each input's own dtype: accumulated in float32 (float64 for float64) and rounded once, so float32 master weights under autocast get float32 gradients |
+| Compute dtype | that of `hidden`, `weight` and `bias` (must match); under autocast, the autocast dtype (`float64` stays `float64`), matching `F.linear` |
+| Logits | GEMM of compute-dtype operands with float32 accumulation, rounded to compute dtype |
+| Loss | `promote(compute dtype, float32)`, accumulated from float64 row losses |
+| Logits' gradient | compute dtype; working arithmetic as in `cross_entropy` (`precision`) |
+| `grad_hidden`, `grad_weight`, `grad_bias` | each input's dtype, accumulated in float32 (`float64` for `float64`) and rounded once |
 
-On the CPU, 16-bit GEMMs run as float32 GEMMs of exact float32 copies of the 16-bit operands
-(of the weight 64 MiB of float32 at a time), with the same rounding: PyTorch's own 16-bit CPU
-GEMMs were 6–60× slower than float32 ones on an AMD EPYC (AVX2, no AMX), running on one core
-for most of a call. 16-bit weights then take 6 bytes per weight for their gradient (a float32
-sum and its 16-bit copy): at 1024×4096×128256 bfloat16 about 1.7× eager PyTorch's memory, a
-known limit ([performance](../docs/performance.md#where-libsdca-is-slower)). On CUDA the GEMMs
-are cuBLAS's in the compute dtype (16-bit `grad_weight` products are rounded per chunk before
-their float32 sum).
-
-Backends: on the CPU the CPU extension (the native library for float64 or without the
-extension); on CUDA the weighted fused Triton kernels of `cross_entropy`, timed on an A100
-([performance](../docs/performance.md#pytorch-on-cuda)); `backend="torch"` takes tensor
-operations on any device. It is a
-`torch.library` operator, so `torch.compile` traces it without graph breaks. Gradients are
-first order; `label_smoothing` must be 0; `DTensor` inputs take the full logits
-(`cross_entropy` of `F.linear`). Timings and memory against eager and compiled PyTorch:
-[performance](../docs/performance.md#pytorch-on-the-cpu).
+**Backends and 16-bit CPU note.** On CUDA, `linear_cross_entropy` uses cuBLAS and the weighted
+fused Triton kernels of `cross_entropy` ([performance](../docs/performance.md#pytorch-on-cuda)).
+On the CPU, it uses the CPU extension (or the native library for `float64` / without the
+extension), converting 16-bit operands to float32 in 64 MiB weight tiles to avoid slow 16-bit
+CPU GEMMs (which uses 6 bytes per weight during the call, about `1.7×` eager PyTorch's memory at
+`1024×4096×128256` bfloat16; [performance](../docs/performance.md#pytorch-on-the-cpu)).
+`backend="torch"` forces tensor operations. Registered via `torch.library`, it traces under
+`torch.compile` without graph breaks (first-order gradients only; `label_smoothing=0.0`;
+`DTensor` inputs fall back to `cross_entropy(F.linear(...))`).
 
 ## Devices and backends
 
@@ -222,7 +201,7 @@ fastest path that applies:
 | --- | --- |
 | CUDA, up to 2²⁵ classes and 2²⁸ rows | fused Triton kernels, launched from C++ autograd (`cuda-launcher`) or by Triton (`triton`) |
 | CUDA otherwise | tensor operations (`torch`): beyond those limits, before PyTorch 2.7 / Triton 3.3, for the hinge, top-k (`k > 1`) and boolean-mask losses with `precision="float32"`, and for top-k losses with `k > 32` (top-k cross-entropy: `k ≥ classes − 1`) or 2³¹ logits or more |
-| CPU, build tools available | the CPU extension (`cpu-kernel`), on PyTorch's thread pool; the native library for float64 integer cross-entropy of more than 32 classes and, with `precision="float32"`, for every `sdca_loss` objective but integer cross-entropy, top-k cross-entropy (`k <= 64`) and `proximal_cross_entropy` |
+| CPU, build tools available | the CPU extension (`cpu-kernel`) on PyTorch's thread pool; uses the native library instead for float64 integer cross-entropy with `classes > 32` and for `precision="float32"` on hinge, multilabel, and `k > 64` top-k losses |
 | CPU otherwise | the prebuilt native library (`native`), on PyTorch's OpenMP threads (rows split as its static loops) |
 
 `backend="torch"` forces tensor operations on any device and `backend="native"`

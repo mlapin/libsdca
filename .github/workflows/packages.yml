@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   sdist:
+    name: sdist
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
@@ -70,18 +71,24 @@ jobs:
           path: wheelhouse/*.whl
 
   crate:
+    name: crate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
       - run: rustup toolchain install stable --profile minimal && rustup default stable
       - run: rust/package.sh
-      - run: cd rust && cargo publish --dry-run --allow-dirty
+      - name: Test the packaged crate outside the checkout
+        run: |
+          mkdir "$RUNNER_TEMP/crate"
+          tar -xzf rust/target/package/libsdca-*.crate -C "$RUNNER_TEMP/crate" --strip-components=1
+          cd "$RUNNER_TEMP/crate" && cargo test && cargo run --example train
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: crate
           path: rust/target/package/*.crate
 
   testpypi:
+    name: Upload (TestPyPI)
     if: github.event_name == 'workflow_dispatch' && inputs.testpypi
     needs: [sdist, wheels]
     runs-on: ubuntu-24.04
@@ -101,6 +108,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
   pypi:
+    name: Upload (PyPI)
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [sdist, wheels, crate]
     runs-on: ubuntu-24.04
