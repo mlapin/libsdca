@@ -42,12 +42,12 @@ clf = SDCAClassifier("topk_cross_entropy", k=2, C=1.0).fit(X, y)
 print(clf.predict(X[:5]), clf.score(X, y))
 ```
 
-`SDCAClassifier` (`libsdca.sklearn`) passes scikit-learn's `check_estimator` suite (with
-`kernel="precomputed"`, all but the checks that pass invalid Gram matrices) and supports
-`Pipeline`, `clone`, `cross_val_score`, `GridSearchCV`, arbitrary sortable class labels, `predict_proba` / `predict_log_proba` (for `cross_entropy`), and precomputed Gram
-matrices (`kernel="precomputed"`). Fitted attributes: `classes_`, `coef_ (n_classes, n_features)`,
-`dual_coef_ (n_classes, n_samples)`, `n_features_in_`, `n_iter_`, `status_`, `history_`,
-and `model_`.
+`SDCAClassifier` (`libsdca.sklearn`) passes scikit-learn's `check_estimator` suite (except
+checks that pass invalid Gram matrices to `kernel="precomputed"`) and supports `Pipeline`,
+`clone`, `cross_val_score`, `GridSearchCV`, arbitrary sortable labels, `predict_proba` /
+`predict_log_proba` (for `cross_entropy`), and precomputed Gram matrices. Fitted attributes:
+`classes_`, `coef_ (n_classes, n_features)`, `dual_coef_ (n_classes, n_samples)`,
+`n_features_in_`, `n_iter_`, `status_`, `history_`, and `model_`.
 
 ## Training
 
@@ -61,23 +61,23 @@ predicted = model.predict(X)
 ```
 
 `libsdca.fit(X, y, objective="cross_entropy", *, ...)` minimizes
-$0.5\|W\|_2^2 + C \sum_i \ell(X_i W, y_i)$ over $W \in \mathbb{R}^{d \times m}$ (no implicit
-intercept; for $\frac{\lambda}{2}\|W\|_2^2 + \frac{1}{n}\sum_i \ell_i$, set $C = 1/(\lambda n)$).
+$0.5\Vert W \Vert_2^2 + C \sum_i \ell(X_i W, y_i)$ over $W \in \mathbb{R}^{d \times m}$ (no implicit
+intercept; set $C = 1 / (\lambda n)$ for $\frac{\lambda}{2}\Vert W \Vert_2^2 + \frac{1}{n}\sum_i \ell_i$).
 See [API.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#loss-definitions)
 for all objectives and options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `C` | `1.0` | Loss weight ($> 0$) |
-| `k`, `gamma` | `1`, `0.0` | Top-$k$ parameter (`[1, m - 1]`) and hinge smoothing (`0` = nonsmooth) |
+| `k`, `gamma` | `1`, `0.0` | Top-*k* parameter (`[1, m - 1]`) and hinge smoothing (`0` = nonsmooth) |
 | `tol`, `max_epoch`, `eval_epoch` | `1e-3`, `1000`, `10` | Relative duality-gap target, epoch limit, and evaluation period |
 | `shrinking` | `"auto"` | Active-set shrinking and gap-safe screening for hinges ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#shrinking)) |
-| `projection_precision` | `"float64"` | `"float64"` (checked double) or `"extended"` for `multilabel_hinge` ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#projection-precision)) |
+| `projection_precision` | `"float64"` | `"float64"` (checked double) or `"extended"` ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#projection-precision)) |
 | `kernel`, `center`, `initial_dual` | `False`, `None`, `None` | Gram matrix `(n, n)` input, regularizer center $W_0$, and warm-start duals |
 | `precision` | `"float64"` | Working arithmetic and solver iterate (`"float64"` or `"float32"`) |
 
-`Model` provides `weights (d, m)` (`None` for kernels), `dual (n, m)`, `status` (only
-`"solved"` certifies the gap), `epochs`, `history`, and `params`.
+`Model` exposes `weights (d, m)` (`None` for kernels), `dual (n, m)`, `status` (only
+`"solved"` certifies the duality gap), `epochs`, `history`, and `params`.
 
 ## Losses and gradients
 
@@ -133,8 +133,8 @@ and [performance.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/performa
 ## Building from source and testing
 
 ```bash
-pip install -e .                                                     # editable install (uses system CBLAS if found)
-python -m pytest -n auto --dist worksteal tests/python --group all   # core, torch, jax, or all
+pip install -e .                                                   # editable install (uses system CBLAS if found)
+python -m pytest -n auto --dist worksteal tests/python --group all # core, torch, jax, or all
 python -m pytest tests/python --group all -m serial
 ```
 

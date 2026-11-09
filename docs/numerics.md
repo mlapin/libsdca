@@ -4,9 +4,9 @@ What `libsdca` 0.3.0 guarantees in floating point, how it is verified, and its k
 (measured on NVIDIA A100 / H100 GPUs and Linux x86-64 / macOS arm64 CPUs with PyTorch 2.15).
 
 - **No softmax collapse:** Naive cross-entropy rounds $1 + \tau$ ($\tau = \sum_{j \neq y} e^{z_j - z_y}$)
-  to $1$ once $\tau < \frac{1}{2}\operatorname{ulp}(1)$, collapsing both the loss and target
+  to $1$ once $\tau < \frac{1}{2}\mathrm{ulp}(1)$, collapsing both the loss and target
   gradient to zero (near margin `16.6` in `float32` and `36.7` in `float64` for two classes;
-  [softmax collapse](softmax-collapse.md)). `libsdca` evaluates $\operatorname{log1p}(\tau)$
+  [softmax collapse](softmax-collapse.md)). `libsdca` evaluates $\mathrm{log1p}(\tau)$
   and forms the target gradient directly from $-\tau / (1 + \tau)$, staying nonzero down to the
   output dtype's subnormal underflow limit (`104` in `float32`, `745` in `float64`; see
   [aggregate-tail limitations](#aggregate-tail-limitations) for exceptions).
@@ -22,21 +22,26 @@ What `libsdca` 0.3.0 guarantees in floating point, how it is verified, and its k
 
 ## What each precision guarantees
 
-| | `"float32"`, `float32` data | `"float64"`, `float32` data (default) | `float64` data |
-| --- | --- | --- | --- |
-| Coordinate steps | `float` (hinge projections in `double`) | `double` | `double` |
-| `fit` iterate (`W`, duals) | `float` | `double`, rounded once into the returned `float32` arrays at each evaluation | `double` |
-| Losses | `float` (`double` when parameters or spread exceed `float`) | `double` | `double` |
-| Evaluation and `solved` | `double` | `double` | `double` |
-| Single-step entropy block error vs. `double` (`tests/cpp/regression.cpp`) | $\le (64n + 16\max|z|)\cdot 2^{-24}$ | $\le 8\cdot 2^{-24}$ (measured `1.86` float ulps) | reference |
-| `multiclass_hinge` on standardized `digits`, lowest certified gap (5000 epochs) | `4.7e-6` | `3.5e-7` (`tol=1e-6` in 2132 epochs; `float64` data: 2100) | `< 1e-7` (2610 epochs) |
+`float64` data always trains in `double`. For `float32` data, `precision` selects the working
+precision of `fit`; evaluation and the [`solved` certificate](#the-solved-certificate) run in
+`double` in both modes.
 
-- Keeping `W` and the duals in `float32` during `fit` loses coordinate updates smaller than
-  $\frac{1}{2}\operatorname{ulp}$ near the optimum (`89%` of weight updates and `75%` of dual
-  updates on `digits`), stalling convergence at `4.7e-6`.
-- The default `"float64"` mode maintains `W` and the duals in `double` and certifies their
-  rounded `float32` copies at each evaluation, reaching `3.5e-7` in the same epoch count as
-  `float64` data.
+| `float32` data | `precision="float32"` | `precision="float64"` (default) |
+| --- | --- | --- |
+| Coordinate steps | `float` (hinge projections in `double`) | `double` |
+| `W` and duals during `fit` | `float` | `double`, rounded into returned arrays at evaluation |
+| Losses | `float` (`double` if parameters/spread exceed `float`) | `double` |
+| Error of one entropy step vs. `double` | $\le (64n + 16\max_j \lvert z_j \rvert) \cdot 2^{-24}$ | $\le 8 \cdot 2^{-24}$ (measured `1.86` ulps) |
+| Lowest certified gap (`digits` hinge) | `4.7e-6` | `3.5e-7` |
+
+- With `"float32"`, `W` and the duals lose coordinate updates smaller than
+  $\frac{1}{2}\mathrm{ulp}$ near the optimum (`89%` of weight updates and `75%` of dual
+  updates on standardized `digits`), so convergence stalls at `4.7e-6` within 5000 epochs.
+  In exchange, cross-entropy fits run `1.6–1.9×` faster ([performance](performance.md#solver)).
+- With `"float64"`, the certificate checks the rounded `float32` arrays the caller receives.
+  They reach `tol=1e-6` in 2132 epochs, against 2100 for `float64` data (which certifies below
+  `1e-7` in 2610 epochs), at the cost of `8(d + n)m` extra bytes.
+- The entropy-step bounds are checked in `tests/cpp/regression.cpp`.
 
 ### The `solved` certificate
 
@@ -46,13 +51,13 @@ $D(A)$ at the feasible projection of the returned duals (the duals themselves up
 for the solver's own iterates; farther for an infeasible `initial_dual`), and $e$ is a
 first-order estimate, not a rigorous bound, of the evaluation's own rounding
 (`test_certificate.py` checks every `solved` fit against a 50-digit primal). With a regularizer center $W_0$, the
-evaluator forms $W - W_0$ directly so $\|W_0\|_2^2$ never cancels (`test_centered_certificate.py`).
+evaluator forms $W - W_0$ directly so $\Vert W_0 \Vert_2^2$ never cancels (`test_centered_certificate.py`).
 
 ### Projection precision
 
 `projection_precision="float64"` (default) solves the `multilabel_hinge` two-simplex
 projection in `double` and accepts the result only if every entry lies clear of its
-threshold error bound; otherwise it re-solves in `"extended"` (`long double`). Top-$k$ hinge
+threshold error bound; otherwise it re-solves in `"extended"` (`long double`). Top-*k* hinge
 projections always use the extended solver. Both modes agree within `16 eps` on offsets up
 to `1e30` (`tests/cpp/regression.cpp`; [API.md](API.md#projection-precision)).
 
@@ -62,10 +67,11 @@ Consider a two-class prediction with logits `z = [0, -g]` and correct target `y 
 margin $g > 0$. The exact target gradient is $\partial \ell / \partial z_0 = -1/(1 + e^g) \approx -e^{-g}$,
 which is strictly nonzero for every finite $g$ and should only round to `0` when $e^{-g}$
 falls below half the smallest representable subnormal number of the output dtype. The table
-below shows the first margin $g$ at which the returned target gradient becomes `0`
+below compares `libsdca` with PyTorch 2.15 `F.cross_entropy` on the first margin $g$ at
+which the returned target gradient becomes `0`
 (`test_half_zero_gaps.py`, `test_float32_zero_gaps.py`, `test_softmax_limits.py`):
 
-| Output dtype | Smallest subnormal | Exact IEEE underflow margin | `libsdca` (CPU & CUDA) | PyTorch 2.15 `F.cross_entropy` (CPU) | PyTorch 2.15 `F.cross_entropy` (CUDA) |
+| Output dtype | Smallest subnormal | Exact underflow | `libsdca` (CPU & CUDA) | PyTorch 2.15 (CPU) | PyTorch 2.15 (CUDA) |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `float16` | $2^{-24} \approx 5.96\times 10^{-8}$ | `17.34375` | **`17.34375`** | `7.625` | `16.640625` |
 | `bfloat16` | $2^{-133} \approx 9.18\times 10^{-41}$ | `93.0` | **`93.0`** | `5.5625` | `16.75` |
@@ -77,7 +83,7 @@ below shows the first margin $g$ at which the returned target gradient becomes `
   (`4.5×` to `20×` wider margin range than unpatched `F.cross_entropy`).
 - **Why naive $\log(1 + \tau)$ collapses early (and differs between CPU and CUDA in PyTorch 2.15):**
   Evaluating $p_0 - 1$ from the normalized probability rounds to `0` as soon as
-  $e^{-g} < \frac{1}{2}\operatorname{ulp}(1)$ (`5.56` in `bfloat16`, `7.63` in `float16`,
+  $e^{-g} < \frac{1}{2}\mathrm{ulp}(1)$ (`5.56` in `bfloat16`, `7.63` in `float16`,
   `16.64` in `float32`, `36.74` in `float64`). On CUDA, PyTorch 2.15 upcasts 16-bit softmax
   internals to `float32`, moving the 16-bit collapse from `5.56–7.63` to the `float32` cliff
   (`~16.7`), while still losing subnormal gradients between `16.7` and `93.0`.
@@ -86,15 +92,15 @@ below shows the first margin $g$ at which the returned target gradient becomes `
 ## How it is verified
 
 Instead of comparing against `float64` `F.cross_entropy` (which collapses at margin `36.7`
-without a $\operatorname{log1p}$ normalizer), the verification suite evaluates every loss
+without a $\mathrm{log1p}$ normalizer), the verification suite evaluates every loss
 value and gradient entry against a 100-digit `mpmath` oracle on the exact represented inputs:
 
-| Verification suite | What it tests | Result |
+| Suite | What it tests | Result |
 | --- | --- | --- |
-| Entropy & distillation stress | 14 class counts around SIMD/tile boundaries (`C = 2` to `32,769`), margins through the subnormal tail (`0` to `110` in `float32`, `0` to `750` in `float64`), cancellation offsets (`1/eps`, `2/eps`), and `±finfo.max` | `0` failures across all dtypes and CPU/native/CUDA paths within `64` output eps (max error `0.678` of budget on CPU, `0.622` on CUDA) |
-| Proximal oracle | `proximal_cross_entropy` for `alpha` from `1e-300` to `1e300`, ties, masks, and up to `32,768` classes vs. 100-digit `mpmath` root solves | `0` failures across `10,884` CPU and `6,734` CUDA cases within 1 rounding + `64` (`float64`) / `60` (`float32`) working eps |
-| Coordinate steps & projections | Randomized entropy KKT conditions, warm hinge steps with duals up to $2^{100}$, and simplex/cone projections across scales $10^{-30}\dots 10^{30}$ (`tests/cpp/`) | Within `4 eps` on warm hinge steps and `64 eps` on projections |
-| 16-bit & ordinary-input sweeps | Every PyTorch CPU/CUDA path, JAX path, NumPy loss, and `fit` (`test_half_gradient_rounding.py`, `test_torch_common_inputs.py`, `test_ordinary_inputs.py`) | Matches `float64` / `mpmath` references across all reductions and upstream scales |
+| Entropy & distillation | 14 class counts around SIMD/tile boundaries (`C = 2` to `32,769`), margins through the subnormal tail (`0` to `110` in `float32`, `0` to `750` in `float64`), cancellation offsets (`1/eps`, `2/eps`), and `±finfo.max` | `0` failures across all dtypes and CPU/native/CUDA paths within `64` output eps (max `0.678` of budget on CPU, `0.622` on CUDA) |
+| Proximal oracle | `proximal_cross_entropy` for `alpha` from `1e-300` to `1e300`, ties, masks, and up to `32,768` classes vs. 100-digit `mpmath` root solves | `0` failures across `10,884` CPU and `6,734` CUDA cases within 1 rounding + `64` (`float64`) or `60` (`float32`) eps |
+| Steps & projections | Randomized entropy KKT conditions, warm hinge steps with duals up to $2^{100}$, and simplex/cone projections across scales $10^{-30}\dots 10^{30}$ in `tests/cpp/` | Within `4 eps` on warm hinge steps and `64 eps` on projections |
+| 16-bit & ordinary sweeps | Every PyTorch CPU/CUDA path, JAX path, NumPy loss, and `fit` (`test_half_gradient_rounding.py`, `test_torch_common_inputs.py`, `test_ordinary_inputs.py`) | Matches `float64` / `mpmath` references across all reductions and upstream scales |
 
 ## Numerical contracts
 
@@ -115,7 +121,7 @@ value and gradient entry against a 100-digit `mpmath` oracle on the exact repres
 - Large regularizer centers $W_0$ limit representable weight updates (`float32` spacing is
   `8` near `1e8`; `float64` spacing is `2` near `1e16`; `test_centered_certificate.py`).
 - On platforms where `long double` is 64-bit (`macOS arm64`, MSVC), extended-precision
-  retries match `double` (top-$k$ entropy blocks solve up to $C\|x\|_2^2 = 10^{20}$).
+  retries match `double` (top-*k* entropy blocks solve up to $C\Vert x \Vert_2^2 = 10^{20}$).
 
 ### Further precision limits
 
@@ -131,13 +137,13 @@ value and gradient entry against a 100-digit `mpmath` oracle on the exact repres
   output eps at $T \in [0.25, 4]$. With `float32` work, entries where student and teacher
   probabilities $q$ and $p$ nearly agree are within `64` `float32` eps of $(p + q)/T$ (CPU
   kernels promote rows with mean log-ratio $> 32$ to `float64`).
-- **Top-$k$ cross-entropy at extreme score spreads (`StressLimit` in `tests/cpp/stress.cpp`):**
-  - *Partially capped rows ($k < C - 1$):* Log-odds combine score differences with order-one
+- **Top-*k* cross-entropy at extreme score spreads (`StressLimit` in `tests/cpp/stress.cpp`):**
+  - *Partially capped rows* ($k < C - 1$): Log-odds combine score differences with order-one
     logarithms in working precision, so error grows with competitor spread (for `[0, S, -S, -S]`,
     $k=2$: `float64` relative error is `5e-13` at $S=10^4$, `5e-10` at $10^8$, `9e-6` at
     $10^{12}$, `log 3` at $10^{16}$, and `0` at `finfo.max`; `prox_topk_entropy` behaves
     identically).
-  - *All-capped rows ($k = C - 1$):* Uses a scaled double-double mean of score differences,
+  - *All-capped rows* ($k = C - 1$): Uses a scaled double-double mean of score differences,
     resolving ~106 bits in `float64`; spreads spanning $> 2^{100}$ lose their smallest term
     (for `[M/4, H, M, 1, -H]` with $H=2^{200}, M=2^{100}, k=4$, all routes return
     `log 5 = 1.6094` instead of `1.8142`).
@@ -148,7 +154,7 @@ value and gradient entry against a 100-digit `mpmath` oracle on the exact repres
   underflow `float32` while their sum over thousands of classes is a representable
   `float32` subnormal (e.g. `8,192` classes, student `[0, -110, ...]`, teacher
   `[0, -220, ...]`, $T=1$), the target gradient rounds to `0` instead of `-1.38e-44` while
-  the loss (`1.40e-44`) remains accurate. Pass `precision="float64"` to retain it.
+  the loss (`1.40e-44`) remains accurate (`precision="float64"` retains it).
 - **JAX GPU, default `float32` work:** Individually underflowed `float32` exponentials
   ($\text{gap} = 104$ across `1,000` classes) vanish before summation, returning `0` instead
   of `6.81e-43`; pass `precision="float64"` (with `jax_enable_x64`) to retain them.

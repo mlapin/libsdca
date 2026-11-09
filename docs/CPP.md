@@ -26,8 +26,8 @@ compile it once alongside your sources). Keep fast math disabled (`-fno-fast-mat
 
 ## Training
 
-Construct an input view (`make_input_feature(d, n, X)` or `make_input_kernel(n, K)`), an
-output specification (`multiclass_output(m, labels)`), and an objective (such as
+Construct an input view (`make_input_feature(d, n, X)` or `make_input_kernel(n, K)`),
+output specification (`multiclass_output(m, labels)`), and objective (such as
 `l2_entropy<Data, Result>(C)`), pass them with caller-owned weight and dual buffers to
 `make_context`, configure `context.criteria`, and call `make_solver(context).solve()`:
 

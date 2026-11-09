@@ -2,35 +2,40 @@
 
 `libsdca` shares one set of loss names, option names, status codes and defaults
 across C++, the C ABI (`include/sdca/c_api.h`), Python, PyTorch, JAX, Rust and
-MATLAB. See the interface guides for language-specific examples:
-[Python](../python/README.md), [PyTorch](../python/TORCH.md),
-[JAX](../python/JAX.md), [Rust](../rust/README.md), [C++](CPP.md), [C](C.md)
-and [MATLAB](MATLAB.md).
+MATLAB. Interface guides: [Python](../python/README.md),
+[PyTorch](../python/TORCH.md), [JAX](../python/JAX.md),
+[Rust](../rust/README.md), [C++](CPP.md), [C](C.md) and [MATLAB](MATLAB.md).
 
 ## Loss definitions
 
 For scores $z \in \mathbb{R}^m$, target class $y$, and non-target margins
 $h_j = 1 + z_j - z_y$ ($j \neq y$) sorted as $h_{[1]} \ge h_{[2]} \ge \dots$
-(or positive label set $Y \subset \{1, \dots, m\}$ for multilabel losses):
+(or positive label set $Y \subset \lbrace 1, \dots, m \rbrace$ for multilabel losses):
 
 | Name | Formula | Parameters | Use case |
 | --- | --- | --- | --- |
-| `cross_entropy` | $\log \sum_j \exp(z_j) - z_y$ | — | Standard multiclass classification |
-| `topk_cross_entropy` | $\max_{p \in \Delta_k} \langle a, p \rangle - (1 - s)\log(1 - s) - \sum_j p_j \log p_j$, where $a_j = z_j - z_y$, $s = \sum_j p_j$, $\Delta_k = \{p \ge 0 : s \le 1,\, p_j \le s/k\}$ over $j \neq y$ | `k` | Top-$k$ entropy classification [4] (`cross_entropy` at $k=1$) |
-| `multiclass_hinge` | $\max(0, h_{[1]})$ | `gamma` | Crammer–Singer multiclass SVM [1] |
-| `topk_hinge_alpha` | $\max\!\big(0, \frac{1}{k}\sum_{i \le k} h_{[i]}\big)$ | `k`, `gamma` | Top-$k$ SVM on average of $k$ worst margins [3] |
-| `topk_hinge_beta` (`topk_hinge`) | $\frac{1}{k}\sum_{i \le k} \max(0, h_{[i]})$ | `k`, `gamma` | Top-$k$ SVM on each of $k$ worst margins [4] |
-| `multilabel_hinge` | $\max\!\big(0, 1 + \max_{j \notin Y} z_j - \min_{y \in Y} z_y\big)$ | `gamma` | Ranked multilabel SVM [2] |
-| `multilabel_cross_entropy` | $\log \sum_j \exp(z_j) - \frac{1}{|Y|}\sum_{y \in Y} z_y$ | — | Softmax cross-entropy to uniform distribution over $Y$ |
-| `proximal_cross_entropy` | $\min_u \big\{\operatorname{CE}(u, y) + \frac{1}{2\alpha}\|u - z\|_2^2\big\}$ | `alpha` | Moreau envelope of cross-entropy [5] (loss evaluation only) |
-| `distillation` | $-\sum_j p_j \log q_j$, with $p = \operatorname{softmax}(t/T)$, $q = \operatorname{softmax}(z/T)$ | `temperature` | Knowledge distillation to teacher logits $t$ [6] |
-| `proximal_distillation` | $\min_u \big\{H(p, \operatorname{softmax}(u)) + \frac{1}{2\alpha}\|u - z/T\|_2^2\big\}$ | `temperature`, `alpha` | Damped distillation step (Moreau envelope in $z/T$) |
-| `linear_cross_entropy` | $\operatorname{CE}(h W^\top + b, y)$ evaluated in row chunks without materializing logits | `chunk_bytes`, `recompute` | Language-model / large-vocabulary classification head (PyTorch) |
+| `cross_entropy` | $\log \sum_j \exp(z_j) - z_y$ | — | Multiclass softmax classification |
+| `topk_cross_entropy` | $\max_{p \in \Delta_k} \langle a, p \rangle + H(\bar p)$ | `k` | Top-*k* entropy [4] (`cross_entropy` at $k=1$) |
+| `multiclass_hinge` | $\max(0, h_{[1]})$ | `gamma` | Crammer–Singer SVM [1] |
+| `topk_hinge_alpha` | $\max\big(0, \frac{1}{k}\sum_{i \le k} h_{[i]}\big)$ | `k`, `gamma` | Top-*k* SVM on average of $k$ worst margins [3] |
+| `topk_hinge_beta` (`topk_hinge`) | $\frac{1}{k}\sum_{i \le k} \max(0, h_{[i]})$ | `k`, `gamma` | Top-*k* SVM on each of $k$ worst margins [4] |
+| `multilabel_hinge` | $\max\big(0, 1 + \max_{j \notin Y} z_j - \min_{y \in Y} z_y\big)$ | `gamma` | Ranked multilabel SVM [2] |
+| `multilabel_cross_entropy` | $\log \sum_j \exp(z_j) - \frac{1}{\lvert Y \rvert}\sum_{y \in Y} z_y$ | — | Cross-entropy to uniform target on $Y$ |
+| `proximal_cross_entropy` | $\mathrm{env}_\alpha[\mathrm{CE}(\cdot, y)]{(z)}$ | `alpha` | Moreau envelope of CE [5] |
+| `distillation` | $H\big(\mathrm{softmax}(t/T), \mathrm{softmax}(z/T)\big)$ | `temperature` | Teacher-logit distillation [6] |
+| `proximal_distillation` | $\mathrm{env}_\alpha[H(p, \mathrm{softmax}(\cdot))]{(z/T)}$ | `temperature`, `alpha` | Moreau-damped distillation in $z/T$ |
+| `linear_cross_entropy` | $\mathrm{CE}(h W^\top + b, y)$ | `chunk_bytes`, `recompute` | Chunked linear head + CE (PyTorch) |
 
+- **Top-*k* entropy:** Over $j \neq y$, $a_j = z_j - z_y$, $s = \sum_j p_j$ and
+  $\Delta_k = \lbrace p \ge 0 : s \le 1, p_j \le s/k \rbrace$;
+  $H(\bar p) = -(1 - s)\log(1 - s) - \sum_j p_j \log p_j$ is the entropy of $\bar p = (1 - s, p)$.
+- **Moreau envelope:**
+  $\mathrm{env}_\alpha[f]{(x)} = \min_u \big\lbrace f(u) + \frac{1}{2\alpha}\Vert u - x \Vert_2^2 \big\rbrace$,
+  where $H(p, q) = -\sum_j p_j \log q_j$ is the cross-entropy and $p = \mathrm{softmax}(t/T)$.
 - **Hinge smoothing (`gamma`):** `gamma = 0` (default) is the nonsmooth hinge;
-  `gamma > 0` is its Moreau envelope $\max_{p \in S} \langle h, p \rangle - \frac{\gamma}{2}\|p\|_2^2$,
+  `gamma > 0` is its Moreau envelope $\max_{p \in S} \langle h, p \rangle - \frac{\gamma}{2}\Vert p \Vert_2^2$,
   which is within $\gamma / 2$ of the nonsmooth loss and has a $(1/\gamma)$-Lipschitz gradient [4].
-- **Top-$k$ exclusion:** Top-$k$ hinges exclude the target class $y$ when selecting the $k$
+- **Top-*k* exclusion:** Top-*k* hinges exclude the target class $y$ when selecting the $k$
   largest competitor margins $h_{[1]}, \dots, h_{[k]}$ [4, Prop. 11]. At $k = 1$,
   `topk_hinge_alpha` and `topk_hinge_beta` coincide with `multiclass_hinge`.
 
@@ -38,55 +43,66 @@ $h_j = 1 + z_j - z_y$ ($j \neq y$) sorted as $h_{[1]} \ge h_{[2]} \ge \dots$
 
 ### Core entry points
 
-| Operation | Python (NumPy / sklearn) | PyTorch | JAX | Rust | C++ | C | MATLAB |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Train classifier | `fit`, `SDCAClassifier` | — | — | `fit` | `make_solver(ctx).solve()` | `sdca_fit` | `matsdca_fit` |
-| Loss & gradient | `loss_and_grad` | `SDCALoss`, `sdca_loss` | `libsdca.jax.sdca_loss` | `loss_and_grad` | `loss_and_gradient` | `sdca_loss_gradient` | `matsdca_loss` |
-| Coordinate step | `coordinate_update` | — | — | `coordinate_update` | `objective.update_dual_variables` | `sdca_update_objective` | — |
+| Interface | Train classifier | Loss & gradient | Coordinate step |
+| --- | --- | --- | --- |
+| Python (NumPy / sklearn) | `fit`, `SDCAClassifier` | `loss_and_grad` | `coordinate_update` |
+| PyTorch | — | `SDCALoss`, `sdca_loss` | — |
+| JAX | — | `libsdca.jax.sdca_loss` | — |
+| Rust | `fit` | `loss_and_grad` | `coordinate_update` |
+| C++ | `make_solver(ctx).solve()` | `loss_and_gradient` | `objective.update_dual_variables` |
+| C | `sdca_fit` | `sdca_loss_gradient` | `sdca_update_objective` |
+| MATLAB | `matsdca_fit` | `matsdca_loss` | — |
 
-The public C++ headers are `sdca/solver.h`, `sdca/prox.h` and `sdca/loss.h`
-(`sdca::detail` and underscore-prefixed Python names are internal).
+Public C++ headers: `sdca/solver.h`, `sdca/prox.h` and `sdca/loss.h`
+(`sdca::detail` and `_`-prefixed Python names are internal).
 
 ### Names across interfaces
 
-| Canonical name | PyTorch module / function | JAX function | Rust | C++ objective / function | C ABI |
-| --- | --- | --- | --- | --- | --- |
-| `cross_entropy` | `CrossEntropyLoss`, `cross_entropy` | `cross_entropy` | `CrossEntropy` | `l2_entropy(c)` | `SDCA_CROSS_ENTROPY` |
-| `topk_cross_entropy` | `TopKCrossEntropyLoss`, `topk_cross_entropy` | `topk_cross_entropy` | `TopKCrossEntropy` | `l2_entropy_topk(c, k)` | `SDCA_TOPK_CROSS_ENTROPY` |
-| `multiclass_hinge` | `MulticlassHingeLoss`, `multiclass_hinge_loss` | `multiclass_hinge_loss` | `MulticlassHinge` | `l2_hinge_topk[_smooth]` | `SDCA_MULTICLASS_HINGE` |
-| `topk_hinge_alpha` | `TopKHingeAlphaLoss`, `topk_hinge_alpha_loss` | `topk_hinge_alpha_loss` | `TopKHingeAlpha` | `l2_hinge_topk[_smooth]` | `SDCA_TOPK_HINGE_ALPHA` |
-| `topk_hinge_beta` | `TopKHingeBetaLoss`, `topk_hinge_beta_loss` (`TopKHingeLoss`) | `topk_hinge_beta_loss` (`topk_hinge_loss`) | `TopKHingeBeta` | `l2_topk_hinge[_smooth]` | `SDCA_TOPK_HINGE_BETA` |
-| `multilabel_hinge` | `MultilabelHingeLoss`, `multilabel_hinge_loss` | `multilabel_hinge_loss` | `MultilabelHinge` | `l2_multilabel_hinge[_smooth]` | `SDCA_MULTILABEL_HINGE` |
-| `multilabel_cross_entropy` | `MultilabelCrossEntropyLoss`, `multilabel_cross_entropy` | `multilabel_cross_entropy` | `MultilabelCrossEntropy` | `l2_multilabel_entropy(c)` | `SDCA_MULTILABEL_CROSS_ENTROPY` |
-| `proximal_cross_entropy` | `ProximalCrossEntropyLoss`, `proximal_cross_entropy` | `proximal_cross_entropy` | `Loss::ProximalCrossEntropy` | `loss_and_gradient` | `SDCA_PROXIMAL_CROSS_ENTROPY` |
-| `distillation` | `DistillationLoss`, `distillation_loss` | `distillation_loss` | `distillation_loss_and_grad`, `fit_distillation` | `l2_distillation`, `distillation_loss[_and_gradient]` | `sdca_distillation_*`, `sdca_fit_distillation` |
-| `proximal_distillation` | `ProximalDistillationLoss`, `proximal_distillation_loss` | `proximal_distillation_loss` | `proximal_distillation_loss_and_grad` | `proximal_distillation_loss[_and_gradient]` | `sdca_proximal_distillation_rows` |
-| `linear_cross_entropy` | `LinearCrossEntropyLoss`, `linear_cross_entropy` | — | — | — | — |
+| Canonical name | PyTorch module, PyTorch / JAX function | Rust | C++ |
+| --- | --- | --- | --- |
+| `cross_entropy` | `CrossEntropyLoss`, `cross_entropy` | `CrossEntropy` | `l2_entropy(c)` |
+| `topk_cross_entropy` | `TopKCrossEntropyLoss`, `topk_cross_entropy` | `TopKCrossEntropy` | `l2_entropy_topk(c, k)` |
+| `multiclass_hinge` | `MulticlassHingeLoss`, `multiclass_hinge_loss` | `MulticlassHinge` | `l2_hinge_topk[_smooth]` |
+| `topk_hinge_alpha` | `TopKHingeAlphaLoss`, `topk_hinge_alpha_loss` | `TopKHingeAlpha` | `l2_hinge_topk[_smooth]` |
+| `topk_hinge_beta` | `TopKHingeLoss`, `topk_hinge_loss` (`*Beta*`) | `TopKHingeBeta` | `l2_topk_hinge[_smooth]` |
+| `multilabel_hinge` | `MultilabelHingeLoss`, `multilabel_hinge_loss` | `MultilabelHinge` | `l2_multilabel_hinge[_smooth]` |
+| `multilabel_cross_entropy` | `MultilabelCrossEntropyLoss`, `multilabel_cross_entropy` | `MultilabelCrossEntropy` | `l2_multilabel_entropy(c)` |
+| `proximal_cross_entropy` | `ProximalCrossEntropyLoss`, `proximal_cross_entropy` | `Loss::ProximalCrossEntropy` | `loss_and_gradient` |
+| `distillation` | `DistillationLoss`, `distillation_loss` | `fit_distillation` | `l2_distillation`, `distillation_loss` |
+| `proximal_distillation` | `ProximalDistillationLoss`, `proximal_distillation_loss` | `proximal_distillation_*` | `proximal_distillation_loss` |
+| `linear_cross_entropy` | `LinearCrossEntropyLoss`, `linear_cross_entropy` (PyTorch) | — | — |
 
-In Python (`distillation_loss_and_grad`, `proximal_distillation_loss_and_grad`),
-passing `objective="distillation"` to `fit` or `coordinate_update` trains on a
-target probability matrix `(n, num_classes)`. Passing label sets or a boolean
-mask with `cross_entropy` selects `multilabel_cross_entropy`.
+- **Aliases and C ABI names:** `TopKHingeBetaLoss` / `topk_hinge_beta_loss` alias
+  `TopKHingeLoss` / `topk_hinge_loss` (`variant="beta"` default). Python and Rust evaluate
+  distillation via `distillation_loss_and_grad` and `proximal_distillation_loss_and_grad`
+  (`distillation_loss_and_gradient` and `proximal_distillation_loss_and_gradient` in C++).
+  In C, `enum sdca_loss` constants are `SDCA_<UPPER_NAME>` (e.g. `SDCA_CROSS_ENTROPY`),
+  plus `sdca_distillation_*`, `sdca_fit_distillation` and `sdca_proximal_distillation_rows`.
+- **Python targets:** Passing `objective="distillation"` to `fit` or `coordinate_update`
+  trains on a target probability matrix `(n, num_classes)`; passing label sets or a boolean
+  mask with `cross_entropy` selects `multilabel_cross_entropy`.
 
 ## Options
 
-| Option | Python / Rust | MATLAB | C++ | Default | Meaning |
-| --- | --- | --- | --- | --- | --- |
-| Loss weight | `C` / `c` | `C` | objective constructor | `1.0` | Regularization trade-off in $0.5\|W\|_2^2 + C \sum_i \ell_i$ |
-| Top-$k$ | `k` | `k` | objective constructor | `1` | Integer in `[1, classes - 1]` for top-$k$ losses |
-| Hinge smoothing | `gamma` | `gamma` | `_smooth` objective | `0.0` | `0`: nonsmooth hinge; `> 0`: Moreau smoothing step |
-| Gap tolerance | `tol` | `tol` | `criteria.epsilon` | `1e-3` | Relative duality-gap stopping threshold |
-| Epoch limit | `max_epoch` | `max_epoch` | `criteria.max_epoch` | `1000` | Maximum passes over the training set |
-| Evaluation period | `eval_epoch` | `eval_epoch` | `criteria.eval_epoch` | `10` | Epochs between duality-gap evaluations |
-| Evaluate at start | `eval_on_start` | `eval_on_start` | `criteria.eval_on_start` | `false` | Evaluate objective and gap before epoch 1 |
-| Rebuild primal | `recompute_primal` | `recompute_primal` | `criteria.recompute_primal` | `true` | Recompute $W = W_0 + X^\top A$ from duals at each evaluation |
-| Shrinking | `shrinking` | `shrinking` | `criteria.shrinking` | `"auto"` | Active-set shrinking and screening for hinge fits ([below](#shrinking)) |
-| Projection mode | `projection_precision` | `projection_precision` | `criteria.projection` | `"float64"` | Multilabel hinge projection solver ([below](#projection-precision)) |
-| Kernel input | `kernel` | `kernel` | `make_input_kernel` | `false` | Input $X$ is a symmetric positive semidefinite $(n, n)$ Gram matrix |
-| Regularizer center | `center` | `center` | `context.primal_initial` | `None` | Regularize $0.5\|W - W_0\|_2^2$ instead of $0.5\|W\|_2^2$ |
-| Warm start | `initial_dual` | `initial_dual` | dual buffer | `None` | Initial dual variables $A$ |
-| Threads | `num_threads` | `num_threads` | `criteria.num_threads` | `SDCA_NUM_THREADS` or auto | Worker threads for loss rows, coordinate steps, and gap evaluations |
-| Precision | `precision` | `precision` | `<Data, Result>` | `"float64"` | Working arithmetic and solver iterate precision ([below](#precision)) |
+Python, MATLAB and Rust share the option names below (`c` in Rust and C):
+
+| Option | C++ | Default | Meaning |
+| --- | --- | --- | --- |
+| `C` (`c` in Rust / C) | objective constructor | `1.0` | Loss weight in $0.5\Vert W \Vert_2^2 + C \sum_i \ell_i$ |
+| `k` | objective constructor | `1` | Integer in `[1, classes - 1]` for top-*k* losses |
+| `gamma` | `_smooth` objective | `0.0` | `0`: nonsmooth hinge; `> 0`: Moreau smoothing step |
+| `tol` | `criteria.epsilon` | `1e-3` | Relative duality-gap stopping threshold |
+| `max_epoch` | `criteria.max_epoch` | `1000` | Maximum passes over the training set |
+| `eval_epoch` | `criteria.eval_epoch` | `10` | Epochs between duality-gap evaluations |
+| `eval_on_start` | `criteria.eval_on_start` | `false` | Evaluate objective and gap before epoch 1 |
+| `recompute_primal` | `criteria.recompute_primal` | `true` | Rebuild $W = W_0 + X^\top A$ at each evaluation |
+| `shrinking` | `criteria.shrinking` | `"auto"` | Hinge shrinking and screening ([below](#shrinking)) |
+| `projection_precision` | `criteria.projection` | `"float64"` | Multilabel hinge projection solver ([below](#projection-precision)) |
+| `kernel` | `make_input_kernel` | `false` | Input $X$ is a symmetric PSD $(n, n)$ Gram matrix |
+| `center` | `context.primal_initial` | `None` | Regularize $0.5\Vert W - W_0 \Vert_2^2$ instead of $0.5\Vert W \Vert_2^2$ |
+| `initial_dual` | dual buffer | `None` | Initial dual variables $A$ for warm starts |
+| `num_threads` | `criteria.num_threads` | `auto` | Worker threads for losses, steps and evaluations |
+| `precision` | `<Data, Result>` | `"float64"` | Working and iterate precision ([below](#precision)) |
 
 - **Evaluations (`eval_epoch`, `recompute_primal`):** Besides checking every
   `eval_epoch` epochs, a fit with `tol > 0` schedules up to two interpolated
@@ -96,8 +112,8 @@ mask with `cross_entropy` selects `multilabel_cross_entropy`.
   pollute the certificate.
 - **Kernel validation (`kernel=True`):** Every interface verifies a nonnegative
   diagonal, symmetry within $10^{-5}\sqrt{K_{ii}K_{jj}}$, and
-  $|K_{ij}| \le (1 + 10^{-3})\sqrt{K_{ii}K_{jj}}$.
-- **Feature scaling:** Because each coordinate step scales with $1/(C\|x_i\|_2^2)$,
+  $\lvert K_{ij} \rvert \le (1 + 10^{-3})\sqrt{K_{ii}K_{jj}}$.
+- **Feature scaling:** Because each coordinate step scales with $1/(C\Vert x_i \Vert_2^2)$,
   standardize or normalize features when example norms span orders of magnitude.
 
 ### Shrinking
@@ -111,13 +127,13 @@ bounds (entropy objectives have strictly positive probabilities and ignore the o
   and restrict single-label updates to the target and nonzero-dual classes; full passes
   and evaluations run after `eval_epoch` full-pass equivalents of work (at most 50 epochs).
 - `"safe"` (`Shrinking::Safe`, `SDCA_SHRINKING_SAFE`): Gap-safe screening [8] on feature
-  inputs. Uses strong convexity $\|W - W^\star\|_2 \le \sqrt{2\,\text{gap}}$ to permanently
+  inputs. Uses strong convexity $\Vert W - W^\star \Vert_2 \le \sqrt{2\text{ gap}}$ to permanently
   prune dual variables proven to be zero at the optimum.
 - `"both"` / `"auto"` (default): Combines `"heuristic"` and `"safe"`.
 - `"off"`: Updates every class of every example on every epoch.
 
-All modes evaluate the duality gap over all examples and classes, so `solved`
-carries the same certificate regardless of shrinking ([performance](performance.md#solver)).
+All modes evaluate the duality gap across all examples and classes (`solved`
+carries the same certificate; see [performance](performance.md#solver)).
 
 ### Projection precision
 
@@ -134,34 +150,32 @@ carries the same certificate regardless of shrinking ([performance](performance.
 
 Storage and working arithmetic are decoupled across all interfaces:
 
-| Input / storage dtype | `precision` | Native (NumPy / Rust / C) | PyTorch | JAX |
+| Storage dtype | `precision` | Native (NumPy, Rust, C) | PyTorch | JAX |
 | --- | --- | --- | --- | --- |
-| `float16`, `bfloat16` | `None` (default) or `"float32"` | unsupported (cast to `float32`) | `float32` work (`float64` row stats in CE) | `float32` work |
-| `float16`, `bfloat16` | `"float64"` | unsupported | `float64` work | `float64` work (requires `jax_enable_x64`) |
-| `float32` | `None` (default) or `"float64"` | `float64` work & double iterate | `float32` work in CE (`float64` in hinges, or with `"float64"`) | `float32` work in CE (`float64` with `"float64"` and x64) |
-| `float32` | `"float32"` | `float32` work & float iterate (1.6–1.9× faster CE fit) | `float32` work | `float32` work |
-| `float64` | `None` or `"float64"` | `float64` work & double iterate (`"float32"` rejected) | `float64` work (`"float32"` rejected) | `float64` work (`"float32"` rejected) |
+| `float16`, `bfloat16` | `None` (default), `"float32"` | unsupported (cast to `float32`) | `float32` (`float64` CE stats) | `float32` work |
+| `float16`, `bfloat16` | `"float64"` | unsupported | `float64` work | `float64` (needs `jax_enable_x64`) |
+| `float32` | `None` (default), `"float64"` | `float64` work & `double` iterate | `float32` in CE (`float64` in hinges or `"float64"`) | `float32` in CE (`float64` with `"float64"`, x64) |
+| `float32` | `"float32"` | `float32` work & `float` iterate | `float32` work | `float32` work |
+| `float64` | `None` (default), `"float64"` | `float64` (`"float32"` invalid) | `float64` (`"float32"` invalid) | `float64` (`"float32"` invalid) |
 
-- **Outputs:** Returned weights, duals and gradients always keep the input storage dtype.
-  Loss values are `double` in the native APIs and `promote(logits.dtype, float32)` in PyTorch
-  and JAX (`float32` for 16- and 32-bit logits, `float64` for `float64`, matching `torch.autocast`).
-- **Why `float32` training defaults to `precision="float64"`:** Keeping `W` and the duals in
-  `float32` during training loses updates smaller than half an ulp near the optimum, stalling
-  `float32` hinge fits around a $4.7\times 10^{-6}$ relative gap on `digits`. The default
-  `"float64"` (`<float, double>` in C++) keeps `W` and the duals in `double` (`8(d + n)m` extra
-  bytes), rounds them once into the caller's `float32` buffers at each evaluation, and certifies
-  those rounded arrays (reaching $3.5\times 10^{-7}$ on `digits`; see
-  [numerics.md](numerics.md#what-each-precision-guarantees)). Pass `precision="float32"` for
-  pure `float32` speed and memory.
+- **Outputs:** Returned weights, duals and gradients keep the input storage dtype. Loss
+  values are `double` in the native APIs and `promote(logits.dtype, float32)` in PyTorch
+  and JAX (`float32` for 16-/32-bit, `float64` for `float64`, as in `torch.autocast`).
+- **Default `precision="float64"` for `float32` fits:** Keeping `W` and the duals in
+  `float32` loses updates below $\frac{1}{2}\mathrm{ulp}$ near the optimum (`4.7e-6` gap on
+  `digits`). The default `"float64"` (`<float, double>` in C++) keeps `double` iterates
+  (`8(d + n)m` extra bytes) and certifies the rounded `float32` arrays (`3.5e-7` gap;
+  [numerics.md](numerics.md#what-each-precision-guarantees)). Pass `"float32"` for
+  `1.6–1.9×` faster cross-entropy fits.
 - **Compiler flags:** Build `libsdca` with IEEE semantics (`-fno-fast-math -ffp-contract=off`);
-  `-ffast-math` / `-Ofast` breaks nonfinite-input detection and compensated reductions.
+  `-ffast-math` or `-Ofast` breaks nonfinite-input checks and compensated reductions.
 
 ### Parameter domains and numerical limits
 
 All loss and training entry points require `classes >= 2`, integer `1 <= k < classes`,
-finite scores/features, and valid targets (0-based class indices, except 1-based in MATLAB;
-boolean masks need at least one positive label, plus one negative label for `multilabel_hinge`
-and `proximal_cross_entropy`).
+finite scores/features, and valid targets (0-based class indices, or 1-based in MATLAB;
+boolean masks require at least one positive label, plus one negative label for
+`multilabel_hinge` and `proximal_cross_entropy`).
 
 | Parameter | Valid domain | Notes |
 | --- | --- | --- |
@@ -169,7 +183,7 @@ and `proximal_cross_entropy`).
 | `gamma` | finite, `>= 0` | `0` selects the nonsmooth hinge; positive values follow the rules of `alpha` |
 | `tol` | finite, `>= 0` | `0` runs until `max_epoch` (or time limits in MATLAB); tolerances below ~`1e-12` in `float64` cannot be certified |
 | `ignore_index` (PyTorch) | 64-bit integer | Matching targets are excluded from the loss and gradient |
-| `weight` (PyTorch CE) | finite, `>= 0`, shape `(C,)` | Same device and dtype as logits (`float32` weights accepted for 16-bit logits under autocast) |
+| `weight` (PyTorch CE) | finite, `>= 0`, shape `(C,)` | Matches logits device and dtype (`float32` accepted for 16-bit logits under autocast) |
 
 Tested accuracy bounds and representation limits are documented in
 [numerics.md](numerics.md#known-limits).
@@ -188,7 +202,7 @@ projection of the returned duals, and $e$ is a first-order estimate of evaluatio
 If a numerical step fails or the evaluated gap falls below $-e$, training stops with
 `failed` at the last consistent iterate. With a regularizer center $W_0$, $P(W)$ and
 $D(A)$ evaluate the full centered objective directly from $W - W_0$ without cancelling
-$\frac{1}{2}\|W_0\|_2^2$.
+$\frac{1}{2}\Vert W_0 \Vert_2^2$.
 
 Array layouts for $n$ examples, $d$ features and $m$ classes: Python returns `weights (d, m)`
 column-major and `dual (n, m)` row-major; Rust returns both row-major; MATLAB takes
@@ -197,9 +211,9 @@ features `(d, n)` and returns `W (d, m)` and `A (m, n)`.
 ## Distillation losses
 
 `distillation_loss` and `proximal_distillation_loss` take student and teacher **logits** of the
-same shape and dtype; the teacher receives no gradient. With $p = \operatorname{softmax}(t/T)$ and
-$q = \operatorname{softmax}(z/T)$, the student gradient is $(q - p)/T$ (or $(\pi - p)/T$ at the
-Moreau-envelope optimum $\pi = \operatorname{softmax}(u^\star)$ for `proximal_distillation_loss`),
+same shape and dtype; the teacher receives no gradient. With $p = \mathrm{softmax}(t/T)$ and
+$q = \mathrm{softmax}(z/T)$, the student gradient is $(q - p)/T$ (or $(\pi - p)/T$ at the
+Moreau-envelope optimum $\pi = \mathrm{softmax}(u^\star)$ for `proximal_distillation_loss`),
 with no $T^2$ multiplier. Because each entry is formed from a centered log-ratio via `expm1`,
 identical student and teacher logits produce an **exact zero gradient** in every dtype
 ([softmax cancellation](softmax-collapse.md#softmax-cancellation)).
@@ -222,7 +236,7 @@ device (`jvp`/`jacfwd` raise, while reverse-over-reverse and `jax.hessian` are s
 ## Threads
 
 Loss evaluations and coordinate steps process rows independently across up to `num_threads`
-threads with **bitwise-identical results** for every thread count:
+worker threads with **bitwise-identical results** for every thread count:
 
 - **Default selection:** When `num_threads` is omitted (`None` in Python/Rust,
   `SDCA_THREADS_DEFAULT` in C), the library reads `SDCA_NUM_THREADS` once and otherwise uses
@@ -246,9 +260,9 @@ retries across processes for 24 h); `on` (`1`) requires the extension and raises
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SDCA_NUM_THREADS` | unset (auto) | Default thread limit (`< 4096`; `0` = auto, `1` = serial) for native losses, steps and evaluations |
+| `SDCA_NUM_THREADS` | unset (auto) | Default thread limit (`< 4096`; `0` = auto, `1` = serial) |
 | `SDCA_CPU_EXTENSION` | `auto` | `auto \| on \| off`: JIT-compiled PyTorch CPU C++ extension (`libsdca.torch.explain_backend` reports status) |
-| `SDCA_CUDA_LAUNCHER` | `auto` | `auto \| on \| off`: C++ `cuLaunchKernel` autograd launcher for fused CUDA kernels (Triton 3.3–3.9) |
+| `SDCA_CUDA_LAUNCHER` | `auto` | `auto \| on \| off`: C++ `cuLaunchKernel` launcher for CUDA kernels (Triton 3.3–3.9) |
 | `SDCA_JAX_FFI` | `auto` | `auto \| on \| off`: XLA FFI custom-call handler for native JAX CPU losses |
 | `SDCA_CACHE_DIR` | `~/.cache/libsdca` | Cache directory for compiled JAX FFI handlers |
 | `TORCH_EXTENSIONS_DIR` | PyTorch cache | Cache directory for compiled PyTorch CPU and CUDA extensions |

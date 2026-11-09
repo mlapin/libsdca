@@ -1,6 +1,6 @@
 # JAX losses
 
-`libsdca.jax` provides the classification and distillation losses as JAX functions that
+`libsdca.jax` provides classification and distillation losses as JAX functions that
 compose with `jit`, `grad` and `vmap` (`pip install 'libsdca[jax]'`):
 
 ```python
@@ -20,15 +20,15 @@ and all except the distillation losses accept `backend` (`"auto"`, `"jax"`, `"na
 
 | Function | Loss | Parameters |
 | --- | --- | --- |
-| `cross_entropy` | Softmax cross-entropy (integer labels or boolean mask) | — |
-| `topk_cross_entropy` | Top-$k$ entropy | `k` |
+| `cross_entropy` | Softmax cross-entropy (labels or mask) | — |
+| `topk_cross_entropy` | Top-*k* entropy | `k` |
 | `multiclass_hinge_loss` | Crammer–Singer multiclass hinge | `gamma=0.0` |
-| `topk_hinge_loss` (`topk_hinge_beta_loss`, `topk_hinge_alpha_loss`) | Top-$k$ hinge ($\beta$ default, or $\alpha$) | `k`, `variant="beta"`, `gamma=0.0` |
-| `multilabel_cross_entropy` | Cross-entropy with uniform target over positive mask entries | — |
+| `topk_hinge_loss` (`topk_hinge_beta_loss`, `topk_hinge_alpha_loss`) | Top-*k* hinge ($\beta$ default, or $\alpha$) | `k`, `variant="beta"`, `gamma=0.0` |
+| `multilabel_cross_entropy` | Cross-entropy to uniform target on mask | — |
 | `multilabel_hinge_loss` | Multilabel hinge | `gamma=0.0` |
 | `proximal_cross_entropy` | Moreau envelope of cross-entropy | `alpha=1.0` |
-| `distillation_loss`, `proximal_distillation_loss` | Logit distillation and its Moreau envelope (`jax.numpy`) | `temperature=1.0`, `alpha=1.0` |
-| `sdca_loss` | Generic wrapper for any of the eight `LOSSES` | `loss`, `k=1`, `gamma=0.0`, `alpha=1.0` |
+| `distillation_loss`, `proximal_distillation_loss` | Logit distillation and Moreau envelope | `temperature=1.0`, `alpha=1.0` |
+| `sdca_loss` | Generic wrapper for the eight `LOSSES` | `loss`, `k=1`, `gamma=0.0`, `alpha=1.0` |
 
 See [API.md](../docs/API.md#loss-definitions) and
 [parameter domains](../docs/API.md#parameter-domains-and-numerical-limits).
@@ -37,17 +37,17 @@ See [API.md](../docs/API.md#loss-definitions) and
 
 | Loss | `backend="auto"` selection | Derivatives |
 | --- | --- | --- |
-| `cross_entropy`, `multilabel_cross_entropy`, `topk_cross_entropy` ($k=1$) | `"jax"` on all devices | Any order, forward and reverse |
-| Other `LOSSES` | `"jax"` on GPU/TPU and on CPU for $\le 16{,}384$ scores when required arithmetic (`jax_enable_x64` or `precision="float32"`) is enabled (except `proximal_cross_entropy`); otherwise `"native"` | First order, reverse mode only |
+| `cross_entropy`, `multilabel_cross_entropy`, `topk_cross_entropy` ($k=1$) | `"jax"` on all devices | Any order |
+| Other `LOSSES` | `"jax"` on GPU/TPU and on CPU for $\le 16{,}384$ scores when required arithmetic (`jax_enable_x64` or `precision="float32"`) is enabled (except `proximal_cross_entropy`); otherwise `"native"` | First order (reverse) |
 
 - **`"jax"`:** Pure `jax.numpy` / XLA operations with no host round trip and full
   `jax.export` support. Entropy and distillation losses use fused variadic row reductions
   on CPU. Non-entropy losses use `float64` by default (requiring `jax_enable_x64=True`) or
   `float32` when `precision="float32"`.
 - **`"native"`:** Calls the C++ library with a custom VJP on CPU threads
-  (`SDCA_NUM_THREADS`). On CPU it compiles and caches a zero-copy XLA FFI custom call on
-  first use (`SDCA_JAX_FFI` in [API.md](../docs/API.md#environment-variables)), falling
-  back to `jax.pure_callback` when no C++ compiler is available or on GPU/TPU.
+  (`SDCA_NUM_THREADS`). On CPU it compiles a zero-copy XLA FFI custom call on first use
+  (`SDCA_JAX_FFI` in [API.md](../docs/API.md#environment-variables)), falling back to
+  `jax.pure_callback` without a C++ compiler or on GPU/TPU.
 - **Subnormal and GPU tail limits:** XLA on CPU flushes subnormal inputs and outputs to
   zero across all backends, so CPU values vanish below the normal limit (`exp(-87.3)` in
   `float32`, `exp(-708.4)` in `float64`). On GPU, default `float32` work can lose

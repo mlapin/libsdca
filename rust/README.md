@@ -42,8 +42,8 @@ fn main() -> libsdca::Result<()> {
 
 ## Building
 
-Install from crates.io with `cargo add libsdca` (or from git with
-`cargo add libsdca --git https://github.com/mlapin/libsdca --tag v0.3.0`).
+Install from crates.io with `cargo add libsdca`, or from git with
+`cargo add libsdca --git https://github.com/mlapin/libsdca --tag v0.3.0`.
 
 By default, `build.rs` compiles `src/c_api.cpp` with the system C++11 compiler (`CXX`,
 default `c++`) and the built-in BLAS—no external dependencies are required. To link an

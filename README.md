@@ -10,7 +10,7 @@
 ascent (SDCA) and provides the corresponding classification losses as
 differentiable layers for PyTorch and JAX and as NumPy functions. It covers
 multiclass and multilabel SVMs, softmax cross-entropy, knowledge distillation,
-and the top-$k$ hinge and entropy losses of [Lapin et al.](#citation).
+and the top-*k* hinge and entropy losses of [Lapin et al.](#citation).
 
 Both the solver and loss layers are numerically stable: confident predictions
 keep nonzero losses and target gradients down to the subnormal limit instead of
@@ -38,8 +38,8 @@ loss.backward()
   `2` to `32,769` classes, subnormal tails, cancellation offsets and `±finfo.max`
   ([verification](docs/numerics.md#how-it-is-verified)).
 - **Fused CUDA and CPU kernels:** On an A100 at `8192 × 32000` and `8192 × 128256`
-  (`bfloat16` / `float32`), `CrossEntropyLoss` takes `0.33–0.41×` eager
-  `F.cross_entropy` time (`0.93–0.98×` `torch.compile`) while saving a few scalars
+  (`bfloat16` / `float32`), `CrossEntropyLoss` runs in `0.33–0.41×` eager
+  `F.cross_entropy` time (`0.93–0.98×` `torch.compile`) and saves a few scalars
   per row instead of an `(N, C)` tensor ([performance](docs/performance.md)).
 - **Decoupled storage and compute precision:** `precision="float32"` or `"float64"`
   selects working arithmetic independently of array/tensor storage
@@ -53,9 +53,9 @@ loss.backward()
 | Name | Loss | Targets |
 | --- | --- | --- |
 | `cross_entropy` | Softmax cross-entropy | single class index |
-| `topk_cross_entropy` | Top-$k$ entropy [5] | single class index |
+| `topk_cross_entropy` | Top-*k* entropy [5] | single class index |
 | `multiclass_hinge` | Crammer–Singer SVM [1] | single class index |
-| `topk_hinge_alpha`, `topk_hinge_beta` | Top-$k$ hinge $\alpha$ [4] and $\beta$ [5] | single class index |
+| `topk_hinge_alpha`, `topk_hinge_beta` | Top-*k* hinge $\alpha$ [4] and $\beta$ [5] | single class index |
 | `multilabel_hinge` | Multilabel SVM [2] | label sets / boolean mask |
 | `multilabel_cross_entropy` | Multilabel cross-entropy | label sets / boolean mask |
 
@@ -141,9 +141,11 @@ loss_and_grad = jax.jit(jax.value_and_grad(
 use libsdca::{fit, loss_and_grad, FitOptions, Loss, LossOptions, Matrix, Objective};
 
 let x = Matrix::new(&[1.0, 0.0, 0.0, 1.0, -1.0, -1.0], 3, 2)?;
-let model = fit(x, &[0, 1, 2], &FitOptions { c: 10.0, objective: Objective::CrossEntropy, ..Default::default() })?;
+let fit_opts = FitOptions { c: 10.0, objective: Objective::CrossEntropy, ..Default::default() };
+let model = fit(x, &[0, 1, 2], &fit_opts)?;
 let scores = Matrix::new(&[0.3, -0.8, 1.2], 1, 3)?;
-let (values, gradients) = loss_and_grad(scores, &[0], &LossOptions { loss: Loss::TopKHingeBeta, k: 2, gamma: 1.0, ..Default::default() })?;
+let loss_opts = LossOptions { loss: Loss::TopKHingeBeta, k: 2, gamma: 1.0, ..Default::default() };
+let (values, gradients) = loss_and_grad(scores, &[0], &loss_opts)?;
 ```
 
 ### C++

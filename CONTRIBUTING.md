@@ -36,25 +36,25 @@ cargo test --manifest-path rust/Cargo.toml
 
 | Location | Contents |
 | --- | --- |
-| `include/sdca/math/`, `include/sdca/prox/` | Compensated arithmetic, entropy roots, BLAS abstraction, projections and proximal operators |
-| `include/sdca/solver/`, `include/sdca/loss.h` | Data views, contexts, objectives, dual updates, stopping criteria, evaluation, and loss dispatch |
+| `include/sdca/math/`, `include/sdca/prox/` | Compensated math, entropy roots, BLAS, projections and proximal operators |
+| `include/sdca/solver/`, `include/sdca/loss.h` | Data views, contexts, objectives, dual updates, stopping criteria, evaluation and loss dispatch |
 | `include/sdca/c_api.h`, `src/c_api.cpp` | Exception-safe C ABI used by Python and Rust |
 | `python/libsdca/_core.py`, `sklearn.py` | NumPy API and `SDCAClassifier` |
-| `python/libsdca/torch.py`, `_cpu.py`, `_torch_*.{h,cpp}` | PyTorch autograd layers, tensor losses, and ATen/OpenMP CPU extension |
+| `python/libsdca/torch.py`, `_cpu.py`, `_torch_*` | PyTorch autograd layers, tensor losses, and ATen/OpenMP CPU extension |
 | `python/libsdca/_triton_*.py`, `_cuda_launch.py` | Fused Triton CUDA kernels and C++ `cuLaunchKernel` launcher |
-| `python/libsdca/jax.py`, `_jax_losses.py`, `_jax_ffi.*` | JAX losses and XLA FFI custom-call handler |
-| `rust/`, `matlab/`, `src/matlab/` | Rust crate (`rust/consumer` tests BLAS links) and MATLAB/Octave MEX gateways |
-| `tests/`, `examples/`, `docs/`, `tools/` | C++/Python/MATLAB test suites, runnable examples, documentation, and quality/coverage scripts |
+| `python/libsdca/jax.py`, `_jax_*` | JAX losses and XLA FFI custom-call handler |
+| `rust/`, `matlab/`, `src/matlab/` | Rust crate (`rust/consumer` tests BLAS links) and MATLAB/Octave gateways |
+| `tests/`, `examples/`, `docs/`, `tools/` | C++/Python/MATLAB test suites, runnable examples, docs, and quality/coverage scripts |
 
 ## Checks
 
 | Tool | Scope | Rule |
 | --- | --- | --- |
-| `clang-format` 18 | `include/sdca`, `src`, `tests`, `tools`, `python/libsdca` | `.clang-format`: Google style, C++11, 100 columns |
-| `clang-tidy` 18 | `src/c_api.cpp`, `tests/cpp/regression.cpp` (both BLAS backends) | `.clang-tidy`: correctness and performance checks, warnings as errors |
-| `lizard` | `include/sdca`, `src`, `python/libsdca` (tests exempt) | Cyclomatic complexity $\le 20$, length $\le 100$ lines (`tools/complexity_baseline.txt` may only shrink) |
+| `clang-format` | `include/sdca`, `src`, `tests`, `tools`, `python/libsdca` | `.clang-format` (v18): Google style, C++11, 100 columns |
+| `clang-tidy` | `src/c_api.cpp`, `tests/cpp/regression.cpp` (both BLAS backends) | `.clang-tidy` (v18): correctness and performance checks, warnings as errors |
+| `lizard` | `include/sdca`, `src`, `python/libsdca` | Cyclomatic complexity $\le 20$, length $\le 100$ lines (`tools/complexity_baseline.txt` may only shrink) |
 | `ruff` | `python`, `tests/python`, `examples/python`, `tools`, build scripts | `pyproject.toml`: `E`, `F`, `I`, `B`, `UP`, `C90` (complexity $\le 15$) |
-| `basedpyright` | Python package, tests, examples, build scripts, tools | `pyproject.toml`: standard mode, warnings as errors, rule-scoped `# pyright: ignore[rule]` only |
+| `basedpyright` | Python package, tests, examples, build scripts, tools | `pyproject.toml`: standard mode, warnings as errors, rule-scoped `# pyright: ignore[rule]` |
 | `gcovr`, `coverage.py` | `include/sdca`, `src/c_api.cpp`, `python/libsdca/` | $\ge 90\%$ line coverage across C++ and Python host code (only `@triton.jit` device bodies excluded) |
 | `rustfmt`, `clippy` | `rust/` | Standard style, `-D warnings`, all public items documented |
 | C++ compilers | All C++ targets | `-pedantic -Werror -W -Wall -Wextra` under GCC and Clang |
@@ -90,7 +90,7 @@ python tools/coverage.py --python-data build/gpu.coverage
 
 ## Releases
 
-The version string is checked across 9 files by `tools/quality.py`: `CMakeLists.txt`,
+The version string is checked across 10 files by `tools/quality.py`: `CMakeLists.txt`,
 `pyproject.toml`, `setup.py`, `python/build.py`, `python/libsdca/__init__.py`,
 `matlab/make.m`, `rust/Cargo.toml`, `include/sdca/c_api.h`, `docs/C.md`, and `CHANGELOG.md`.
 

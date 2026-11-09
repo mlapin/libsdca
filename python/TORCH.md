@@ -6,14 +6,14 @@ functions (`pip install 'libsdca[torch]'`), running on CPU and CUDA tensors in
 
 | Loss | Module | Function | Options / notes |
 | --- | --- | --- | --- |
-| Cross-entropy (drop-in, except integer class labels only and no label smoothing) | `CrossEntropyLoss` | `cross_entropy` | `weight`, `ignore_index`, `(N, C, ...)` shapes |
-| Linear + cross-entropy (unmaterialized logits) | `LinearCrossEntropyLoss` | `linear_cross_entropy` | `class_weight`, `ignore_index`, `chunk_bytes`, `recompute` |
-| Top-$k$ cross-entropy | `TopKCrossEntropyLoss` | `topk_cross_entropy` | `k` (`1 <= k < C`) |
-| Multiclass hinge (Crammer–Singer) | `MulticlassHingeLoss` | `multiclass_hinge_loss` | `gamma=0.0` (`> 0` smooths) |
-| Top-$k$ hinge ($\beta$ default, or $\alpha$) | `TopKHingeLoss` (`TopKHingeBetaLoss`, `TopKHingeAlphaLoss`) | `topk_hinge_loss` (`topk_hinge_beta_loss`, `topk_hinge_alpha_loss`) | `k`, `variant="beta"`, `gamma=0.0` |
+| Cross-entropy | `CrossEntropyLoss` | `cross_entropy` | `weight`, `ignore_index`, `(N, C, ...)` (integer labels, no smoothing) |
+| Linear + cross-entropy | `LinearCrossEntropyLoss` | `linear_cross_entropy` | `class_weight`, `ignore_index`, `chunk_bytes`, `recompute` (no `(N, V)` logits) |
+| Top-*k* cross-entropy | `TopKCrossEntropyLoss` | `topk_cross_entropy` | `k` (`1 <= k < C`) |
+| Multiclass hinge | `MulticlassHingeLoss` | `multiclass_hinge_loss` | Crammer–Singer; `gamma=0.0` (`> 0` smooths) |
+| Top-*k* hinge | `TopKHingeLoss` (`*Beta*`, `*Alpha*`) | `topk_hinge_loss` (`*_beta_loss`, `*_alpha_loss`) | `k`, `variant="beta"` (or `"alpha"`), `gamma=0.0` |
 | Multilabel cross-entropy | `MultilabelCrossEntropyLoss` | `multilabel_cross_entropy` | boolean mask target (uniform over positives) |
 | Multilabel hinge | `MultilabelHingeLoss` | `multilabel_hinge_loss` | boolean mask target, `gamma=0.0` |
-| Proximal cross-entropy | `ProximalCrossEntropyLoss` | `proximal_cross_entropy` | Moreau envelope with step `alpha=1.0` ($\nabla_z \phi_\alpha = -a$) |
+| Proximal cross-entropy | `ProximalCrossEntropyLoss` | `proximal_cross_entropy` | Moreau envelope (`alpha=1.0`) |
 | Logit distillation | `DistillationLoss` | `distillation_loss` | `temperature=1.0` |
 | Proximal distillation | `ProximalDistillationLoss` | `proximal_distillation_loss` | `temperature=1.0`, `alpha=1.0` |
 | Generic loss | `SDCALoss` | `sdca_loss` | `loss`, `k`, `gamma`, `alpha`, `dim=-1` |
@@ -31,8 +31,8 @@ criterion(net(features), target).backward()
 optimizer.step()
 ```
 
-All names are exported by both `libsdca` and `libsdca.torch` (`import libsdca` does not
-import `torch` until a PyTorch symbol is accessed).
+All names are exported by `libsdca` and `libsdca.torch` (`import libsdca` does not import
+`torch` until a PyTorch symbol is accessed).
 
 ## Build tools
 
@@ -77,7 +77,7 @@ and saves a few scalars per row instead of an `(N, C)` tensor
 
 | `nn.CrossEntropyLoss` feature | `libsdca.CrossEntropyLoss` |
 | --- | --- |
-| `weight`, `ignore_index=-100`, `reduction` | Supported (`"none"`, `"sum"`, `"mean"`; `float32` weights accepted for 16-bit logits under autocast). |
+| `weight`, `ignore_index=-100`, `reduction` | Supported (`"none"`, `"sum"`, `"mean"`; `float32` weights accepted for 16-bit autocast). |
 | Shapes and dtypes | `(C,)`, `(N, C)`, `(N, C, d1, ...)`; non-contiguous inputs supported; `int64` targets; 16-bit logits return `float32` loss and 16-bit gradients. |
 | Invalid targets / nonfinite logits | Raises `ValueError` on CPU; returns `NaN` on CUDA without host synchronization. |
 | `torch.compile`, CUDA graphs, double backward | Supported ([compilation](#compilation-and-transformations)). |
@@ -136,7 +136,7 @@ loss.backward()
 | Inputs | `backend="auto"` path |
 | --- | --- |
 | CUDA ($C \le 2^{25}$, $N \le 2^{28}$) | Fused Triton kernels via C++ autograd (`cuda-launcher`) or Triton (`triton`) |
-| CUDA (other shapes, or `precision="float32"` on hinges / masks / $k > 1$ top-$k$) | Composed tensor operations (`torch`) |
+| CUDA (other shapes, or `precision="float32"` on hinges / masks / $k > 1$ top-*k*) | Composed tensor operations (`torch`) |
 | CPU (build tools available) | ATen/OpenMP C++ extension (`cpu-kernel`), or `native` for `float64` CE ($C > 32$) and `precision="float32"` hinges/masks |
 | CPU (without build tools) | Prebuilt native library (`native`) on PyTorch's OpenMP pool |
 
@@ -149,7 +149,7 @@ Loss values have dtype `promote(logits.dtype, float32)` and gradients keep `logi
 
 | `precision` | Working arithmetic |
 | --- | --- |
-| `None` (default) | `float64` for `float64` logits and fused hinges; `float32` exponentials with `float64` row statistics for 16-/32-bit cross-entropy and top-$k$ CE ($k \le 64$ CPU, $k \le 32$ CUDA) |
+| `None` (default) | `float64` for `float64` logits and fused hinges; `float32` exponentials with `float64` row statistics for 16-/32-bit cross-entropy and top-*k* CE ($k \le 64$ CPU, $k \le 32$ CUDA) |
 | `"float32"` | `float32` (promoted to `float64` when `gamma`, `alpha` or row spread exceeds `float32`) |
 | `"float64"` | `float64` throughout, rounded once to the output dtype |
 
@@ -161,7 +161,7 @@ Loss values have dtype `promote(logits.dtype, float32)` and gradients keep `logi
 
 On CUDA (`cuda-launcher`), backward for `cross_entropy`, $k=1$ hinges and multilabel losses
 overwrites the logits tensor in place when no other reference holds it (`loss = criterion(net(x), y)`
-or `del logits` before ` loss.backward()`). On CPU, peak extra memory is one gradient-sized tensor.
+or `del logits` before `loss.backward()`). On CPU, peak extra memory is one gradient-sized tensor.
 
 ## Compilation and transformations
 
@@ -185,7 +185,7 @@ criterion(student_logits, teacher_logits).backward()
 ```
 
 Both inputs are raw logits; the teacher receives no gradient, no $T^2$ factor is applied,
-and equal student and teacher logits give an **exact zero gradient**
+and equal student and teacher logits produce an **exact zero gradient**
 ([API.md](../docs/API.md#distillation-losses)).
 
 ## Tests

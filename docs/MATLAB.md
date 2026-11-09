@@ -6,7 +6,7 @@ Three MEX gateways wrap the C++ headers:
 | --- | --- |
 | `matsdca_fit` | Train a linear or kernel classifier with any objective. |
 | `matsdca_loss` | Evaluate loss values and score gradients. |
-| `matsdca_prox` | Apply proximal operators and projections (simplex, top-$k$ cone, entropic). |
+| `matsdca_prox` | Apply proximal operators and projections (simplex, top-*k* cone, entropic). |
 
 ## Building
 
@@ -56,8 +56,8 @@ warm-starts from a previous dual solution.
 
 The returned `model` struct contains `W` (`d`-by-`m`, feature input only), `A` (`m`-by-`n`),
 `status` (only `'solved'` certifies the gap), `epoch`, `relative_gap`, `cpu_time`,
-`wall_time`, `train` (evaluation history), `test`, and the options used. Run
-`matsdca_fit('help')` for built-in usage details.
+`wall_time`, `train` (evaluation history), `test`, and the options used
+(`matsdca_fit('help')` prints full usage).
 
 ## Losses and gradients
 

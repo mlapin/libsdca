@@ -10,10 +10,10 @@ CMake 3.12+ is required only for the CMake packages (`libsdca::libsdca` and
 | Component | Validated environments |
 | --- | --- |
 | C++ & C ABI | Ubuntu 22.04 / 24.04 (`x86_64`) with GCC 11.4 / 13 and Clang 18 (`BUILTIN` and `EXTERNAL` BLAS, C and C++ consumers, GCC ASan/UBSan, Clang TSan); macOS (`arm64`) with Apple Clang 21 (`BUILTIN` and Accelerate) |
-| Python (CPU) | Python 3.10–3.14, NumPy 1.23–2.5, SciPy 1.10–1.18, scikit-learn 1.6–1.9, PyTorch 2.1–2.15 (with CPU extension syntax and runtime checks across AVX-512, AVX2, and generic/arm64), JAX 0.4.35–0.12 (with XLA FFI handlers on and off) |
+| Python (CPU) | Python 3.10–3.14, NumPy 1.23–2.5, SciPy 1.10–1.18, scikit-learn 1.6–1.9, PyTorch 2.1–2.15 (CPU extension across AVX-512, AVX2 and generic/arm64), JAX 0.4.35–0.12 (with and without XLA FFI) |
 | CUDA | NVIDIA A100-SXM4-80GB and H100 (PyTorch 2.14–2.15, Triton 3.8–3.9, both C++ launcher and Triton launch paths; JAX 0.12 with CUDA plugin) |
 | Packaging | Portable `py3-none` wheels (`SDCA_BLAS_BACKEND=BUILTIN`) via `cibuildwheel` on `manylinux_2_28` `x86_64` and macOS 11+ `arm64`, sdist builds, and standalone `.crate` archives |
-| Rust | Rust 1.74 (MSRV) and stable on Linux `x86_64`, linked against `BUILTIN`, reference BLAS, OpenBLAS and BLIS (shared and static) |
+| Rust | Rust 1.74 (MSRV) and stable on Linux `x86_64` (`BUILTIN`, reference BLAS, OpenBLAS and BLIS, shared and static) |
 | Octave | GNU Octave 10.3 (`mkoctfile` MEX gateways) |
 
 - **PyTorch & JAX version floors:** Requires `python >= 3.10`, `numpy >= 1.23`,
@@ -78,10 +78,10 @@ SDCA_BUILD_NATIVE=OFF python -m pip install '.[torch]'
 | Optional extra | Packages | Purpose |
 | --- | --- | --- |
 | *(default)* | `numpy>=1.23` | NumPy solver and loss interface |
-| `torch` | `torch>=2.1`, `ninja` | PyTorch loss layers and JIT CPU/CUDA extension builds |
+| `torch` | `torch>=2.1`, `ninja` | PyTorch loss layers and JIT extensions |
 | `jax` | `jax>=0.4.35` | JAX loss functions (`libsdca.jax`) |
 | `sklearn` | `scikit-learn>=1.6` | `SDCAClassifier` estimator |
-| `test`, `test-torch`, `test-jax` | `pytest>=9`, `pytest-xdist>=3.6`, `scipy`, `mpmath`, ... | Test suites (`--group core`, `torch`, `jax`, `all`) |
+| `test`, `test-torch`, `test-jax` | `pytest>=9`, `pytest-xdist>=3.6`, `scipy`, `mpmath`, ... | Test suites (`--group core\|torch\|jax\|all`) |
 | `coverage` | `coverage[toml]>=7` | Python line-coverage instrumentation |
 
 ## Rust configuration

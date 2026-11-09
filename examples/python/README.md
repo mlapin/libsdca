@@ -10,9 +10,9 @@ python examples/python/torch_drop_in_cross_entropy.py
 
 | Script | Shows | Needs |
 | --- | --- | --- |
-| [torch_drop_in_cross_entropy.py](torch_drop_in_cross_entropy.py) | Replaces `torch.nn.CrossEntropyLoss` in an MLP training loop. Checks the loss and gradient against PyTorch at initialization, with `weight`, `ignore_index` and `(N, C, d1, d2)` inputs, then switches to top-k with one line. | torch |
-| [torch_losses_tour.py](torch_losses_tour.py) | Runs every PyTorch loss, as a module and as a function, forward and backward on one batch. | torch |
-| [torch_mnist_lenet.py](torch_mnist_lenet.py) | Trains LeNet-5 on MNIST (downloaded once, read with NumPy) with `torch.nn.CrossEntropyLoss`, `libsdca.CrossEntropyLoss`, the smoothed multiclass hinge and top-2 cross-entropy from one initialization, and reports test accuracy and time. | torch |
+| [torch_drop_in_cross_entropy.py](torch_drop_in_cross_entropy.py) | Replaces `torch.nn.CrossEntropyLoss` in an MLP training loop, checks the loss and gradient against PyTorch (`weight`, `ignore_index`, `(N, C, d1, d2)`), and switches to top-*k*. | torch |
+| [torch_losses_tour.py](torch_losses_tour.py) | Runs every PyTorch loss as a module and as a function, forward and backward. | torch |
+| [torch_mnist_lenet.py](torch_mnist_lenet.py) | Trains LeNet-5 on MNIST with `torch.nn.CrossEntropyLoss`, `libsdca.CrossEntropyLoss`, smoothed multiclass hinge and top-2 cross-entropy from one initialization. | torch |
 | [torch_distillation.py](torch_distillation.py) | Teacher-student distillation, the zero gradient at equal logits, and proximal distillation tending to distillation as `alpha -> 0`. | torch |
 | [numpy_fit.py](numpy_fit.py) | `fit`, `Model` prediction and probabilities, warm start, `loss_and_grad`, `coordinate_update` (checks its optimality condition) and `Solver`. | numpy |
 | [sklearn_classifier.py](sklearn_classifier.py) | `SDCAClassifier` with string labels, in a `Pipeline` with `GridSearchCV`, with `predict_proba` and a precomputed RBF kernel. | scikit-learn |
