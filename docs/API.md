@@ -280,7 +280,7 @@ CMake options (`cmake -D<option>=<value>`): `SDCA_BLAS_BACKEND` (`AUTO|EXTERNAL|
    kernel-based vector machines. *JMLR*, 2001.
 2. K. Crammer and Y. Singer. A family of additive online algorithms for
    category ranking. *JMLR*, 2003.
-3. M. Lapin, M. Hein and B. Schiele. Top-k multiclass SVM. *NIPS*, 2015.
+3. M. Lapin, M. Hein and B. Schiele. Top-k multiclass SVM. *NeurIPS*, 2015.
 4. M. Lapin, M. Hein and B. Schiele. Loss functions for top-k error: analysis
    and insights. *CVPR*, 2016.
 5. S. Shalev-Shwartz and T. Zhang. Stochastic dual coordinate ascent methods for

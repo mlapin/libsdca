@@ -178,7 +178,7 @@ If `libsdca` helps your research, please cite:
 @inproceedings{lapin2015topk,
   title     = {Top-k Multiclass {SVM}},
   author    = {Lapin, Maksim and Hein, Matthias and Schiele, Bernt},
-  booktitle = {Advances in Neural Information Processing Systems (NIPS)},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year      = {2015}
 }
 
@@ -198,7 +198,7 @@ If `libsdca` helps your research, please cite:
    category ranking. *JMLR*, 2003.
 3. K. C. Kiwiel. Variable fixing algorithms for the continuous quadratic
    knapsack problem. *JOTA*, 2008.
-4. M. Lapin, M. Hein and B. Schiele. Top-k multiclass SVM. *NIPS*, 2015.
+4. M. Lapin, M. Hein and B. Schiele. Top-k multiclass SVM. *NeurIPS*, 2015.
 5. M. Lapin, M. Hein and B. Schiele. Loss functions for top-k error: analysis
    and insights. *CVPR*, 2016.
 6. J. T. Barron, D. Gnanapragasam and M. Tschannen. A fix for softmax and
