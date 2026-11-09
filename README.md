@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/mlapin/libsdca/actions/workflows/ci.yml/badge.svg)](https://github.com/mlapin/libsdca/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/libsdca.svg)](https://pypi.org/project/libsdca/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://pypi.org/project/libsdca/)
+[![Crates.io](https://img.shields.io/crates/v/libsdca.svg)](https://crates.io/crates/libsdca)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **libsdca** trains linear and kernel classifiers with stochastic dual coordinate
@@ -10,12 +12,12 @@ differentiable layers for PyTorch and JAX and as NumPy functions. It covers
 multiclass and multilabel SVMs, softmax cross-entropy, knowledge distillation,
 and the top-$k$ hinge and entropy losses of [Lapin et al.](#citation).
 
-Both the solver and loss layers are numerically stable where standard framework
-implementations fail: confident predictions keep nonzero losses and target
-gradients down to the subnormal limit instead of collapsing to zero (softmax
-collapse [6]), and distillation gradients are exact zero at equal student and
-teacher logits (softmax cancellation [6]), across `float16`, `bfloat16`,
-`float32` and `float64` on CPU and CUDA ([known limits](docs/numerics.md#known-limits)).
+Both the solver and loss layers are numerically stable: confident predictions
+keep nonzero losses and target gradients down to the subnormal limit instead of
+collapsing to zero (softmax collapse [6]), and distillation gradients are exact
+zero at equal student and teacher logits (softmax cancellation [6]), across
+`float16`, `bfloat16`, `float32` and `float64` on CPU and CUDA
+([known limits](docs/numerics.md#known-limits)).
 
 ```python
 from libsdca import CrossEntropyLoss
@@ -31,8 +33,7 @@ loss.backward()
   ([numerics](docs/numerics.md#the-solved-certificate)).
 - **Verified to the subnormal limit:** Every loss value and gradient entry is
   verified within `64` output-dtype eps against 100-digit `mpmath` references across
-  `2` to `32,769` classes, subnormal tails (where standard `F.cross_entropy`
-  collapses to `0`), cancellation offsets and `±finfo.max`
+  `2` to `32,769` classes, subnormal tails, cancellation offsets and `±finfo.max`
   ([verification](docs/numerics.md#how-it-is-verified)).
 - **Fused CUDA and CPU kernels:** On an A100 at `8192 × 32000` and `8192 × 128256`
   (`bfloat16` / `float32`), `CrossEntropyLoss` takes `0.33–0.41×` eager
@@ -165,8 +166,8 @@ Runnable examples are in [examples/](examples), [rust/examples](rust/examples) a
 - [Performance](docs/performance.md): CUDA, CPU and solver benchmarks
 - [Softmax collapse and cancellation](docs/softmax-collapse.md): formulations and
   reproduction of Barron et al. [6]
-- [Dependencies](DEPENDENCIES.md), [contributing](CONTRIBUTING.md) and
-  [changelog](CHANGELOG.md)
+- [Dependencies](DEPENDENCIES.md), [contributing](CONTRIBUTING.md),
+  [AI coding assistant guide](AGENTS.md) and [changelog](CHANGELOG.md)
 - [Project page & technical report](https://mlapin.github.io/libsdca/)
 
 ## Citation

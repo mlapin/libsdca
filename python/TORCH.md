@@ -53,17 +53,18 @@ criterion = CrossEntropyLoss()           # drop-in for torch.nn.CrossEntropyLoss
 loss = criterion(net(features), target)  # raw logits, int64 class indices
 ```
 
-When a prediction is confident, standard `F.cross_entropy` rounds the normalizer $1 + \tau$
+When a prediction is confident, naive $\log(1 + \tau)$ evaluation rounds $1 + \tau$
 to $1$ and collapses both the loss and target gradient to zero (at margin $\sim 16.6$ in
-`float32` and $\sim 36.7$ in `float64` for two classes). `CrossEntropyLoss` preserves
-both down to the output dtype's subnormal limit ($\sim 104$ in `float32`, $\sim 745$ in
-`float64`; [numerics](../docs/numerics.md#representation-limits)):
+`float32` and $\sim 36.7$ in `float64` for two classes, as in PyTorch $\le 2.15$).
+`CrossEntropyLoss` preserves both down to the output dtype's subnormal limit
+($\sim 104$ in `float32`, $\sim 745$ in `float64`;
+[numerics](../docs/numerics.md#representation-limits)):
 
 ```python
 logits = torch.tensor([[0., -20.]], requires_grad=True)
 loss = CrossEntropyLoss()(logits, torch.tensor([0]))
 loss.backward()
-print(loss.item(), logits.grad)  # 2.061e-9, [[-2.061e-9, 2.061e-9]] (PyTorch returns 0)
+print(loss.item(), logits.grad)  # 2.061e-9, [[-2.061e-9, 2.061e-9]]
 ```
 
 On an A100 at `8192 × 32000` and `8192 × 128256` (`bfloat16` / `float32`), forward +

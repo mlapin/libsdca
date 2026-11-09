@@ -9,8 +9,8 @@
   functions, Rust crate, C ABI (`include/sdca/c_api.h`), C++11 headers, and MATLAB/Octave
   gateways sharing one set of objective, option and status names ([API.md](docs/API.md)).
 - **Numerical stability:** Losses and gradients preserve tiny probability tails down to the
-  subnormal limit where standard cross-entropy collapses to zero, and distillation gradients
-  are exact zero at equal logits ([numerics](docs/numerics.md),
+  subnormal limit (avoiding softmax collapse), and distillation gradients are exact zero at
+  equal logits ([numerics](docs/numerics.md),
   [known limits](docs/numerics.md#aggregate-tail-limitations)).
 - **Fused CUDA and CPU kernels:** On an A100 (`8192 × 32000` and `8192 × 128256`),
   cross-entropy takes `0.93–0.98×` `torch.compile` time (`0.33–0.41×` eager), top-5
