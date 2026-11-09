@@ -96,11 +96,14 @@ The version string is checked across 10 files by `tools/quality.py`: `CMakeLists
 
 `.github/workflows/packages.yml` builds and tests the sdist, `manylinux_2_28` `x86_64` and
 macOS 11+ `arm64` wheels (`cibuildwheel`), and the `.crate` archive (`rust/package.sh`),
-publishing to TestPyPI (manual dispatch) or PyPI (on `v*` tags) via OIDC Trusted Publishing:
+publishing to TestPyPI (manual dispatch) or, on `v*` tags, to PyPI and then crates.io via OIDC
+Trusted Publishing:
 
-1. In GitHub *Settings → Environments*, create `testpypi` and `pypi` (restrict `pypi` to `v*`
-   tags with required reviewers).
+1. In GitHub *Settings → Environments*, create `testpypi`, `pypi` and `crates-io` (restrict
+   `pypi` and `crates-io` to `v*` tags, and `pypi` to required reviewers: approving it releases
+   both, since the crates.io job waits for the PyPI upload).
 2. On [TestPyPI](https://test.pypi.org/manage/account/publishing/) and
    [PyPI](https://pypi.org/manage/account/publishing/), register `mlapin/libsdca`, workflow
    `packages.yml`, and environment `testpypi` / `pypi` as a trusted publisher.
-3. Publish the Rust crate to crates.io with `rust/package.sh && (cd rust && cargo publish --allow-dirty)`.
+3. In the [crates.io](https://crates.io/crates/libsdca) crate settings, add a GitHub trusted
+   publisher for `mlapin/libsdca`, workflow `packages.yml`, and environment `crates-io`.
