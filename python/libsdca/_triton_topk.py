@@ -746,6 +746,274 @@ def _entropy(
     return tl.where(flag, float("nan"), loss)
 
 
+@triton.jit
+def _at_rows(top, kk, idx):
+    """Per-row entry idx of a [ROWS, KB] short-vector tile (-inf when out of range)."""
+    return tl.max(tl.where(kk == idx[:, None], top, -float("inf")), 1)
+
+
+@triton.jit
+def _knapsack_rows(h, other, top, kk, active_in, cap, gamma, K: tl.constexpr, ROWS: tl.constexpr):
+    """_knapsack across a [ROWS, B] register tile along axis 1."""
+    lo = tl.zeros([ROWS], tl.int32)
+    hi = tl.where(active_in, K, 0)
+    while tl.max(hi - lo, 0) > 0:
+        mid = (lo + hi + 1) // 2
+        level = _at_rows(top, kk, mid - 1)
+        clipped = tl.sum(
+            tl.where(other, tl.minimum(tl.maximum((h - level[:, None]) + cap, 0.0), cap), 0.0), 1
+        )
+        ok = clipped <= gamma
+        searching = lo < hi
+        lo = tl.where(searching & ok, mid, lo)
+        hi = tl.where(searching & (~ok), mid - 1, hi)
+    origin = _at_rows(top, kk, tl.minimum(lo, K - 1))
+    rem = gamma - cap * lo.to(tl.float64)
+    free_active = active_in & (lo < K)
+    s = tl.full([ROWS], -cap, tl.float64)
+    level = s
+    if tl.max(free_active.to(tl.int32), 0) > 0:
+        g = h - origin[:, None]
+        cand_free = other & (h <= origin[:, None])
+        inside = cand_free & (g > level[:, None])
+        count = tl.sum(inside.to(tl.int32), 1)
+        total = tl.sum(tl.where(inside, g, 0.0), 1)
+        least = tl.min(tl.where(inside, g, float("inf")), 1)
+        new_s = (total - rem) / tl.maximum(count, 1)
+        s = tl.where(free_active, new_s, s)
+        level = tl.where(free_active, tl.maximum(level, new_s), level)
+        running = free_active & (least <= level)
+        while tl.max(running.to(tl.int32), 0) > 0:
+            inside = cand_free & (g > level[:, None])
+            count = tl.sum(inside.to(tl.int32), 1)
+            total = tl.sum(tl.where(inside, g, 0.0), 1)
+            least = tl.min(tl.where(inside, g, float("inf")), 1)
+            new_s = (total - rem) / tl.maximum(count, 1)
+            s = tl.where(running, new_s, s)
+            level = tl.where(running, tl.maximum(level, new_s), level)
+            running = running & (least <= level)
+    return origin, s
+
+
+@triton.jit
+def _cone_free_rows(h, other, top, kk, u, cone_free, t, c, K: tl.constexpr, ROWS: tl.constexpr):
+    """Michelot pass over the uncapped cone entries of _cone_rows."""
+    head = tl.sum(tl.where(kk < u[:, None], top, 0.0), 1)
+    bound = _at_rows(top, kk, u)
+    cand_free = other & (h <= bound[:, None])
+    level = tl.full([ROWS], -float("inf"), tl.float64)
+    inside = cand_free & (h > level[:, None])
+    m = tl.sum(inside.to(tl.int32), 1)
+    rest = tl.sum(tl.where(inside, h, 0.0), 1)
+    least = tl.min(tl.where(inside, h, float("inf")), 1)
+    d = tl.maximum((K - u) * (K - u) + m * u, 1).to(tl.float64)
+    new_t = (u * rest - (K - u) * head) / d
+    new_c = (m * head + (K - u) * rest) / d
+    t = tl.where(cone_free, new_t, t)
+    c = tl.where(cone_free, new_c, c)
+    level = tl.where(cone_free, new_t, level)
+    running = cone_free & (least <= level)
+    while tl.max(running.to(tl.int32), 0) > 0:
+        inside = cand_free & (h > level[:, None])
+        m = tl.sum(inside.to(tl.int32), 1)
+        rest = tl.sum(tl.where(inside, h, 0.0), 1)
+        least = tl.min(tl.where(inside, h, float("inf")), 1)
+        d = tl.maximum((K - u) * (K - u) + m * u, 1).to(tl.float64)
+        new_t = (u * rest - (K - u) * head) / d
+        new_c = (m * head + (K - u) * rest) / d
+        t = tl.where(running, new_t, t)
+        c = tl.where(running, new_c, c)
+        level = tl.where(running, tl.maximum(level, new_t), level)
+        running = running & (least <= level)
+    return t, c
+
+
+@triton.jit
+def _cone_rows(
+    h, other, top, kk, active_in, whole, tol, kth_1, kth, K: tl.constexpr, ROWS: tl.constexpr
+):
+    """_cone across a [ROWS, B] register tile along axis 1."""
+    c = whole / K
+    t = kth_1 - c
+    need_cone = active_in & (t < kth - tol) & (whole > tol)
+    if tl.max(need_cone.to(tl.int32), 0) > 0:
+        lo = tl.full([ROWS], -1, tl.int32)
+        hi = tl.where(need_cone, K - 1, -1)
+        while tl.max(hi - lo, 0) > 0:
+            mid = (lo + hi + 1) // 2
+            level = _at_rows(top, kk, mid)
+            above1 = tl.sum(tl.where(other, tl.maximum(h - level[:, None], 0.0), 0.0), 1)
+            shift = -above1 / K
+            above2 = tl.sum(tl.where(other, tl.maximum(h - shift[:, None], 0.0), 0.0), 1)
+            ok = above2 / K + 2 * shift < level
+            searching = lo < hi
+            lo = tl.where(searching & ok, mid, lo)
+            hi = tl.where(searching & (~ok), mid - 1, hi)
+        u = lo + 1
+        cone_free = need_cone & (u < K)
+        if tl.max(cone_free.to(tl.int32), 0) > 0:
+            t, c = _cone_free_rows(h, other, top, kk, u, cone_free, t, c, K, ROWS)
+    zero = (~active_in) | (whole <= tol)
+    return tl.where(zero, 0.0, t), tl.where(zero, 0.0, c)
+
+
+@triton.jit
+def _smooth_rows(
+    h, other, j, valid_row, GAMMA,
+    LOSS: tl.constexpr, K: tl.constexpr, K1: tl.constexpr, KB: tl.constexpr, ROWS: tl.constexpr,
+):  # fmt: skip
+    """_smooth across a [ROWS, B] register tile (B >= C)."""
+    gamma = tl.load(GAMMA)
+    cap = gamma / K
+    if LOSS == 3:
+        need_proj = valid_row
+    else:
+        box = tl.sum(tl.where(other, tl.minimum(tl.maximum(h, 0.0), cap), 0.0), 1)
+        need_proj = valid_row & (box > gamma)
+    origin = tl.zeros([ROWS], tl.float64)
+    correction = tl.zeros([ROWS], tl.float64)
+    if tl.max(need_proj.to(tl.int32), 0) > 0:
+        kk = tl.arange(0, KB)[None, :]
+        top = tl.full([ROWS, KB], -float("inf"), tl.float64)
+        cand = h
+        whole = tl.zeros([ROWS], tl.float64)
+        low = tl.zeros([ROWS], tl.float64)
+        scale = tl.zeros([ROWS], tl.float64)
+        kth_1 = tl.full([ROWS], -float("inf"), tl.float64)
+        kth = tl.full([ROWS], -float("inf"), tl.float64)
+        i = tl.zeros([], tl.int32)
+        while i < K1:
+            best, at = tl.max(cand, 1, return_indices=True, return_indices_tie_break_left=True)
+            top = tl.where(kk == i, best[:, None], top)
+            if LOSS == 3:
+                in_k = need_proj & (i < K)
+                x = tl.where(in_k, best, 0.0)
+                total = whole + x
+                rounded = total - whole
+                err = (whole - (total - rounded)) + (x - rounded)
+                low += tl.where((total - total) == 0, err, 0.0)
+                whole = total
+                scale += tl.abs(x)
+                kth_1 = tl.where(i == K - 1, best, kth_1)
+                kth = tl.where(i == K, best, kth)
+            cand = tl.where(j == at[:, None], -float("inf"), cand)
+            i += 1
+        if LOSS == 3:
+            whole += low
+            tol = 16 * _EPS * tl.minimum(scale, 1.0)
+            t, c = _cone_rows(h, other, top, kk, need_proj, whole, tol, kth_1, kth, K, ROWS)
+            full = need_proj & (K * c > gamma)
+            origin = tl.where(need_proj, tl.where(c > 0, t, float("inf")), 0.0)
+            correction = tl.where(need_proj, c, 0.0)
+            if tl.max(full.to(tl.int32), 0) > 0:
+                ko, kc = _knapsack_rows(h, other, top, kk, full, cap, gamma, K, ROWS)
+                origin = tl.where(full, ko, origin)
+                correction = tl.where(full, kc, correction)
+        else:
+            ko, kc = _knapsack_rows(h, other, top, kk, need_proj, cap, gamma, K, ROWS)
+            origin = tl.where(need_proj, ko, 0.0)
+            correction = tl.where(need_proj, kc, 0.0)
+    # h is already in registers, so _terms sums across the row directly (as loss.h does;
+    # _smooth sums top when last projects to zero only to skip a global-memory pass over Z,
+    # which has the same nonzero terms up to float64 addition order).
+    a = _projected(h, origin[:, None], correction[:, None], gamma, K)
+    return _terms(h, other, a, gamma, 1), origin, correction
+
+
+@triton.jit
+def _hinge_rows(
+    Z, Y, S, GAMMA, N, C: tl.constexpr, B: tl.constexpr,
+    LOSS: tl.constexpr, K: tl.constexpr, KB: tl.constexpr, ROWS: tl.constexpr,
+):  # fmt: skip
+    """Top-k hinges across a [ROWS, B] register tile (B >= C)."""
+    row = tl.program_id(0).to(tl.int64) * ROWS + tl.arange(0, ROWS)
+    row_valid = row < N
+    offset = row * C
+    y = tl.load(Y + row, mask=row_valid, other=0)
+    in_range = row_valid & (y >= 0) & (y < C)
+    y = tl.minimum(tl.maximum(y, 0), C - 1)
+    label = tl.load(Z + offset + y, mask=row_valid, other=0).to(tl.float64)
+    flag = row_valid & ((~in_range) | ((label - label) != 0))
+    j = tl.arange(0, B)[None, :]
+    valid = row_valid[:, None] & (j < C)
+    z = tl.load(Z + offset[:, None] + j, mask=valid, other=0).to(tl.float64)
+    other = valid & (j != y[:, None])
+    flag = flag | (tl.sum((other & ((z - z) != 0)).to(tl.int32), 1) > 0)
+    h = tl.where(other & (~flag[:, None]), _margin(z, label[:, None]), -float("inf"))
+    if LOSS <= 2:
+        cand = h
+        value = tl.zeros([ROWS], tl.float64)
+        first = tl.full([ROWS], -float("inf"), tl.float64)
+        second = tl.full([ROWS], -1, tl.int32)
+        for i in tl.static_range(K):
+            best, at = tl.max(cand, 1, return_indices=True, return_indices_tie_break_left=True)
+            x = tl.maximum(best, 0.0) if LOSS == 2 else best
+            value += x / K
+            if i == K - 1:
+                first = best
+                second = at
+            else:
+                cand = tl.where(j == at[:, None], -float("inf"), cand)
+        value = tl.maximum(value, 0.0)
+        second_out = second.to(tl.float64)
+    elif LOSS == 3:
+        value, first, second_out = _smooth_rows(
+            h, other, j, row_valid & (~flag), GAMMA, LOSS, K, K + 1, KB, ROWS
+        )
+    else:
+        value, first, second_out = _smooth_rows(
+            h, other, j, row_valid & (~flag), GAMMA, LOSS, K, K, KB, ROWS
+        )
+    tl.store(S + row, tl.where(flag, float("nan"), value), mask=row_valid)
+    tl.store(S + N + row, first, mask=row_valid)
+    tl.store(S + 2 * N + row, second_out, mask=row_valid)
+    tl.store(S + 3 * N + row, flag.to(tl.float64), mask=row_valid)
+
+
+@triton.jit
+def _hinge_rows_backward(
+    Z, Y, S, U, G, GAMMA, N, C: tl.constexpr, B: tl.constexpr,
+    LOSS: tl.constexpr, K: tl.constexpr, REDUCTION: tl.constexpr, ROWS: tl.constexpr,
+):  # fmt: skip
+    """_backward of top-k hinges across a [ROWS, B] register tile (B >= C)."""
+    row = tl.program_id(0).to(tl.int64) * ROWS + tl.arange(0, ROWS)
+    row_valid = row < N
+    j = tl.arange(0, B)[None, :]
+    valid = row_valid[:, None] & (j < C)
+    offset = row * C
+    y = tl.load(Y + row, mask=row_valid, other=0)
+    y = tl.minimum(tl.maximum(y, 0), C - 1)
+    label = tl.load(Z + offset + y, mask=row_valid, other=0).to(tl.float64)[:, None]
+    z = tl.load(Z + offset[:, None] + j, mask=valid, other=0).to(tl.float64)
+    other = valid & (j != y[:, None])
+    weight = (
+        tl.load(U + row, mask=row_valid, other=0.0).to(tl.float64)
+        if REDUCTION == 0
+        else tl.load(U).to(tl.float64) + tl.zeros([ROWS], tl.float64)
+    )
+    if REDUCTION == 1:
+        weight = weight / N
+    flag = tl.load(S + 3 * N + row, mask=row_valid, other=0.0) != 0
+    first = tl.load(S + N + row, mask=row_valid, other=0.0)[:, None]
+    second = tl.load(S + 2 * N + row, mask=row_valid, other=0.0)[:, None]
+    h = _margin(z, label)
+    if LOSS <= 2:
+        loss = tl.load(S + row, mask=row_valid, other=0.0)
+        step = ((tl.full([ROWS], 1.0, tl.float64) / K) * tl.where(loss > 0, weight, 0.0))[:, None]
+        chosen = (h > first) | ((h == first) & (j <= second.to(tl.int32)))
+        if LOSS == 2:
+            chosen = chosen & (h > 0)
+        entry = tl.where(other & chosen, step, 0.0)
+    else:
+        gamma = tl.load(GAMMA)
+        x = _projected(h, first, second, gamma, K) / gamma
+        entry = tl.where(other, x * weight[:, None], 0.0)
+    mass = tl.sum(entry, 1)
+    entry = tl.where(j == y[:, None], -mass[:, None], entry)
+    grad = tl.where(flag[:, None], float("nan"), entry).to(G.dtype.element_ty)
+    tl.store(G + offset[:, None] + j, grad, mask=valid)
+
+
 @triton.jit(do_not_specialize=["N"])
 def _forward(
     Z,
@@ -763,6 +1031,8 @@ def _forward(
 ):
     if LOSS == 0 and B >= C:
         _entropy_rows(Z, Y, S, N, C, B, K, KB, FP32, ROWS)
+    elif LOSS != 0 and ROWS > 1:
+        _hinge_rows(Z, Y, S, GAMMA, N, C, B, LOSS, K, KB, ROWS)
     else:
         row = tl.program_id(0)
         if LOSS == 0:
@@ -821,6 +1091,8 @@ def _backward(
 ):
     if LOSS == 0 and B >= C:
         _entropy_rows_backward(Z, Y, S, U, G, N, C, B, K, REDUCTION, FP32, ROWS)
+    elif LOSS != 0 and ROWS > 1:
+        _hinge_rows_backward(Z, Y, S, U, G, GAMMA, N, C, B, LOSS, K, REDUCTION, ROWS)
     else:
         row = tl.program_id(0)
         j = tl.arange(0, B)
@@ -891,18 +1163,24 @@ def _backward(
         tl.store(G + offset + y, target)
 
 
-def _rows_per_cta(c: int, loss: int = 0) -> int:
-    """Rows per program for short top-k entropy rows (c <= 256), else 1."""
-    if loss != 0 or c > 256:
+def _rows_per_cta(c: int, loss: int = 0, k: int = 2) -> int:
+    """Rows per program for short rows (c <= 256 for entropy, c <= 128 for hinges), else 1."""
+    limit = 256 if loss == 0 else 128
+    block = max(16, triton.next_power_of_2(c))
+    if c > limit or block > _CHUNK or (loss >= 3 and triton.next_power_of_2(k + 1) > block):
         return 1
-    return min(16, 256 // max(16, triton.next_power_of_2(c)))
+    cap = 16 if loss < 3 or block <= 16 else 4
+    return min(cap, 256 // block)
 
 
 def _shape(c: int, k: int, loss: int = 0) -> tuple[int, int, int]:
     """Chunk width, warps and the short vector of the k (or k + 1) largest."""
+    rows = _rows_per_cta(c, loss, k)
     block = max(16, min(triton.next_power_of_2(c), _CHUNK))
-    rows = _rows_per_cta(c, loss)
-    warps = 2 if rows > 1 else max(4, block // _WARP_COLUMNS)
+    if rows > 1:
+        warps = 2 if loss < 3 or c <= 8 or block >= 128 else 4
+    else:
+        warps = max(4, block // _WARP_COLUMNS)
     return block, warps, triton.next_power_of_2(k + 1)
 
 
@@ -950,7 +1228,7 @@ def forward(
         output = torch.empty((n,) if reduction == "none" else (), device=logits.device, dtype=dtype)
         loss, fp32 = LOSSES[objective], _fp32(logits, objective, fp32)
         block, warps, kb = _shape(c, k, loss)
-        rows = _rows_per_cta(c, loss)
+        rows = _rows_per_cta(c, loss, k)
         g = _gamma(logits.device, gamma)
         _forward[(triton.cdiv(n, rows),)](
             logits, target, stats, g, n, c, block, loss, k, kb, fp32, rows, num_warps=warps
@@ -978,7 +1256,7 @@ def backward(
         gradient = torch.empty_like(logits)
         loss = LOSSES[objective]
         block, warps, _ = _shape(c, k, loss)
-        rows = _rows_per_cta(c, loss)
+        rows = _rows_per_cta(c, loss, k)
         _backward[(triton.cdiv(n, rows),)](
             logits,
             target,
@@ -1011,7 +1289,7 @@ def _compiled(
         g = torch.empty(1, device="cuda", dtype=torch.float64)
         out = torch.empty(1, device="cuda", dtype=torch.promote_types(dtype, torch.float32))
         block, warps, kb = _shape(c, k, loss)
-        rows = _rows_per_cta(c, loss)
+        rows = _rows_per_cta(c, loss, k)
         # Any int32 N: the kernels do not specialize on it. The C++ launcher passes a
         # float64 upstream derivative.
         k_fwd = _forward.warmup(

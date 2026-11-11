@@ -33,6 +33,7 @@ jobs:
     name: C++ (${{ matrix.backend }}, ${{ matrix.cxx }})
     runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         include:
           - {backend: BUILTIN, cxx: g++}
@@ -45,7 +46,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       # Install system CBLAS headers and library when testing the EXTERNAL BLAS backend.
       - if: matrix.backend == 'EXTERNAL'
-        run: sudo apt-get update && sudo apt-get install -y libblas-dev
+        run: bash tools/apt_mirror.sh && sudo apt-get update && sudo apt-get install -y libblas-dev
       # Configure the C++ library, C ABI library, and GoogleTest suite with warnings treated as errors.
       - run: >-
           cmake -S . -B build -DBUILD_TESTING=ON -DSDCA_WARNINGS_AS_ERRORS=ON
@@ -78,7 +79,7 @@ jobs:
       # Check out repository sources for sanitizer-instrumented C++ and C ABI test runs.
       - uses: actions/checkout@v7.0.1
       # Install reference BLAS required to link the external-BLAS sanitizer binaries.
-      - run: sudo apt-get update && sudo apt-get install -y libblas-dev
+      - run: bash tools/apt_mirror.sh && sudo apt-get update && sudo apt-get install -y libblas-dev
       # Lower mmap ASLR entropy so older Clang ThreadSanitizer runtimes do not abort at startup.
       - run: sudo sysctl -w vm.mmap_rnd_bits=28
       # Run regression and C ABI tests under ASan + UBSan (GCC) and multithreaded tests under TSan (Clang).
@@ -125,7 +126,7 @@ jobs:
         with:
           python-version: '3.12'
       # Install system BLAS and LLVM 18 OpenMP headers (Clang 18 rejects GCC 13's omp.h attributes).
-      - run: sudo apt-get update && sudo apt-get install -y libblas-dev libomp-18-dev
+      - run: bash tools/apt_mirror.sh && sudo apt-get update && sudo apt-get install -y libblas-dev libomp-18-dev
       # Install core, scikit-learn, JAX, Triton (for CPU interpreter tests), Ninja, and CPU PyTorch.
       - run: >-
           python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn triton jax ninja &&
@@ -243,7 +244,7 @@ jobs:
       # Verify the consumer crate builds and runs with the default built-in BLAS (no external CBLAS).
       - run: bash rust/consumer/ci.sh builtin
       # Install Ubuntu's reference Netlib BLAS package.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libblas-dev
+      - run: bash tools/apt_mirror.sh && sudo apt-get update && sudo apt-get install -y --no-install-recommends libblas-dev
       # Test dynamic (-lblas) and static (.a) linkage against reference BLAS.
       - run: bash rust/consumer/ci.sh reference l static
       # Install OpenBLAS development headers and static/shared pthread libraries.

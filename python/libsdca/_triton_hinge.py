@@ -54,6 +54,21 @@ def _margins(Z, Y, row, j, C: tl.constexpr):
 
 
 @triton.jit
+def _margins_rows(Z, Y, row, row_valid, j, C: tl.constexpr):
+    """_margins across a [ROWS, B] register tile (B >= C)."""
+    valid = row_valid[:, None] & (j < C)
+    z = tl.load(Z + row[:, None] * C + j, mask=valid, other=0).to(tl.float64)
+    y = tl.load(Y + row, mask=row_valid, other=0)
+    in_range = row_valid & (y >= 0) & (y < C)
+    y = tl.minimum(tl.maximum(y, 0), C - 1)
+    label = tl.load(Z + row * C + y, mask=row_valid, other=0).to(tl.float64)
+    other = valid & (j != y[:, None])
+    nonfinite = tl.sum((other & ((z - z) != 0)).to(tl.int32), 1)
+    bad = row_valid & ((~in_range) | ((label - label) != 0) | (nonfinite > 0))
+    return tl.where(other, _margin(z, label[:, None]), -float("inf")), other, y, bad
+
+
+@triton.jit
 def _threshold(h, other, gamma):
     """Origin and correction of a = clip((h - origin) - correction, 0, gamma), sum a <= gamma."""
     box = tl.sum(tl.where(other, tl.minimum(tl.maximum(h, 0.0), gamma), 0.0), 0)
@@ -79,14 +94,38 @@ def _threshold(h, other, gamma):
 
 
 @triton.jit
-def _terms(h, other, a, gamma):
+def _threshold_rows(h, other, valid_row, gamma):
+    """_threshold across a [ROWS, B] tile along axis 1."""
+    box = tl.sum(tl.where(other, tl.minimum(tl.maximum(h, 0.0), gamma), 0.0), 1)
+    project = valid_row & (box > gamma)
+    top = tl.where(project, tl.max(h, 1), 0.0)
+    g = h - top[:, None]
+    inside = other & (g > -gamma)
+    count = tl.sum(inside.to(tl.int32), 1)
+    s = (tl.sum(tl.where(inside, g, 0.0), 1) - gamma) / tl.maximum(count, 1)
+    level = tl.maximum(s, -gamma)
+    active = project
+    while tl.max(active.to(tl.int32), 0) > 0:
+        previous = count
+        inside = other & (g > level[:, None])
+        new_count = tl.sum(inside.to(tl.int32), 1)
+        new_s = (tl.sum(tl.where(inside, g, 0.0), 1) - gamma) / tl.maximum(new_count, 1)
+        count = tl.where(active, new_count, count)
+        s = tl.where(active, new_s, s)
+        level = tl.where(active, tl.maximum(level, new_s), level)
+        active = active & (count != previous)
+    return top, tl.where(project, s, 0.0)
+
+
+@triton.jit
+def _terms(h, other, a, gamma, AXIS: tl.constexpr = 0):
     """Sum of (h a - a^2 / 2) / gamma over a > 0, as _smooth_value (scaled first off range)."""
     ha = h * a
     aa = a * a / 2
     v = tl.abs(ha - aa)
     normal = (v <= 1.7976931348623157e308) & (v >= 2.2250738585072014e-308 / 2.220446049250313e-16)
     term = tl.where(normal, (ha - aa) / gamma, (h - a / 2) * (a / gamma))
-    return tl.sum(tl.where(other & (a > 0), term, 0.0), 0)
+    return tl.sum(tl.where(other & (a > 0), term, 0.0), AXIS)
 
 
 @triton.jit
@@ -160,32 +199,113 @@ def _chunks(Z, Y, row, GAMMA, C: tl.constexpr, B: tl.constexpr, SMOOTH: tl.const
     return value, first, second, flags
 
 
-@triton.jit(do_not_specialize=["N"])
-def _forward(Z, Y, S, GAMMA, N, C: tl.constexpr, B: tl.constexpr, SMOOTH: tl.constexpr):
-    row = tl.program_id(0)
-    if B < C:
-        value, first, second, bad = _chunks(Z, Y, row.to(tl.int64), GAMMA, C, B, SMOOTH)
-        tl.store(S + N + row, first)
-        tl.store(S + 2 * N + row, second)
+@triton.jit
+def _forward_rows(
+    Z, Y, S, GAMMA, N, C: tl.constexpr, B: tl.constexpr, SMOOTH: tl.constexpr, ROWS: tl.constexpr
+):
+    """_forward across a [ROWS, B] register tile (B >= C)."""
+    row = tl.program_id(0).to(tl.int64) * ROWS + tl.arange(0, ROWS)
+    row_valid = row < N
+    j = tl.arange(0, B)[None, :]
+    h, other, _, bad = _margins_rows(Z, Y, row, row_valid, j, C)
+    if SMOOTH:
+        gamma = tl.load(GAMMA)
+        origin, correction = _threshold_rows(h, other, row_valid & (~bad), gamma)
+        a = tl.minimum(tl.maximum((h - origin[:, None]) - correction[:, None], 0.0), gamma)
+        value = _terms(h, other, a, gamma, 1)
+        first, second = origin, correction
     else:
-        j = tl.arange(0, B)
-        h, other, y, bad = _margins(Z, Y, row.to(tl.int64), j, C)
-        if SMOOTH:
-            gamma = tl.load(GAMMA)
-            origin, correction = _threshold(h, other, gamma)
-            a = tl.minimum(tl.maximum((h - origin) - correction, 0.0), gamma)
-            value = _terms(h, other, a, gamma)
-            tl.store(S + N + row, origin)
-            tl.store(S + 2 * N + row, correction)
+        top = tl.max(h, 1)
+        value = tl.maximum(top, 0.0)
+        # The first largest margin per row, as the stable sort of loss.h.
+        index = tl.min(tl.where(h == top[:, None], j, B), 1)
+        first, second = index.to(tl.float64), (value > 0).to(tl.float64)
+    tl.store(S + row, tl.where(bad, float("nan"), value), mask=row_valid)
+    tl.store(S + N + row, first, mask=row_valid)
+    tl.store(S + 2 * N + row, second, mask=row_valid)
+    tl.store(S + 3 * N + row, bad.to(tl.float64), mask=row_valid)
+
+
+@triton.jit(do_not_specialize=["N"])
+def _forward(
+    Z,
+    Y,
+    S,
+    GAMMA,
+    N,
+    C: tl.constexpr,
+    B: tl.constexpr,
+    SMOOTH: tl.constexpr,
+    ROWS: tl.constexpr = 1,
+):
+    if ROWS > 1:
+        _forward_rows(Z, Y, S, GAMMA, N, C, B, SMOOTH, ROWS)
+    else:
+        row = tl.program_id(0)
+        if B < C:
+            value, first, second, bad = _chunks(Z, Y, row.to(tl.int64), GAMMA, C, B, SMOOTH)
+            tl.store(S + N + row, first)
+            tl.store(S + 2 * N + row, second)
         else:
-            top = tl.max(h, 0)
-            value = tl.maximum(top, 0.0)
-            # The first largest margin, as the stable sort of loss.h.
-            index = tl.min(tl.where(h == top, j, B), 0)
-            tl.store(S + N + row, index.to(tl.float64))
-            tl.store(S + 2 * N + row, (value > 0).to(tl.float64))
-    tl.store(S + row, tl.where(bad != 0, float("nan"), value))
-    tl.store(S + 3 * N + row, bad.to(tl.float64))
+            j = tl.arange(0, B)
+            h, other, y, bad = _margins(Z, Y, row.to(tl.int64), j, C)
+            if SMOOTH:
+                gamma = tl.load(GAMMA)
+                origin, correction = _threshold(h, other, gamma)
+                a = tl.minimum(tl.maximum((h - origin) - correction, 0.0), gamma)
+                value = _terms(h, other, a, gamma)
+                tl.store(S + N + row, origin)
+                tl.store(S + 2 * N + row, correction)
+            else:
+                top = tl.max(h, 0)
+                value = tl.maximum(top, 0.0)
+                # The first largest margin, as the stable sort of loss.h.
+                index = tl.min(tl.where(h == top, j, B), 0)
+                tl.store(S + N + row, index.to(tl.float64))
+                tl.store(S + 2 * N + row, (value > 0).to(tl.float64))
+        tl.store(S + row, tl.where(bad != 0, float("nan"), value))
+        tl.store(S + 3 * N + row, bad.to(tl.float64))
+
+
+@triton.jit
+def _backward_rows(
+    Z, Y, S, U, G, GAMMA, N, C: tl.constexpr, B: tl.constexpr,
+    SMOOTH: tl.constexpr, REDUCTION: tl.constexpr, ROWS: tl.constexpr,
+):  # fmt: skip
+    """_backward across a [ROWS, B] register tile (B >= C)."""
+    row = tl.program_id(0).to(tl.int64) * ROWS + tl.arange(0, ROWS)
+    row_valid = row < N
+    j = tl.arange(0, B)[None, :]
+    valid = row_valid[:, None] & (j < C)
+    if REDUCTION == 0:
+        weight = tl.load(U + row, mask=row_valid, other=0.0).to(tl.float64)
+    else:
+        weight = tl.load(U).to(tl.float64) + tl.zeros([ROWS], tl.float64)
+    if REDUCTION == 1:
+        weight = weight / N
+    y = tl.minimum(tl.maximum(tl.load(Y + row, mask=row_valid, other=0), 0), C - 1)
+    bad = tl.load(S + 3 * N + row, mask=row_valid, other=0.0) != 0
+    if SMOOTH:
+        gamma = tl.load(GAMMA)
+        origin = tl.load(S + N + row, mask=row_valid, other=0.0)[:, None]
+        correction = tl.load(S + 2 * N + row, mask=row_valid, other=0.0)[:, None]
+        label = tl.load(Z + row * C + y, mask=row_valid, other=0).to(tl.float64)[:, None]
+        z = tl.load(Z + row[:, None] * C + j, mask=valid, other=0).to(tl.float64)
+        other = valid & (j != y[:, None])
+        h = _margin(z, label)
+        a = tl.minimum(tl.maximum((h - origin) - correction, 0.0), gamma)
+        entry = tl.where(other, (a / gamma) * weight[:, None], 0.0)
+        total = tl.sum(entry, 1)
+        grad = tl.where(
+            bad[:, None], float("nan"), tl.where(j == y[:, None], -total[:, None], entry)
+        )
+    else:
+        index = tl.load(S + N + row, mask=row_valid, other=0.0).to(tl.int64)[:, None]
+        w = (weight * tl.load(S + 2 * N + row, mask=row_valid, other=0.0))[:, None]
+        grad = tl.where(
+            bad[:, None], float("nan"), tl.where(j == index, w, tl.where(j == y[:, None], -w, 0.0))
+        )
+    tl.store(G + row[:, None] * C + j, grad.to(G.dtype.element_ty), mask=valid)
 
 
 @triton.jit(do_not_specialize=["N"])
@@ -201,42 +321,46 @@ def _backward(
     B: tl.constexpr,
     SMOOTH: tl.constexpr,
     REDUCTION: tl.constexpr,
+    ROWS: tl.constexpr = 1,
 ):
-    row = tl.program_id(0).to(tl.int64)
-    j = tl.arange(0, B)
-    if REDUCTION == 0:
-        weight = tl.load(U + row).to(tl.float64)
+    if ROWS > 1:
+        _backward_rows(Z, Y, S, U, G, GAMMA, N, C, B, SMOOTH, REDUCTION, ROWS)
     else:
-        weight = tl.load(U).to(tl.float64)
-    if REDUCTION == 1:
-        weight = weight / N
-    y = tl.minimum(tl.maximum(tl.load(Y + row), 0), C - 1)
-    bad = tl.load(S + 3 * N + row) != 0
-    if SMOOTH:
-        gamma = tl.load(GAMMA)
-        origin = tl.load(S + N + row)
-        correction = tl.load(S + 2 * N + row)
-        total = tl.zeros([], tl.float64)
-        for start in range(0, C, B):
-            k = start + j
-            h, other, label, _ = _margins(Z, Y, row, k, C)
-            a = tl.minimum(tl.maximum((h - origin) - correction, 0.0), gamma)
-            # The unrounded entries, rounded once when stored.
-            entry = tl.where(other, (a / gamma) * weight, 0.0)
-            total += tl.sum(entry, 0)
-            stored = tl.where(bad, float("nan"), entry)
-            tl.store(G + row * C + k, stored.to(G.dtype.element_ty), (k < C) & (k != y))
-        # The target entry: minus the competitors' unrounded sum, rounded once.
-        tl.store(G + row * C + y, tl.where(bad, float("nan"), -total).to(G.dtype.element_ty))
-    else:
-        index = tl.load(S + N + row).to(tl.int64)
-        w = weight * tl.load(S + 2 * N + row)
-        for start in range(0, C, B):
-            k = start + j
-            gradient = tl.where(
-                bad, float("nan"), tl.where(k == index, w, tl.where(k == y, -w, 0.0))
-            )
-            tl.store(G + row * C + k, gradient.to(G.dtype.element_ty), k < C)
+        row = tl.program_id(0).to(tl.int64)
+        j = tl.arange(0, B)
+        if REDUCTION == 0:
+            weight = tl.load(U + row).to(tl.float64)
+        else:
+            weight = tl.load(U).to(tl.float64)
+        if REDUCTION == 1:
+            weight = weight / N
+        y = tl.minimum(tl.maximum(tl.load(Y + row), 0), C - 1)
+        bad = tl.load(S + 3 * N + row) != 0
+        if SMOOTH:
+            gamma = tl.load(GAMMA)
+            origin = tl.load(S + N + row)
+            correction = tl.load(S + 2 * N + row)
+            total = tl.zeros([], tl.float64)
+            for start in range(0, C, B):
+                k = start + j
+                h, other, label, _ = _margins(Z, Y, row, k, C)
+                a = tl.minimum(tl.maximum((h - origin) - correction, 0.0), gamma)
+                # The unrounded entries, rounded once when stored.
+                entry = tl.where(other, (a / gamma) * weight, 0.0)
+                total += tl.sum(entry, 0)
+                stored = tl.where(bad, float("nan"), entry)
+                tl.store(G + row * C + k, stored.to(G.dtype.element_ty), (k < C) & (k != y))
+            # The target entry: minus the competitors' unrounded sum, rounded once.
+            tl.store(G + row * C + y, tl.where(bad, float("nan"), -total).to(G.dtype.element_ty))
+        else:
+            index = tl.load(S + N + row).to(tl.int64)
+            w = weight * tl.load(S + 2 * N + row)
+            for start in range(0, C, B):
+                k = start + j
+                gradient = tl.where(
+                    bad, float("nan"), tl.where(k == index, w, tl.where(k == y, -w, 0.0))
+                )
+                tl.store(G + row * C + k, gradient.to(G.dtype.element_ty), k < C)
 
 
 def _gamma(device: torch.device, gamma: float) -> torch.Tensor:
@@ -251,16 +375,28 @@ def _gamma(device: torch.device, gamma: float) -> torch.Tensor:
     return _gammas[key]
 
 
+def rows_per_cta(c: int) -> int:
+    """Rows per program for short rows (c <= min(128, _MAX_BLOCK)), else 1."""
+    block = max(16, triton.next_power_of_2(c))
+    if c > 128 or block > _MAX_BLOCK:
+        return 1
+    return min(16, 512 // block)
+
+
 def _shape(c: int, smooth: bool) -> tuple[int, int]:
-    """Block width and warps of the program of one row of c columns."""
+    """Block width and warps of the program of one (or rows_per_cta) row of c columns."""
+    rows = rows_per_cta(c)
+    if rows > 1:
+        block = max(16, triton.next_power_of_2(c))
+        return block, 2 if rows * block <= 256 else 4
     block = triton.next_power_of_2(c)
     if block > _MAX_BLOCK:
         return _CHUNKS[smooth]
-    return block, min(32, max(4, block // 1024))
+    return max(16, block), min(32, max(4, block // 1024))
 
 
 def covers(logits: torch.Tensor) -> bool:
-    """Whether one program per row computes the logits (int64 element offsets)."""
+    """Whether one program per row (or packed short-row tile) computes the logits."""
     return logits.is_cuda and logits.shape[0] <= _cuda_launch.ROWS
 
 
@@ -275,8 +411,11 @@ def forward(
         dtype = torch.promote_types(logits.dtype, torch.float32)
         output = torch.empty((n,) if reduction == "none" else (), device=logits.device, dtype=dtype)
         block, warps = _shape(c, smooth)
+        rows = rows_per_cta(c)
         g = _gamma(logits.device, gamma)
-        _forward[(n,)](logits, target, stats, g, n, c, block, smooth, num_warps=warps)
+        _forward[(triton.cdiv(n, rows),)](
+            logits, target, stats, g, n, c, block, smooth, rows, num_warps=warps
+        )
         _triton_reduce.launch(stats, output, n, _REDUCTIONS[reduction], _LAYOUT)
         if not logits.is_cuda and stats[4 * n].item():
             raise ValueError("logits must be finite and target indices in range")
@@ -297,7 +436,8 @@ def backward(
     with _cuda_launch.device_guard(logits):
         gradient = torch.empty_like(logits)
         block, warps = _shape(c, smooth)
-        _backward[(n,)](
+        rows = rows_per_cta(c)
+        _backward[(triton.cdiv(n, rows),)](
             logits,
             target,
             stats,
@@ -309,6 +449,7 @@ def backward(
             block,
             smooth,
             _REDUCTIONS[reduction],
+            rows,
             num_warps=warps,
         )
         return gradient
@@ -326,11 +467,12 @@ def _compiled(
         g = torch.empty(1, device="cuda", dtype=torch.float64)
         out = torch.empty(1, device="cuda", dtype=torch.promote_types(dtype, torch.float32))
         block, warps = _shape(c, smooth)
+        rows = rows_per_cta(c)
         # Any int32 N: the kernels do not specialize on it. The C++ launcher passes a
         # float64 upstream derivative.
-        k_fwd = _forward.warmup(z, y, s, g, 2, c, block, smooth, num_warps=warps, grid=(1,))
+        k_fwd = _forward.warmup(z, y, s, g, 2, c, block, smooth, rows, num_warps=warps, grid=(1,))
         k_bwd = _backward.warmup(
-            z, y, s, g, z, g, 2, c, block, smooth, code, num_warps=warps, grid=(1,)
+            z, y, s, g, z, g, 2, c, block, smooth, code, rows, num_warps=warps, grid=(1,)
         )
         reduce = _triton_reduce.warmup(s, out, code, _LAYOUT)
         return _cuda_launch.handles(
@@ -339,6 +481,9 @@ def _compiled(
             + [(k_bwd, (_P, _P, _P, _P, _P, _P, _I))],
             _triton_reduce.BLOCK,
             _triton_reduce.DIRECT_ROWS,
+            0,
+            rows,
+            rows,
         )
 
 

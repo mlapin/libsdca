@@ -554,6 +554,111 @@ class TopkKernelTests:
                     with pytest.raises(ValueError):
                         fused(z, y, loss, 2)
 
+    def test_short_row_packing_and_mixed_invalid_rows(self):
+        kernels = _triton()
+        for loss_id in (1, 2, 3, 4):
+            for c in (3, 10, 31, 64, 100, 128):
+                assert kernels._rows_per_cta(c, loss_id, 2) > 1
+            assert kernels._rows_per_cta(129, loss_id, 2) == 1
+        # Non-multiple batch sizes and scale sweep on packed C = 10 and C = 100.
+        for c, k in ((10, 3), (100, 5)):
+            for n in (1, 3, 15, 16, 17):
+                z, y = self._data(n, c)
+                for loss in LOSSES[1:]:
+                    self.assert_native(z, y, loss, k)
+        # Scale sweep across 60 orders of magnitude (1e-30 to 1e30), and agreement within a few
+        # float64 eps against both loss.h and the 1-row kernel (whose top-only value shortcut has
+        # the same nonzero terms summed in sorted rather than column order).
+        from libsdca import _triton_reduce as R
+
+        eps = torch.finfo(torch.float64).eps
+        z, y = self._data(9, 10)
+        for exp in (-30, 0, 30):
+            scale = 10.0**exp
+            zs, gamma = z * scale, 0.5 * scale
+            for loss in SMOOTH:
+                vp, _ = self.assert_native(zs, y, loss, 3, gamma=gamma, rtol=16 * eps)
+                code = kernels.LOSSES[loss]
+                block, _, kb = kernels._shape(10, 3, code)
+                s1 = torch.empty(R.size(9, 4), device=DEVICE, dtype=torch.float64)
+                v1 = torch.empty(9, device=DEVICE, dtype=torch.float64)
+                kernels._forward[(9,)](
+                    zs,
+                    y,
+                    s1,
+                    kernels._gamma(zs.device, gamma),
+                    9,
+                    10,
+                    block,
+                    code,
+                    3,
+                    kb,
+                    False,
+                    1,
+                    num_warps=4,
+                )
+                R.launch(s1, v1, 9, 0, kernels._LAYOUT)
+                _close(vp, v1, 8 * eps, f"{loss} exp={exp} packed vs 1-row")
+        # In-place backward (G == Z) and mixed invalid rows within one packed CTA.
+
+        clean, cy = self._data(9, 10)
+        mixed, my = clean.clone(), cy.clone()
+        mixed[2, (int(cy[2]) + 1) % 10] = float("nan")
+        my[6] = 10
+        u = torch.ones(9, dtype=torch.float64, device=DEVICE)
+        for loss in LOSSES[1:]:
+            gamma = 0.5 if loss in SMOOTH else 0.0
+            code = kernels.LOSSES[loss]
+            ref_v, ref_s = kernels.forward(clean, cy, "none", loss, 3, gamma)
+            ref_g = kernels.backward(clean, cy, ref_s, u, "none", loss, 3, gamma)
+            inplace = clean.clone()
+            block, warps, kb = kernels._shape(10, 3, code)
+            rows = kernels._rows_per_cta(10, code, 3)
+            grid = ((9 + rows - 1) // rows,)
+            kernels._backward[grid](
+                inplace,
+                cy,
+                ref_s,
+                u,
+                inplace,
+                kernels._gamma(clean.device, gamma),
+                9,
+                10,
+                block,
+                code,
+                3,
+                0,
+                False,
+                rows,
+                num_warps=warps,
+            )
+            torch.testing.assert_close(inplace, ref_g, rtol=0, atol=0)
+            stats = torch.empty(R.size(9, 4), device=DEVICE, dtype=torch.float64)
+            out = torch.empty(9, device=DEVICE, dtype=torch.float64)
+            kernels._forward[grid](
+                mixed,
+                my,
+                stats,
+                kernels._gamma(mixed.device, gamma),
+                9,
+                10,
+                block,
+                code,
+                3,
+                kb,
+                False,
+                rows,
+                num_warps=warps,
+            )
+            R.launch(stats, out, 9, 0, kernels._LAYOUT)
+            grad = kernels.backward(mixed, my, stats, u, "none", loss, 3, gamma)
+            for r in range(9):
+                if r in (2, 6):
+                    assert bool(out[r].isnan()) and bool(grad[r].isnan().all()), (loss, r)
+                else:
+                    torch.testing.assert_close(out[r], ref_v[r], rtol=0, atol=0)
+                    torch.testing.assert_close(grad[r], ref_g[r], rtol=0, atol=0)
+
 
 @pytest.mark.skipif(
     not (torch.cuda.is_available() and T is not None), reason="CUDA with Triton is not available"
@@ -680,6 +785,81 @@ class TopkDispatchTests:
             )
             with pytest.raises(RuntimeError):
                 torch.autograd.grad(g.sum(), x)
+
+    def test_short_row_zero_spills_and_cuda_graphs(self):
+        kernels = _triton()
+        z = torch.empty((1, 1), device="cuda", dtype=torch.float32)
+        y = torch.empty(1, device="cuda", dtype=torch.int64)
+        s = torch.empty(1, device="cuda", dtype=torch.float64)
+        g = torch.empty(1, device="cuda", dtype=torch.float64)
+        for c, k in ((3, 2), (10, 5), (31, 5), (64, 16), (100, 5), (128, 16)):
+            for dtype in (torch.bfloat16, torch.float16, torch.float32, torch.float64):
+                zd = z.to(dtype)
+                for loss in LOSSES[1:]:
+                    code = kernels.LOSSES[loss]
+                    block, warps, kb = kernels._shape(c, k, code)
+                    rows = kernels._rows_per_cta(c, code, k)
+                    kf = kernels._forward.warmup(
+                        zd,
+                        y,
+                        s,
+                        g,
+                        2,
+                        c,
+                        block,
+                        code,
+                        k,
+                        kb,
+                        False,
+                        rows,
+                        num_warps=warps,
+                        grid=(1,),
+                    )
+                    kb_kern = kernels._backward.warmup(
+                        zd,
+                        y,
+                        s,
+                        g,
+                        zd,
+                        g,
+                        2,
+                        c,
+                        block,
+                        code,
+                        k,
+                        1,
+                        False,
+                        rows,
+                        num_warps=warps,
+                        grid=(1,),
+                    )
+                    kf._init_handles()
+                    kb_kern._init_handles()
+                    assert kf.n_spills == 0, (c, k, dtype, loss, kf.n_spills)
+                    assert kb_kern.n_spills == 0, (c, k, dtype, loss, kb_kern.n_spills)
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        x = torch.randn(257, 10, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        yt = torch.randint(0, 10, (257,), device="cuda")
+        for loss in LOSSES[1:]:
+            name, gamma = _public(loss)
+            with torch.cuda.stream(stream):
+                for _ in range(2):
+                    (warm,) = torch.autograd.grad(sdca_loss(x, yt, name, k=3, gamma=gamma), x)
+                    del warm
+            torch.cuda.current_stream().wait_stream(stream)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                val = sdca_loss(x, yt, name, k=3, gamma=gamma)
+                (captured,) = torch.autograd.grad(val, x)
+            with torch.no_grad():
+                x.normal_()
+            ref_val = sdca_loss(x, yt, name, k=3, gamma=gamma)
+            (expected,) = torch.autograd.grad(ref_val, x)
+            graph.replay()
+            torch.cuda.synchronize()
+            torch.testing.assert_close(val, ref_val, rtol=0, atol=0)
+            torch.testing.assert_close(captured, expected, rtol=0, atol=0)
 
 
 @pytest.mark.skipif(not _cpu_entropy.buildable(), reason="the CPU extension does not build here")
