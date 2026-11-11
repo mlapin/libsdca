@@ -913,6 +913,9 @@ def _smooth_rows(
             ko, kc = _knapsack_rows(h, other, top, kk, need_proj, cap, gamma, K, ROWS)
             origin = tl.where(need_proj, ko, 0.0)
             correction = tl.where(need_proj, kc, 0.0)
+    # h is already in registers, so _terms sums across the row directly (as loss.h does;
+    # _smooth sums top when last projects to zero only to skip a global-memory pass over Z,
+    # which has the same nonzero terms up to float64 addition order).
     a = _projected(h, origin[:, None], correction[:, None], gamma, K)
     return _terms(h, other, a, gamma, 1), origin, correction
 

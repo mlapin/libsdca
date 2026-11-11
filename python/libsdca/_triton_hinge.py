@@ -375,9 +375,8 @@ def _gamma(device: torch.device, gamma: float) -> torch.Tensor:
     return _gammas[key]
 
 
-def rows_per_cta(c: int, smooth: bool = False) -> int:
+def rows_per_cta(c: int) -> int:
     """Rows per program for short rows (c <= min(128, _MAX_BLOCK)), else 1."""
-    del smooth
     block = max(16, triton.next_power_of_2(c))
     if c > 128 or block > _MAX_BLOCK:
         return 1
@@ -386,7 +385,7 @@ def rows_per_cta(c: int, smooth: bool = False) -> int:
 
 def _shape(c: int, smooth: bool) -> tuple[int, int]:
     """Block width and warps of the program of one (or rows_per_cta) row of c columns."""
-    rows = rows_per_cta(c, smooth)
+    rows = rows_per_cta(c)
     if rows > 1:
         block = max(16, triton.next_power_of_2(c))
         return block, 2 if rows * block <= 256 else 4
@@ -412,7 +411,7 @@ def forward(
         dtype = torch.promote_types(logits.dtype, torch.float32)
         output = torch.empty((n,) if reduction == "none" else (), device=logits.device, dtype=dtype)
         block, warps = _shape(c, smooth)
-        rows = rows_per_cta(c, smooth)
+        rows = rows_per_cta(c)
         g = _gamma(logits.device, gamma)
         _forward[(triton.cdiv(n, rows),)](
             logits, target, stats, g, n, c, block, smooth, rows, num_warps=warps
@@ -437,7 +436,7 @@ def backward(
     with _cuda_launch.device_guard(logits):
         gradient = torch.empty_like(logits)
         block, warps = _shape(c, smooth)
-        rows = rows_per_cta(c, smooth)
+        rows = rows_per_cta(c)
         _backward[(triton.cdiv(n, rows),)](
             logits,
             target,
@@ -468,7 +467,7 @@ def _compiled(
         g = torch.empty(1, device="cuda", dtype=torch.float64)
         out = torch.empty(1, device="cuda", dtype=torch.promote_types(dtype, torch.float32))
         block, warps = _shape(c, smooth)
-        rows = rows_per_cta(c, smooth)
+        rows = rows_per_cta(c)
         # Any int32 N: the kernels do not specialize on it. The C++ launcher passes a
         # float64 upstream derivative.
         k_fwd = _forward.warmup(z, y, s, g, 2, c, block, smooth, rows, num_warps=warps, grid=(1,))

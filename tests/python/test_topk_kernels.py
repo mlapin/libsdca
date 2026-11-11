@@ -566,13 +566,40 @@ class TopkKernelTests:
                 z, y = self._data(n, c)
                 for loss in LOSSES[1:]:
                     self.assert_native(z, y, loss, k)
+        # Scale sweep across 60 orders of magnitude (1e-30 to 1e30), and agreement within a few
+        # float64 eps against both loss.h and the 1-row kernel (whose top-only value shortcut has
+        # the same nonzero terms summed in sorted rather than column order).
+        from libsdca import _triton_reduce as R
+
+        eps = torch.finfo(torch.float64).eps
         z, y = self._data(9, 10)
         for exp in (-30, 0, 30):
             scale = 10.0**exp
+            zs, gamma = z * scale, 0.5 * scale
             for loss in SMOOTH:
-                self.assert_native(z * scale, y, loss, 3, gamma=0.5 * scale, rtol=1e-11)
+                vp, _ = self.assert_native(zs, y, loss, 3, gamma=gamma, rtol=16 * eps)
+                code = kernels.LOSSES[loss]
+                block, _, kb = kernels._shape(10, 3, code)
+                s1 = torch.empty(R.size(9, 4), device=DEVICE, dtype=torch.float64)
+                v1 = torch.empty(9, device=DEVICE, dtype=torch.float64)
+                kernels._forward[(9,)](
+                    zs,
+                    y,
+                    s1,
+                    kernels._gamma(zs.device, gamma),
+                    9,
+                    10,
+                    block,
+                    code,
+                    3,
+                    kb,
+                    False,
+                    1,
+                    num_warps=4,
+                )
+                R.launch(s1, v1, 9, 0, kernels._LAYOUT)
+                _close(vp, v1, 8 * eps, f"{loss} exp={exp} packed vs 1-row")
         # In-place backward (G == Z) and mixed invalid rows within one packed CTA.
-        from libsdca import _triton_reduce as R
 
         clean, cy = self._data(9, 10)
         mixed, my = clean.clone(), cy.clone()

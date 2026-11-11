@@ -284,7 +284,7 @@ def check_packed_hinge(device: str) -> None:
                 expected = H.backward(z, y, stats, u, "mean", smooth, gamma)
                 inplace = z.clone()
                 block, warps = H._shape(c, smooth)
-                rows = H.rows_per_cta(c, smooth)
+                rows = H.rows_per_cta(c)
                 H._backward[(triton.cdiv(n, rows),)](
                     inplace,
                     y,
@@ -301,7 +301,19 @@ def check_packed_hinge(device: str) -> None:
                     num_warps=warps,
                 )
                 torch.testing.assert_close(inplace, expected, rtol=0, atol=0)
-    # 100-digit scale sweep (1e-30 to 1e30) and leftmost ties on packed C = 10.
+    # Scale sweep across 60 orders of magnitude (1e-30 to 1e30) and leftmost ties on packed C = 10.
+    ties_z = torch.zeros(19, 10, dtype=torch.float64, device=device)
+    ties_z[:, 2] = ties_z[:, 5] = ties_z[:, 8] = 3.0
+    ties_y = torch.zeros(19, dtype=torch.int64, device=device)
+    tv, ts = H.forward(ties_z, ties_y, "none", False, 0.0)
+    tg = H.backward(
+        ties_z, ties_y, ts, torch.ones(19, dtype=torch.float64, device=device), "none", False, 0.0
+    )
+    assert torch.equal(tv, torch.full((19,), 4.0, dtype=torch.float64, device=device))
+    expected_tie_row = torch.tensor(
+        [-1.0, 0.0, 1.0] + [0.0] * 7, dtype=torch.float64, device=device
+    )
+    assert torch.equal(tg, expected_tie_row.expand(19, 10))
     base_z = torch.randn(19, 10, dtype=torch.float64, generator=gen)
     base_y = torch.randint(0, 10, (19,), generator=gen)
     mask10 = torch.nn.functional.one_hot(base_y, 10).bool()
@@ -346,7 +358,7 @@ def check_packed_hinge(device: str) -> None:
         stats = torch.empty(R.size(9, 4), device=device, dtype=torch.float64)
         out = torch.empty(9, device=device, dtype=torch.float64)
         block, warps = H._shape(10, smooth)
-        rows = H.rows_per_cta(10, smooth)
+        rows = H.rows_per_cta(10)
         H._forward[(triton.cdiv(9, rows),)](
             mz, my, stats, H._gamma(mz.device, gamma), 9, 10, block, smooth, rows, num_warps=warps
         )
@@ -379,7 +391,7 @@ class PackedHingeKernelTests:
                 zd = z.to(dtype)
                 for smooth in (False, True):
                     block, warps = H._shape(c, smooth)
-                    rows = H.rows_per_cta(c, smooth)
+                    rows = H.rows_per_cta(c)
                     kf = H._forward.warmup(
                         zd, y, s, g, 2, c, block, smooth, rows, num_warps=warps, grid=(1,)
                     )
