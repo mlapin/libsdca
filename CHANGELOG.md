@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.1 (2026-11-12)
+
+- **CUDA hinges:** For `C <= 128`, the fused multiclass, smooth and top-*k* hinge kernels pack
+  several rows per CTA, as the top-*k* cross-entropy kernels already do. Forward plus backward
+  on an A100 (`bfloat16`): `multiclass_hinge` at `262144 × 10` takes `0.20` ms (was `0.52`),
+  the smooth hinge `0.27` ms (was `2.21`), and `topk_hinge_alpha` ($k = 5$) `0.17` ms (was
+  `2.76`). Values and gradients are unchanged, and wider rows keep the existing kernels.
+- **Name and description:** The project is described everywhere by the technical report's
+  title, *libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks*
+  (README, PyPI, crates.io, module docs), and report links go to
+  <https://mlapin.github.io/libsdca/report/>.
+- **Citation:** `CITATION.cff` and the README cite the technical report and the TPAMI 2018
+  paper; softmax collapse is credited to Prieto et al. (2025).
+- **Docs:** Fixed GitHub math rendering, wide tables and line wrapping.
+- **Packaging:** The crate is published through crates.io Trusted Publishing, and
+  `tools/quality.py` checks the `CITATION.cff` version and date and the release-pinned links
+  of the PyPI and crates.io pages.
+
 ## 0.3.0 (2026-11-09)
 
 ### Highlights

@@ -10,8 +10,8 @@ abstract: >-
 authors:
   - family-names: Lapin
     given-names: Max
-version: 0.3.0
-date-released: 2026-11-09
+version: 0.3.1
+date-released: 2026-11-12
 license: MIT
 url: https://mlapin.github.io/libsdca/
 repository-code: https://github.com/mlapin/libsdca

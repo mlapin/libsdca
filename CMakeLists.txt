@@ -3,7 +3,7 @@ project(libsdca)
 
 set(libsdca_MAJOR_VERSION 0)
 set(libsdca_MINOR_VERSION 3)
-set(libsdca_PATCH_VERSION 0)
+set(libsdca_PATCH_VERSION 1)
 set(libsdca_VERSION
   ${libsdca_MAJOR_VERSION}.${libsdca_MINOR_VERSION}.${libsdca_PATCH_VERSION}
   )

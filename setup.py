@@ -28,7 +28,7 @@ if enabled("SDCA_BUILD_NATIVE"):
                 (macro, "1"),
                 ("NDEBUG", None),
                 ("SDCA_USE_CHRONO", "1"),
-                ("SDCA_VERSION", '"0.3.0"'),
+                ("SDCA_VERSION", '"0.3.1"'),
             ],
             extra_compile_args=[
                 "-std=c++11",

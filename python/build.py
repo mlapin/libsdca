@@ -31,7 +31,7 @@ def build(backend: str | None = None, output: str | Path | None = None) -> Path:
         "-pthread",
         "-D" + macro,
         "-DSDCA_USE_CHRONO",
-        '-DSDCA_VERSION="0.3.0"',
+        '-DSDCA_VERSION="0.3.1"',
         *flags,
         "-I",
         str(ROOT / "include"),

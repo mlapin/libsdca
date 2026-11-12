@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from .torch import topk_hinge_beta_loss as topk_hinge_beta_loss
     from .torch import topk_hinge_loss as topk_hinge_loss
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 # Names of the optional submodules, imported on first use.
 _LAZY = {
     "SDCAClassifier": ".sklearn",
