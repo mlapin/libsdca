@@ -97,21 +97,11 @@ The version string is checked across 11 files by `tools/quality.py`: `CMakeLists
 GitHub links (`blob/v<version>`, `--tag v<version>`) in `pyproject.toml`, `python/README.md`
 and `rust/README.md` must name the same version.
 
-The project is named the same way everywhere: `libsdca`, with the technical report's title
-*libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks* as the
-canonical description. The PyPI summary (`pyproject.toml`), crates.io description
-(`rust/Cargo.toml`), GitHub repository description, `CITATION.cff`, and the opening lines of
-`README.md`, `python/README.md`, `rust/README.md`, `rust/src/lib.rs` and
-`python/libsdca/__init__.py` start from that description, describe losses as *accurate* (not
-*numerically stable*, which remains a search keyword only), and link the report at
-<https://mlapin.github.io/libsdca/report/>. The report is the source of truth for wording:
-the losses are "multiclass, top-*k*, multilabel, and soft-target classification losses" in
-two forms, fused loss layers and SDCA solvers, and "certified" is used only where the
-duality-gap certificate is explained (`status == "solved"`), not as a label for the solvers.
-The `CITATION.cff` abstract is the report's subtitle. After the canonical opening, the PyPI
-summary, the crates.io description and the package README openings name the losses by the
-terms people search for (cross-entropy, SVM, softmax, distillation), because search engines
-index that text and not the package keywords.
+The project is described everywhere by the technical report's title, *libsdca: Accurate and
+Fast Classification Losses for SDCA and Neural Networks*. The PyPI summary, the crates.io
+description, `CITATION.cff` and the README openings start from it and then name the losses by
+their search terms (cross-entropy, SVM, softmax, distillation). Follow the report's wording:
+losses are *accurate*, not *numerically stable*.
 
 `.github/workflows/packages.yml` builds and tests the sdist, `manylinux_2_28` `x86_64` and
 macOS 11+ `arm64` wheels (`cibuildwheel`), and the `.crate` archive (`rust/package.sh`),
