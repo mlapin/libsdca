@@ -124,7 +124,7 @@ class BuildConfigTests:
         files = [
             "CHANGELOG.md", "CMakeLists.txt", "docs/C.md", "include/sdca/c_api.h",
             "matlab/make.m", "pyproject.toml", "python/build.py", "python/libsdca/__init__.py",
-            "rust/Cargo.toml", "setup.py",
+            "rust/Cargo.toml", "setup.py", "CITATION.cff", "python/README.md", "rust/README.md",
         ]  # fmt: skip
         version = tool._version(r'^version = "([^"]+)"', "pyproject.toml")
         heading = tool._version(rf"^(## {re.escape(version)} \(.*\))$", "CHANGELOG.md")
@@ -132,6 +132,10 @@ class BuildConfigTests:
             ("CHANGELOG.md", heading, "## 9.9.9 (2026-01-01)"),
             ("CHANGELOG.md", heading, f"## {version} (2026-13-01)"),
             ("include/sdca/c_api.h", f'e.g. "{version}"', 'e.g. "9.9.9"'),
+            ("CITATION.cff", f"version: {version}", "version: 9.9.9"),
+            ("CITATION.cff", "date-released: ", "date-released: 1999-01-01 # "),
+            ("python/README.md", f"libsdca/blob/v{version}/", "libsdca/blob/v9.9.9/"),
+            ("rust/README.md", f"--tag v{version}", "--tag v9.9.9"),
         ]:
             with subtests.test(path=path, new=new), tempfile.TemporaryDirectory() as directory:
                 copy = Path(directory)

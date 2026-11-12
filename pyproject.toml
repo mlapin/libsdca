@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libsdca"
-version = "0.3.0"
+version = "0.3.1"
 description = "Accurate and fast classification losses for SDCA and neural networks: cross-entropy, top-k, multiclass and multilabel SVM, and distillation losses as fused PyTorch and JAX layers and SDCA solvers"
 readme = "python/README.md"
 license = "MIT"
@@ -78,7 +78,7 @@ Homepage = "https://mlapin.github.io/libsdca/"
 "Technical Report" = "https://mlapin.github.io/libsdca/report/"
 Documentation = "https://github.com/mlapin/libsdca#documentation"
 Source = "https://github.com/mlapin/libsdca"
-Changelog = "https://github.com/mlapin/libsdca/blob/v0.3.0/CHANGELOG.md"
+Changelog = "https://github.com/mlapin/libsdca/blob/v0.3.1/CHANGELOG.md"
 Issues = "https://github.com/mlapin/libsdca/issues"
 
 [tool.cibuildwheel]

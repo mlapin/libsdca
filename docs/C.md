@@ -24,7 +24,7 @@ Without CMake, compile `src/c_api.cpp` directly with any C++11 compiler:
 ```bash
 c++ -std=c++11 -O2 -shared -fPIC -pthread -fno-fast-math -ffp-contract=off \
   -fvisibility=hidden -fvisibility-inlines-hidden -DBLAS_BUILTIN \
-  '-DSDCA_VERSION="0.3.0"' -Iinclude src/c_api.cpp -o libsdca_c.so
+  '-DSDCA_VERSION="0.3.1"' -Iinclude src/c_api.cpp -o libsdca_c.so
 ```
 
 ## Usage

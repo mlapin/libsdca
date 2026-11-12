@@ -13,8 +13,8 @@ The native C++ library loads via `ctypes`. Prebuilt wheels for Linux `x86_64` an
 `arm64` require no compiler and depend only on NumPy; `import libsdca` does not import
 PyTorch, scikit-learn or JAX until used. All losses preserve tiny confident-prediction
 losses and gradients down to the output dtype's subnormal underflow and produce exact zero
-distillation gradients at equal logits ([numerics](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/numerics.md),
-[known limits](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/numerics.md#known-limits)).
+distillation gradients at equal logits ([numerics](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/numerics.md),
+[known limits](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/numerics.md#known-limits)).
 
 ```bash
 pip install libsdca              # NumPy interface
@@ -28,8 +28,8 @@ pip install 'libsdca[jax]'       # JAX loss functions
 | Train a scikit-learn classifier | `libsdca.SDCAClassifier` |
 | Train with full control (warm starts, label sets, history) | `libsdca.fit` $\to$ `Model` |
 | Evaluate losses and gradients on NumPy arrays | `libsdca.loss_and_grad`, `distillation_loss_and_grad` |
-| PyTorch neural-network loss layers | `libsdca.CrossEntropyLoss`, `TopKCrossEntropyLoss`, ... ([TORCH.md](https://github.com/mlapin/libsdca/blob/v0.3.0/python/TORCH.md)) |
-| JAX loss functions (`jit`, `grad`, `vmap`) | `libsdca.jax.sdca_loss`, ... ([JAX.md](https://github.com/mlapin/libsdca/blob/v0.3.0/python/JAX.md)) |
+| PyTorch neural-network loss layers | `libsdca.CrossEntropyLoss`, `TopKCrossEntropyLoss`, ... ([TORCH.md](https://github.com/mlapin/libsdca/blob/v0.3.1/python/TORCH.md)) |
+| JAX loss functions (`jit`, `grad`, `vmap`) | `libsdca.jax.sdca_loss`, ... ([JAX.md](https://github.com/mlapin/libsdca/blob/v0.3.1/python/JAX.md)) |
 | Single SDCA dual block update | `libsdca.coordinate_update` |
 
 ## Classifier
@@ -67,7 +67,7 @@ predicted = model.predict(X)
 `libsdca.fit(X, y, objective="cross_entropy", *, ...)` minimizes
 $0.5\Vert W \Vert_2^2 + C \sum_i \ell(X_i W, y_i)$ over $W \in \mathbb{R}^{d \times m}$ (no implicit
 intercept; set $C = 1 / (\lambda n)$ for $\frac{\lambda}{2}\Vert W \Vert_2^2 + \frac{1}{n}\sum_i \ell_i$).
-See [API.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#loss-definitions)
+See [API.md](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#loss-definitions)
 for all objectives and options:
 
 | Option | Default | Meaning |
@@ -75,8 +75,8 @@ for all objectives and options:
 | `C` | `1.0` | Loss weight ($> 0$) |
 | `k`, `gamma` | `1`, `0.0` | Top-*k* parameter (`[1, m - 1]`) and hinge smoothing (`0` = nonsmooth) |
 | `tol`, `max_epoch`, `eval_epoch` | `1e-3`, `1000`, `10` | Relative duality-gap target, epoch limit, and evaluation period |
-| `shrinking` | `"auto"` | Active-set shrinking and gap-safe screening for hinges ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#shrinking)) |
-| `projection_precision` | `"float64"` | `"float64"` (checked double) or `"extended"` ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#projection-precision)) |
+| `shrinking` | `"auto"` | Active-set shrinking and gap-safe screening for hinges ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#shrinking)) |
+| `projection_precision` | `"float64"` | `"float64"` (checked double) or `"extended"` ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#projection-precision)) |
 | `kernel`, `center`, `initial_dual` | `False`, `None`, `None` | Gram matrix `(n, n)` input, regularizer center $W_0$, and warm-start duals |
 | `precision` | `"float64"` | Working arithmetic and solver iterate (`"float64"` or `"float32"`) |
 
@@ -99,8 +99,8 @@ values, gradients = libsdca.loss_and_grad(scores, y_int, "topk_hinge_beta", k=2,
 
 Row loops parallelize across `num_threads` threads (`None` uses `SDCA_NUM_THREADS` or
 automatic CPU detection; `1` runs serially) with bitwise-identical results
-([threads](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#threads),
-[environment variables](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#environment-variables)).
+([threads](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#threads),
+[environment variables](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#environment-variables)).
 
 ## Precision
 
@@ -108,8 +108,8 @@ Outputs (`weights`, `dual`, `gradients`) keep the input array's `float32` or `fl
 dtype; loss values are `float64`. For `float32` inputs, the default `precision="float64"`
 keeps the solver iterate in `double` (`8(d + n)m` bytes) so convergence does not stall
 above `1e-5`; pass `precision="float32"` for `1.6–1.9×` faster `cross_entropy` fits
-([support matrix](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#precision),
-[PyTorch precision](https://github.com/mlapin/libsdca/blob/v0.3.0/python/TORCH.md#precision)).
+([support matrix](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#precision),
+[PyTorch precision](https://github.com/mlapin/libsdca/blob/v0.3.1/python/TORCH.md#precision)).
 
 ```python
 X32 = X.astype(np.float32)
@@ -131,8 +131,8 @@ target = torch.randint(5, (32,))
 CrossEntropyLoss()(logits, target).backward()
 ```
 
-See [TORCH.md](https://github.com/mlapin/libsdca/blob/v0.3.0/python/TORCH.md#replace-pytorch-cross-entropy)
-and [performance.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/performance.md).
+See [TORCH.md](https://github.com/mlapin/libsdca/blob/v0.3.1/python/TORCH.md#replace-pytorch-cross-entropy)
+and [performance.md](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/performance.md).
 
 ## Building from source and testing
 
@@ -142,5 +142,5 @@ python -m pytest -n auto --dist worksteal tests/python --group all # core, torch
 python -m pytest tests/python --group all -m serial
 ```
 
-See [DEPENDENCIES.md](https://github.com/mlapin/libsdca/blob/v0.3.0/DEPENDENCIES.md) for
+See [DEPENDENCIES.md](https://github.com/mlapin/libsdca/blob/v0.3.1/DEPENDENCIES.md) for
 `SDCA_BLAS_BACKEND` options (`AUTO`, `EXTERNAL`, `BUILTIN`).

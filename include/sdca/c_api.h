@@ -171,7 +171,7 @@ struct sdca_fit_result {
 
 /* SDCA_ABI_VERSION of the library; compare it with the header's first. */
 int sdca_abi_version(void);
-/* The library version, e.g. "0.3.0"; a static string. */
+/* The library version, e.g. "0.3.1"; a static string. */
 const char* sdca_version(void);
 /* The message of this thread's last failed call, "" after a success; valid
  * until the thread's next computing call. */

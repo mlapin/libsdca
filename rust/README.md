@@ -1,6 +1,6 @@
 # libsdca for Rust
 
-Rust bindings to [libsdca](https://github.com/mlapin/libsdca/blob/v0.3.0/README.md),
+Rust bindings to [libsdca](https://github.com/mlapin/libsdca/blob/v0.3.1/README.md),
 accurate and fast classification losses for SDCA and neural networks: SDCA solvers for
 linear and kernel SVMs and softmax classifiers, plus loss, gradient and coordinate-step
 evaluation through the shared C ABI (`include/sdca/c_api.h`;
@@ -28,7 +28,7 @@ fn main() -> libsdca::Result<()> {
 - **Losses and coordinate steps:** `loss_and_grad`, `distillation_loss_and_grad`,
   `proximal_distillation_loss_and_grad`, and `coordinate_update` evaluate rows in parallel
   across `num_threads` threads (`None` uses `SDCA_NUM_THREADS` or automatic CPU detection;
-  `Some(1)` runs serially; [threads](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#threads)):
+  `Some(1)` runs serially; [threads](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#threads)):
 
 ```rust
 use libsdca::{loss_and_grad, Loss, LossOptions, Matrix};
@@ -45,7 +45,7 @@ fn main() -> libsdca::Result<()> {
 ## Building
 
 Install from crates.io with `cargo add libsdca`, or from git with
-`cargo add libsdca --git https://github.com/mlapin/libsdca --tag v0.3.0`.
+`cargo add libsdca --git https://github.com/mlapin/libsdca --tag v0.3.1`.
 
 By default, `build.rs` compiles `src/c_api.cpp` with the system C++11 compiler (`CXX`,
 default `c++`) and the built-in BLAS—no external dependencies are required. To link an
@@ -73,7 +73,7 @@ rust/package.sh                     # builds rust/target/package/libsdca-<versio
 `f64` inputs always compute in `double` (`Precision::Float64`). For `f32` inputs, the
 default `Precision::Float64` keeps working arithmetic and `fit`'s internal iterate in
 `double` and rounds the returned `Model<f32>` arrays once at each evaluation
-([numerics](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/numerics.md#known-limits));
+([numerics](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/numerics.md#known-limits));
 pass `precision: Some(Precision::Float32)` for faster `f32` entropy steps:
 
 ```rust
@@ -88,6 +88,6 @@ fn main() -> libsdca::Result<()> {
 }
 ```
 
-See [API.md](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md) for all options,
-[projection precision](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#projection-precision),
-and [shrinking](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/API.md#shrinking).
+See [API.md](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md) for all options,
+[projection precision](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#projection-precision),
+and [shrinking](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#shrinking).
