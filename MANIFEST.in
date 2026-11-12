@@ -5,5 +5,5 @@ include python/README.md
 include python/TORCH.md python/JAX.md
 include python/libsdca/_torch_entropy.cpp python/libsdca/_torch_*.h python/libsdca/_jax_ffi.cpp
 include include/sdca/utility/logging.cpp
-include CHANGELOG.md DEPENDENCIES.md AGENTS.md
+include CHANGELOG.md DEPENDENCIES.md AGENTS.md CITATION.cff
 include tests/python/*.py

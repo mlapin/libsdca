@@ -1,4 +1,4 @@
-"""SDCA solvers and classification losses.
+"""Accurate and fast classification losses for SDCA and neural networks.
 
 NumPy:
     fit, loss_and_grad, coordinate_update, Model; Solver for another

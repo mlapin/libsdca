@@ -6,18 +6,20 @@
 [![Crates.io](https://img.shields.io/crates/v/libsdca.svg)](https://crates.io/crates/libsdca)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**libsdca** trains linear and kernel classifiers with stochastic dual coordinate
-ascent (SDCA) and provides the corresponding classification losses as
-differentiable layers for PyTorch and JAX and as NumPy functions. It covers
-multiclass and multilabel SVMs, softmax cross-entropy, knowledge distillation,
-and the top-*k* hinge and entropy losses of [Lapin et al.](#citation).
+**libsdca** provides accurate and fast classification losses for SDCA and neural
+networks. It implements multiclass, top-*k*, multilabel, and soft-target
+classification losses in two forms: fused CPU and CUDA loss layers for PyTorch and
+JAX (and NumPy functions), and stochastic dual coordinate ascent (SDCA) solvers for
+linear and kernel models. It covers cross-entropy, the multiclass hinge, knowledge
+distillation, the multilabel losses, and the top-*k* hinge and entropy losses of
+[Lapin et al.](#citation).
 
-Both the solver and loss layers are numerically stable: confident predictions
-keep nonzero losses and target gradients down to the subnormal limit instead of
-collapsing to zero (softmax collapse [6]), and distillation gradients are exact
-zero at equal student and teacher logits (softmax cancellation [6]), across
-`float16`, `bfloat16`, `float32` and `float64` on CPU and CUDA
-([known limits](docs/numerics.md#known-limits)).
+Every loss and gradient is accurate to the limit of its floating-point format:
+confident predictions keep nonzero losses and target gradients down to subnormal
+underflow instead of collapsing to zero (softmax collapse [7], fixed in [6]), and
+distillation gradients are exact zero at equal student and teacher logits (softmax
+cancellation [6]), across `float16`, `bfloat16`, `float32` and `float64` on CPU
+and CUDA ([known limits](docs/numerics.md#known-limits)).
 
 ```python
 from libsdca import CrossEntropyLoss
@@ -28,19 +30,19 @@ loss = criterion(logits, targets)
 loss.backward()
 ```
 
-- **Certified dual solver:** Training evaluates the duality gap of the returned
+- **Accurate to the limit of the format:** Every loss value and gradient entry is
+  verified within `64` output-dtype eps against 100-digit `mpmath` references across
+  `2` to `32,769` classes, subnormal tails, cancellation offsets and `±finfo.max`
+  ([verification](docs/numerics.md#how-it-is-verified)).
+- **Fast fused loss kernels:** On an A100 at `8192 × 32000` and `8192 × 128256`
+  (`bfloat16` / `float32`), `CrossEntropyLoss` runs in `0.33–0.41×` eager
+  `F.cross_entropy` time (`0.93–0.98×` `torch.compile`) and saves a few scalars
+  per row instead of an `(N, C)` tensor ([performance](docs/performance.md)).
+- **Certified SDCA:** Training evaluates the duality gap of the returned
   weights and the feasible projection of the returned duals in `double`, with a
   first-order rounding estimate $e$;
   `status == "solved"` certifies $P(W) - D(A) + e \le \text{tol} \cdot \max(|P|, |D|)$
   ([numerics](docs/numerics.md#the-solved-certificate)).
-- **Verified to the subnormal limit:** Every loss value and gradient entry is
-  verified within `64` output-dtype eps against 100-digit `mpmath` references across
-  `2` to `32,769` classes, subnormal tails, cancellation offsets and `±finfo.max`
-  ([verification](docs/numerics.md#how-it-is-verified)).
-- **Fused CUDA and CPU kernels:** On an A100 at `8192 × 32000` and `8192 × 128256`
-  (`bfloat16` / `float32`), `CrossEntropyLoss` runs in `0.33–0.41×` eager
-  `F.cross_entropy` time (`0.93–0.98×` `torch.compile`) and saves a few scalars
-  per row instead of an `(N, C)` tensor ([performance](docs/performance.md)).
 - **Decoupled storage and compute precision:** `precision="float32"` or `"float64"`
   selects working arithmetic independently of array/tensor storage
   ([support matrix](docs/API.md#precision)).
@@ -54,9 +56,9 @@ loss.backward()
 | --- | --- | --- |
 | `cross_entropy` | Softmax cross-entropy | single class index |
 | `topk_cross_entropy` | Top-*k* entropy [5] | single class index |
-| `multiclass_hinge` | Crammer–Singer SVM [1] | single class index |
+| `multiclass_hinge` | Multiclass hinge (Crammer–Singer SVM) [1] | single class index |
 | `topk_hinge_alpha`, `topk_hinge_beta` | Top-*k* hinge $\alpha$ [4] and $\beta$ [5] | single class index |
-| `multilabel_hinge` | Multilabel SVM [2] | label sets / boolean mask |
+| `multilabel_hinge` | Multilabel hinge (multilabel SVM) [2] | label sets / boolean mask |
 | `multilabel_cross_entropy` | Multilabel cross-entropy | label sets / boolean mask |
 
 Hinge losses accept `gamma >= 0` (`0` = nonsmooth hinge, `> 0` = Moreau-smoothed
@@ -183,11 +185,13 @@ Runnable examples are in [examples/](examples), [rust/examples](rust/examples) a
   reproduction of Barron et al. [6]
 - [Dependencies](DEPENDENCIES.md), [contributing](CONTRIBUTING.md),
   [AI coding assistant guide](AGENTS.md) and [changelog](CHANGELOG.md)
-- [Project page & technical report](https://mlapin.github.io/libsdca/)
+- [Project page](https://mlapin.github.io/libsdca/) and technical report,
+  [*libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks*](https://mlapin.github.io/libsdca/report/)
 
 ## Citation
 
-If `libsdca` helps your research, please cite:
+If `libsdca` is useful in your research, please cite the paper for the losses you use
+and the technical report for the library:
 
 ```bibtex
 @inproceedings{lapin2015topk,
@@ -203,7 +207,26 @@ If `libsdca` helps your research, please cite:
   booktitle = {IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
   year      = {2016}
 }
+
+@article{lapin2018analysis,
+  title     = {Analysis and Optimization of Loss Functions for Multiclass, Top-k, and Multilabel Classification},
+  author    = {Lapin, Maksim and Hein, Matthias and Schiele, Bernt},
+  journal   = {IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI)},
+  volume    = {40},
+  number    = {7},
+  pages     = {1533--1554},
+  year      = {2018}
+}
+
+@misc{lapin2026libsdca,
+  title        = {libsdca: Accurate and Fast Classification Losses for {SDCA} and Neural Networks},
+  author       = {Lapin, Max},
+  year         = {2026},
+  howpublished = {Technical report, \url{https://mlapin.github.io/libsdca/report/}}
+}
 ```
+
+GitHub's *Cite this repository* button uses [CITATION.cff](CITATION.cff).
 
 ## References
 
@@ -218,6 +241,8 @@ If `libsdca` helps your research, please cite:
    and insights. *CVPR*, 2016.
 6. J. T. Barron, D. Gnanapragasam and M. Tschannen. A fix for softmax and
    cross-entropy. arXiv:2610.31642, 2026 ([reproduction](docs/softmax-collapse.md#reproduction)).
+7. L. Prieto, M. Barsbey, P. A. M. Mediano and T. Birdal. Grokking at the edge of
+   numerical stability. *ICLR*, 2025.
 
 ## License
 

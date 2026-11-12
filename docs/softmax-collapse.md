@@ -1,8 +1,10 @@
 # Softmax collapse and cancellation
 
 Barron, Gnanapragasam and Tschannen,
-[*A Fix for Softmax and Cross-Entropy*](https://arxiv.org/abs/2610.31642) (2026), identify
-two floating-point failure modes in standard softmax cross-entropy. This page explains both,
+[*A Fix for Softmax and Cross-Entropy*](https://arxiv.org/abs/2610.31642) (2026), fix two
+floating-point failure modes in standard softmax cross-entropy: softmax collapse, identified
+by Prieto et al. ([*Grokking at the Edge of Numerical Stability*](https://arxiv.org/abs/2501.04697),
+2025), and softmax cancellation in distillation. This page explains both,
 shows how `libsdca` avoids them across all losses, and summarizes our reproduction of the
 paper's experiments.
 
@@ -116,5 +118,5 @@ Key takeaways:
   and `ProximalDistillationLoss` have an exact zero gradient at equal logits and keep the
   student at `100%` accuracy ($\mathrm{KL} = 0$) across all 2,000 steps.
 
-Full tables, training curves and the StableMax analysis are on the
-[project page](https://mlapin.github.io/libsdca/).
+Full tables, training curves and the StableMax analysis are in the
+[technical report](https://mlapin.github.io/libsdca/report/#experiments).

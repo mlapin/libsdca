@@ -1,14 +1,18 @@
 # libsdca for Python
 
-SDCA solvers for linear and kernel SVMs and softmax classifiers (`cross_entropy`,
-`topk_cross_entropy`, `multiclass_hinge`, `topk_hinge_alpha`, `topk_hinge_beta`,
-`multilabel_hinge`, `multilabel_cross_entropy`, `distillation`), plus differentiable
-loss layers for PyTorch, JAX and NumPy.
+Accurate and fast classification losses for SDCA and neural networks: multiclass, top-*k*,
+multilabel, and soft-target losses as fused PyTorch and JAX loss layers, NumPy functions,
+and SDCA solvers for linear and kernel SVMs and softmax classifiers with a scikit-learn
+estimator
+(`cross_entropy`, `topk_cross_entropy`, `multiclass_hinge`, `topk_hinge_alpha`,
+`topk_hinge_beta`, `multilabel_hinge`, `multilabel_cross_entropy`, `distillation`;
+[project page](https://mlapin.github.io/libsdca/),
+[technical report](https://mlapin.github.io/libsdca/report/)).
 
 The native C++ library loads via `ctypes`. Prebuilt wheels for Linux `x86_64` and macOS
 `arm64` require no compiler and depend only on NumPy; `import libsdca` does not import
 PyTorch, scikit-learn or JAX until used. All losses preserve tiny confident-prediction
-losses and gradients down to the output dtype's subnormal limit and produce exact zero
+losses and gradients down to the output dtype's subnormal underflow and produce exact zero
 distillation gradients at equal logits ([numerics](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/numerics.md),
 [known limits](https://github.com/mlapin/libsdca/blob/v0.3.0/docs/numerics.md#known-limits)).
 

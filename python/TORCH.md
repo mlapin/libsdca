@@ -57,7 +57,7 @@ loss = criterion(net(features), target)  # raw logits, int64 class indices
 When a prediction is confident, naive $\log(1 + \tau)$ evaluation rounds $1 + \tau$
 to $1$ and collapses both the loss and target gradient to zero (at margin $\sim 16.6$ in
 `float32` and $\sim 36.7$ in `float64` for two classes, as in PyTorch $\le 2.15$).
-`CrossEntropyLoss` preserves both down to the output dtype's subnormal limit
+`CrossEntropyLoss` preserves both down to the output dtype's subnormal underflow
 ($\sim 104$ in `float32`, $\sim 745$ in `float64`;
 [numerics](../docs/numerics.md#representation-limits)):
 

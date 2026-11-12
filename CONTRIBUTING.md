@@ -90,9 +90,17 @@ python tools/coverage.py --python-data build/gpu.coverage
 
 ## Releases
 
-The version string is checked across 10 files by `tools/quality.py`: `CMakeLists.txt`,
+The version string is checked across 11 files by `tools/quality.py`: `CMakeLists.txt`,
 `pyproject.toml`, `setup.py`, `python/build.py`, `python/libsdca/__init__.py`,
-`matlab/make.m`, `rust/Cargo.toml`, `include/sdca/c_api.h`, `docs/C.md`, and `CHANGELOG.md`.
+`matlab/make.m`, `rust/Cargo.toml`, `include/sdca/c_api.h`, `docs/C.md`, `CITATION.cff`
+(whose `date-released` must match the changelog date), and `CHANGELOG.md`. The release-pinned
+GitHub links (`blob/v<version>`, `--tag v<version>`) in `pyproject.toml`, `python/README.md`
+and `rust/README.md` must name the same version.
+
+The project is described everywhere by the technical report's title, *libsdca: Accurate and
+Fast Classification Losses for SDCA and Neural Networks*. The PyPI summary, the crates.io
+description, `CITATION.cff` and the README openings start from it and then name the losses by
+their search terms (cross-entropy, SVM, softmax, distillation).
 
 `.github/workflows/packages.yml` builds and tests the sdist, `manylinux_2_28` `x86_64` and
 macOS 11+ `arm64` wheels (`cibuildwheel`), and the `.crate` archive (`rust/package.sh`),

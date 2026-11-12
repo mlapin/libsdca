@@ -1,8 +1,10 @@
 # libsdca for Rust
 
-Rust bindings to [libsdca](https://github.com/mlapin/libsdca/blob/v0.3.0/README.md):
-certified SDCA solvers for linear and kernel SVMs and softmax classifiers, plus loss,
-gradient and coordinate-step evaluation through the shared C ABI (`include/sdca/c_api.h`).
+Rust bindings to [libsdca](https://github.com/mlapin/libsdca/blob/v0.3.0/README.md),
+accurate and fast classification losses for SDCA and neural networks: SDCA solvers for
+linear and kernel SVMs and softmax classifiers, plus loss, gradient and coordinate-step
+evaluation through the shared C ABI (`include/sdca/c_api.h`;
+[technical report](https://mlapin.github.io/libsdca/report/)).
 
 ```rust
 use libsdca::{fit, FitOptions, Matrix, Objective};
