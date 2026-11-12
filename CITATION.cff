@@ -1,0 +1,73 @@
+cff-version: 1.2.0
+message: >-
+  If libsdca is useful in your research, please cite the paper for the losses you use
+  and the technical report for the library.
+type: software
+title: "libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks"
+abstract: >-
+  Fused loss layers and SDCA solvers, accurate to the limit of the floating-point format
+  and fast on GPU and CPU.
+authors:
+  - family-names: Lapin
+    given-names: Max
+version: 0.3.0
+date-released: 2026-11-09
+license: MIT
+url: https://mlapin.github.io/libsdca/
+repository-code: https://github.com/mlapin/libsdca
+keywords:
+  - sdca
+  - top-k
+  - cross-entropy
+  - svm
+  - loss functions
+  - numerical accuracy
+  - pytorch
+  - jax
+preferred-citation:
+  type: report
+  title: "libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks"
+  authors:
+    - family-names: Lapin
+      given-names: Max
+  year: 2026
+  month: 11
+  url: https://mlapin.github.io/libsdca/report/
+references:
+  - type: conference-paper
+    title: Top-k Multiclass SVM
+    authors:
+      - family-names: Lapin
+        given-names: Maksim
+      - family-names: Hein
+        given-names: Matthias
+      - family-names: Schiele
+        given-names: Bernt
+    collection-title: Advances in Neural Information Processing Systems (NeurIPS)
+    year: 2015
+  - type: conference-paper
+    title: "Loss Functions for Top-k Error: Analysis and Insights"
+    authors:
+      - family-names: Lapin
+        given-names: Maksim
+      - family-names: Hein
+        given-names: Matthias
+      - family-names: Schiele
+        given-names: Bernt
+    collection-title: IEEE Conference on Computer Vision and Pattern Recognition (CVPR)
+    year: 2016
+  - type: article
+    title: Analysis and Optimization of Loss Functions for Multiclass, Top-k, and Multilabel Classification
+    authors:
+      - family-names: Lapin
+        given-names: Maksim
+      - family-names: Hein
+        given-names: Matthias
+      - family-names: Schiele
+        given-names: Bernt
+    journal: IEEE Transactions on Pattern Analysis and Machine Intelligence
+    volume: 40
+    issue: 7
+    start: 1533
+    end: 1554
+    year: 2018

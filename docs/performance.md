@@ -3,7 +3,7 @@
 Runtime and memory of `libsdca` 0.3.0 compared with PyTorch, JAX and scikit-learn.
 Ratios are `libsdca` time (or memory) divided by the reference's: below `1.0` means
 `libsdca` is faster or uses less memory. Full benchmark tables and methodology are in the
-[technical report](https://mlapin.github.io/libsdca/).
+[technical report](https://mlapin.github.io/libsdca/report/#performance).
 
 ## Test systems
 

@@ -1,4 +1,5 @@
-//! Rust interface to libsdca: SDCA solvers, losses and coordinate steps.
+//! Rust interface to libsdca, accurate and fast classification losses for SDCA
+//! and neural networks: SDCA solvers, losses and coordinate steps.
 //!
 //! The API mirrors the Python `libsdca` module. [`fit`] trains the
 //! [`Objective`]s into a [`Model`], [`loss_and_grad`] evaluates the

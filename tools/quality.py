@@ -101,7 +101,8 @@ def _version(pattern: str, path: str) -> str:
 
 
 def check_versions() -> None:
-    """One version in CMake, the packages and builders, the C header and the changelog."""
+    """One version in CMake, the packages and builders, the C header, the changelog, the
+    citation, and the release links of the package pages."""
     heading = r"^## (\S+) \((\d{4}-\d{2}-\d{2})\)$"
     changelog = re.search(heading, (ROOT / "CHANGELOG.md").read_text(), re.M)
     if changelog is None:
@@ -123,9 +124,20 @@ def check_versions() -> None:
         "python/libsdca/__init__.py": _version(
             r'^__version__ = "([^"]+)"', "python/libsdca/__init__.py"
         ),
+        "CITATION.cff": _version(r"^version: (\S+)$", "CITATION.cff"),
     }
     if len(set(found.values())) != 1:
         raise SystemExit(f"Versions differ: {found}")
+    if _version(r"^date-released: (\S+)$", "CITATION.cff") != changelog.group(2):
+        raise SystemExit("CITATION.cff: date-released differs from the CHANGELOG.md date")
+    # PyPI and crates.io render these pages once per release, so their links pin its tag.
+    version = changelog.group(1)
+    for path in ("pyproject.toml", "python/README.md", "rust/README.md"):
+        text = (ROOT / path).read_text()
+        stale = set(re.findall(r"mlapin/libsdca(?:/blob/| --tag )v(\d[\w.-]*\w)", text))
+        stale.discard(version)
+        if stale:
+            raise SystemExit(f"{path}: links to v{', v'.join(sorted(stale))}, not v{version}")
 
 
 def main() -> None:

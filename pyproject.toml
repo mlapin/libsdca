@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "libsdca"
 version = "0.3.0"
-description = "Numerically stable multiclass, top-k, multilabel and distillation losses for PyTorch, JAX and NumPy, and certified SDCA solvers for linear and kernel SVM and softmax classifiers, with scikit-learn, C++, C, Rust and MATLAB interfaces"
+description = "Accurate and fast classification losses for SDCA and neural networks: cross-entropy, top-k, multiclass and multilabel SVM, and distillation losses as fused PyTorch and JAX layers and SDCA solvers"
 readme = "python/README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -75,6 +75,7 @@ coverage = ["coverage[toml]>=7"]
 
 [project.urls]
 Homepage = "https://mlapin.github.io/libsdca/"
+"Technical Report" = "https://mlapin.github.io/libsdca/report/"
 Documentation = "https://github.com/mlapin/libsdca#documentation"
 Source = "https://github.com/mlapin/libsdca"
 Changelog = "https://github.com/mlapin/libsdca/blob/v0.3.0/CHANGELOG.md"
