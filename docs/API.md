@@ -134,7 +134,7 @@ bounds (entropy objectives have strictly positive probabilities and ignore the o
 - `"off"`: Updates every class of every example on every epoch.
 
 All modes evaluate the duality gap across all examples and classes, so `solved` carries the
-same certificate.
+same guarantee.
 
 ### Projection precision
 
@@ -170,8 +170,8 @@ MATLAB differs: `precision` defaults to `'double'` for every input class
   in the native APIs and `promote(logits.dtype, float32)` in PyTorch and JAX.
 - **`float32` fits:** Keeping $W$ and the duals in `float32` can stall near the optimum
   (updates below half an ulp are lost). `precision="float64"` (`<float, double>` in C++) keeps
-  `double` iterates for tighter convergence at `8(d + n)m` extra bytes. Both modes certify the
-  returned arrays.
+  `double` iterates for tighter convergence at `8(d + n)m` extra bytes. Both modes check the
+  gap of the returned arrays.
 - **Compiler flags:** Build with IEEE semantics (`-fno-fast-math -ffp-contract=off`);
   `-ffast-math` or `-Ofast` breaks the nonfinite-input checks and compensated sums.
 
@@ -201,7 +201,7 @@ Training returns a status (`none`, `solving`, `solved`, `no_progress`, `max_epoc
 `accuracy` / `rank_loss`, `cpu_time`, `wall_time`; MATLAB's `model.train` has its own field
 names).
 
-Only `status == "solved"` certifies convergence:
+Only `status == "solved"` guarantees convergence:
 $$P(W) - D(A) + e \le \text{tol} \cdot \max(|P(W)|, |D(A)|),$$
 where $P(W)$ is evaluated in `double` at the returned weights, $D(A)$ at the feasible
 projection of the returned duals, and $e$ is a first-order estimate of evaluation rounding.
@@ -321,7 +321,7 @@ CMake options (`cmake -D<option>=<value>`): `SDCA_BLAS_BACKEND` (`AUTO|EXTERNAL|
   a wrong value, or raise `ValueError` for the derived scores. Top-*k* entropy loses
   relative accuracy at huge competitor spreads (`float64` relative error `9e-6` at
   $10^{12}$).
-- **Solver:** Tolerances below about `1e-12` in `float64` cannot be certified: the fit ends
+- **Solver:** Tolerances below about `1e-12` in `float64` cannot be guaranteed: the fit ends
   with `max_epoch` or `no_progress`. Large regularizer centers $W_0$ limit representable
   updates. Where `long double` is 64-bit (macOS `arm64`, MSVC), extended-precision retries
   equal `double`.

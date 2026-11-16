@@ -43,7 +43,7 @@ output specification (`multiclass_output(m, labels)`), and objective (such as
   parameter should be converted to float work. `loss_and_gradient`
   with `float` work forms the smoothed hinges' margins and gradient entries in `double`.
 - **Convergence:** Inspect `context.status == sdca::solver_status::solved`; reaching
-  `max_epoch` is not a convergence certificate.
+  `max_epoch` does not guarantee convergence.
 
 ## Losses and projections
 

@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples" / "python"
+# The sdist ships the tests without the examples.
+pytestmark = pytest.mark.skipif(not EXAMPLES.is_dir(), reason="no examples next to the tests")
 NEEDS = {
     "numpy_fit.py": "numpy",
     "sklearn_classifier.py": "sklearn",

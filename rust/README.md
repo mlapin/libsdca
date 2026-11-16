@@ -24,7 +24,7 @@ fn main() -> libsdca::Result<()> {
 - **Errors and convergence:** Invalid inputs return `Error::InvalidArgument` and failures
   of the native library return `Error::Native`. A fit that fails numerically or stops at
   `max_epoch` still returns `Ok(model)`: check `model.status()` (`Status::Failed`,
-  `Status::MaxEpoch`; only `Status::Solved` certifies the duality gap).
+  `Status::MaxEpoch`; only `Status::Solved` guarantees the duality gap).
 - **Losses and coordinate steps:** `loss_and_grad`, `distillation_loss_and_grad`,
   `proximal_distillation_loss_and_grad`, and `coordinate_update` evaluate rows in parallel
   across `num_threads` threads (`None` uses `SDCA_NUM_THREADS` or automatic CPU detection;
@@ -74,7 +74,7 @@ Working precision follows the input type: `Precision::Float32` for `f32` and
 `Precision::Float64` for `f64`. Set `precision: Some(Precision::Float64)` to keep an
 `f32` fit's internal iterate in `double` for tighter convergence; the returned
 `Model<f32>` arrays retain their storage type. This costs `8(d + n)m` extra bytes
-and can slow fitting. Both modes certify the returned model in `double`
+and can slow fitting. Both modes check the returned model's duality gap in `double`
 ([precision](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#precision)).
 
 ```rust

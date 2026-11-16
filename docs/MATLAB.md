@@ -58,7 +58,7 @@ evaluates all datasets at each check (`model.test`). Passing `opts.initial_dual 
 warm-starts from a previous dual solution.
 
 The returned `model` struct contains `W` (`d`-by-`m`, feature input only), `A` (`m`-by-`n`),
-`status` (only `'solved'` certifies the gap), `epoch`, `relative_gap`, `cpu_time`,
+`status` (only `'solved'` guarantees the gap), `epoch`, `relative_gap`, `cpu_time`,
 `wall_time`, `train` (evaluation history), `test` (with cell-array datasets), and the options used
 (`matsdca_fit('help')` prints full usage).
 

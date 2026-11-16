@@ -78,7 +78,7 @@ for all objectives and options:
 | `precision` | storage dtype | Working arithmetic and solver iterate (`"float32"` or `"float64"`) |
 
 `Model` exposes `weights (d, m)` (`None` for kernels), `dual (n, m)`, `status` (only
-`"solved"` certifies the duality gap), `epochs`, `history`, and `params`.
+`"solved"` guarantees the duality gap), `epochs`, `history`, and `params`.
 
 ## Losses and gradients
 

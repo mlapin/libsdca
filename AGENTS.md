@@ -53,7 +53,7 @@ Loss names, options, defaults and errors are shared across languages:
 - **Solver objective:** $\frac12\Vert W \Vert_2^2 + C\sum_i \ell_i$ with no intercept; standardize
   features; for $d \gg n$ pass a Gram matrix ([python/README.md](python/README.md#training),
   [API.md](docs/API.md#options)).
-- **Convergence:** only `status == "solved"` certifies the duality gap
+- **Convergence:** only `status == "solved"` guarantees the duality gap
   ([API.md](docs/API.md#results)).
 - **Precision:** `precision=None` follows the storage dtype (16-bit inputs use `float32`
   work); pass `precision="float64"` for double work ([API.md](docs/API.md#precision),
