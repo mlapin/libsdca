@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build tests/matlab/gateway_mock.cpp against the stub mex.h and run it; no MATLAB
-# needed. The gateway's other mx calls are never made, so they stay unresolved.
+# Build tests/matlab/gateway_mock.cpp (matsdca_fit) and loss_mock.cpp (matsdca_loss)
+# against the stub mex.h and the in-memory mx implementation of mx_mock.h, and run
+# them; no MATLAB needed. Any mx call the mock lacks stays unresolved.
 # Optional argument: another source tree whose include/ and src/matlab/ to test.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -13,8 +14,10 @@ if [ "$(uname -s)" = Darwin ]; then
 else
   unresolved=-Wl,--unresolved-symbols=ignore-all
 fi
-g++ -std=c++11 -O1 -DBLAS_BUILTIN -ffp-contract=off \
-  -DMEX_SOLVE='"libsdca_solve"' -DLIBSDCA_VERSION='"check"' \
-  -I"$tree/include" -I"$here" -I"$tree/src/matlab" "$here/gateway_mock.cpp" \
-  "$unresolved" -o "$out/gateway_mock"
-"$out/gateway_mock"
+for test in gateway_mock loss_mock; do
+  g++ -std=c++11 -O1 -pthread -DBLAS_BUILTIN -ffp-contract=off \
+    -DMEX_SOLVE='"libsdca_solve"' -DMEX_LOSS='"libsdca_loss"' -DLIBSDCA_VERSION='"check"' \
+    -I"$tree/include" -I"$here" -I"$tree/src/matlab" "$here/$test.cpp" \
+    "$unresolved" -o "$out/$test"
+  "$out/$test"
+done

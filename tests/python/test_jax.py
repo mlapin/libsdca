@@ -14,9 +14,11 @@ import numpy.typing as npt
 import pytest
 from child_process import run_python
 from jax.typing import ArrayLike
-from libsdca import LOSSES, loss_and_grad
 from libsdca import jax as sdca_jax
+from libsdca._core import _LABEL_LOSSES as LOSSES
 from libsdca.jax import (
+    Backend,
+    Reduction,
     cross_entropy,
     distillation_loss,
     multiclass_hinge_loss,
@@ -24,12 +26,11 @@ from libsdca.jax import (
     multilabel_hinge_loss,
     proximal_cross_entropy,
     proximal_distillation_loss,
-    sdca_loss,
     topk_cross_entropy,
-    topk_hinge_alpha_loss,
-    topk_hinge_beta_loss,
     topk_hinge_loss,
 )
+from named_losses import jax_loss as named_loss
+from numpy_api import mask_loss_and_grad as loss_and_grad
 
 jax.config.update("jax_enable_x64", True)
 
@@ -91,9 +92,10 @@ class JaxLossTests:
         labels = np.zeros(4, dtype=int)
         for objective in LOSSES:
             with subtests.test(objective=objective):
+                target = target_of(objective, labels, np.eye(3, dtype=bool)[labels])
 
-                def loss(x: jax.Array):
-                    values = sdca_loss(x, labels, objective, backend="jax", reduction="none")
+                def loss(x: jax.Array, target: np.ndarray = target):
+                    values = named_loss(x, target, objective, backend="jax", reduction="none")
                     return values.sum(), values
 
                 (_, values), gradient = jax.jit(jax.value_and_grad(loss, has_aux=True))(z)
@@ -132,7 +134,9 @@ class JaxLossTests:
                 for transform in (lambda f: f, jax.jit):
                     with subtests.test(dtype=dtype, scores=scores, transform=transform):
                         value, gradient = transform(
-                            jax.value_and_grad(lambda x: sdca_loss(x, target, backend="jax"))
+                            jax.value_and_grad(
+                                lambda x: multilabel_cross_entropy(x, target, backend="jax")
+                            )
                         )(z)
                         np.testing.assert_allclose(value, expected_value, rtol=3e-7)
                         np.testing.assert_allclose(gradient, [[2 / 3, -1 / 3, -1 / 3]], rtol=3e-7)
@@ -174,15 +178,16 @@ class JaxLossTests:
             for transform in (lambda f: f, jax.jit):
                 with subtests.test(dtype=dtype, transform=transform):
                     value, gradient = transform(
-                        jax.value_and_grad(lambda x, t: sdca_loss(x, t, backend="jax"))
+                        jax.value_and_grad(lambda x, t: named_loss(x, t, backend="jax"))
                     )(z, np.array([0], dtype=dtype))
                     np.testing.assert_allclose(value, expected_value, rtol=1e-14)
                     np.testing.assert_allclose(gradient, expected_gradient, rtol=1e-14)
-        invalid = jax.jit(jax.value_and_grad(lambda x, t: sdca_loss(x, t, backend="jax")))
-        for target in (np.array([-1], dtype=np.int8), np.zeros_like(z, dtype=bool)):
-            value, gradient = invalid(z, target)
-            assert np.isnan(value)
-            assert np.isnan(gradient).all()
+        invalid = jax.jit(jax.value_and_grad(lambda x, t: named_loss(x, t, backend="jax")))
+        value, gradient = invalid(z, np.array([-1], dtype=np.int8))
+        assert np.isnan(value)
+        assert np.isnan(gradient).all()
+        with pytest.raises(TypeError, match="integer class labels"):
+            invalid(z, np.zeros_like(z, dtype=bool))
 
     def test_native_losses_match_loss_and_grad(self):
         for dtype in [np.float64, np.float32]:
@@ -193,7 +198,7 @@ class JaxLossTests:
                 values, gradients = loss_and_grad(z, target, loss, **OPTIONS)
 
                 def weighted(x: jax.Array, t: jax.Array, loss: str = loss):
-                    per = sdca_loss(x, t, loss, backend="native", reduction="none", **OPTIONS)
+                    per = named_loss(x, t, loss, backend="native", reduction="none", **OPTIONS)
                     return (per * weights).sum(), per
 
                 (_, actual), gradient = jax.jit(jax.value_and_grad(weighted, has_aux=True))(
@@ -210,18 +215,19 @@ class JaxLossTests:
 
         def spy(*args: Any, **kwargs: Any) -> Any:
             threads.append(kwargs["num_threads"])
-            return loss_and_grad(*args, **kwargs)
+            return host(*args, **kwargs)
 
         # The host callback's call; test_jax_ffi.py compares the FFI handlers with it.
-        with mock.patch.object(sdca_jax, "loss_and_grad", spy):
-            loss = jax.jit(lambda x: sdca_loss(x, labels, "multiclass_hinge", backend="native"))
+        host = sdca_jax._host_loss_and_grad
+        with mock.patch.object(sdca_jax, "_host_loss_and_grad", spy):
+            loss = jax.jit(lambda x: named_loss(x, labels, "multiclass_hinge", backend="native"))
             with mock.patch.dict(os.environ, {"SDCA_JAX_FFI": "off"}):
                 os.environ.pop("SDCA_NUM_THREADS", None)
                 loss(z).block_until_ready()
                 os.environ["SDCA_NUM_THREADS"] = "2"
                 loss(z + 1).block_until_ready()
-        # 0 is automatic; None leaves the count to SDCA_NUM_THREADS.
-        assert threads == [0, None]
+        # None: SDCA_NUM_THREADS, else the available CPUs.
+        assert threads == [None, None]
 
     def test_native_values_take_the_x64_setting_of_the_trace(self):
         """The host returns the value dtype declared at trace time, which XLA's callback thread
@@ -230,9 +236,9 @@ class JaxLossTests:
             """
             from unittest import mock
             import jax, jax.experimental, numpy as np
-            from libsdca import loss_and_grad
             from libsdca import jax as sdca_jax
-            from libsdca.jax import sdca_loss
+            from numpy_api import mask_loss_and_grad as loss_and_grad
+            from named_losses import jax_loss as named_loss
             x64 = getattr(jax, "enable_x64", None)
             x64 = getattr(jax.experimental, "enable_x64", None) if x64 is None else x64
             z = np.random.default_rng(3).normal(size=(4, 6)).astype(np.float32)
@@ -244,7 +250,7 @@ class JaxLossTests:
                 dtypes.append(result[0].dtype)
                 return result
             def loss(x):
-                return sdca_loss(x, labels, "topk_hinge_beta", k=2, backend="native")
+                return named_loss(x, labels, "topk_hinge_beta", k=2, backend="native")
             def check(value, gradient):
                 np.testing.assert_allclose(value, values.mean(), rtol=1e-6)
                 np.testing.assert_allclose(gradient, gradients / 4, rtol=1e-6)
@@ -274,7 +280,7 @@ class JaxLossTests:
             with x64(enabled):
                 loss = jax.jit(
                     jax.value_and_grad(
-                        lambda x: sdca_loss(
+                        lambda x: named_loss(
                             x, labels, "multiclass_hinge", backend="native", gamma=0.6
                         )
                     )
@@ -285,11 +291,10 @@ class JaxLossTests:
 
     def test_native_vmap_of_integer_labels_below_the_score_rank(self, subtests: pytest.Subtests):
         """vmap of native losses whose integer labels have the rank of the scores less one
-        (batched or shared, the class axis inside the example): as their label masks."""
+        (batched or shared, the class axis inside the example): as a loop."""
         rng = np.random.default_rng(11)
         z = rng.normal(size=(3, 2, 7, 4))
         labels = rng.integers(0, 7, (3, 2, 4))
-        masks = np.moveaxis(np.eye(7, dtype=bool)[labels], -1, 2)
         for loss in [
             "multiclass_hinge",
             "topk_hinge_beta",
@@ -298,12 +303,9 @@ class JaxLossTests:
         ]:
 
             def per(x: ArrayLike, t: ArrayLike, loss: str = loss) -> jax.Array:
-                return sdca_loss(x, t, loss, backend="native", axis=1, reduction="sum", **OPTIONS)
+                return named_loss(x, t, loss, backend="native", axis=1, reduction="sum", **OPTIONS)
 
-            for in_axes, target, mask in [
-                ((0, 0), labels, masks),
-                ((0, None), labels[0], masks[0]),
-            ]:
+            for in_axes, target in [((0, 0), labels), ((0, None), labels[0])]:
 
                 def total(
                     x: jax.Array, t: ArrayLike, in_axes: tuple[int, int | None] = in_axes
@@ -319,10 +321,8 @@ class JaxLossTests:
                     mapped, grads = jax.jit(jax.vmap(per, in_axes)), jax.jit(jax.grad(total))
                     loop = [per(z[i], pick(i)) for i in range(3)]
                     np.testing.assert_allclose(mapped(z, target), loop, rtol=1e-12)
-                    np.testing.assert_allclose(mapped(z, target), mapped(z, mask), rtol=1e-15)
                     expected = [jax.grad(per)(z[i], pick(i)) for i in range(3)]
                     np.testing.assert_allclose(grads(z, target), expected, rtol=1e-12)
-                    np.testing.assert_allclose(grads(z, target), grads(z, mask), rtol=1e-15)
 
     def test_vmap_and_class_axis(self):
         z, labels, mask = problem(np.float64)
@@ -336,8 +336,8 @@ class JaxLossTests:
             ("multilabel_hinge", "native"),
         ]:
 
-            def per(x: ArrayLike, t: ArrayLike, loss: str = loss, backend: str = backend):
-                return sdca_loss(x, t, loss, backend=backend, **OPTIONS)
+            def per(x: ArrayLike, t: ArrayLike, loss: str = loss, backend: Any = backend):
+                return named_loss(x, t, loss, backend=backend, **OPTIONS)
 
             multilabel = loss.startswith("multilabel")
             batched = np.broadcast_to(mask, batch.shape) if multilabel else batch_labels
@@ -363,31 +363,35 @@ class JaxLossTests:
         flat = np.moveaxis(z4, 1, -1).reshape(-1, 7)
         expected, _ = loss_and_grad(flat, l4.reshape(-1))
         for backend in ["native", "jax"]:
-            values = sdca_loss(z4, l4, axis=1, backend=backend, reduction="none")
+            values = named_loss(z4, l4, axis=1, backend=backend, reduction="none")
             np.testing.assert_allclose(np.asarray(values).reshape(-1), expected, rtol=1e-13)
         mask4 = np.moveaxis(np.eye(7, dtype=bool)[l4], -1, 1)
-        np.testing.assert_allclose(sdca_loss(z4, mask4, axis=1), expected.mean(), rtol=1e-13)
+        np.testing.assert_allclose(
+            multilabel_cross_entropy(z4, mask4, axis=1), expected.mean(), rtol=1e-13
+        )
 
     def test_jax_entropy_matches_native_to_any_order(self):
         for dtype in [np.float64, np.float32]:
             z, labels, mask = problem(dtype)
-            for target in [labels, mask]:
+            for name, target in [("cross_entropy", labels), ("multilabel_cross_entropy", mask)]:
                 for f in [lambda x: x, jax.grad]:
-                    native = f(lambda x, t=target: sdca_loss(x, t, backend="native"))(z)
-                    actual = jax.jit(f(lambda x, t=target: sdca_loss(x, t, backend="jax")))(z)
+                    native = f(lambda x, t=target, n=name: named_loss(x, t, n, backend="native"))(z)
+                    actual = jax.jit(
+                        f(lambda x, t=target, n=name: named_loss(x, t, n, backend="jax"))
+                    )(z)
                     np.testing.assert_allclose(actual, native, **TOLERANCES[dtype])
         z, labels, _ = problem(np.float64)
-        hessian = jax.hessian(lambda x: sdca_loss(x, labels[:1], reduction="sum"))(z[:1])
+        hessian = jax.hessian(lambda x: named_loss(x, labels[:1], reduction="sum"))(z[:1])
         p = np.asarray(jax.nn.softmax(z[0]))
         np.testing.assert_allclose(
             hessian[0, :, 0, :], np.diag(p) - np.outer(p, p), rtol=1e-14, atol=1e-15
         )
         small = np.array([[0.0, 1e-10, -1e-10]])
         gradient = jax.grad(
-            lambda x: sdca_loss(x, np.ones((1, 3), bool), "multilabel_cross_entropy")
+            lambda x: named_loss(x, np.ones((1, 3), bool), "multilabel_cross_entropy")
         )
         np.testing.assert_allclose(gradient(small), small / 3, rtol=1e-6, atol=1e-20)
-        half = sdca_loss(jnp.asarray(z, jnp.bfloat16), labels, reduction="none")
+        half = named_loss(jnp.asarray(z, jnp.bfloat16), labels, reduction="none")
         assert half.dtype == jnp.float32
 
     def test_jax_entropy_derivatives_at_tied_maxima(self, subtests: pytest.Subtests):
@@ -410,6 +414,8 @@ class JaxLossTests:
                         return -(t * jax.nn.log_softmax(x, -1)).sum()
 
                     def loss(x: jax.Array, target: np.ndarray = target) -> jax.Array:
+                        if target.dtype == bool:
+                            return multilabel_cross_entropy(x, target, reduction="sum")
                         return cross_entropy(x, target, reduction="sum")
 
                     def orders(f: Any) -> list[jax.Array]:
@@ -432,8 +438,8 @@ class JaxLossTests:
 
         for backend in ["native", "jax"]:
 
-            def f(x: jax.Array, backend: str = backend):
-                return sdca_loss(x, labels, "topk_hinge_beta", backend=backend, **OPTIONS)
+            def f(x: jax.Array, backend: Any = backend):
+                return named_loss(x, labels, "topk_hinge_beta", backend=backend, **OPTIONS)
 
             with pytest.raises(Exception, match="JVP"):
                 jax.hessian(f)(z)
@@ -442,34 +448,85 @@ class JaxLossTests:
 
     def test_validation(self):
         z, labels, mask = problem(np.float64)
-        cases = [
-            ({"loss": "typo"}, "Unknown loss"),
-            ({"backend": "torch"}, "Unknown backend"),
-            ({"target": labels + 7}, "out of range"),
-            ({"target": np.zeros_like(mask)}, "positive label"),
-            ({"loss": "topk_hinge_beta", "target": mask}, "exactly one target"),
-            ({"loss": "topk_hinge_beta", "gamma": 0.5, "target": mask}, "exactly one target"),
-            ({"loss": "multiclass_hinge", "gamma": 0.5, "target": mask}, "exactly one target"),
-            ({"loss": "topk_cross_entropy", "target": mask}, "exactly one target"),
-            ({"loss": "multilabel_hinge", "target": np.ones_like(mask)}, "negative label"),
-            ({"k": 7}, "k must be"),
-            ({"gamma": -1.0}, "gamma"),
-            ({"axis": 2}, "axis"),
-            ({"logits": z.astype(int)}, "floating-point"),
-            ({"logits": np.where(mask, np.nan, z)}, "finite"),
-            ({"logits": z[:, :1], "target": labels * 0}, "two classes"),
-            ({"target": labels.astype(float)}, "integer class indices"),
-            ({"reduction": "max"}, "reduction"),
+        topk = topk_hinge_loss
+        value_errors = [
+            (cross_entropy, {"backend": "torch"}, "backend must be"),
+            (cross_entropy, {"target": labels + 7}, "out of range"),
+            (multilabel_cross_entropy, {"target": np.zeros_like(mask)}, "positive label"),
+            (multilabel_hinge_loss, {"target": np.ones_like(mask)}, "negative label"),
+            (topk, {"k": 7}, "k must be in"),
+            (topk, {"k": 2, "variant": "gamma"}, "variant must be"),
+            (multiclass_hinge_loss, {"gamma": -1.0}, "gamma"),
+            (proximal_cross_entropy, {"alpha": 0.0}, "alpha"),
+            (cross_entropy, {"axis": 2}, "axis"),
+            (cross_entropy, {"logits": np.where(mask, np.nan, z)}, "finite"),
+            (cross_entropy, {"logits": z[:, :1], "target": labels * 0}, "two classes"),
+            (cross_entropy, {"target": labels[:-1]}, "shape"),
+            (cross_entropy, {"reduction": "max"}, "reduction"),
+            (cross_entropy, {"precision": "double"}, "precision"),
+            (cross_entropy, {"precision": np.float16}, "precision"),
+            (cross_entropy, {"label_smoothing": 1.5}, "label_smoothing"),
+            (cross_entropy, {"weight": -np.ones(z.shape[1])}, "weight"),
+            (cross_entropy, {"weight": np.ones(3)}, "weight"),
+            (cross_entropy, {"target": jax.nn.softmax(z), "ignore_index": -100}, "ignore_index"),
         ]
-        for change, message in cases:
+        for function, change, message in value_errors:
             arguments = {"logits": z, "target": labels, **change}
             with pytest.raises(ValueError, match=message):
-                sdca_loss(arguments.pop("logits"), arguments.pop("target"), **arguments)
-        # Traced targets reach the native checks on the host.
-        with pytest.raises(Exception, match="positive label|one target"):
-            jax.jit(lambda t: sdca_loss(z, t, "topk_hinge_beta", backend="native"))(
-                labels + 7
-            ).block_until_ready()
+                function(arguments.pop("logits"), arguments.pop("target"), **arguments)
+        type_errors = [
+            (cross_entropy, {"target": mask}, "multilabel_cross_entropy"),
+            (topk_cross_entropy, {"target": mask, "k": 1}, "integer class labels"),
+            (multiclass_hinge_loss, {"target": labels.astype(float)}, "integer class labels"),
+            (multilabel_hinge_loss, {"target": labels}, "boolean mask"),
+            (cross_entropy, {"logits": z.astype(int)}, "floating-point"),
+            (cross_entropy, {"reduction": 1}, "reduction"),
+            (cross_entropy, {"precision": 64.0}, "precision"),
+            (cross_entropy, {"axis": 1.0}, "axis"),
+            (cross_entropy, {"ignore_index": 1.5}, "ignore_index"),
+            (cross_entropy, {"weight": np.ones(z.shape[1], int)}, "weight"),
+            (multiclass_hinge_loss, {"gamma": "0"}, "gamma"),
+            (topk, {"k": 2.0}, "k must be an integer"),
+            (cross_entropy, {"k": 2}, "k"),
+            (multiclass_hinge_loss, {"alpha": 2}, "alpha"),
+            (distillation_loss, {"target": z, "gamma": 1.0}, "gamma"),
+        ]
+        for function, change, message in type_errors:
+            arguments = {"logits": z, "target": labels, **change}
+            with pytest.raises(TypeError, match=message):
+                function(arguments.pop("logits"), arguments.pop("target"), **arguments)
+        with pytest.raises(NotImplementedError, match="probability targets"):
+            cross_entropy(z, jax.nn.softmax(z), backend="native")
+        # Traced invalid targets give nan rows on every backend (the native library's call is
+        # repeated row by row after a failure).
+        invalid = labels + 7 * (np.arange(len(labels)) == 1)
+        backends: tuple[Backend, ...] = ("native", "jax", "auto")
+        for route in backends:
+
+            def rows(t: jax.Array, route: Backend = route) -> jax.Array:
+                return topk(z, t, k=2, backend=route, reduction="none")
+
+            values = jax.jit(rows)(invalid)
+            assert np.isnan(values).tolist() == [i == 1 for i in range(len(labels))]
+
+    def test_hyperparameters_are_static(self):
+        z, labels, _ = problem(np.float64)
+        calls = {
+            "gamma": lambda v: multiclass_hinge_loss(z, labels, gamma=v),
+            "alpha": lambda v: proximal_cross_entropy(z, labels, alpha=v),
+            "temperature": lambda v: distillation_loss(z, z, temperature=v),
+            "k": lambda v: topk_cross_entropy(z, labels, k=v),
+        }
+        for name, call in calls.items():
+            with pytest.raises(TypeError, match=f"{name} must be a static Python number"):
+                jax.jit(call)(2)
+            # A concrete 0-d array is a number.
+            np.testing.assert_array_equal(call(jnp.asarray(2)), call(2))
+        # label_smoothing may be traced: its composition is jax.numpy.
+        smoothed = jax.jit(lambda e: cross_entropy(z, labels, label_smoothing=e))
+        np.testing.assert_allclose(
+            smoothed(0.25), cross_entropy(z, labels, label_smoothing=0.25), rtol=1e-14
+        )
 
     def test_empty_batches_follow_torch(self, subtests: pytest.Subtests):
         # As libsdca.torch and torch.nn.functional: empty, a zero sum, a NaN mean, and a
@@ -478,7 +535,9 @@ class JaxLossTests:
         labels = jnp.zeros((0,), dtype=jnp.int32)
         calls = {
             "cross_entropy": lambda x, r: cross_entropy(x, labels, reduction=r),
-            "topk_hinge_alpha": lambda x, r: topk_hinge_alpha_loss(x, labels, k=2, reduction=r),
+            "topk_hinge_alpha": lambda x, r: topk_hinge_loss(
+                x, labels, k=2, variant="alpha", reduction=r
+            ),
             "distillation": lambda x, r: distillation_loss(x, x, reduction=r),
             "proximal_distillation": lambda x, r: proximal_distillation_loss(x, x, reduction=r),
         }
@@ -513,7 +572,7 @@ class JaxLossTests:
                     v: jax.Array, f: Any = f, k: int | None = k, y: np.ndarray = y
                 ) -> tuple[jax.Array, jax.Array]:
                     values = (
-                        f(v, y, reduction="none") if k is None else f(v, y, k, reduction="none")
+                        f(v, y, reduction="none") if k is None else f(v, y, k=k, reduction="none")
                     )
                     return values.sum(), values
 
@@ -525,16 +584,15 @@ class JaxLossTests:
                 np.testing.assert_allclose(
                     gradient, np.where(gradient < 0, gradient, p[part]), rtol=1e-5, atol=1e-30
                 )
-        # Traced labels out of range, negative ones included, and masks of top-k entropy at
-        # k = 1 with other than one target give nan rows.
+        # Traced labels out of range, negative ones included, give nan rows.
         step = jax.jit(jax.value_and_grad(lambda v, t: cross_entropy(v, t, reduction="sum")))
         for invalid in (-1, -100, 1000):
             value, gradient = step(z[:2], np.array([invalid, 3]))
             assert np.isnan(value) and np.isnan(gradient[0]).all()
             assert not np.isnan(gradient[1]).any()
-        mask = np.zeros((3, 1000), bool)
-        mask[0, :2] = mask[2, 5] = True
-        values = jax.jit(lambda v, t: topk_cross_entropy(v, t, reduction="none"))(z[:3], mask)
+        values = jax.jit(lambda v, t: topk_cross_entropy(v, t, k=1, reduction="none"))(
+            z[:3], np.array([-1, 1000, 5])
+        )
         assert np.isnan(values).tolist() == [True, True, False]
         np.testing.assert_allclose(values[2], cross_entropy(z[2:3], np.array([5])), rtol=1e-6)
 
@@ -579,7 +637,7 @@ class JaxLossTests:
         for temperature in [0.5, 1.0, 3.0]:
 
             def loss(x: jax.Array, temperature: float = temperature) -> jax.Array:
-                return distillation_loss(x, teacher, temperature, reduction="sum")
+                return distillation_loss(x, teacher, temperature=temperature, reduction="sum")
 
             def reference(x: jax.Array, temperature: float = temperature) -> jax.Array:
                 p = jax.nn.softmax(teacher / temperature, -1)
@@ -598,7 +656,7 @@ class JaxLossTests:
             backend = "auto" if loss == "cross_entropy" else "native"
             results = [
                 jax.value_and_grad(
-                    lambda x, p=p, t=target, n=loss, b=backend: sdca_loss(
+                    lambda x, p=p, t=target, n=loss, b=backend: named_loss(
                         x, t, n, precision=p, backend=b
                     )
                 )(z)
@@ -610,8 +668,8 @@ class JaxLossTests:
                 np.testing.assert_array_equal(dt64, f64)
                 np.testing.assert_array_equal(dt32, single)
         # precision="float64" computes jax entropy and distillation in float64.
-        entropy = sdca_loss(z, labels, precision="float64", reduction="none")
-        double = sdca_loss(z.astype(np.float64), labels, reduction="none")
+        entropy = named_loss(z, labels, precision="float64", reduction="none")
+        double = named_loss(z.astype(np.float64), labels, reduction="none")
         np.testing.assert_array_equal(entropy, double.astype(np.float32))
         teacher = np.roll(z, 1, axis=1)
         options = {"temperature": 2.0, "reduction": "none"}
@@ -625,7 +683,7 @@ class JaxLossTests:
             (z, "half"),
         ):
             with pytest.raises(ValueError, match="precision"):
-                sdca_loss(x, labels, precision=precision)
+                named_loss(x, labels, precision=precision)
             with pytest.raises(ValueError, match="precision"):
                 distillation_loss(x, x, precision=precision)
 
@@ -668,8 +726,10 @@ class JaxLossTests:
 
             def f(x: jax.Array, temperature: float = temperature, alpha: float | None = alpha):
                 if alpha is None:
-                    return distillation_loss(x, teacher, temperature, reduction="sum")
-                return proximal_distillation_loss(x, teacher, temperature, alpha, reduction="sum")
+                    return distillation_loss(x, teacher, temperature=temperature, reduction="sum")
+                return proximal_distillation_loss(
+                    x, teacher, temperature=temperature, alpha=alpha, reduction="sum"
+                )
 
             step = jax.jit(jax.grad(f))
             expected = step(student)
@@ -684,7 +744,9 @@ class JaxLossTests:
         rng = np.random.default_rng(7)
         student = rng.normal(size=(2, 32768))
         noise = rng.normal(size=(2, 32768))
-        grad = jax.jit(jax.grad(lambda x, y: distillation_loss(x, y, 2.0, reduction="sum")))
+        grad = jax.jit(
+            jax.grad(lambda x, y: distillation_loss(x, y, temperature=2.0, reduction="sum"))
+        )
         for spread in (0.3, 1e-3):
             s = student.astype(np.float32)
             t = (student + spread * noise).astype(np.float32)
@@ -701,11 +763,13 @@ class JaxLossTests:
             if temperature != part:
                 continue
             p = np.asarray(jax.nn.softmax(t / temperature))
-            distill = distillation_loss(z, t, temperature, reduction="none")
+            distill = distillation_loss(z, t, temperature=temperature, reduction="none")
             for alpha in (1e-4, 0.1, 1.0, 10.0, 1e4):
 
                 def f(x: jax.Array, alpha: float = alpha, temperature: float = temperature):
-                    values = proximal_distillation_loss(x, t, temperature, alpha, reduction="none")
+                    values = proximal_distillation_loss(
+                        x, t, temperature=temperature, alpha=alpha, reduction="none"
+                    )
                     return values.sum(), values
 
                 (_, value), g = jax.jit(jax.value_and_grad(f, has_aux=True))(z)
@@ -717,27 +781,35 @@ class JaxLossTests:
                 envelope += alpha * (r * r).sum(-1) / 2
                 np.testing.assert_allclose(value, envelope, rtol=4e-13)
                 assert bool((value <= distill * (1 + 1e-12)).all())
-            limit = proximal_distillation_loss(z, t, temperature, 1e-12, reduction="none")
+            limit = proximal_distillation_loss(
+                z, t, temperature=temperature, alpha=1e-12, reduction="none"
+            )
             np.testing.assert_allclose(limit, distill, rtol=1e-11)
         if part == "zero":
             # Equal logits, also with subnormal teacher probabilities: an exactly zero gradient.
             far = np.array([[0.0, -720.0, -360.0, 1.0, -721.0]])
             for x in (z, far, far.astype(np.float32), z.astype(jnp.bfloat16)):
                 for alpha in (1e-3, 1.0, 30.0):
-                    g = jax.grad(lambda v, x=x, a=alpha: proximal_distillation_loss(v, x, 2.0, a))(
-                        x
-                    )
+                    g = jax.grad(
+                        lambda v, x=x, a=alpha: proximal_distillation_loss(
+                            v, x, temperature=2.0, alpha=a
+                        )
+                    )(x)
                     assert g.dtype == x.dtype
                     assert int(jnp.count_nonzero(g)) == 0
         if part != "other":
             return
         # vmap, the teacher's zero gradient, first-order only and validation.
-        batched = jax.vmap(lambda a, b: proximal_distillation_loss(a, b, 2.0, 0.5))(
-            z.reshape(2, 3, 9), t.reshape(2, 3, 9)
-        )
-        expected = proximal_distillation_loss(z, t, 2.0, 0.5, reduction="none").reshape(2, 3)
+        batched = jax.vmap(
+            lambda a, b: proximal_distillation_loss(a, b, temperature=2.0, alpha=0.5)
+        )(z.reshape(2, 3, 9), t.reshape(2, 3, 9))
+        expected = proximal_distillation_loss(
+            z, t, temperature=2.0, alpha=0.5, reduction="none"
+        ).reshape(2, 3)
         np.testing.assert_allclose(batched, expected.mean(-1), rtol=1e-14)
-        moved = proximal_distillation_loss(z.T, t.T, 2.0, 0.5, axis=0, reduction="none")
+        moved = proximal_distillation_loss(
+            z.T, t.T, temperature=2.0, alpha=0.5, axis=0, reduction="none"
+        )
         np.testing.assert_allclose(moved, expected.reshape(-1), rtol=1e-14)
         gt = jax.grad(lambda b: proximal_distillation_loss(z, b), argnums=0)(t)
         np.testing.assert_array_equal(gt, 0.0)
@@ -759,18 +831,20 @@ class JaxLossTests:
         for dtype in (jnp.float16, jnp.bfloat16):
             x, t = jnp.asarray(z, dtype), jnp.asarray(teacher, dtype)
             cases = {
-                "sdca_loss": (lambda v: sdca_loss(v, labels, reduction="none"), jnp.float32),
+                "sdca_loss": (lambda v: named_loss(v, labels, reduction="none"), jnp.float32),
                 "cross_entropy": (
                     lambda v: cross_entropy(v, labels, reduction="none"),
                     jnp.float32,
                 ),
                 "distillation": (
-                    lambda v: distillation_loss(v, t.astype(v.dtype), 2.0, reduction="none"),
+                    lambda v: distillation_loss(
+                        v, t.astype(v.dtype), temperature=2.0, reduction="none"
+                    ),
                     jnp.float32,
                 ),
                 "proximal": (
                     lambda v: proximal_distillation_loss(
-                        v, t.astype(v.dtype), 2.0, 0.5, reduction="none"
+                        v, t.astype(v.dtype), temperature=2.0, alpha=0.5, reduction="none"
                     ),
                     jnp.float32,
                 ),
@@ -827,7 +901,10 @@ class JaxLossTests:
                 lambda x, r: multiclass_hinge_loss(x, labels, backend="native", **r),
                 hinge,
             ),
-            "distillation": (lambda x, r: distillation_loss(x, teacher, 2.0, **r), distillation),
+            "distillation": (
+                lambda x, r: distillation_loss(x, teacher, temperature=2.0, **r),
+                distillation,
+            ),
         }
         for name, (f, exact) in cases.items():
             for reduction in ("sum", "mean"):
@@ -844,10 +921,11 @@ class JaxLossTests:
     def test_native_losses_keep_subnormals_in_host_callbacks(self):
         # XLA:CPU flushes subnormals, also on the host callback thread.
         z, mask = np.array([[0.0, 20.0, 20.0, -100.0]]), np.array([[True, False, True, False]])
-        expected, _ = loss_and_grad(z, mask, "proximal_cross_entropy", alpha=1e300)
+        label = np.array([2])
+        expected, _ = loss_and_grad(z, label, "proximal_cross_entropy", alpha=1e300)
 
         def per_row(x: jax.Array):
-            return sdca_loss(x, mask, "proximal_cross_entropy", alpha=1e300, reduction="none")
+            return named_loss(x, label, "proximal_cross_entropy", alpha=1e300, reduction="none")
 
         np.testing.assert_allclose(jax.jit(per_row)(z), expected, rtol=1e-15)
         # Subnormal gamma and alpha pass the wrapper's checks on that thread.
@@ -866,7 +944,7 @@ class JaxLossTests:
                 options: Smoothing = options,
                 target: np.ndarray = target,
             ):
-                return sdca_loss(x, target, loss, backend="native", reduction="sum", **options)
+                return named_loss(x, target, loss, backend="native", reduction="sum", **options)
 
             value, actual = jax.jit(jax.value_and_grad(total))(z)
             np.testing.assert_allclose(value, expected.sum(), rtol=1e-15, err_msg=loss)
@@ -877,7 +955,7 @@ class JaxLossTests:
             z = np.array([[big, -big]], dtype)
             for backend in ["jax", "native"]:
                 value, gradient = jax.value_and_grad(
-                    lambda x, b=backend: sdca_loss(x, np.array([0]), backend=b)
+                    lambda x, b=backend: named_loss(x, np.array([0]), backend=b)
                 )(z)
                 assert float(value) == 0.0, backend
                 np.testing.assert_array_equal(gradient, 0.0)
@@ -918,7 +996,7 @@ class JaxLossTests:
                     )
                     actual, grad = jax.jit(
                         jax.value_and_grad(
-                            lambda x, t=target, name=loss, g=smoothing: sdca_loss(
+                            lambda x, t=target, name=loss, g=smoothing: named_loss(
                                 x, t, name, gamma=g
                             )
                         )
@@ -934,57 +1012,114 @@ class JaxLossTests:
 
     def test_functional_helpers_and_names(self):
         z, labels, mask = problem(np.float64)
-        for name in ("ce", "softmax", "svm", "topk_hinge_beta_smooth"):
-            with pytest.raises(ValueError, match="Unknown loss"):
-                sdca_loss(z, labels, name)
-        np.testing.assert_allclose(cross_entropy(z, labels), sdca_loss(z, labels, "cross_entropy"))
+        for name in ("sdca_loss", "topk_hinge_alpha_loss", "topk_hinge_beta_loss"):
+            assert not hasattr(sdca_jax, name)
         np.testing.assert_allclose(
-            topk_cross_entropy(z, labels, 2), sdca_loss(z, labels, "topk_cross_entropy", k=2)
+            multiclass_hinge_loss(z, labels, gamma=0.5),
+            topk_hinge_loss(z, labels, k=1, variant="alpha", gamma=0.5),
+        )
+        np.testing.assert_allclose(  # the default variant is beta
+            topk_hinge_loss(z, labels, k=2),
+            topk_hinge_loss(z, labels, k=2, variant="beta", gamma=0.0),
         )
         np.testing.assert_allclose(
-            multiclass_hinge_loss(z, labels), sdca_loss(z, labels, "multiclass_hinge", k=2)
+            topk_cross_entropy(z, labels, k=1), cross_entropy(z, labels), rtol=1e-14
         )
-        np.testing.assert_allclose(
-            multiclass_hinge_loss(z, labels, 0.5),
-            sdca_loss(z, labels, "topk_hinge_alpha", k=1, gamma=0.5),
-        )
-        for variant in ("alpha", "beta"):
-            base = f"topk_hinge_{variant}"
-            single = topk_hinge_alpha_loss if variant == "alpha" else topk_hinge_beta_loss
-            for gamma in (0.0, 0.4):
-                expected = sdca_loss(z, labels, base, k=2, gamma=gamma)
-                np.testing.assert_allclose(
-                    topk_hinge_loss(z, labels, 2, variant=variant, gamma=gamma), expected
-                )
-                np.testing.assert_allclose(single(z, labels, 2, gamma=gamma), expected)
-        default = topk_hinge_loss  # the default variant is beta
-        np.testing.assert_allclose(
-            default(z, labels, 2), sdca_loss(z, labels, "topk_hinge_beta", k=2)
-        )
-        with pytest.raises(ValueError, match="variant"):
-            topk_hinge_loss(z, labels, 2, variant="invalid")
         with pytest.raises(TypeError):
             # Deliberately an unknown keyword.
-            topk_hinge_loss(z, labels, 2, mode="alpha")  # pyright: ignore[reportCallIssue]
-        np.testing.assert_allclose(
-            multilabel_cross_entropy(z, mask), sdca_loss(z, mask, "multilabel_cross_entropy")
+            topk_hinge_loss(z, labels, k=2, mode="alpha")  # pyright: ignore[reportCallIssue]
+        for function, target in (
+            (multiclass_hinge_loss, labels),
+            (multilabel_hinge_loss, mask),
+            (proximal_cross_entropy, labels),
+            (distillation_loss, z),
+        ):
+            with pytest.raises(TypeError, match="positional"):
+                function(z, target, 0.5)  # pyright: ignore[reportCallIssue]
+
+    def test_weights_ignored_labels_and_smoothing_follow_torch(self, subtests: pytest.Subtests):
+        """torch.nn.functional.cross_entropy's formulas, in jax.numpy: per-example losses times
+        the weight of their label (0 where ignored), smoothing (1 - eps) nll + eps / C sum_j w_j
+        (lse - z_j), the mean divided by the sum of the label weights; probability targets
+        -sum_j w_j t_j log p_j, the mean divided by the examples."""
+        rng = np.random.default_rng(17)
+        z = rng.normal(size=(2, 9, 6))
+        labels = rng.integers(0, 6, (2, 9))
+        labels[0, 3] = labels[1, 5] = -100
+        weight = rng.uniform(0.2, 2.0, 6)
+        probabilities = np.asarray(jax.nn.softmax(rng.normal(size=z.shape), -1))
+
+        def reference(
+            per: np.ndarray, w: np.ndarray | None, eps: float, reduction: Reduction
+        ) -> Any:
+            ignored = labels == -100
+            safe = np.where(ignored, 0, labels)
+            rows = np.where(ignored, 0.0, 1.0 if w is None else w[safe])
+            log_p = np.asarray(jax.nn.log_softmax(z, -1))
+            smooth = -(log_p * (1.0 if w is None else w)).sum(-1)
+            loss = (1 - eps) * np.where(ignored, 0.0, per) * rows + eps / 6 * np.where(
+                ignored, 0.0, smooth
+            )
+            if reduction == "none":
+                return loss
+            return loss.sum() if reduction == "sum" else loss.sum() / rows.sum()
+
+        def unweighted(function: Any, **options: Any) -> np.ndarray:
+            safe = np.where(labels == -100, 0, labels)
+            return np.asarray(function(z, safe, reduction="none", **options))
+
+        losses = {
+            "cross_entropy": (cross_entropy, {}),
+            "topk_cross_entropy": (topk_cross_entropy, {"k": 2}),
+            "multiclass_hinge": (multiclass_hinge_loss, {"gamma": 0.5}),
+            "topk_hinge": (topk_hinge_loss, {"k": 3, "variant": "alpha"}),
+            "proximal_cross_entropy": (proximal_cross_entropy, {"alpha": 0.5}),
+        }
+        for name, (function, options) in losses.items():
+            per = unweighted(function, **options)
+            smoothing = (0.0, 0.3) if name == "cross_entropy" else (0.0,)
+            for w in (None, weight):
+                for eps in smoothing:
+                    extra = {"label_smoothing": eps} if name == "cross_entropy" else {}
+                    for reduction in ("none", "sum", "mean"):
+                        with subtests.test(name, weighted=w is not None, eps=eps, r=reduction):
+
+                            def loss(x: jax.Array, t: jax.Array, w: Any = w, r: str = reduction):
+                                return function(
+                                    x, t, weight=w, ignore_index=-100, reduction=r,
+                                    **options, **extra
+                                )  # fmt: skip
+
+                            actual = jax.jit(loss)(z, labels)
+                            expected = reference(per, w, eps, reduction)
+                            np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-15)
+                            # Ignored rows get no gradient.
+                            gradient = jax.grad(lambda x, f=loss: f(x, labels).sum())(z)
+                            assert not np.asarray(gradient)[labels == -100].any()
+        for w in (None, weight):
+            for eps in (0.0, 0.2):
+                for reduction in ("none", "sum", "mean"):
+                    with subtests.test("probabilities", weighted=w is not None, eps=eps):
+                        t = (1 - eps) * probabilities + eps / 6
+                        log_p = np.asarray(jax.nn.log_softmax(z, -1))
+                        rows = -(log_p * t * (1.0 if w is None else w)).sum(-1)
+                        expected = {"none": rows, "sum": rows.sum(), "mean": rows.mean()}
+                        actual = cross_entropy(
+                            z, probabilities, weight=w, label_smoothing=eps, reduction=reduction
+                        )
+                        np.testing.assert_allclose(actual, expected[reduction], rtol=1e-12)
+        # The class axis anywhere; traced invalid weights give NaN.
+        moved = cross_entropy(
+            np.moveaxis(z, -1, 1), labels, weight=weight, ignore_index=-100, axis=1
         )
         np.testing.assert_allclose(
-            multilabel_hinge_loss(z, mask), sdca_loss(z, mask, "multilabel_hinge")
+            moved, cross_entropy(z, labels, weight=weight, ignore_index=-100), rtol=1e-14
         )
-        np.testing.assert_allclose(
-            multilabel_hinge_loss(z, mask, 0.6),
-            sdca_loss(z, mask, "multilabel_hinge", gamma=0.6),
-        )
-        np.testing.assert_allclose(
-            proximal_cross_entropy(z, labels, 0.7),
-            sdca_loss(z, labels, "proximal_cross_entropy", alpha=0.7),
-        )
-        teacher = np.roll(z, 1, axis=1)
-        np.testing.assert_allclose(
-            distillation_loss(z, teacher, 3.0),
-            distillation_loss(z, teacher, temperature=3.0),
-        )
+        nan = jax.jit(lambda w: cross_entropy(z, labels, weight=w, ignore_index=-100))(-weight)
+        assert np.isnan(nan)
+        # 16-bit logits give float32 losses, as without the options.
+        half = cross_entropy(z.astype(jnp.bfloat16), labels, weight=weight, ignore_index=-100)
+        assert half.dtype == jnp.float32
 
 
 class PublicNamesTests:

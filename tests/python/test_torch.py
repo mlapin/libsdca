@@ -4,11 +4,11 @@ import math
 from collections.abc import Callable
 from typing import Any
 
-import libsdca
+import libsdca.torch
 import mpmath
 import pytest
 import torch
-from libsdca import LOSSES
+from libsdca._core import _LABEL_LOSSES as LOSSES
 from libsdca.torch import (
     CrossEntropyLoss,
     DistillationLoss,
@@ -17,10 +17,7 @@ from libsdca.torch import (
     MultilabelHingeLoss,
     ProximalCrossEntropyLoss,
     ProximalDistillationLoss,
-    SDCALoss,
     TopKCrossEntropyLoss,
-    TopKHingeAlphaLoss,
-    TopKHingeBetaLoss,
     TopKHingeLoss,
     cross_entropy,
     distillation_loss,
@@ -29,14 +26,19 @@ from libsdca.torch import (
     multilabel_hinge_loss,
     proximal_cross_entropy,
     proximal_distillation_loss,
-    sdca_loss,
     topk_cross_entropy,
-    topk_hinge_alpha_loss,
-    topk_hinge_beta_loss,
     topk_hinge_loss,
 )
 from mpmath_types import MPReal
+from named_losses import loss as named_loss
 from torch.autograd import gradcheck, gradgradcheck
+
+
+def sdca_loss(
+    z: torch.Tensor, target: torch.Tensor, loss: str = "cross_entropy", **options: Any
+) -> torch.Tensor:
+    """The named libsdca.torch loss (named_losses.loss)."""
+    return named_loss(libsdca.torch, loss, z, target, **options)
 
 
 class TorchTests:
@@ -58,22 +60,24 @@ class TorchTests:
             torch.tensor([1, 2]),
             torch.tensor([[1, 1, 0, 0], [0, 1, 1, 0]], dtype=torch.bool),
         ]:
+            name = "multilabel_cross_entropy" if target.dtype == torch.bool else "cross_entropy"
 
             def f(x: torch.Tensor) -> torch.Tensor:
-                return sdca_loss(x, target, backend="torch")
+                return sdca_loss(x, target, name, backend="torch")
 
             assert gradcheck(f, (z,))
             assert gradgradcheck(f, (z,))
-            torch.testing.assert_close(f(z), sdca_loss(z, target), rtol=1e-14, atol=1e-14)
+            torch.testing.assert_close(f(z), sdca_loss(z, target, name), rtol=1e-14, atol=1e-14)
 
     def test_uniform_target_retains_small_logit_differences(self):
         for backend in ["native", "torch"]:
             z = torch.tensor([[0.0, 1e-10, -1e-10]], dtype=torch.float32, requires_grad=True)
-            sdca_loss(z, torch.ones_like(z, dtype=torch.bool), backend=backend).backward()
+            mask = torch.ones_like(z, dtype=torch.bool)
+            multilabel_cross_entropy(z, mask, backend=backend).backward()
             torch.testing.assert_close(z.grad, z.detach() / 3, rtol=1e-6, atol=1e-18)
         z = torch.zeros(1, 3, dtype=torch.float64, requires_grad=True)
         target = torch.ones_like(z, dtype=torch.bool)
-        assert gradgradcheck(lambda x: sdca_loss(x, target, backend="torch"), (z,))
+        assert gradgradcheck(lambda x: multilabel_cross_entropy(x, target, backend="torch"), (z,))
 
     def test_collapse_and_arbitrary_upstream_gradient(self):
         for dtype, gap in [(torch.float32, 18.0), (torch.float64, 50.0)]:
@@ -97,7 +101,7 @@ class TorchTests:
         target = torch.randint(0, 3, (2, 4))
         reference = torch.nn.functional.cross_entropy(z, target)
         for backend in ["native", "torch"]:
-            actual = sdca_loss(z, target, dim=1, backend=backend)
+            actual = cross_entropy(z, target, backend=backend)
             torch.testing.assert_close(actual, reference, rtol=1e-14, atol=1e-15)
             ga = torch.autograd.grad(actual, z)[0]
             gr = torch.autograd.grad(reference, z, retain_graph=True)[0]
@@ -245,7 +249,7 @@ class TorchTests:
         entropy = sdca_loss(x, labels, backend="torch", precision="float64", reduction="none")
         double = sdca_loss(x.double(), labels, backend="torch", reduction="none")
         torch.testing.assert_close(entropy, double.float(), rtol=0, atol=0)
-        assert "precision='float32'" in repr(SDCALoss("cross_entropy", precision="float32"))
+        assert "precision='float32'" in repr(CrossEntropyLoss(precision="float32"))
         assert "precision='float64'" in repr(DistillationLoss(precision="float64"))
         for x, precision in (
             (z.double(), "float32"),
@@ -266,12 +270,7 @@ class TorchTests:
         labels = torch.tensor([0, 1, 2, 3])
         mask = torch.nn.functional.one_hot(labels, 5).bool()
         mask[:, 4] = True
-        multilabel = (
-            "cross_entropy",
-            "multilabel_hinge",
-            "multilabel_cross_entropy",
-            "proximal_cross_entropy",
-        )
+        multilabel = ("multilabel_hinge", "multilabel_cross_entropy")
         cases = [
             (objective, backend, target, k)
             for objective in LOSSES
@@ -282,7 +281,7 @@ class TorchTests:
             for k in ((2,) if objective == "topk_cross_entropy" else (1, 2))
             if objective not in ("cross_entropy", "multilabel_cross_entropy")
             or (backend == "native" and target is mask)
-            if target is labels or objective in multilabel
+            if (target is labels) != (objective in multilabel)
         ]
         for device in ["cpu"] + (["cuda"] if torch.cuda.is_available() else []):
             for dtype in (torch.float64, torch.float32):
@@ -331,17 +330,20 @@ class TorchTests:
             mask[torch.arange(4), labels] = True
             mask[torch.arange(4), (labels + 1) % 6] = True
             for target in (labels, mask):
+                name = "multilabel_cross_entropy" if target is mask else "cross_entropy"
                 cpu = z.clone().requires_grad_()
                 gpu = z.to(device).requires_grad_()
-                values = sdca_loss(cpu, target, backend="torch", reduction="none")
-                device_values = sdca_loss(gpu, target.to(device), backend="torch", reduction="none")
+                values = sdca_loss(cpu, target, name, backend="torch", reduction="none")
+                device_values = sdca_loss(
+                    gpu, target.to(device), name, backend="torch", reduction="none"
+                )
                 torch.testing.assert_close(device_values.cpu(), values)
                 values.sum().backward()
                 device_values.sum().backward()
                 assert gpu.grad is not None
                 torch.testing.assert_close(gpu.grad.cpu(), cpu.grad)
                 with pytest.raises(ValueError):
-                    sdca_loss(gpu, target.to(device), backend="native")
+                    sdca_loss(gpu, target.to(device), name, backend="native")
             confident = torch.tensor(
                 [[20.0, -20.0, -20.0]], dtype=dtype, device=device, requires_grad=True
             )
@@ -375,7 +377,7 @@ class TorchTests:
         y = x.argmax(-1)
         net = torch.nn.Sequential(torch.nn.Linear(3, 12), torch.nn.Tanh(), torch.nn.Linear(12, 3))
         optimizer = torch.optim.Adam(net.parameters(), lr=0.04)
-        criterion = SDCALoss("proximal_cross_entropy", alpha=1.0)
+        criterion = ProximalCrossEntropyLoss(alpha=1.0)
         first = criterion(net(x), y).item()
         for _ in range(80):
             optimizer.zero_grad()
@@ -413,32 +415,31 @@ class TorchTests:
     def test_invalid_float_class_dimension(self):
         with pytest.raises(TypeError):
             # A float dim is invalid on purpose.
-            sdca_loss(torch.tensor([[1.0, 2.0]]), torch.tensor([0]), dim=-1.0)  # pyright: ignore[reportArgumentType]
+            topk_cross_entropy(torch.tensor([[1.0, 2.0]]), torch.tensor([0]), k=1, dim=-1.0)  # pyright: ignore[reportArgumentType]
 
     def test_consolidated_hinge_signatures(self):
         z = torch.tensor([[0.3, -0.4, 0.8, 1.2]], dtype=torch.float64, requires_grad=True)
         y = torch.tensor([1])
-        for variant, objective in (("alpha", "topk_hinge_alpha"), ("beta", "topk_hinge_beta")):
+        for variant in ("alpha", "beta"):
             for gamma in (0.0, 0.4):
-                expected = sdca_loss(z, y, objective, k=2, gamma=gamma)
-                actual = TopKHingeLoss(2, variant=variant, gamma=gamma)(z, y)
+                expected = topk_hinge_loss(z, y, k=2, variant=variant, gamma=gamma)
+                actual = TopKHingeLoss(k=2, variant=variant, gamma=gamma)(z, y)
                 torch.testing.assert_close(actual, expected)
-                torch.testing.assert_close(
-                    topk_hinge_loss(z, y, 2, variant=variant, gamma=gamma), expected
-                )
                 torch.testing.assert_close(
                     torch.autograd.grad(actual, z, retain_graph=True)[0],
                     torch.autograd.grad(expected, z, retain_graph=True)[0],
                 )
-        # variant is the only selector; the removed mode= alias is rejected.
+        # variant is the only selector; k is keyword-only.
         with pytest.raises(TypeError):
-            TopKHingeLoss(2, mode="alpha")  # pyright: ignore[reportCallIssue]
+            TopKHingeLoss(k=2, mode="alpha")  # pyright: ignore[reportCallIssue]
         with pytest.raises(TypeError):
-            topk_hinge_loss(z, y, 2, mode="beta")  # pyright: ignore[reportCallIssue]
+            topk_hinge_loss(z, y, k=2, mode="beta")  # pyright: ignore[reportCallIssue]
+        with pytest.raises(TypeError):
+            topk_hinge_loss(z, y, 2)  # pyright: ignore[reportCallIssue]
         with pytest.raises(ValueError, match="variant"):
-            TopKHingeLoss(2, variant="invalid")
+            TopKHingeLoss(k=2, variant="invalid")  # pyright: ignore[reportArgumentType]
 
-    def test_drop_in_modules_functions_and_aliases(self):
+    def test_drop_in_modules_and_functions(self):
         torch.manual_seed(42)
         z = torch.randn(5, 4, dtype=torch.float64, requires_grad=True)
         y = torch.tensor([0, 2, 1, 3, 0])
@@ -446,118 +447,81 @@ class TorchTests:
             [[1, 1, 0, 0], [0, 1, 1, 0], [1, 0, 1, 0], [0, 0, 1, 1], [1, 1, 1, 0]],
             dtype=torch.bool,
         )
-        # Names only: no aliases, and smoothing is gamma.
-        for bad in ("ce", "softmax", "svm", "topk_hinge_beta_smooth"):
-            with pytest.raises(ValueError, match="Unknown loss"):
-                sdca_loss(z, y, bad)
-        torch.testing.assert_close(
-            sdca_loss(z, y, "multiclass_hinge", k=2), sdca_loss(z, y, "topk_hinge_beta", k=1)
-        )
+        # multiclass_hinge is the top-1 hinge (both variants agree at k = 1).
+        for variant in ("alpha", "beta"):
+            torch.testing.assert_close(
+                multiclass_hinge_loss(z, y), topk_hinge_loss(z, y, k=1, variant=variant)
+            )
         # Drop-in CrossEntropyLoss and cross_entropy.
-        torch.testing.assert_close(CrossEntropyLoss()(z, y), sdca_loss(z, y, "cross_entropy"))
-        torch.testing.assert_close(cross_entropy(z, y), sdca_loss(z, y, "cross_entropy"))
+        reference = torch.nn.functional.cross_entropy(z, y)
+        torch.testing.assert_close(CrossEntropyLoss()(z, y), reference)
+        torch.testing.assert_close(cross_entropy(z, y), reference)
         assert "reduction='mean'" in repr(CrossEntropyLoss())
-        unsupported: list[dict[str, Any]] = [{"label_smoothing": 0.1}]
-        for options in unsupported:
-            with pytest.raises(ValueError, match="not supported"):
-                CrossEntropyLoss(**options)
-            with pytest.raises(ValueError, match="not supported"):
-                cross_entropy(z, y, **options)
         removed: list[dict[str, Any]] = [{"size_average": True}, {"reduce": False}]
         for options in removed:
             with pytest.raises(TypeError):
                 CrossEntropyLoss(**options)
             with pytest.raises(TypeError):
                 cross_entropy(z, y, **options)
-        # Top-k cross-entropy, hinge, multilabel, proximal, and distillation helpers.
+        # Modules and functions agree.
+        torch.testing.assert_close(TopKCrossEntropyLoss(k=2)(z, y), topk_cross_entropy(z, y, k=2))
         torch.testing.assert_close(
-            TopKCrossEntropyLoss(2)(z, y), sdca_loss(z, y, "topk_cross_entropy", k=2)
+            MulticlassHingeLoss(gamma=0.5)(z, y),
+            topk_hinge_loss(z, y, k=1, variant="alpha", gamma=0.5),
         )
         torch.testing.assert_close(
-            topk_cross_entropy(z, y, 2), sdca_loss(z, y, "topk_cross_entropy", k=2)
+            multiclass_hinge_loss(z, y, gamma=0.5), MulticlassHingeLoss(gamma=0.5)(z, y)
         )
-        torch.testing.assert_close(MulticlassHingeLoss()(z, y), sdca_loss(z, y, "multiclass_hinge"))
-        torch.testing.assert_close(
-            MulticlassHingeLoss(0.5)(z, y), sdca_loss(z, y, "topk_hinge_alpha", k=1, gamma=0.5)
-        )
-        torch.testing.assert_close(multiclass_hinge_loss(z, y, 0.5), MulticlassHingeLoss(0.5)(z, y))
-        for variant in ("alpha", "beta"):
-            base = f"topk_hinge_{variant}"
-            for gamma in (0.0, 0.4):
-                expected = sdca_loss(z, y, base, k=2, gamma=gamma)
-                for actual in (
-                    TopKHingeLoss(2, variant=variant, gamma=gamma)(z, y),
-                    topk_hinge_loss(z, y, 2, variant=variant, gamma=gamma),
-                    (TopKHingeAlphaLoss if variant == "alpha" else TopKHingeBetaLoss)(
-                        2, gamma=gamma
-                    )(z, y),
-                    (topk_hinge_alpha_loss if variant == "alpha" else topk_hinge_beta_loss)(
-                        z, y, 2, gamma=gamma
-                    ),
-                ):
-                    torch.testing.assert_close(actual, expected)
         # The default top-k hinge is beta, nonsmooth.
-        default_module, default_function = TopKHingeLoss, topk_hinge_loss
-        torch.testing.assert_close(default_module(2)(z, y), sdca_loss(z, y, "topk_hinge_beta", k=2))
-        torch.testing.assert_close(default_function(z, y, 2), TopKHingeBetaLoss(2)(z, y))
-        with pytest.raises(ValueError, match="variant"):
-            TopKHingeLoss(2, variant="invalid")
-        with pytest.raises(ValueError, match="variant"):
-            topk_hinge_loss(z, y, 2, variant="invalid")
         torch.testing.assert_close(
-            MultilabelCrossEntropyLoss()(z, mask), sdca_loss(z, mask, "multilabel_cross_entropy")
+            TopKHingeLoss(k=2)(z, y), topk_hinge_loss(z, y, k=2, variant="beta", gamma=0.0)
         )
         torch.testing.assert_close(
-            multilabel_cross_entropy(z, mask), sdca_loss(z, mask, "multilabel_cross_entropy")
+            MultilabelCrossEntropyLoss()(z, mask), multilabel_cross_entropy(z, mask)
+        )
+        torch.testing.assert_close(MultilabelHingeLoss()(z, mask), multilabel_hinge_loss(z, mask))
+        torch.testing.assert_close(
+            MultilabelHingeLoss(gamma=0.6)(z, mask), multilabel_hinge_loss(z, mask, gamma=0.6)
         )
         torch.testing.assert_close(
-            MultilabelHingeLoss()(z, mask), sdca_loss(z, mask, "multilabel_hinge")
-        )
-        torch.testing.assert_close(
-            MultilabelHingeLoss(0.6)(z, mask),
-            sdca_loss(z, mask, "multilabel_hinge", gamma=0.6),
-        )
-        torch.testing.assert_close(
-            multilabel_hinge_loss(z, mask, 0.6), MultilabelHingeLoss(0.6)(z, mask)
-        )
-        torch.testing.assert_close(
-            ProximalCrossEntropyLoss(0.7)(z, y),
-            sdca_loss(z, y, "proximal_cross_entropy", alpha=0.7),
-        )
-        torch.testing.assert_close(
-            proximal_cross_entropy(z, y, 0.7), ProximalCrossEntropyLoss(0.7)(z, y)
+            ProximalCrossEntropyLoss(alpha=0.7)(z, y), proximal_cross_entropy(z, y, alpha=0.7)
         )
         teacher = torch.randn_like(z)
         torch.testing.assert_close(
-            DistillationLoss(4.0)(z, teacher),
             DistillationLoss(temperature=4.0)(z, teacher),
-        )
-        torch.testing.assert_close(
-            distillation_loss(z, teacher, 4.0),
             distillation_loss(z, teacher, temperature=4.0),
         )
         torch.testing.assert_close(
-            ProximalDistillationLoss(4.0, 0.5)(z, teacher),
+            ProximalDistillationLoss(temperature=4.0, alpha=0.5)(z, teacher),
             proximal_distillation_loss(z, teacher, temperature=4.0, alpha=0.5),
         )
         for mod in (
-            TopKCrossEntropyLoss(2),
-            MulticlassHingeLoss(0.5),
-            TopKHingeLoss(2, gamma=0.4, variant="alpha"),
+            TopKCrossEntropyLoss(k=2),
+            MulticlassHingeLoss(gamma=0.5),
+            TopKHingeLoss(k=2, gamma=0.4, variant="alpha"),
             MultilabelCrossEntropyLoss(),
-            MultilabelHingeLoss(0.6),
-            ProximalCrossEntropyLoss(0.7),
-            ProximalDistillationLoss(2.0, 0.5),
+            MultilabelHingeLoss(gamma=0.6),
+            ProximalCrossEntropyLoss(alpha=0.7),
+            ProximalDistillationLoss(temperature=2.0, alpha=0.5),
         ):
             assert "reduction='mean'" in repr(mod)
-        # Lazy top-level exports on libsdca.
+        # Hyperparameters are keyword-only.
+        for positional in (
+            lambda: TopKCrossEntropyLoss(2),  # pyright: ignore[reportCallIssue]
+            lambda: MulticlassHingeLoss(0.5),  # pyright: ignore[reportCallIssue]
+            lambda: ProximalCrossEntropyLoss(0.7),  # pyright: ignore[reportCallIssue]
+            lambda: DistillationLoss(4.0),  # pyright: ignore[reportCallIssue]
+            lambda: distillation_loss(z, teacher, 4.0),  # pyright: ignore[reportCallIssue]
+            lambda: multilabel_hinge_loss(z, mask, 0.6),  # pyright: ignore[reportCallIssue]
+        ):
+            with pytest.raises(TypeError):
+                positional()
+        # The PyTorch names are in libsdca.torch only: importing libsdca needs no torch.
         for name in (
             "CrossEntropyLoss",
             "TopKCrossEntropyLoss",
             "MulticlassHingeLoss",
             "TopKHingeLoss",
-            "TopKHingeAlphaLoss",
-            "TopKHingeBetaLoss",
             "MultilabelCrossEntropyLoss",
             "MultilabelHingeLoss",
             "ProximalCrossEntropyLoss",
@@ -566,14 +530,12 @@ class TorchTests:
             "topk_cross_entropy",
             "multiclass_hinge_loss",
             "topk_hinge_loss",
-            "topk_hinge_alpha_loss",
-            "topk_hinge_beta_loss",
             "multilabel_cross_entropy",
             "multilabel_hinge_loss",
             "proximal_cross_entropy",
             "proximal_distillation_loss",
         ):
-            assert getattr(libsdca, name) is getattr(libsdca.torch, name)
+            assert hasattr(libsdca.torch, name) and not hasattr(libsdca, name)
 
     def test_proximal_distillation_kkt_limits_and_zero_gradient(self):
         gen = torch.Generator().manual_seed(31)

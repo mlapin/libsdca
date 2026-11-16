@@ -38,6 +38,15 @@ _modules: dict[Path, Any] = {}
 _log = logging.getLogger("libsdca")
 
 
+class BuildFailure(RuntimeError):
+    """A new build failed in a way taken to repeat with the same build key, so automatic
+    records it: the compiler exited with an error (also one of the environment that it reports
+    itself, such as no space left on device), or the new module does not import. Not
+    recorded: an OSError in this process (the file system), an existing build or native
+    library that does not load, and, for the JAX handlers only, a compiler killed by a signal
+    (PyTorch's cpp_extension reports every failed compile as the same RuntimeError)."""
+
+
 @dataclass(frozen=True)
 class Extension:
     """One build of SOURCE and the switch that selects it."""
@@ -100,7 +109,7 @@ def missing_tools(cuda: bool = False) -> str | None:
     try:  # older PyTorch loads setuptools (2.1 also its pkg_resources) for these tools
         import torch.utils.cpp_extension  # noqa: F401
     except ImportError as error:
-        return f"PyTorch's C++ extension tools do not load ({error}; pip install 'setuptools<81')"
+        return f"PyTorch's C++ extension tools do not load ({error}; pip install 'libsdca[torch]')"
     if not (Path(sysconfig.get_paths()["include"]) / "Python.h").is_file():
         return (
             "the Python development headers (Python.h) are not installed (Debian/Ubuntu: "
@@ -151,17 +160,30 @@ def _compiler(cxx: str) -> str:
     return " ".join(command) + "\n" + (version.splitlines() or [""])[0]
 
 
+def cpu_headers() -> list[Path]:
+    """Portable headers, including the canonical storage header in source/editable builds."""
+    headers = sorted(SOURCE.parent.glob("_cpu_*.h"))
+    if not SOURCE.with_name("_cpu_storage.h").is_file():
+        canonical = SOURCE.parents[2] / "include/sdca/math/storage.h"
+        if canonical.is_file():
+            headers.append(canonical)
+    return headers
+
+
 def build_directory(extension: Extension) -> Path:
-    """Where an extension is cached: one directory per source, PyTorch, Python, platform,
+    """Where an extension is cached: one directory per source, PyTorch build, Python, platform,
     compiler (command and version), flags and key, under TORCH_EXTENSIONS_DIR, else
     PyTorch's default extension root. It runs the compiler (once per CXX): check the tools
     first."""
     import torch
     from torch.utils.cpp_extension import get_default_build_root
 
-    parts = [torch.__version__, sys.implementation.cache_tag, sys.platform, compiler()]
+    # Builds of one torch version (pip, conda, CUDA variants) differ in ABI.
+    build = (torch.version.git_version, torch.version.cuda, torch._C._GLIBCXX_USE_CXX11_ABI)
+    parts = [torch.__version__, *map(str, build), sys.implementation.cache_tag, sys.platform]
+    parts.append(compiler())
     parts += [*extension.cflags, *extension.ldflags, *extension.key]
-    headers = sorted(SOURCE.parent.glob("_torch_*.h"))
+    headers = sorted([*SOURCE.parent.glob("_torch_*.h"), *cpu_headers()])
     identity = b"\0".join(
         [
             SOURCE.read_bytes(),
@@ -244,24 +266,42 @@ def load(extension: Extension) -> Any:
         try:
             module = _import(directory) if built else _build(extension, directory)
         except Exception as error:
-            raise RuntimeError(f"libsdca: {failure_reason(error, extension.what)}") from error
+            if built:
+                reason = failure_reason(error, extension.what, "could not be loaded")
+                raise RuntimeError(
+                    f"libsdca: {reason}; delete {directory} to build it again"
+                ) from error
+            failed = RuntimeError if isinstance(error, OSError) else BuildFailure
+            raise failed(f"libsdca: {failure_reason(error, extension.what)}") from error
         failure_record(extension).unlink(missing_ok=True)
         _modules[directory] = module
         return module
 
 
+_INTERNAL = frozenset(("libsdca", "torch", "jax", "jaxlib"))
+
+
+def warn(message: str) -> None:
+    """A RuntimeWarning attributed to the first caller outside libsdca, torch and jax."""
+    frame, level = sys._getframe(1), 2
+    while (
+        frame.f_back is not None
+        and frame.f_globals.get("__name__", "").partition(".")[0] in _INTERNAL
+    ):
+        frame, level = frame.f_back, level + 1
+    warnings.warn(message, RuntimeWarning, stacklevel=level)
+
+
 def automatic(extension: Extension) -> tuple[Any, str]:
     """(module, "") where the extension loads, else (None, why not); never raises. Missing
-    tools warn with a hint, a failed build warns and leaves a record that later processes
-    skip for RETRY seconds. Callers cache the result: once per process."""
+    tools warn with a hint, any other failure warns, and a BuildFailure leaves a record that
+    later processes skip for RETRY seconds. Callers cache the result: once per process."""
     with _lock:
         reason = missing_tools(extension.cuda)
         if reason is not None:
-            warnings.warn(
+            warn(
                 f"libsdca: {extension.fallback}: {reason}. Install it to build "
-                f"{extension.what}, or set {extension.env}=off to silence this.",
-                RuntimeWarning,
-                stacklevel=3,
+                f"{extension.what}, or set {extension.env}=off to silence this."
             )
             return None, reason
         record = failure_record(extension)
@@ -272,13 +312,14 @@ def automatic(extension: Extension) -> tuple[Any, str]:
             return load(extension), ""
         except Exception as error:  # noqa: BLE001 - any failure keeps the fallback
             reason = str(error).removeprefix("libsdca: ")
+            if not isinstance(error, BuildFailure):
+                warn(
+                    f"libsdca: {reason}; {extension.fallback} in this process "
+                    f"({extension.env}=off silences this)"
+                )
+                return None, reason
             record_failure(record, reason, error.__cause__ or error)
-            warnings.warn(
-                f"libsdca: {reason}; {extension.fallback}. Details: {record} (retried after "
-                f"24 h; {extension.env}=off silences this)",
-                RuntimeWarning,
-                stacklevel=3,
-            )
+            warn(f"libsdca: {reason}; {extension.fallback}. {retry_hint(record, extension.env)}")
             return None, f"{reason}; record {record}"
 
 
@@ -300,6 +341,14 @@ def recorded_failure(record: Path, env: str) -> str | None:
     )
 
 
+def retry_hint(record: Path, env: str) -> str:
+    """Where a new failure record is and how to retry before it expires."""
+    return (
+        f"Details: {record}; processes sharing this cache skip the build for 24 h (delete "
+        f"it or set {env}=on to retry now; {env}=off silences this)"
+    )
+
+
 def record_failure(record: Path, reason: str, error: BaseException) -> None:
     """Record a failed build (its reason on the first line); best effort."""
     try:
@@ -309,7 +358,7 @@ def record_failure(record: Path, reason: str, error: BaseException) -> None:
         pass
 
 
-def failure_reason(error: BaseException, what: str) -> str:
-    """The one-line reason of a failed build of what."""
+def failure_reason(error: BaseException, what: str, failed: str = "did not build") -> str:
+    """The one-line reason why what failed ("did not build", "could not be loaded")."""
     first = (str(error).strip().splitlines() or [""])[0]
-    return f"{what} did not build ({type(error).__name__}: {first})"
+    return f"{what} {failed} ({type(error).__name__}: {first})"

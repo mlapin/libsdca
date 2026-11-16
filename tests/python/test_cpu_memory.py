@@ -11,6 +11,7 @@ import libsdca.torch as sdca
 import pytest
 import torch
 from libsdca import _cpu, _cpu_entropy
+from named_losses import torch_loss
 
 DTYPES = [torch.float32, torch.bfloat16, torch.float16, torch.float64]
 
@@ -34,15 +35,15 @@ def _losses(
     mask = torch.rand(n, c, generator=g) < 0.2
     mask[:, 0], mask[:, 1] = True, False
     return z, [
-        lambda x: sdca.sdca_loss(
-            x, y, "topk_cross_entropy", k=3, backend="native", reduction="none"
-        ),
-        lambda x: sdca.sdca_loss(
+        lambda x: torch_loss(x, y, "topk_cross_entropy", k=3, backend="native", reduction="none"),
+        lambda x: torch_loss(
             x, y, "topk_hinge_beta", k=3, gamma=0.5, backend="native", reduction="none"
         ),
-        lambda x: sdca.sdca_loss(x, mask, "multilabel_hinge", backend="native", reduction="none"),
-        lambda x: sdca.proximal_cross_entropy(x, y, 0.7, reduction="none"),
-        lambda x: sdca.proximal_distillation_loss(x, teacher, 2.0, 0.7, reduction="none"),
+        lambda x: torch_loss(x, mask, "multilabel_hinge", backend="native", reduction="none"),
+        lambda x: sdca.proximal_cross_entropy(x, y, alpha=0.7, reduction="none"),
+        lambda x: sdca.proximal_distillation_loss(
+            x, teacher, temperature=2.0, alpha=0.7, reduction="none"
+        ),
     ]
 
 

@@ -27,7 +27,8 @@ def higher_worker(rank: int, rendezvous: str):
 
 
 def check_higher_derivatives():
-    from libsdca.torch import cross_entropy, distillation_loss, sdca_loss
+    from libsdca.torch import cross_entropy, distillation_loss
+    from named_losses import torch_loss
     from torch.distributed.device_mesh import init_device_mesh
     from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
     from torch.nn import functional as F
@@ -65,7 +66,7 @@ def check_higher_derivatives():
                 else:
                     reference = F.cross_entropy(local, labels)
                     # Plain labels contain the same GLOBAL values on each rank.
-                    actual = sdca_loss(z, labels, objective, k=1, backend="torch")
+                    actual = torch_loss(z, labels, objective, k=1, backend="torch")
                 (expected_gradient,) = torch.autograd.grad(reference, local, create_graph=True)
                 (expected_hvp,) = torch.autograd.grad(expected_gradient, local, direction)
                 (gradient,) = torch.autograd.grad(actual, z, create_graph=True)

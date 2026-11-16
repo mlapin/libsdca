@@ -9,7 +9,7 @@ import mpmath
 import pytest
 import torch
 from libsdca import _tensor_prox
-from libsdca.torch import sdca_loss
+from named_losses import torch_loss
 
 DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 
@@ -22,7 +22,7 @@ class StressTorchTests:
             backends = [("native", "cpu")] + [("torch", device) for device in DEVICES]
             for backend, device in backends:
                 z = torch.tensor([[big, -big]], dtype=dtype, device=device, requires_grad=True)
-                value = sdca_loss(z, torch.tensor([0], device=device), backend=backend)
+                value = torch_loss(z, torch.tensor([0], device=device), backend=backend)
                 message = f"{dtype} {backend} {device}"
                 assert value.item() == 0.0, message
                 value.backward()
@@ -64,7 +64,7 @@ class StressTorchTests:
                 _tensor_prox.proximal_entropy(scores, positive, alpha)
 
     def test_barron_collapse_and_extreme_wrong_margins(self):
-        # Past -ln(eps/2), PyTorch cross_entropy collapses to 0 while sdca_loss stays
+        # Past -ln(eps/2), PyTorch cross_entropy collapses to 0 while torch_loss stays
         # accurate and zero-sum; at [-max, max] the gradient stays exact [-1, 1].
         cases = [
             (torch.float16, 18.0, 1.5229979055675358e-8, 0.0),
@@ -87,7 +87,7 @@ class StressTorchTests:
                     assert z_pt.grad[0, 0].item() == 0.0
 
                 z = torch.tensor([[margin, 0.0]], dtype=dtype, device=device, requires_grad=True)
-                val = sdca_loss(z, y)
+                val = torch_loss(z, y)
                 val.backward()
                 assert z.grad is not None
                 assert round(abs(val.item() / expected_loss - 1.0), 5) == 0
@@ -100,7 +100,7 @@ class StressTorchTests:
 
                 fmax = torch.finfo(dtype).max
                 zw = torch.tensor([[-fmax, fmax]], dtype=dtype, device=device, requires_grad=True)
-                sdca_loss(zw, y).backward()
+                torch_loss(zw, y).backward()
                 torch.testing.assert_close(
                     zw.grad, torch.tensor([[-1.0, 1.0]], dtype=dtype, device=device)
                 )

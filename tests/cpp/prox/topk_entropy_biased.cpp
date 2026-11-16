@@ -183,7 +183,7 @@ TEST(ProxTopKEntropyBiasedTest, test_prox_k2_validated_cases) {
   }
 }
 
-// The objective l2_entropy_topk solves the same block with topk_entropy_block
+// The objective l2_topk_cross_entropy solves the same block with topk_entropy_block
 // (sdca/math/entropy.h); the thresholds derived from it must reproduce it.
 TEST(ProxTopKEntropyBiasedTest, test_prox_agrees_with_topk_entropy_block) {
   std::mt19937 gen(11);

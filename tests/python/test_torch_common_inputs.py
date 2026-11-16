@@ -12,7 +12,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 from libsdca import _cpu
-from libsdca.torch import sdca_loss
+from named_losses import loss as named_loss
 
 # The mode of the suite: the release gate's torch suites run with SDCA_CPU_EXTENSION on and off.
 MODE = os.environ.get("SDCA_CPU_EXTENSION", "auto") or "auto"
@@ -134,52 +134,69 @@ LOSSES = (
     "multilabel_hinge",
     "proximal_cross_entropy",
 )
+MULTILABEL = ("multilabel_cross_entropy", "multilabel_hinge")
 BACKENDS = ("auto", "native", "torch")
+
+
+def _target(name: str, y: torch.Tensor, classes: int = 5) -> torch.Tensor:
+    """The labels y, or for the multilabel losses their one-hot mask."""
+    return F.one_hot(y, classes).bool() if name in MULTILABEL else y
 
 
 def _loss(
     name: str, z: torch.Tensor, target: torch.Tensor, backend: str, **options: Any
 ) -> torch.Tensor:
     k = 2 if name.startswith("topk") else 1
-    return sdca_loss(z, target, name, backend=backend, k=k, **options)
+    return named_loss(ci.L, name, z, target, backend=backend, k=k, **options)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("loss", LOSSES)
 def test_invalid_targets_and_logits_raise(loss: str, backend: str):
-    """Out-of-range and ignore-like labels, other label dtypes and shapes, empty or full
-    masks and nonfinite logits raise ValueError, with or without gradients."""
+    """Out-of-range labels, empty or full masks, wrong shapes and nonfinite logits raise
+    ValueError, targets of another kind TypeError, with or without gradients; any integer
+    label dtype is accepted."""
     z = torch.randn(6, 5, generator=torch.Generator().manual_seed(1))
     y = torch.tensor([0, 1, 2, 3, 4, 0])
-    bad_targets = [
-        torch.full((6,), 5),
-        torch.full((6,), -1),
-        torch.full((6,), -100),
-        y.int(),
-        y.to(torch.uint8),
-        y.float(),
-        y[:5],
-        torch.zeros(6, 5, dtype=torch.bool),
-    ]
-    if loss in ("multilabel_hinge", "proximal_cross_entropy"):
-        bad_targets.append(torch.ones(6, 5, dtype=torch.bool))
-    for target in bad_targets:
+    target = _target(loss, y)
+    if loss in MULTILABEL:
+        bad_values = [torch.zeros(6, 5, dtype=torch.bool), target[:5]]
+        if loss == "multilabel_hinge":
+            bad_values.append(torch.ones(6, 5, dtype=torch.bool))
+        bad_types = [y, target.float()]
+    else:
+        bad_values = [torch.full((6,), 5), torch.full((6,), -1), y[:5]]
+        bad_types = [torch.zeros(6, 5, dtype=torch.bool)]
+        if loss == "cross_entropy":
+            # Floating-point targets are class probabilities of the logits' shape; -100 is
+            # the ignored label.
+            bad_values.append(y.float())
+        else:
+            bad_values.append(torch.full((6,), -100))
+            bad_types.append(y.float())
+        expected = _loss(loss, z, y, backend)
+        for other in (y.int(), y.to(torch.uint8), y.short()):
+            torch.testing.assert_close(_loss(loss, z, other, backend), expected, rtol=0, atol=0)
+    for bad in bad_values:
         with pytest.raises(ValueError):
-            _loss(loss, z, target, backend)
+            _loss(loss, z, bad, backend)
+    for bad in bad_types:
+        with pytest.raises(TypeError):
+            _loss(loss, z, bad, backend)
     for value in (float("nan"), float("inf"), -float("inf")):
         bad = z.clone()
         bad[2, 3] = value
         with pytest.raises(ValueError):
-            _loss(loss, bad.requires_grad_(), y, backend)
+            _loss(loss, bad.requires_grad_(), target, backend)
         with torch.no_grad(), pytest.raises(ValueError):
-            _loss(loss, bad, y, backend)
+            _loss(loss, bad, target, backend)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("loss", LOSSES)
 def test_no_grad_and_inference_mode_give_the_values(loss: str, backend: str):
     z = torch.randn(6, 5, generator=torch.Generator().manual_seed(2))
-    y = torch.tensor([0, 1, 2, 3, 4, 0])
+    y = _target(loss, torch.tensor([0, 1, 2, 3, 4, 0]))
     for reduction in ("none", "mean", "sum"):
         expected = _loss(loss, z.clone().requires_grad_(), y, backend, reduction=reduction)
         with torch.no_grad():
@@ -200,7 +217,8 @@ def test_no_grad_and_inference_mode_give_the_values(loss: str, backend: str):
 def test_empty_batches_follow_torch_functional(loss: str, backend: str):
     for reduction in ("none", "mean", "sum"):
         z = torch.randn(0, 5, requires_grad=True)
-        value = _loss(loss, z, torch.zeros(0, dtype=torch.long), backend, reduction=reduction)
+        target = _target(loss, torch.zeros(0, dtype=torch.long))
+        value = _loss(loss, z, target, backend, reduction=reduction)
         value.sum().backward()
         assert z.grad is not None and z.grad.shape == (0, 5)
         if reduction == "none":
@@ -218,7 +236,7 @@ def test_cpu_autocast_bfloat16(loss: str, backend: str):
     g = torch.Generator().manual_seed(3)
     layer = torch.nn.Linear(4, 5)
     x = torch.randn(6, 4, generator=g)
-    y = torch.tensor([0, 1, 2, 3, 4, 0])
+    y = _target(loss, torch.tensor([0, 1, 2, 3, 4, 0]))
     with torch.autocast("cpu", dtype=torch.bfloat16):
         logits = layer(x)
         value = _loss(loss, logits, y, backend, gamma=0.5)
@@ -243,10 +261,14 @@ def test_upstream_layouts(loss: str, backend: str):
         if loss == "ce":
             return ci.L.cross_entropy(x.movedim(-1, 1), y, reduction="none", backend=backend)
         if loss == "distillation":
-            return ci.L.distillation_loss(x, teacher, 2.0, reduction="none")
+            return ci.L.distillation_loss(
+                x, teacher, temperature=2.0, reduction="none", backend=backend
+            )
         if loss == "proximal_distillation":
-            return ci.L.proximal_distillation_loss(x, teacher, 2.0, 0.5, reduction="none")
-        return _loss(loss, x, y, backend, reduction="none", gamma=0.5)
+            return ci.L.proximal_distillation_loss(
+                x, teacher, temperature=2.0, alpha=0.5, reduction="none", backend=backend
+            )
+        return _loss(loss, x, _target(loss, y), backend, reduction="none", gamma=0.5)
 
     w = torch.rand(2, 6, generator=g) - 0.3
     upstreams = {
@@ -255,8 +277,6 @@ def test_upstream_layouts(loss: str, backend: str):
         "transposed": (lambda v: (v.t() * w.t().contiguous()).sum(), w),
         "strided": (lambda v: v.backward(torch.stack([w, w], -1)[..., 0]), w),
     }
-    if loss.endswith("distillation") and backend != "auto":
-        pytest.skip("distillation has no backend option")
     for name, (use, dense) in upstreams.items():
         x = z.clone().requires_grad_()
         out = use(value(x))
@@ -285,7 +305,9 @@ def test_boolean_mask_entropy_gradients_round_once(backend: str, precision: str 
     z = ci.inputs(case)["z"].reshape(-1, case.c)
     mask = ci.inputs(case)["target"].reshape(-1, case.c)
     x = z.clone().requires_grad_()
-    sdca_loss(x, mask, backend=backend, precision=precision, reduction="sum").backward()
+    ci.L.multilabel_cross_entropy(
+        x, mask, backend=backend, precision=precision, reduction="sum"
+    ).backward()
     _, expected = ci._entropy_rows(z.double(), mask)
     exact = _mask_entropy_tolerance(expected, 64 * torch.finfo(torch.float64).eps)
     rounding = torch.where(mask, 0.0, expected.float().double() - expected).sum(-1)

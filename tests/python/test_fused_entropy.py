@@ -13,7 +13,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 from libsdca import _cuda_launch
-from libsdca.torch import explain_backend, sdca_loss
+from named_losses import explain_route, torch_loss
 
 # The float32 contract, in float32 eps (losses) and eps of the logits dtype (gradients):
 # relative loss and target-entry errors, competitor errors relative to the row's largest entry.
@@ -68,7 +68,7 @@ def _call(
     z: torch.Tensor, y: torch.Tensor, reduction: str, u: torch.Tensor, precision: object
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x = z.detach().clone().requires_grad_()
-    value = sdca_loss(x, y, reduction=reduction, precision=precision)
+    value = torch_loss(x, y, reduction=reduction, precision=precision)
     value.backward(u.to(device=value.device, dtype=value.dtype))
     assert x.grad is not None
     return value.detach(), x.grad
@@ -200,7 +200,7 @@ class FusedEntropyTests:
         z = torch.full((1, 1000), -110.8)
         z[0, 0] = 0
         x = z.cuda().requires_grad_()
-        loss = sdca_loss(x, torch.zeros(1, dtype=torch.long, device="cuda"), precision="float32")
+        loss = torch_loss(x, torch.zeros(1, dtype=torch.long, device="cuda"), precision="float32")
         loss.backward()
         assert loss.item() > 0
         assert x.grad is not None
@@ -255,15 +255,15 @@ class FusedEntropyTests:
         z = torch.randn(5, wide_c, device="cuda")
         y = torch.randint(0, wide_c, (5,), device="cuda")
         host, _ = _cuda_launch.status()
-        name, reason = explain_backend(z, y, precision="float32")
+        name, reason = explain_route(z, y, precision="float32")
         assert name == ("cuda-launcher" if host is not None else "triton"), reason
         assert "float32 exponentials" in reason
         assert "column chunks" in reason
-        assert "rows in registers" in explain_backend(z[:, :reg_c], y % reg_c)[1]
+        assert "rows in registers" in explain_route(z[:, :reg_c], y % reg_c)[1]
         with pytest.raises(ValueError, match="precision"):
-            explain_backend(z.double(), y, precision="float32")
+            explain_route(z.double(), y, precision="float32")
         with pytest.raises(ValueError):
-            sdca_loss(z, y, backend="native", precision="float32")
+            torch_loss(z, y, backend="native", precision="float32")
         for precision in (None, "float32", "float64", torch.float32, torch.float64):
             for reduction in ("none", "mean"):
                 u = _upstream(5, reduction, 1.5)
@@ -272,7 +272,7 @@ class FusedEntropyTests:
                 with mock.patch.dict(os.environ, {_cuda_launch.ENV: "off"}):
                     _cuda_launch.status.cache_clear()
                     try:
-                        name, reason = explain_backend(z, y, precision=precision)
+                        name, reason = explain_route(z, y, precision=precision)
                         assert name == "triton", reason
                         forced = _call(z, y, reduction, u, precision)
                     finally:
@@ -287,7 +287,7 @@ class FusedEntropyTests:
         y = torch.tensor([0, 2, 5], device="cuda")
         second = []
         for precision in ("float64", "float32"):
-            (g,) = torch.autograd.grad(sdca_loss(z, y, precision=precision), z, create_graph=True)
+            (g,) = torch.autograd.grad(torch_loss(z, y, precision=precision), z, create_graph=True)
             second.append(torch.autograd.grad(g.square().sum(), z)[0])
         torch.testing.assert_close(second[1], second[0], rtol=1e-6, atol=1e-9)
 
@@ -334,14 +334,14 @@ class ChunkedEntropyTests(FusedEntropyTests):
                     z = torch.zeros(3, 13, device="cuda", requires_grad=True)
                     with torch.no_grad():
                         z[1 if col != 12 else 2, col] = bad
-                    loss = sdca_loss(z, y, precision=precision)
+                    loss = torch_loss(z, y, precision=precision)
                     assert bool(loss.isnan().all()), f"{precision} {bad} {col}"
                     (grad,) = torch.autograd.grad(loss, z)
                     assert bool(grad.isnan().any()), f"{precision} {bad} {col}"
             for t in (-1, 13):
                 target = torch.tensor([0, t, 1], device="cuda")
                 z = torch.zeros(3, 13, device="cuda", requires_grad=True)
-                loss = sdca_loss(z, target, precision=precision)
+                loss = torch_loss(z, target, precision=precision)
                 assert bool(loss.isnan().all())
                 (grad,) = torch.autograd.grad(loss, z)
                 assert bool(grad[1].isnan().all())

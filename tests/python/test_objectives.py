@@ -6,7 +6,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 from libsdca import HINGES, MULTILABEL, OBJECTIVES
-from libsdca._core import Solver
+from numpy_api import Solver
 from scipy.optimize import minimize
 
 
@@ -205,10 +205,9 @@ class ObjectiveTests:
                 assert abs(
                     model.history["primal"][-1] - self.primal(objective, model.weights, gamma)
                 ) <= 1e-9 * abs(model.history["primal"][-1])
-                metric = "rank_loss" if objective in MULTILABEL else "accuracy"
-                assert metric in model.history
+                # The accuracy column holds the rank loss of the multilabel losses.
                 if objective in MULTILABEL:
-                    assert model.history["rank_loss"][-1] < 0.1
+                    assert model.history["accuracy"][-1] < 0.1
                 else:
                     assert (model.predict(self.x) == self.y).mean() > 0.7
 
@@ -276,7 +275,10 @@ class ObjectiveTests:
         bad[0] = True
         with pytest.raises(ValueError):
             self.solver.fit(self.x, bad, objective="multilabel_hinge")
-        single = self.solver.fit(self.x, self.y, objective="multilabel_hinge", max_epoch=20, tol=0)
+        singletons = [[label] for label in self.y]
+        single = self.solver.fit(
+            self.x, singletons, objective="multilabel_hinge", max_epoch=20, tol=0
+        )
         one_hot = np.zeros_like(self.mask)
         one_hot[np.arange(len(self.y)), self.y] = True
         np.testing.assert_array_equal(
@@ -285,8 +287,10 @@ class ObjectiveTests:
                 self.x, one_hot, objective="multilabel_hinge", max_epoch=20, tol=0
             ).weights,
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             self.solver.fit(self.x, [[0, "a"]] * len(self.y), objective="multilabel_hinge")
+        with pytest.raises(TypeError):
+            self.solver.fit(self.x, self.y, objective="multilabel_hinge")
         with pytest.raises(ValueError):
             self.solver.fit(self.x, self.y, objective="topk_cross_entropy", k=4)
 
@@ -478,7 +482,7 @@ class ObjectiveTests:
                     [[1.0, -0.2, -0.8], [-0.2, 1.0, -0.8], [-0.8, -0.2, 1.0]], np.float32
                 ),
             )
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             s.fit(x, np.array([0.2, 1.0, 2.0]))
         with pytest.raises(ValueError):
             s.fit(x, y, objective="proximal_cross_entropy")

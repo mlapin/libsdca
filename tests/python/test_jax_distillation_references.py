@@ -1,8 +1,11 @@
 """JAX distillation regressions using the shared multiprecision cases."""
 
+import os
+from unittest import mock
+
 import numpy as np
 import pytest
-from test_distillation_references import cases, check_reference, proximal_reference
+from test_distillation_references import cases, check_reference, proximal_reference, reference
 
 
 class JaxDistillationReferenceTests:
@@ -31,7 +34,11 @@ class JaxDistillationReferenceTests:
 
                             def loss(z: jax.Array, t: jax.Array) -> tuple[jax.Array, jax.Array]:
                                 values = distillation_loss(
-                                    z, t, temperature, reduction="none", precision=precision
+                                    z,
+                                    t,
+                                    temperature=temperature,
+                                    reduction="none",
+                                    precision=precision,
                                 )
                                 return values.sum(), values
 
@@ -45,6 +52,111 @@ class JaxDistillationReferenceTests:
                                 teacher,
                                 temperature,
                             )
+
+    @pytest.mark.parametrize("layout", ["tall", "wide"])
+    @pytest.mark.parametrize(
+        "dtype,precision",
+        [
+            ("float32", None),
+            ("float32", "float64"),
+            ("float64", None),
+            ("float16", None),
+            ("float16", "float64"),
+            ("bfloat16", None),
+            ("bfloat16", "float64"),
+        ],
+        ids=str,
+    )
+    @mock.patch.dict(os.environ, {"SDCA_JAX_FFI": "off"})
+    def test_jax_fenced_and_unfenced_passes(
+        self,
+        layout: str,
+        dtype: str,
+        precision: str | None,
+        monkeypatch: pytest.MonkeyPatch,
+        subtests: pytest.Subtests,
+    ):
+        """The cases tiled (tall) or padded with classes of no mass (wide) past _SMALL scores,
+        where the CPU passes may be fenced (SDCA_JAX_CPU_FUSION): both programs on every
+        platform, forward plus backward and forward only. 16-bit logits (the float32 cases
+        where they are finite) keep the envelope of test_jax_half_precision."""
+        try:
+            import jax
+            import jax.experimental
+        except ImportError:
+            pytest.skip("JAX is unavailable")
+        import jax.numpy as jnp
+        import libsdca.jax as sdca_jax
+        from test_jax_half_precision import assert_envelope
+
+        if jax.default_backend() != "cpu":
+            pytest.skip("the fences are CPU passes")
+        context = getattr(jax, "enable_x64", None)
+        if context is None:
+            context = getattr(jax.experimental, "enable_x64", None)
+        assert context is not None
+        half = dtype in ("float16", "bfloat16")
+        with context():
+            for temperature in (0.25, 1.0, 4.0):
+                source = cases(np.float32 if half else np.dtype(dtype).type, temperature)
+                largest = float(jnp.finfo(dtype).max)
+                finite = (np.abs(source[0]) <= largest).all(-1)
+                finite &= (np.abs(source[1]) <= largest).all(-1)
+                student, teacher = (
+                    np.asarray(jnp.asarray(x[finite], dtype), np.float64) for x in source
+                )
+                value, gradient = reference(student, teacher, temperature)
+                rows, classes = student.shape
+                if layout == "tall":
+                    copies = sdca_jax._SMALL // student.size + 1
+                    student, teacher = np.tile(student, (copies, 1)), np.tile(teacher, (copies, 1))
+                    value, gradient = np.tile(value, copies), np.tile(gradient, (copies, 1))
+                else:
+                    pad = np.full((rows, sdca_jax._SMALL // rows + 1 - classes), -1e4 * temperature)
+                    student, teacher = np.hstack((student, pad)), np.hstack((teacher, pad))
+                assert student.size > sdca_jax._SMALL
+                z, t = jnp.asarray(student, dtype), jnp.asarray(teacher, dtype)
+                for fenced in (True, False):
+                    message = f"{layout} {dtype} {precision} T={temperature} fenced={fenced}"
+                    with subtests.test(message):
+                        monkeypatch.setenv(
+                            "SDCA_JAX_CPU_FUSION", "fenced" if fenced else "unfenced"
+                        )
+
+                        def loss(
+                            z: jax.Array, t: jax.Array, temperature: float = temperature
+                        ) -> jax.Array:
+                            return sdca_jax.distillation_loss(
+                                z, t, temperature=temperature, reduction="none", precision=precision
+                            )
+
+                        def total(z: jax.Array, t: jax.Array) -> tuple[jax.Array, jax.Array]:
+                            values = loss(z, t)
+                            return values.sum(), values
+
+                        with mock.patch.object(
+                            sdca_jax, "_fenced", wraps=sdca_jax._fenced
+                        ) as fence:
+                            (_, values), gradients = jax.jit(
+                                jax.value_and_grad(total, has_aux=True)
+                            )(z, t)
+                        assert (fence.call_count > 0) == fenced
+                        assert np.all(np.asarray(gradients)[:, classes:] == 0)
+                        gradients = gradients[:, :classes]
+                        results = [(values, gradients)]
+                        if fenced:  # forward-only ignores _fenced_distillation; check it once
+                            results.append((jax.jit(loss)(z, t), None))
+                        for v, g in results:
+                            if half:
+                                assert_envelope(z, v, g, value, gradient, 0.0, precision, message)
+                            else:
+                                check_reference(
+                                    np.asarray(v),
+                                    None if g is None else np.asarray(g),
+                                    *source,
+                                    temperature,
+                                    (value, gradient),
+                                )
 
     @pytest.mark.parametrize(
         "part", [(d, i) for d in ("float32", "float64") for i in range(5)], ids=str
@@ -90,7 +202,7 @@ class JaxDistillationReferenceTests:
                                 alpha: float = alpha,
                             ) -> tuple[jax.Array, jax.Array]:
                                 values = proximal_distillation_loss(
-                                    z, t, temperature, alpha, reduction="none"
+                                    z, t, temperature=temperature, alpha=alpha, reduction="none"
                                 )
                                 return values.sum(), values
 
@@ -125,7 +237,9 @@ class JaxDistillationReferenceTests:
             for temperature in (0.5, 1.0):
 
                 def loss(z: jax.Array, t: jax.Array, temperature: float = temperature) -> jax.Array:
-                    return proximal_distillation_loss(z, t, temperature, 1.0, reduction="sum")
+                    return proximal_distillation_loss(
+                        z, t, temperature=temperature, alpha=1.0, reduction="sum"
+                    )
 
                 step = jax.jit(jax.value_and_grad(loss))
                 value, gradient = step(student, teacher)

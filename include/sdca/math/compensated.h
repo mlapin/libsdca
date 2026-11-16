@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <limits>
+#include <type_traits>
 
 namespace sdca {
 
@@ -70,6 +71,20 @@ struct compensated_sum {
   }
   T value() const { return hi + lo; }
 };
+
+// A plain sum with the add and value of compensated_sum.
+template <typename T>
+struct plain_sum {
+  T hi = T(0);
+  void add(const T x) { hi += x; }
+  T value() const { return hi; }
+};
+
+// A sum in T of Term terms: compensated where they are as wide as T; a wider T
+// already keeps the narrower terms' sum below their own epsilon.
+template <typename Term, typename T>
+using row_sum =
+    typename std::conditional<std::is_same<Term, T>::value, compensated_sum<T>, plain_sum<T>>::type;
 
 // A hinge margin below this fraction of its terms cancels and is refined;
 // results that lose no bits keep them.

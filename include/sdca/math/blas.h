@@ -28,11 +28,19 @@ typedef std::ptrdiff_t ptrdiff_t;  // Matlab's blas.h needs ptrdiff_t
 #include "cblas.h"
 #endif
 
+namespace sdca {
+
+// The transposition argument of the BLAS wrappers below: CBLAS's own enum
+// where a CBLAS header declares it, else one with its values in this namespace
+// (so that a CBLAS header included alongside does not clash with it).
 #if defined(BLAS_MATLAB) || defined(BLAS_BUILTIN)
 enum CBLAS_TRANSPOSE { CblasNoTrans = 111, CblasTrans = 112, CblasConjTrans = 113 };
+#else
+using ::CBLAS_TRANSPOSE;
+using ::CblasConjTrans;
+using ::CblasNoTrans;
+using ::CblasTrans;
 #endif
-
-namespace sdca {
 
 #if defined(MKL_INT)
 typedef MKL_INT blas_int;

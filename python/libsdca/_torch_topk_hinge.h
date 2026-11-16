@@ -149,10 +149,8 @@ int64_t find_at_least_rows(const T* x, int64_t from, int64_t n, float floor) {
 }
 
 // The nonsmooth k = 1 hinge of a row from its largest competitor alone: value and statistics
-// as hinge_row of hinge_margins (the margin 1 + z_j - z_y rises with z_j, so the largest is
-// the top competitor's and its first index is the first competitor within rounding of the
-// top whose margin equals it); false for nonfinite logits. Float and 16-bit rows are read in
-// place.
+// from the first largest score, before adding the unit margin can merge distinct scores.
+// False for nonfinite logits. Float and 16-bit rows are read in place.
 template <typename scalar_t>
 bool hinge_top(const scalar_t* z, int64_t c, int64_t target, double* stats, double& value) {
   auto scan = [&](const auto* x) {
@@ -165,22 +163,15 @@ bool hinge_top(const scalar_t* z, int64_t c, int64_t target, double* stats, doub
     }
     if (!finite) return false;
     const double label = static_cast<double>(x[target]), h = hinge_margin(top, label);
-    const double eps = std::numeric_limits<double>::epsilon();
-    const double floor = top - 4 * eps * (std::abs(top) + std::abs(label) + 1);
     auto find = [&](int64_t from) {
       if constexpr (std::is_same_v<scalar_t, double>) {
-        return find_at_least(x, from, c, floor);
+        return find_at_least(x, from, c, top);
       } else {
-        return find_at_least_rows(x, from, c, static_cast<float>(floor));
+        return find_at_least_rows(x, from, c, static_cast<float>(top));
       }
     };
-    int64_t index = 0;
-    for (int64_t j = find(0); j < c; j = find(j + 1)) {
-      if (j != target && hinge_margin(static_cast<double>(x[j]), label) == h) {
-        index = j;
-        break;
-      }
-    }
+    int64_t index = find(0);
+    if (index == target) index = find(index + 1);
     value = std::max(h, 0.0);
     stats[0] = static_cast<double>(index);
     stats[1] = value > 0;
@@ -725,7 +716,7 @@ double topk_entropy_row_float(const scalar_t* src, int64_t c, int64_t target, in
     const int64_t skip = target - b;  // outside [0, n) where the label is elsewhere
     int64_t j = 0;
     for (; j + L <= n; j += L) {
-      vf v = load(x + j);
+      vf v = lanes::load(x + j);
       bad = bad + v * 0.0f;  // NaN for inf and NaN entries
       if (skip >= j && skip < j + L)
         v = select(iota() == static_cast<int32_t>(skip - j), splat(-kInf), v);

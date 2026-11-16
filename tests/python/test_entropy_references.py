@@ -2,8 +2,8 @@
 
 import mpmath as mp
 import numpy as np
-from libsdca._core import Solver
 from mpmath_types import MPReal
+from numpy_api import Solver
 
 
 class EntropyReferenceTests:
@@ -186,7 +186,10 @@ class EntropyReferenceTests:
                         ]
                     )
                     target = np.arange(len(z))[None] < positives
-                    actual = Solver().coordinate_update([scores], target, C=c)[0]
+                    name = "cross_entropy" if positives == 1 else "multilabel_cross_entropy"
+                    if positives == 1:
+                        target = np.array([0])
+                    actual = Solver().coordinate_update([scores], target, name, C=c)[0]
                     np.testing.assert_allclose(
                         actual, expected, rtol=1.5e-14, err_msg=f"{scores} p={positives} C={c}"
                     )

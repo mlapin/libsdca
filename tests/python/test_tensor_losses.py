@@ -8,8 +8,10 @@ from unittest import mock
 import mpmath as mp
 import pytest
 import torch
-from libsdca import LOSSES, _cpu_entropy
-from libsdca.torch import SDCALoss, sdca_loss
+from libsdca import _cpu_entropy
+from libsdca import torch as sdca_torch
+from libsdca._core import _LABEL_LOSSES as LOSSES
+from named_losses import torch_loss, torch_module
 from topk_rows import CAPPED_GAPS, capped_reference, capped_rows
 from torch.autograd import gradcheck
 
@@ -85,13 +87,13 @@ class TensorLossTests:
         """Values and weighted gradients of the tensor backend against the native backend."""
         reference = z.detach().clone().requires_grad_()
         weights = torch.linspace(0.5, 2.0, z.shape[0], dtype=z.dtype)
-        expected = sdca_loss(
+        expected = torch_loss(
             reference, target, objective, backend="native", reduction="none", **options
         )
         expected.backward(weights)
         for device in DEVICES:
             x = z.detach().to(device).requires_grad_()
-            actual = sdca_loss(
+            actual = torch_loss(
                 x, target.to(device), objective, backend="torch", reduction="none", **options
             )
             actual.backward(weights.to(device))
@@ -125,7 +127,7 @@ class TensorLossTests:
                     rows = slice(None)
                     if objective == "topk_hinge_alpha":
                         # A mean margin of zero up to rounding admits either subgradient.
-                        value = sdca_loss(z, target, objective, reduction="none", **options)
+                        value = torch_loss(z, target, objective, reduction="none", **options)
                         rows = value.abs() > 1e-12
                     self.check(z[rows], target[rows], objective, 1e-12, 1e-12, **options)
 
@@ -175,7 +177,7 @@ class TensorLossTests:
                             ("torch", d) for d in DEVICES
                         ]:
                             x = z.to(device).requires_grad_()
-                            v = sdca_loss(
+                            v = torch_loss(
                                 x, target.to(device), objective, backend=backend, gamma=gamma
                             )
                             (g,) = torch.autograd.grad(v, x)
@@ -206,12 +208,12 @@ class TensorLossTests:
         for k in [2, 3]:
             near = torch.tensor([[-700.0, 1.0, 700.0, -0.3, 0.2]], dtype=torch.float64)
             near.requires_grad_()
-            sdca_loss(near, target, "topk_cross_entropy", k=k, backend="native").backward()
+            torch_loss(near, target, "topk_cross_entropy", k=k, backend="native").backward()
             for gap in [1e16, 1e30]:
                 z = torch.tensor([[-gap, 1.0, gap, -0.3, 0.2]], dtype=torch.float64)
                 for device in DEVICES:
                     x = z.detach().to(device).requires_grad_()
-                    sdca_loss(
+                    torch_loss(
                         x, target.to(device), "topk_cross_entropy", k=k, backend="torch"
                     ).backward()
                     assert x.grad is not None
@@ -230,7 +232,7 @@ class TensorLossTests:
             for device in DEVICES:
                 x = z.to(device).requires_grad_()
                 target = torch.zeros(len(gaps), dtype=torch.long, device=device)
-                value = sdca_loss(
+                value = torch_loss(
                     x, target, "topk_cross_entropy", k=k, backend="torch", reduction="none"
                 )
                 (gradient,) = torch.autograd.grad(value.sum(), x)
@@ -258,7 +260,7 @@ class TensorLossTests:
                 x = z.to(device).requires_grad_()
                 target = torch.zeros(len(z), dtype=torch.long, device=device)
                 with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": extension}):
-                    value = sdca_loss(
+                    value = torch_loss(
                         x, target, "topk_cross_entropy", k=k, backend=backend, reduction="none"
                     )
                     (gradient,) = torch.autograd.grad(value.sum(), x)
@@ -279,10 +281,10 @@ class TensorLossTests:
                 for device in DEVICES:
                     x = z.to(device, dtype).requires_grad_()
                     reference = x.detach().float().cpu().requires_grad_()
-                    values = sdca_loss(
+                    values = torch_loss(
                         x, target.to(device), objective, k=3, gamma=0.5, reduction="none"
                     )
-                    expected = sdca_loss(
+                    expected = torch_loss(
                         reference, target, objective, k=3, gamma=0.5, reduction="none"
                     )
                     values.sum().backward()
@@ -304,30 +306,32 @@ class TensorLossTests:
                 target = labels
                 if objective.startswith("multilabel"):
                     target = torch.nn.functional.one_hot(labels, 5).movedim(-1, 1).bool()
-                expected = SDCALoss(objective, backend="native", **options)(z, target)
-                actual = SDCALoss(objective, **options)(x, target.to(device))
+                expected = torch_module(objective, backend="native", **options)(z, target)
+                actual = torch_module(objective, **options)(x, target.to(device))
                 torch.testing.assert_close(actual.cpu(), expected, rtol=1e-12, atol=1e-14)
                 if objective in SMOOTH:
                     assert gradcheck(
-                        lambda v: sdca_loss(
+                        lambda v: torch_loss(
                             v, target.to(device), objective, backend="torch", **options
                         ),
                         (x,),
                     )
             mask = torch.tensor([[True, True, False], [False, True, False]], device=device)
             zeros = torch.zeros(2, 3, device=device)
+            # Single-label losses take class labels only.
+            with pytest.raises(TypeError):
+                sdca_torch.topk_hinge_loss(zeros, mask, k=1, variant="alpha", backend="torch")
             for objective, target in [
-                ("topk_hinge_alpha", mask),
                 ("multilabel_hinge", torch.ones_like(mask)),
                 ("topk_hinge_alpha", torch.tensor([0, 3], device=device)),
             ]:
                 if device == "cpu":
                     with pytest.raises(ValueError):
-                        sdca_loss(zeros, target, objective, backend="torch")
+                        torch_loss(zeros, target, objective, backend="torch")
                 else:
-                    assert bool(sdca_loss(zeros, target, objective, backend="torch").isnan().all())
+                    assert bool(torch_loss(zeros, target, objective, backend="torch").isnan().all())
             g = torch.autograd.grad(
-                sdca_loss(x, labels.to(device), "topk_hinge_beta", dim=1), x, create_graph=True
+                torch_loss(x, labels.to(device), "topk_hinge_beta", dim=1), x, create_graph=True
             )[0]
             with pytest.raises(RuntimeError):
                 torch.autograd.grad(g.sum(), x)
@@ -338,8 +342,8 @@ class TensorLossTests:
         labels = torch.randint(0, 6, (8,), device="cuda")
         for objective in ["cross_entropy", "topk_hinge_alpha"]:
             torch.testing.assert_close(
-                sdca_loss(z, labels, objective, k=2),
-                sdca_loss(z, labels, objective, k=2, backend="torch"),
+                torch_loss(z, labels, objective, k=2),
+                torch_loss(z, labels, objective, k=2, backend="torch"),
             )
         with pytest.raises(ValueError):
-            sdca_loss(z, labels, "cross_entropy", backend="native")
+            torch_loss(z, labels, "cross_entropy", backend="native")

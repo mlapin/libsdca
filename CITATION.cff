@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: >-
-  If libsdca is useful in your research, please cite the paper for the losses you use
-  and the technical report for the library.
+  If libsdca is useful in your research, please cite the TPAMI paper; the earlier papers
+  introduce the top-k losses, and the technical report describes the library.
 type: software
 title: "libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks"
 abstract: >-
@@ -10,8 +10,8 @@ abstract: >-
 authors:
   - family-names: Lapin
     given-names: Max
-version: 0.3.1
-date-released: 2026-11-12
+version: 0.4.0
+date-released: 2026-11-16
 license: MIT
 url: https://mlapin.github.io/libsdca/
 repository-code: https://github.com/mlapin/libsdca
@@ -25,14 +25,21 @@ keywords:
   - pytorch
   - jax
 preferred-citation:
-  type: report
-  title: "libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks"
+  type: article
+  title: Analysis and Optimization of Loss Functions for Multiclass, Top-k, and Multilabel Classification
   authors:
     - family-names: Lapin
-      given-names: Max
-  year: 2026
-  month: 11
-  url: https://mlapin.github.io/libsdca/report/
+      given-names: Maksim
+    - family-names: Hein
+      given-names: Matthias
+    - family-names: Schiele
+      given-names: Bernt
+  journal: IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI)
+  volume: 40
+  issue: 7
+  start: 1533
+  end: 1554
+  year: 2018
 references:
   - type: conference-paper
     title: Top-k Multiclass SVM
@@ -56,18 +63,11 @@ references:
         given-names: Bernt
     collection-title: IEEE Conference on Computer Vision and Pattern Recognition (CVPR)
     year: 2016
-  - type: article
-    title: Analysis and Optimization of Loss Functions for Multiclass, Top-k, and Multilabel Classification
+  - type: report
+    title: "libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks"
     authors:
       - family-names: Lapin
-        given-names: Maksim
-      - family-names: Hein
-        given-names: Matthias
-      - family-names: Schiele
-        given-names: Bernt
-    journal: IEEE Transactions on Pattern Analysis and Machine Intelligence
-    volume: 40
-    issue: 7
-    start: 1533
-    end: 1554
-    year: 2018
+        given-names: Max
+    year: 2026
+    month: 11
+    url: https://mlapin.github.io/libsdca/report/

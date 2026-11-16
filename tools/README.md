@@ -1,21 +1,26 @@
 # Developer tools
 
-Quality, coverage and build-verification scripts used in local development and CI
-(see [CONTRIBUTING.md](../CONTRIBUTING.md) for the full setup):
+Scripts used in development and CI ([CONTRIBUTING.md](../CONTRIBUTING.md)):
 
 | File | Purpose |
 | --- | --- |
-| `quality.py` | Runs `ruff`, `clang-format`, `basedpyright`, version-string checks, `lizard` complexity checks and `clang-tidy` (`--fix` formats first; `--skip-tidy` skips `clang-tidy`) |
-| `coverage.py` | Builds C++ and the C ABI with `--coverage`, runs C++ and Python test suites, and enforces the $\ge 90\%$ line-coverage floor in `gcovr` and `coverage.py` |
-| `check_extension_builds.py` | Syntax-checks the PyTorch CPU extension (`_torch_entropy.cpp`) across target ISAs (`AVX-512`, `AVX2`, generic) and compilers |
-| `run_cpp_tests.sh` | Builds and runs the C++ and C ABI GoogleTest suites directly (`--sanitize` enables ASan, UBSan and Clang TSan) |
-| `apt_mirror.sh` | Used by CI before `apt-get`: adds retries and a fallback Ubuntu mirror (`mirrors.edge.kernel.org`), placed first when the runner cannot resolve Ubuntu's package hosts |
-| `complexity_baseline.txt` | Grandfathered functions above the `lizard` complexity ($\le 20$) or line-count ($\le 100$) limits (may only shrink) |
-| `typings/triton/` | Minimal type stubs used by `basedpyright` to type-check the Triton kernel modules without a GPU |
+| `quality.py` | `ruff`, `clang-format`, `basedpyright`, version checks, `lizard` and `clang-tidy` (`--fix`, `--skip-tidy`) |
+| `coverage.py` | C++ and Python line coverage with the $\ge 90\%$ floor |
+| `bump_version.py` | Sets `VERSION` and the copies that cannot read it |
+| `run_cpp_tests.sh` | Builds and runs the C++ and C ABI suites without CMake (`--sanitize` for ASan, UBSan, TSan) |
+| `check_extension_builds.py` | Compiles the PyTorch CPU extension for AVX-512, AVX2 and generic targets |
+| `check_install_archives.py` | Checks that an sdist or wheel contains the shared CPU sources and native libraries |
+| `readme_smoke.py` | Installs a wheel into fresh uv or conda environments and runs the README examples verbatim |
+| `readme_*_smoke.py` | Installed-package probes used by `readme_smoke.py` (precision, CPU and CUDA dispatch, contracts) |
+| `perf_gate.py` | CUDA speed and memory against `torch.compile`, with per-loss speedup floors |
+| `apt_mirror.sh` | Adds retries and a fallback Ubuntu mirror before `apt-get` in CI |
+| `complexity_baseline.txt` | Functions above the `lizard` limits (may only shrink) |
+| `typings/triton/` | Type stubs for checking the Triton kernels without a GPU |
 
 ```bash
 python tools/quality.py --fix
 python tools/coverage.py --cpp-only
-python tools/check_extension_builds.py
 tools/run_cpp_tests.sh --sanitize
+python -m build --wheel && python tools/readme_smoke.py --wheel dist/libsdca-*.whl --output build/readme
+python tools/readme_smoke.py --device cuda --profiles torch jax-cuda --wheel dist/libsdca-*.whl --output build/readme-cuda
 ```

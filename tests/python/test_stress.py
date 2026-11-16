@@ -11,8 +11,17 @@ from fractions import Fraction
 import libsdca
 import numpy as np
 import pytest
-from libsdca import OBJECTIVES, STATUS
-from libsdca._core import Solver, _fit_result, _options, _ptr
+from libsdca._core import (
+    DTYPE_FLOAT64,
+    TARGET_MASK,
+    _Execution,
+    _host_loss_and_grad,
+    _Loss,
+    _make,
+    _native,
+    _Targets,
+)
+from numpy_api import Solver
 
 # (hinge, smoothed by gamma)
 HINGES = [
@@ -86,19 +95,22 @@ class StressEntropyTests:
         # Equal label scores reach log 2 at alpha = 1e50; at alpha = 1e300 the
         # value is d^2/(4 alpha) + log1p(e^-d), d + log d + log1p(e^-d) = log(2 alpha).
         solver = Solver("float64")
-        for z, target, alpha, expected in [
-            ([[1e16, 0.0, 0.0]], [[0, 1]], 1e50, math.log(2)),
-            ([[0.0, 0.0]], [0], 1e300, 1.1762794618348152e-295),
-        ]:
-            value, _ = solver.loss_and_grad(z, target, "proximal_cross_entropy", alpha=alpha)
-            assert abs(value[0] / expected - 1) <= 1e-13
-        # 100-class equal-competitor row at alpha = 1e300 stays within 32 eps.
+        # Two labels: the internal rows of the tensor layers (the public loss takes one label).
+        mask = np.array([[True, True, False]])
+        value = _host_loss_and_grad([[1e16, 0.0, 0.0]], mask, "proximal_cross_entropy", alpha=1e50)[
+            0
+        ]
+        assert abs(value[0] / math.log(2) - 1) <= 1e-13
+        value, _ = solver.loss_and_grad([[0.0, 0.0]], [0], "proximal_cross_entropy", alpha=1e300)
+        assert abs(value[0] / 1.1762794618348152e-295 - 1) <= 1e-13
+        # 100-class equal-competitor row at alpha = 1e300: the threshold near log(alpha) holds
+        # the gradient to 32 eps; the value, about alpha |gradient|^2 / 2, to twice that.
         z100 = [[0.0] + [1.0] * 99]
         v100, g100 = solver.loss_and_grad(z100, [0], "proximal_cross_entropy", alpha=1e300)
         ref_v100 = 2.3624605285888881e-295
         ref_g0 = -6.829457899398158e-298
         eps = np.finfo(np.float64).eps
-        assert abs(v100[0] - ref_v100) / ref_v100 / eps <= 32
+        assert abs(v100[0] - ref_v100) / ref_v100 / eps <= 64
         assert abs(g100[0, 0] - ref_g0) / abs(ref_g0) / eps <= 32
 
     def test_topk_single_solve_around_split_threshold(self):
@@ -110,11 +122,10 @@ class StressEntropyTests:
             dtype = DTYPES[precision]
             tol = 8 * float(np.finfo(dtype).eps)
             for gap in (63.875, 64.0, 64.125):
-                prev = np.array([[32.0, -32.0, 0.0, 0.0, 0.0]], dtype)
-                z = np.array([[32.0 - gap, gap - 32.0, 0.0, -0.25, -0.28125]], dtype)
-                out = solver.coordinate_update(
-                    z, [0], "topk_cross_entropy", previous=prev, C=1.0, k=2
-                )
+                # The scores z - norm2 * previous of the block [32, -32, 0, 0, 0], which is
+                # outside the feasible set at C = 1 (and so rejected as previous).
+                z = np.array([[-gap, gap, 0.0, -0.25, -0.28125]], dtype)
+                out = solver.coordinate_update(z, [0], "topk_cross_entropy", C=1.0, k=2)
                 np.testing.assert_allclose(
                     out[0], expected, rtol=tol, atol=0, err_msg=f"{precision} {gap}"
                 )
@@ -216,9 +227,9 @@ class StressFitTests:
                 )
 
     def test_a10_a11_exports_and_model_input_widths(self):
-        # Solver and the array aliases are exported, and a
-        # model rejects inputs of the wrong width instead of broadcasting them.
-        for name in ["Solver", "FloatArray", "IndexArray", "Targets"]:
+        # The array aliases are exported, and a model rejects inputs of the wrong width
+        # instead of broadcasting them.
+        for name in ["Model", "FloatArray", "IndexArray", "Targets"]:
             assert hasattr(libsdca, name), name
         x = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
         model = Solver().fit(x, [0, 1, 0], max_epoch=5)
@@ -228,62 +239,45 @@ class StressFitTests:
 
 
 class StressNativeAbiTests:
-    """Direct C callers: invalid input is rejected and leaves outputs as given."""
-
-    def setup_method(self):
-        self.solver = Solver()
-        self.call = self.solver._call
+    """Invalid input is rejected, and leaves the outputs of direct C callers as given."""
 
     def test_zero_rows_with_c_beyond_float_storage(self):
         # c (e_y - 1/m) = [5e99, -5e99] overflows float storage; the fit must not
         # return infinite duals or NaN weights.
-        entropy = OBJECTIVES.index("cross_entropy")
-        for precision_code in [0, 1]:
-            for kernel in [0, 1]:
+        for precision in ["float32", "float64"]:
+            for kernel in [False, True]:
                 x = np.zeros((1, 1), np.float32)
-                w, a = np.zeros((1, 2), np.float32), np.zeros((1, 2), np.float32)
-                history, result = np.zeros((4, len(libsdca.HISTORY))), _fit_result()
-                labels = np.zeros(1, np.int64)
-                options = _options(precision=precision_code, loss=entropy, c=1e100, gamma=1.0)
-                options.max_epoch, options.eval_epoch, options.kernel = 1, 1, kernel
-                args = (ct.byref(options), 1, 1, 2, _ptr(x), _ptr(labels), None, None)
-                message = f"code={precision_code} kernel={kernel}"
+                data = libsdca.Kernel(x) if kernel else x
+                message = f"{precision} kernel={kernel}"
                 try:
-                    self.call(
-                        "sdca_fit", *args, _ptr(w), _ptr(a), _ptr(history), 4, ct.byref(result)
-                    )
+                    model = libsdca.fit(
+                        data, [0], num_classes=2, C=1e100, max_epoch=1, eval_epoch=1,
+                        precision=precision,
+                    )  # fmt: skip
                 except ValueError:
-                    pass
-                else:
-                    assert STATUS[result.status] != "solved", message
-                assert np.isfinite(a).all() and np.isfinite(w).all(), message
-                np.testing.assert_array_equal(a, 0, err_msg=message)
+                    continue
+                assert model.status != "solved", message
+                assert np.isfinite(model.dual).all(), message
+                assert model.weights is None or np.isfinite(model.weights).all(), message
 
     def test_nonfinite_warm_state_and_extents_are_rejected(self):
         # Previous duals, center and warm duals must be finite, and
         # buffer extents must not overflow size_t.
-        z, labels = np.array([[1.0, 2.0, 3.0]]), np.zeros(1, np.int64)
-        previous, out = np.array([[0.0, 0.0, np.inf]]), np.full((1, 3), 7.0)
-        options = ct.byref(_options(gamma=1.0))
-        update = (options, 1, 3, _ptr(z), _ptr(labels), None, _ptr(previous), 1.0, _ptr(out))
-        with pytest.raises(ValueError):
-            self.call("sdca_update_objective", *update)
-        np.testing.assert_array_equal(out, 7.0)
+        z = np.array([[1.0, 2.0, 3.0]])
+        with pytest.raises(ValueError, match="finite"):
+            libsdca.coordinate_update(z, [0], previous=np.array([[0.0, 0.0, np.inf]]))
         x = np.ones((1, 1))
-        history = np.zeros((2, len(libsdca.HISTORY)))
-        for warm, center, dual in [
-            (0, np.array([[np.inf, 0.0]]), np.full((1, 2), 7.0)),
-            (1, None, np.array([[np.nan, 7.0]])),
-        ]:
-            w = np.full((1, 2), 7.0)
-            fit = _options(gamma=1.0, max_epoch=0, eval_epoch=1, tol=0.0, warm=warm)
-            args = (ct.byref(fit), 1, 1, 2, _ptr(x), _ptr(labels), None, _ptr(center))
-            outputs = (_ptr(w), _ptr(dual), _ptr(history), 2, ct.byref(_fit_result()))
-            with pytest.raises(ValueError):
-                self.call("sdca_fit", *args, *outputs)
-            np.testing.assert_array_equal(w, 7.0)
+        with pytest.raises(ValueError, match="finite"):
+            libsdca.fit(x, [0], num_classes=2, center=np.array([[np.inf, 0.0]]), max_epoch=0)
+        with pytest.raises(ValueError, match="finite"):
+            libsdca.fit(x, [0], num_classes=2, initial_dual=np.array([[np.nan, 7.0]]))
         mask, values, grad = np.array([[1, 0]], np.uint8), np.full(1, 7.0), np.full((1, 2), 7.0)
-        loss = (options, 2**64 - 1, 2, _ptr(z), _ptr(mask), _ptr(values), _ptr(grad))
-        with pytest.raises(ValueError):
-            self.call("sdca_loss_gradient", *loss)
+        lib = _native().lib
+        loss, execution = _make(_Loss, kind=6), _make(_Execution)
+        targets = _make(_Targets, kind=TARGET_MASK, mask=mask.ctypes.data)
+        code = lib.sdca_loss_evaluate(
+            ct.byref(loss), ct.byref(execution), DTYPE_FLOAT64, 2**64 - 1, 2, z.ctypes.data,
+            ct.byref(targets), values.ctypes.data, grad.ctypes.data,
+        )  # fmt: skip
+        assert code == -2 and b"overflow" in lib.sdca_last_error()
         np.testing.assert_array_equal(values, 7.0)

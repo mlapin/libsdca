@@ -1,61 +1,63 @@
-//! Rust interface to libsdca, accurate and fast classification losses for SDCA
-//! and neural networks: SDCA solvers, losses and coordinate steps.
+//! Rust interface to libsdca: accurate and fast classification losses for SDCA
+//! and neural networks.
 //!
-//! The API mirrors the Python `libsdca` module. [`fit`] trains the
-//! [`Objective`]s into a [`Model`], [`loss_and_grad`] evaluates the
-//! [`Loss`]es and [`coordinate_update`] takes one coordinate step. Matrices
-//! are row-major [`Matrix`] views: features X (n, d), scores (n, classes),
-//! dual variables A (n, classes) and weights W (d, classes); targets are
-//! labels or label sets ([`Targets`]). The objective is
-//! `0.5 ||W||^2 + C sum_i loss(X[i] W, y[i])`, without an implicit intercept.
+//! A [`Loss`] carries its parameters. [`Solver`] trains it into a [`Model`] by
+//! stochastic dual coordinate ascent, minimizing
+//! `0.5 ||W||^2 + c sum_i loss(x_i W, y_i)` (no intercept) until the relative
+//! duality gap reaches `tol`, and takes single coordinate steps;
+//! [`Loss::loss_and_grad`] evaluates losses and their gradients. Matrices are
+//! row-major [`Matrix`] views: features X (n, d) or a Gram matrix ([`Input`]),
+//! scores (n, classes), duals A (n, classes) and weights W (d, classes).
+//! [`Targets`] are labels, label sets, target distributions or teacher logits.
 //!
 //! ```
-//! use libsdca::{fit, loss_and_grad, FitOptions, LossOptions, Matrix, Status};
+//! use libsdca::{Loss, Matrix, Solver, Status};
 //!
-//! let x = [1.0, 0.0, 0.0, 1.0, -1.0, -1.0];
-//! let x = Matrix::new(&x, 3, 2)?;
-//! let model = fit(x, &[0, 1, 2], &FitOptions::default())?;
-//! assert_eq!(model.status(), Status::Solved);
-//! assert_eq!(model.predict(x)?, [0, 1, 2]);
+//! let x = Matrix::new(&[1.0, 0.0, 0.0, 1.0, -1.0, -1.0], 3, 2)?; // 3 examples, 2 features
+//! let y = [0, 1, 2];
+//!
+//! let model = Solver::new(Loss::cross_entropy()).fit(x, &y)?;
+//! assert_eq!((model.status(), model.predict(x)?), (Status::Solved, vec![0, 1, 2]));
+//!
+//! let model = Solver::new(Loss::topk_hinge(2)).fit(x, &y)?; // top-2 SVM
+//! assert_eq!((model.status(), model.predict(x)?), (Status::Solved, vec![0, 1, 2]));
 //!
 //! let scores = model.decision_function(x)?;
-//! let scores = Matrix::new(&scores, 3, 3)?;
-//! let (values, gradients) = loss_and_grad(scores, &[0, 1, 2], &LossOptions::default())?;
-//! assert_eq!((values.len(), gradients.len()), (3, 9));
+//! let (losses, gradients) = Loss::topk_hinge(2).loss_and_grad(Matrix::new(&scores, 3, 3)?, &y)?;
+//! assert_eq!((losses.len(), gradients.len()), (3, 9));
 //! # Ok::<(), libsdca::Error>(())
 //! ```
 //!
 //! # Precision
 //!
-//! The element type of the data, f64 or f32, selects the storage; the
-//! `precision` option selects the working arithmetic of [`fit`],
-//! [`coordinate_update`] and [`loss_and_grad`]. Its default, `None`, is
-//! [`Real::DEFAULT_PRECISION`] ([`Precision::Float64`] for both f64 and f32).
-//! `Some(Precision::Float32)` computes f32 data in float, accurate to float
-//! rounding of the scores: the entropy steps are faster, the hinge steps are
-//! not. Requesting `Precision::Float32` on f64 data is an
-//! [`Error::InvalidArgument`].
+//! The element type of the data, f32 or f64 ([`Real`]), is the storage of the
+//! inputs and results; [`Settings::precision`] selects the working arithmetic.
+//! Its default, `None`, is [`Real::DEFAULT_PRECISION`]: float for f32 and
+//! double for f64. [`Precision::Float64`] on f32 data keeps a fit's iterate in
+//! double for tighter convergence; [`Precision::Float32`] on f64 data is an
+//! [`Error::InvalidArgument`]. Only [`Status::Solved`] guarantees the duality
+//! gap, which every precision checks in double on the returned arrays.
 
 mod error;
 mod ffi;
+mod loss;
 mod matrix;
 mod model;
 mod names;
-mod options;
+mod native;
 mod real;
+mod settings;
 mod solver;
 mod targets;
 
 pub use error::{Error, Result};
+pub use loss::Loss;
 pub use matrix::Matrix;
-pub use model::{History, Model, HISTORY};
-pub use names::{Loss, Objective, Precision, ProjectionPrecision, Shrinking, Status};
-pub use options::{DistillationOptions, FitOptions, LossOptions, UpdateOptions};
+pub use model::{Evaluation, Model};
+pub use names::{Precision, ProjectionPrecision, Shrinking, Status};
 pub use real::Real;
-pub use solver::{
-    coordinate_update, coordinate_update_distillation, distillation_loss_and_grad, fit,
-    fit_distillation, loss_and_grad, proximal_distillation_loss_and_grad,
-};
+pub use settings::{Settings, Threads};
+pub use solver::{Input, Solver, Start};
 pub use targets::Targets;
 
 /// Compiles the README examples as doctests.

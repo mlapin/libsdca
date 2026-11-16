@@ -40,20 +40,21 @@ TEST(StressProjections, topk_hinge_steps_at_huge_norm2) {
   for (double norm2 : norm2s) {
     const double s = 1 / (3 * norm2);
     std::vector<double> a(3, 0.), z(3, 0.);
-    sdca::l2_topk_hinge<double, double>(1, 1).update_dual_variables(3, norm2, a.data(), z.data());
+    sdca::l2_topk_hinge_beta<double, double>(1, 1).update_dual_variables(3, norm2, a.data(),
+                                                                         z.data());
     expect_relative(a, {2 * s, -s, -s}, 1e-14, "topk_hinge float64");
     std::vector<double> b(3, 0.), y(3, 0.);
-    sdca::l2_topk_hinge_smooth<double, double>(1, 1, 1).update_dual_variables(3, norm2, b.data(),
-                                                                              y.data());
+    sdca::l2_topk_hinge_beta_smooth<double, double>(1, 1, 1).update_dual_variables(
+        3, norm2, b.data(), y.data());
     expect_relative(b, {2 * s, -s, -s}, 1e-14, "topk_hinge_smooth float64");
     std::vector<float> c(3, 0.f), w(3, 0.f);
-    sdca::l2_topk_hinge<float, double>(1, 1).update_dual_variables(3, float(norm2), c.data(),
-                                                                   w.data());
+    sdca::l2_topk_hinge_beta<float, double>(1, 1).update_dual_variables(3, float(norm2), c.data(),
+                                                                        w.data());
     expect_relative(c, {2 * s, -s, -s}, 1e-6, "topk_hinge float32 storage / float64 compute");
   }
   // Float32 reaches the floor near norm2 = 1e8.
   std::vector<float> a(3, 0.f), z(3, 0.f);
-  sdca::l2_topk_hinge<float, float>(1, 1).update_dual_variables(3, 1e8f, a.data(), z.data());
+  sdca::l2_topk_hinge_beta<float, float>(1, 1).update_dual_variables(3, 1e8f, a.data(), z.data());
   const double s = 1 / (3 * double(1e8f));
   expect_relative(a, {2 * s, -s, -s}, 1e-6, "topk_hinge float32");
 }
@@ -63,10 +64,10 @@ TEST(StressProjections, float32_topk_hinge_resolves_a_tiny_margin) {
   // s = 2^-26 / 2 (nonsmooth) and 2^-26 / 3 (smooth), to an ulp of the scores (absolute).
   const double h = std::ldexp(1., -26), eps = double(std::numeric_limits<float>::epsilon());
   float a[] = {0, 0}, z[] = {1, float(h)};
-  sdca::l2_topk_hinge<float, float>(1, 1).update_dual_variables(2, 1.f, a, z);
+  sdca::l2_topk_hinge_beta<float, float>(1, 1).update_dual_variables(2, 1.f, a, z);
   for (int i = 0; i < 2; ++i) EXPECT_NEAR(a[i], (i ? -h : h) / 2, 4 * eps) << i;
   float b[] = {0, 0}, y[] = {1, float(h)};
-  sdca::l2_topk_hinge_smooth<float, float>(1, 1, 1).update_dual_variables(2, 1.f, b, y);
+  sdca::l2_topk_hinge_beta_smooth<float, float>(1, 1, 1).update_dual_variables(2, 1.f, b, y);
   for (int i = 0; i < 2; ++i) EXPECT_NEAR(b[i], (i ? -h : h) / 3, 4 * eps) << i;
 }
 

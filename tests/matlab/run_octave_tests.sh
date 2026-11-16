@@ -19,10 +19,29 @@ else
 fi
 out=${1:-build/octave}; mkdir -p "$out"; out=$(cd "$out" && pwd)
 # mkoctfile strips quotes from -D values; string macros go through a header.
-printf '#define SDCA_VERSION "0.3.0-octave"\n#define MEX_PROX "matsdca_prox"\n#define MEX_SOLVE "matsdca_fit"\n#define MEX_LOSS "matsdca_loss"\n' > "$out/defines.h"
+printf '#define SDCA_VERSION "octave"\n#define MEX_PROX "matsdca_prox"\n#define MEX_SOLVE "matsdca_fit"\n#define MEX_LOSS "matsdca_loss"\n' > "$out/defines.h"
 # The numerics flags of matlab/make.m and the CMake build.
 flags=(--mex "$blas_def" -include "$out/defines.h" -Iinclude -Isrc/matlab)
-export OCTAVE_HOME=$prefix CC=${CC:-gcc} CXX=${CXX:-g++} DL_LD=${CXX:-g++} LD_CXX=${CXX:-g++} CXXFLAGS="-std=c++11 -O2 -fno-fast-math -ffp-contract=off -fPIC -pthread"
+# Some relocatable Octave packages pad rewritten compiler-flag strings with NULs.
+# Passing those through mkoctfile's shell command truncates it before the source file.
+# Preserve the configured flags, stripping only that padding before overriding them.
+for variable in CPPFLAGS CFLAGS LDFLAGS DL_LDFLAGS; do
+  if [[ -z "${!variable+x}" ]]; then
+    value=$("$mkoctfile" -p "$variable" | tr -d '\000')
+    export "$variable=$value"
+  fi
+done
+export OCTAVE_HOME=$prefix
+# Prefer the compiler shipped with this Octave prefix when its configured name is
+# relative; a user's explicit CC/CXX still wins (for example Apple versus LLVM clang).
+for variable in CC CXX; do
+  if [[ -z "${!variable:-}" ]]; then
+    value=$("$mkoctfile" -p "$variable")
+    [[ ! -x "$prefix/bin/$value" ]] || value="$prefix/bin/$value"
+    export "$variable=$value"
+  fi
+done
+export DL_LD=$CXX LD_CXX=$CXX CXXFLAGS="-std=c++11 -O2 -fno-fast-math -ffp-contract=off -fPIC -pthread"
 "$mkoctfile" "${flags[@]}" -o "$out/matsdca_prox.mex" src/matlab/mex_prox.cpp $blas
 "$mkoctfile" "${flags[@]}" -o "$out/matsdca_fit.mex" src/matlab/mex_solve.cpp $blas
 "$mkoctfile" "${flags[@]}" -o "$out/matsdca_loss.mex" src/matlab/mex_loss.cpp $blas

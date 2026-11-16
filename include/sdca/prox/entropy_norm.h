@@ -17,7 +17,7 @@ namespace sdca {
  * The solution is
  *    x = max(0, min(lambert_w_exp(a - t), hi))
  * Entries are relatively accurate down to tiny ones where long double is
- * wider than double (docs/numerics.md).
+ * wider than double (docs/API.md, Known limits).
  **/
 template <typename Result = double, typename Iterator>
 inline auto thresholds_entropy_norm(Iterator first, Iterator last, const Result hi = 1,

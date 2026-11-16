@@ -1,4 +1,4 @@
-"""libsdca losses in JAX: jit, grad, vmap, named functions and distillation."""
+"""libsdca losses in JAX: jit, grad, vmap, class weights, label smoothing and distillation."""
 
 import jax
 import jax.numpy as jnp
@@ -8,7 +8,6 @@ from libsdca.jax import (
     cross_entropy,
     distillation_loss,
     multilabel_hinge_loss,
-    sdca_loss,
     topk_cross_entropy,
     topk_hinge_loss,
 )
@@ -20,7 +19,7 @@ y = jnp.argmax(x @ jax.random.normal(key_w, (10, 5)), axis=1)  # labels 0..4
 
 # A linear model trained by gradient descent on a jitted top-k loss.
 def objective(w: jax.Array, x: jax.Array, y: jax.Array) -> jax.Array:
-    return sdca_loss(x @ w, y, "topk_hinge_beta", k=2, gamma=0.5)
+    return topk_hinge_loss(x @ w, y, k=2, gamma=0.5)
 
 
 step = jax.jit(jax.value_and_grad(objective))
@@ -34,12 +33,16 @@ for i in range(101):
 # Same values as the NumPy loss_and_grad on the same scores.
 scores = x @ w
 values, _ = libsdca.loss_and_grad(
-    np.asarray(scores), np.asarray(y), "topk_hinge_beta", k=2, gamma=0.5
+    np.asarray(scores), np.asarray(y), libsdca.TopKHingeBeta(k=2, gamma=0.5)
 )
 np.testing.assert_allclose(float(objective(w, x, y)), values.mean(), rtol=1e-5)
 
-# Named functions; entropy supports higher derivatives.
+# Entropy supports higher derivatives; cross_entropy also takes class weights, an ignored
+# label, label smoothing and class probabilities, as torch.nn.functional.cross_entropy.
 print("cross_entropy", float(cross_entropy(scores, y)))
+weight = jnp.linspace(0.5, 1.5, 5)
+print("weighted, smoothed", float(cross_entropy(scores, y, weight=weight, label_smoothing=0.1)))
+print("probabilities", float(cross_entropy(scores, jax.nn.softmax(scores))))
 print("topk_cross_entropy", float(topk_cross_entropy(scores, y, k=2)))
 print("topk_hinge beta", float(topk_hinge_loss(scores, y, k=2, variant="beta")))
 mask = jax.nn.one_hot(y, 5, dtype=bool).at[:, 0].set(True)
@@ -48,12 +51,12 @@ hessian = jax.hessian(lambda z: cross_entropy(z, y[0]))(scores[0])
 print("entropy Hessian", hessian.shape)
 
 # vmap over a leading batch axis, reduction="none" per example.
-per_example = jax.vmap(lambda z, t: sdca_loss(z, t, "topk_cross_entropy", k=2, reduction="none"))
+per_example = jax.vmap(lambda z, t: topk_cross_entropy(z, t, k=2, reduction="none"))
 print("vmap", per_example(scores.reshape(4, 16, 5), y.reshape(4, 16)).shape)
 
 # Distillation: both arguments are logits; the teacher gets no gradient.
 teacher = scores + 0.1 * jax.random.normal(key_t, scores.shape)
 g = jax.grad(lambda s: distillation_loss(s, teacher, temperature=2.0))(scores)
-zero = jax.grad(lambda s: distillation_loss(s, scores, 2.0))(scores)
+zero = jax.grad(lambda s: distillation_loss(s, scores, temperature=2.0))(scores)
 assert float(jnp.abs(zero).max()) == 0.0  # exactly zero at equal logits
 print("distillation grad norm", float(jnp.linalg.norm(g)))

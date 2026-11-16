@@ -7,13 +7,14 @@ interpreter test runs them, and the streamed distillation kernels, over hundreds
 """
 
 import os
+from typing import Any
 from unittest import mock
 
 import interpreter
 import pytest
 import torch
 from libsdca import _cpu_entropy
-from libsdca.torch import sdca_loss
+from named_losses import proximal_mask_loss, torch_loss
 
 BUDGET = 60
 EPS = torch.finfo(torch.float32).eps
@@ -29,14 +30,12 @@ def solve(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x = x.clone().requires_grad_()
     with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": flag}):
-        value = sdca_loss(
-            x,
-            target,
-            "proximal_cross_entropy",
-            backend=backend,
-            reduction="none",
-            precision=precision,
-        )
+        options: dict[str, Any] = dict(backend=backend, reduction="none", precision=precision)
+        if target.dtype == torch.bool:
+            # Uniform targets on a positive mask: the internal loss (proximal_mask_loss).
+            value = proximal_mask_loss(x, target, **options)
+        else:
+            value = torch_loss(x, target, "proximal_cross_entropy", **options)
         value.backward(torch.ones_like(value))
     assert x.grad is not None
     return value.detach().double().cpu(), x.grad.double().cpu()
@@ -112,12 +111,14 @@ def streamed_check(
         x = student.double().requires_grad_()
         if proximal:
             value, grad = kernels.proximal_distillation(student, teacher, 1.0, 1.0, False)
-            value64 = proximal_distillation_loss(x, teacher.double(), 1.0, 1.0, reduction="none")
+            value64 = proximal_distillation_loss(
+                x, teacher.double(), temperature=1.0, alpha=1.0, reduction="none"
+            )
         else:
             value, stats = kernels.forward(student, teacher, 1.0, False, "none")
             ones = torch.ones(len(picked))
             grad = kernels.backward(student, teacher, stats, ones, 1.0, False, "none")
-            value64 = distillation_loss(x, teacher.double(), 1.0, reduction="none")
+            value64 = distillation_loss(x, teacher.double(), temperature=1.0, reduction="none")
         value64.sum().backward()
         assert x.grad is not None
         found[name] = errors(value, grad, value64.detach(), x.grad)

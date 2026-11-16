@@ -1,952 +1,629 @@
-use std::ffi::{c_int, c_void, CStr};
+use std::ffi::c_int;
 use std::ptr;
-use std::sync::OnceLock;
 
-use crate::error::{invalid, Error, Result};
+use crate::error::{invalid, Result};
 use crate::ffi;
+use crate::loss::Loss;
 use crate::matrix::Matrix;
-use crate::model::{History, Model, HISTORY};
-use crate::names::{Objective, Precision, Status};
-use crate::options::{DistillationOptions, FitOptions, LossOptions, UpdateOptions};
-use crate::real::{self, Real};
-use crate::targets::Targets;
+use crate::model::{Evaluation, Model};
+use crate::names::{Precision, ProjectionPrecision, Shrinking, Status};
+use crate::native::{self, call, check_logits, void};
+use crate::real::Real;
+use crate::settings::{Settings, Threads};
+use crate::targets::{self, Targets};
 
-/// SDCA_ABI_VERSION of include/sdca/c_api.h.
-const ABI_VERSION: c_int = 5;
-
-/// SDCA_INVALID_ARGUMENT of include/sdca/c_api.h.
-const INVALID_ARGUMENT: c_int = -2;
-
-/// Whether the native library has the wrapper's C ABI and history layout.
-fn check_abi(abi: c_int, history_fields: usize) -> Result<()> {
-    if abi != ABI_VERSION {
-        return Err(Error::Native(
-            "Library and wrapper disagree on the C ABI".into(),
-        ));
-    }
-    if history_fields != HISTORY.len() {
-        return Err(Error::Native(
-            "Library and wrapper disagree on the history layout".into(),
-        ));
-    }
-    Ok(())
-}
-
-/// The ABI handshake, done once, then the C ABI precision code of an entry point.
-fn ready<T: Real>(precision: Option<Precision>) -> Result<c_int> {
-    static HANDSHAKE: OnceLock<Result<()>> = OnceLock::new();
-    HANDSHAKE
-        .get_or_init(|| {
-            // SAFETY: plain queries of the native library.
-            let (abi, fields) = unsafe { (ffi::sdca_abi_version(), ffi::sdca_history_fields()) };
-            check_abi(abi, fields)
-        })
-        .clone()?;
-    real::precision_code::<T>(precision)
-}
-
-fn native(call: impl FnOnce() -> c_int) -> Result<()> {
-    let code = call();
-    if code == 0 {
-        return Ok(());
-    }
-    // SAFETY: sdca_last_error returns a NUL-terminated thread-local string.
-    let message = unsafe { CStr::from_ptr(ffi::sdca_last_error()) };
-    let message = message.to_string_lossy().into_owned();
-    Err(if code == INVALID_ARGUMENT {
-        Error::InvalidArgument(message)
-    } else {
-        Error::Native(message)
-    })
-}
-
-/// The native num_threads: SDCA_THREADS_DEFAULT for None.
-fn threads(num_threads: Option<usize>) -> usize {
-    num_threads.unwrap_or(usize::MAX)
-}
-
-fn positive(value: f64, name: &str) -> Result<()> {
-    if !(value.is_finite() && value > 0.0) {
-        return invalid(format!("{name} must be finite and positive"));
-    }
-    Ok(())
-}
-
-/// A finite gamma >= 0: 0 is the nonsmooth hinge.
-fn smoothing(gamma: f64) -> Result<()> {
-    if !(gamma.is_finite() && gamma >= 0.0) {
-        return invalid("gamma must be finite and nonnegative");
-    }
-    Ok(())
-}
-
-fn check_k(k: usize, classes: usize) -> Result<()> {
-    if k < 1 || k >= classes {
-        return invalid("k must be an integer in [1, classes-1]");
-    }
-    Ok(())
-}
-
-fn finite<T: Real>(values: &[T]) -> Result<()> {
-    if !values.iter().all(|v| v.f64().is_finite()) {
-        return invalid("Inputs must be finite");
-    }
-    Ok(())
-}
-
-fn check_logits<T: Real>(z: Matrix<'_, T>) -> Result<()> {
-    if z.rows() == 0 || z.cols() < 2 {
-        return invalid("logits must have shape (n>=1,k>=2)");
-    }
-    finite(z.data())
-}
-
-fn check_scale<T: Real>(c: f64, norm2: f64) -> Result<()> {
-    let normal = |v: f64| (T::MIN_POSITIVE..=T::MAX).contains(&v);
-    if !(normal(c) && normal(norm2) && normal(c * norm2)) {
-        return invalid("C, norm2, and C*norm2 must be normal in the data dtype");
-    }
-    Ok(())
-}
-
-fn void<T>(values: &[T]) -> *const c_void {
-    values.as_ptr().cast()
-}
-
-fn optional<T>(values: Option<&[T]>) -> *const T {
-    values.map_or(ptr::null(), <[T]>::as_ptr)
-}
-
-/// Cross-entropy on label sets is multilabel_cross_entropy.
-fn resolve(objective: Objective, y: &Targets<'_>) -> Objective {
-    if objective == Objective::CrossEntropy && y.is_sets() {
-        Objective::MultilabelCrossEntropy
-    } else {
-        objective
-    }
-}
-
-/// The labels, and the offsets of the multilabel objectives.
-fn targets(
-    y: &Targets<'_>,
-    n: usize,
-    classes: usize,
-    objective: Objective,
-) -> Result<(Vec<i64>, Option<Vec<i64>>)> {
-    if objective.is_multilabel() {
-        let (labels, offsets) = y.label_sets(n, classes, classes - 1)?;
-        Ok((labels, Some(offsets)))
-    } else {
-        Ok((y.labels(n, classes)?, None))
-    }
-}
-
-/// Unregularized per-row loss of the scores `logits` (n, classes) and its
-/// gradient (n, classes) with respect to them (a subgradient at the kinks of
-/// the hinges).
+/// The training input: features, or a Gram matrix of a kernel.
 ///
-/// `target` holds a label or a label set per row; the entropy loss takes a
-/// uniform target over the set, which may hold every class.
-///
-/// # Errors
-/// [`Error::InvalidArgument`] for invalid scores, targets or options (or a
-/// precision that does not store `T`), [`Error::Native`] for a native
-/// failure or a library that does not match the wrapper.
+/// A [`Matrix`] converts into `Features`.
 ///
 /// ```
-/// use libsdca::{loss_and_grad, Loss, LossOptions, Matrix};
+/// use libsdca::{Input, Matrix};
 ///
-/// let logits = Matrix::new(&[2.0, -0.5, 1.0, 0.0, 1.0, 3.0], 2, 3)?;
-/// let options = LossOptions { loss: Loss::TopKHingeAlpha, k: 2, ..Default::default() };
-/// let (values, gradients) = loss_and_grad(logits, &[0, 2], &options)?;
-/// assert_eq!((values.len(), gradients.len()), (2, 6));
+/// let x = Matrix::new(&[1.0, 0.0, 0.0, 1.0], 2, 2)?;
+/// assert_eq!(Input::from(x), Input::Features(x));
 /// # Ok::<(), libsdca::Error>(())
 /// ```
-pub fn loss_and_grad<'y, T: Real>(
-    logits: Matrix<'_, T>,
-    target: impl Into<Targets<'y>>,
-    options: &LossOptions,
-) -> Result<(Vec<f64>, Vec<T>)> {
-    let code = ready::<T>(options.precision)?;
-    check_logits(logits)?;
-    let (n, classes) = (logits.rows(), logits.cols());
-    check_k(options.k, classes)?;
-    smoothing(options.gamma)?;
-    positive(options.alpha, "alpha")?;
-    let mask = target.into().positive(n, classes)?;
-    let (mut values, mut gradients) = (vec![0.0; n], vec![T::default(); n * classes]);
-    let native_options = ffi::Options {
-        precision: code,
-        loss: options.loss.id(),
-        k: options.k,
-        gamma: options.gamma,
-        alpha: options.alpha,
-        projection_precision: options.projection_precision.id(),
-        num_threads: threads(options.num_threads),
-        ..Default::default()
-    };
-    // SAFETY: the buffers have the sizes of the C ABI documentation.
-    native(|| unsafe {
-        ffi::sdca_loss_gradient(
-            &native_options,
-            n,
-            classes,
-            void(logits.data()),
-            mask.as_ptr(),
-            values.as_mut_ptr(),
-            gradients.as_mut_ptr().cast(),
-        )
-    })?;
-    Ok((values, gradients))
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Input<'a, T> {
+    /// Features X (n, d), one example per row: a linear model W (d, num_classes).
+    Features(Matrix<'a, T>),
+    /// A symmetric positive semidefinite Gram matrix K (n, n) of the
+    /// examples: a kernel model of its duals.
+    Kernel(Matrix<'a, T>),
 }
 
-/// Unregularized per-row distillation loss (or proximal distillation if
-/// `options.alpha > 0`) and gradient with respect to `student`.
-pub fn distillation_loss_and_grad<T: Real>(
-    student: Matrix<'_, T>,
-    teacher: Matrix<'_, T>,
-    options: &DistillationOptions,
-) -> Result<(Vec<f64>, Vec<T>)> {
-    let code = ready::<T>(options.precision)?;
-    check_logits(student)?;
-    check_logits(teacher)?;
-    if (teacher.rows(), teacher.cols()) != (student.rows(), student.cols()) {
-        return invalid("teacher must have the same shape as student");
+impl<'a, T> From<Matrix<'a, T>> for Input<'a, T> {
+    fn from(features: Matrix<'a, T>) -> Self {
+        Input::Features(features)
     }
-    positive(options.temperature, "temperature")?;
-    if !(options.alpha.is_finite() && options.alpha >= 0.0) {
-        return invalid("alpha must be finite and nonnegative");
-    }
-    let (n, classes) = (student.rows(), student.cols());
-    let dtype = T::DTYPE_CODE;
-    let (mut values, mut gradients) = (vec![0.0; n], vec![T::default(); n * classes]);
-    if options.alpha > 0.0 {
-        let native_options = ffi::Options {
-            precision: 2,
-            num_threads: threads(options.num_threads),
-            ..Default::default()
-        };
-        // SAFETY: the buffers have the sizes of the C ABI documentation.
-        native(|| unsafe {
-            ffi::sdca_proximal_distillation_rows(
-                &native_options,
-                dtype,
-                n,
-                classes,
-                void(student.data()),
-                void(teacher.data()),
-                options.temperature,
-                options.alpha,
-                values.as_mut_ptr(),
-                gradients.as_mut_ptr().cast(),
-            )
-        })?;
-        return Ok((values, gradients));
-    }
-    let native_options = ffi::Options {
-        precision: if code == 0 { 0 } else { 2 },
-        num_threads: threads(options.num_threads),
-        ..Default::default()
-    };
-    let mut stats = vec![0.0; n * 7];
-    let scale = [1.0f64];
-    // SAFETY: the buffers have the sizes of the C ABI documentation.
-    native(|| unsafe {
-        ffi::sdca_distillation_forward(
-            &native_options,
-            dtype,
-            n,
-            classes,
-            void(student.data()),
-            void(teacher.data()),
-            options.temperature,
-            values.as_mut_ptr(),
-            stats.as_mut_ptr(),
-        )
-    })?;
-    // SAFETY: the buffers have the sizes of the C ABI documentation.
-    native(|| unsafe {
-        ffi::sdca_distillation_backward(
-            &native_options,
-            dtype,
-            n,
-            classes,
-            void(student.data()),
-            void(teacher.data()),
-            options.temperature,
-            stats.as_ptr(),
-            scale.as_ptr(),
-            0,
-            gradients.as_mut_ptr().cast(),
-        )
-    })?;
-    Ok((values, gradients))
 }
 
-/// Unregularized per-row proximal distillation loss (`options.alpha > 0`) and
-/// gradient with respect to `student`.
-pub fn proximal_distillation_loss_and_grad<T: Real>(
-    student: Matrix<'_, T>,
-    teacher: Matrix<'_, T>,
-    options: &DistillationOptions,
-) -> Result<(Vec<f64>, Vec<T>)> {
-    positive(options.alpha, "alpha")?;
-    distillation_loss_and_grad(student, teacher, options)
-}
-
-/// New dual blocks (n, classes) of one coordinate step from the blocks
-/// `options.previous` at the scores `logits` (n, classes) (not gradients).
-///
-/// # Errors
-/// As [`loss_and_grad`]; `previous` must match the shape of `logits`.
+/// The starting point of [`Solver::fit_from`]; [`Start::default`] is a cold
+/// start from zero duals.
 ///
 /// ```
-/// use libsdca::{coordinate_update, Matrix, UpdateOptions};
+/// use libsdca::{Matrix, Solver, Start};
 ///
-/// let logits = Matrix::new(&[2.0, -0.5, 1.0], 1, 3)?;
-/// let a = coordinate_update(logits, &[2], &UpdateOptions { c: 3.0, ..Default::default() })?;
-/// assert!(a[2] > 0.0 && a.iter().sum::<f64>().abs() < 1e-12);
+/// let x = Matrix::new(&[1.0, 0.0, 0.0, 1.0, -1.0, -1.0], 3, 2)?;
+/// let solver = Solver::default().with_max_epoch(5);
+/// let first = solver.fit(x, &[0, 1, 2])?;
+/// let start = Start::default().with_initial_dual(first.dual());
+/// let model = solver.with_max_epoch(1000).fit_from(x, &[0, 1, 2], &start)?;
+/// assert_eq!(model.status(), libsdca::Status::Solved);
 /// # Ok::<(), libsdca::Error>(())
 /// ```
-pub fn coordinate_update<'y, T: Real>(
-    logits: Matrix<'_, T>,
-    y: impl Into<Targets<'y>>,
-    options: &UpdateOptions<'_, T>,
-) -> Result<Vec<T>> {
-    let code = ready::<T>(options.precision)?;
-    check_logits(logits)?;
-    let (n, classes) = (logits.rows(), logits.cols());
-    let y = y.into();
-    let objective = resolve(options.objective, &y);
-    let (labels, offsets) = targets(&y, n, classes, objective)?;
-    positive(options.c, "C")?;
-    positive(options.norm2, "norm2")?;
-    smoothing(options.gamma)?;
-    check_k(options.k, classes)?;
-    check_scale::<T>(options.c, options.norm2)?;
-    let zeros = vec![T::default(); n * classes];
-    let previous = options.previous.unwrap_or(&zeros);
-    if previous.len() != n * classes {
-        return invalid("previous must match logits.shape");
-    }
-    finite(previous)?;
-    let mut out = vec![T::default(); n * classes];
-    let native_options = ffi::Options {
-        precision: code,
-        loss: objective.id(),
-        c: options.c,
-        k: options.k,
-        gamma: options.gamma,
-        projection_precision: options.projection_precision.id(),
-        num_threads: threads(options.num_threads),
-        ..Default::default()
-    };
-    // SAFETY: the buffers have the sizes of the C ABI documentation.
-    native(|| unsafe {
-        ffi::sdca_update_objective(
-            &native_options,
-            n,
-            classes,
-            void(logits.data()),
-            labels.as_ptr(),
-            optional(offsets.as_deref()),
-            void(previous),
-            options.norm2,
-            out.as_mut_ptr().cast(),
-        )
-    })?;
-    Ok(out)
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct Start<'a, T> {
+    /// Duals A (n, num_classes), row-major, usually those of an earlier fit:
+    /// checked against the feasible set of the loss to the rounding of `T`,
+    /// with the label entry of single-label rows rebuilt so that rows sum to
+    /// zero exactly.
+    pub initial_dual: Option<&'a [T]>,
+    /// The center W0 (d, num_classes), row-major as [`Model::weights`], of the
+    /// regularizer `0.5 ||W - W0||^2`; features only.
+    pub center: Option<&'a [T]>,
 }
 
-/// Train an objective on features `x` (n, d), or on a Gram matrix (n, n) if
-/// `options.kernel`, with labels or label sets `y`.
+impl<T> Default for Start<'_, T> {
+    fn default() -> Self {
+        Start {
+            initial_dual: None,
+            center: None,
+        }
+    }
+}
+
+impl<'a, T> Start<'a, T> {
+    /// From the duals `initial_dual`.
+    #[must_use]
+    pub fn with_initial_dual(mut self, initial_dual: &'a [T]) -> Self {
+        self.initial_dual = Some(initial_dual);
+        self
+    }
+
+    /// With the regularizer center `center`.
+    #[must_use]
+    pub fn with_center(mut self, center: &'a [T]) -> Self {
+        self.center = Some(center);
+        self
+    }
+}
+
+/// An SDCA solver of `0.5 ||W||^2 + c sum_i loss(x_i W, y_i)`, without an
+/// intercept, and its coordinate steps.
 ///
-/// # Errors
-/// [`Error::InvalidArgument`] for invalid inputs or options (or a precision
-/// that does not store `T`), [`Error::Native`] for a native failure or a
-/// library that does not match the wrapper. Not converging or a numerical
-/// failure of training is no error: see [`Model::status`].
+/// [`Solver::new`] takes the loss; the `with_*` setters change the defaults of
+/// every interface (c = 1, tol = 1e-3, max_epoch = 1000, eval_epoch = 10,
+/// no evaluation on start, recompute_primal on, [`Shrinking::Auto`], seed 0,
+/// the classes implied by the labels, [`Settings::default`]). The settings are
+/// checked by [`Solver::fit`] and [`Solver::coordinate_update`].
+///
+/// The training losses are the single-label and multilabel losses;
+/// `CrossEntropy` against [`Targets::Probabilities`] is the distillation
+/// objective. The proximal losses and `Distillation` (teacher logits) are
+/// losses of [`Loss::loss_and_grad`] only.
 ///
 /// ```
-/// use libsdca::{fit, FitOptions, Matrix, Precision, Status};
+/// use libsdca::{Loss, Matrix, Solver, Status};
 ///
-/// let x = [1.0f32, 0.0, 0.0, 1.0, -1.0, -1.0];
-/// let x = Matrix::new(&x, 3, 2)?;
-/// let options = FitOptions { c: 10.0, precision: Some(Precision::Float32), ..Default::default() };
-/// let model = fit(x, &[0, 1, 2], &options)?;
-/// assert_eq!(model.status(), Status::Solved);
+/// let x = Matrix::new(&[1.0, 0.0, 0.0, 1.0, -1.0, -1.0], 3, 2)?;
+/// let solver = Solver::new(Loss::topk_cross_entropy(2)).with_c(10.0).with_tol(1e-6);
+/// let model = solver.fit(x, &[0, 1, 2])?;
+/// assert_eq!((model.status(), model.c()), (Status::Solved, 10.0));
 /// assert_eq!(model.predict(x)?, [0, 1, 2]);
 /// # Ok::<(), libsdca::Error>(())
 /// ```
-pub fn fit<'y, T: Real>(
-    x: Matrix<'_, T>,
-    y: impl Into<Targets<'y>>,
-    options: &FitOptions<'_, T>,
-) -> Result<Model<T>> {
-    let code = ready::<T>(options.precision)?;
-    let problem = problem(x, &y.into(), options)?;
-    positive(options.c, "C")?;
-    smoothing(options.gamma)?;
-    check_k(options.k, problem.classes)?;
-    check_norms(&problem, options)?;
-    if options.eval_epoch < 1 {
-        return invalid("eval_epoch must be >=1");
-    }
-    if !(options.tol.is_finite() && options.tol >= 0.0) {
-        return invalid("tol must be finite and nonnegative");
-    }
-    let center = center(&problem, options)?;
-    let dual = dual(&problem, options)?;
-    solve(code, &problem, options, center, dual)
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct Solver {
+    loss: Loss,
+    c: f64,
+    tol: f64,
+    max_epoch: usize,
+    eval_epoch: usize,
+    eval_on_start: bool,
+    recompute_primal: bool,
+    shrinking: Shrinking,
+    seed: u64,
+    num_classes: Option<usize>,
+    settings: Settings,
 }
 
-fn check_distribution(targets: Matrix<'_, f64>, n: usize, classes: Option<usize>) -> Result<usize> {
-    if targets.rows() != n || targets.cols() < 2 {
-        return invalid("distillation targets must have shape (n, num_classes>=2)");
+impl Default for Solver {
+    /// A cross-entropy solver.
+    fn default() -> Self {
+        Solver::new(Loss::CrossEntropy)
     }
-    if let Some(c) = classes {
-        if targets.cols() != c {
-            return invalid("distillation targets must match num_classes");
-        }
-    }
-    let m = targets.cols();
-    let tol = 64.0 * f64::EPSILON * m as f64;
-    for i in 0..n {
-        let row = targets.row(i);
-        if row.iter().any(|&q| !q.is_finite() || q < 0.0) {
-            return invalid("Target probabilities must be finite and nonnegative");
-        }
-        let sum: f64 = row.iter().sum();
-        if (sum - 1.0).abs() > tol {
-            return invalid("Target probability rows must sum to one");
-        }
-    }
-    Ok(m)
 }
 
-/// New dual blocks (n, classes) of one soft-target (distillation) coordinate step.
-pub fn coordinate_update_distillation<T: Real>(
-    logits: Matrix<'_, T>,
-    targets: Matrix<'_, f64>,
-    options: &UpdateOptions<'_, T>,
-) -> Result<Vec<T>> {
-    let code = ready::<T>(options.precision)?;
-    check_logits(logits)?;
-    let (n, classes) = (logits.rows(), logits.cols());
-    check_distribution(targets, n, Some(classes))?;
-    positive(options.c, "C")?;
-    positive(options.norm2, "norm2")?;
-    smoothing(options.gamma)?;
-    check_k(options.k, classes)?;
-    check_scale::<T>(options.c, options.norm2)?;
-    let zeros = vec![T::default(); n * classes];
-    let previous = options.previous.unwrap_or(&zeros);
-    if previous.len() != n * classes {
-        return invalid("previous must match logits.shape");
+impl Solver {
+    /// A solver of `loss` with the default settings.
+    #[must_use]
+    pub fn new(loss: Loss) -> Self {
+        Solver {
+            loss,
+            c: 1.0,
+            tol: 1e-3,
+            max_epoch: 1000,
+            eval_epoch: 10,
+            eval_on_start: false,
+            recompute_primal: true,
+            shrinking: Shrinking::Auto,
+            seed: 0,
+            num_classes: None,
+            settings: Settings::default(),
+        }
     }
-    finite(previous)?;
-    let mut out = vec![T::default(); n * classes];
-    let native_options = ffi::Options {
-        precision: code,
-        c: options.c,
-        projection_precision: options.projection_precision.id(),
-        num_threads: threads(options.num_threads),
-        ..Default::default()
-    };
-    // SAFETY: the buffers have the sizes of the C ABI documentation.
-    native(|| unsafe {
-        ffi::sdca_update_distillation(
-            &native_options,
+
+    /// With the loss weight `c`, finite and positive; `c`, every nonzero
+    /// squared example norm and their products must be normal in the data type.
+    #[must_use]
+    pub fn with_c(mut self, c: f64) -> Self {
+        self.c = c;
+        self
+    }
+
+    /// With the relative duality gap of success `tol`, finite and >= 0; 0
+    /// stops at `max_epoch` (or with no progress or a failure).
+    #[must_use]
+    pub fn with_tol(mut self, tol: f64) -> Self {
+        self.tol = tol;
+        self
+    }
+
+    /// With the epoch limit `max_epoch`.
+    #[must_use]
+    pub fn with_max_epoch(mut self, max_epoch: usize) -> Self {
+        self.max_epoch = max_epoch;
+        self
+    }
+
+    /// Evaluate after `eval_epoch` full passes of work (epochs without
+    /// shrinking, at most 50 epochs apart with it), and up to twice between
+    /// where the trend of the gap reaches `tol`; 0 evaluates only at the end.
+    #[must_use]
+    pub fn with_eval_epoch(mut self, eval_epoch: usize) -> Self {
+        self.eval_epoch = eval_epoch;
+        self
+    }
+
+    /// Whether to also evaluate before the first epoch.
+    #[must_use]
+    pub fn with_eval_on_start(mut self, eval_on_start: bool) -> Self {
+        self.eval_on_start = eval_on_start;
+        self
+    }
+
+    /// Whether to rebuild W = center + X' A at each evaluation of a feature
+    /// model, so that the drift of the updates of W does not enter the gap.
+    #[must_use]
+    pub fn with_recompute_primal(mut self, recompute_primal: bool) -> Self {
+        self.recompute_primal = recompute_primal;
+        self
+    }
+
+    /// With what the epochs of the hinge losses leave out; the entropy losses
+    /// take [`Shrinking::Auto`] only.
+    #[must_use]
+    pub fn with_shrinking(mut self, shrinking: Shrinking) -> Self {
+        self.shrinking = shrinking;
+        self
+    }
+
+    /// With the seed `seed` of the order of the examples in the epochs; seeds
+    /// equal modulo 2^31 - 2 give the same order.
+    #[must_use]
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// With `num_classes` classes (>= 2) instead of the largest label plus one
+    /// (or the columns of target probabilities).
+    #[must_use]
+    pub fn with_num_classes(mut self, num_classes: usize) -> Self {
+        self.num_classes = Some(num_classes);
+        self
+    }
+
+    /// With the arithmetic, threads and projection solver of `settings`.
+    #[must_use]
+    pub fn with_settings(mut self, settings: Settings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    /// With the working arithmetic `precision`; see [`Settings::with_precision`].
+    #[must_use]
+    pub fn with_precision(mut self, precision: Precision) -> Self {
+        self.settings = self.settings.with_precision(precision);
+        self
+    }
+
+    /// With the threads `threads`; see [`Settings::with_threads`].
+    #[must_use]
+    pub fn with_threads(mut self, threads: Threads) -> Self {
+        self.settings = self.settings.with_threads(threads);
+        self
+    }
+
+    /// With the projection solver `projection_precision`; see
+    /// [`Settings::with_projection_precision`].
+    #[must_use]
+    pub fn with_projection_precision(mut self, projection_precision: ProjectionPrecision) -> Self {
+        self.settings = self
+            .settings
+            .with_projection_precision(projection_precision);
+        self
+    }
+
+    /// The loss.
+    #[must_use]
+    pub fn loss(&self) -> Loss {
+        self.loss
+    }
+
+    /// The loss weight C.
+    #[must_use]
+    pub fn c(&self) -> f64 {
+        self.c
+    }
+
+    /// The relative duality gap of success.
+    #[must_use]
+    pub fn tol(&self) -> f64 {
+        self.tol
+    }
+
+    /// The epoch limit.
+    #[must_use]
+    pub fn max_epoch(&self) -> usize {
+        self.max_epoch
+    }
+
+    /// The full passes of work between evaluations (0: only at the end).
+    #[must_use]
+    pub fn eval_epoch(&self) -> usize {
+        self.eval_epoch
+    }
+
+    /// Whether the objective is also evaluated before the first epoch.
+    #[must_use]
+    pub fn eval_on_start(&self) -> bool {
+        self.eval_on_start
+    }
+
+    /// Whether evaluations rebuild W = center + X' A.
+    #[must_use]
+    pub fn recompute_primal(&self) -> bool {
+        self.recompute_primal
+    }
+
+    /// What the epochs of the hinge losses leave out.
+    #[must_use]
+    pub fn shrinking(&self) -> Shrinking {
+        self.shrinking
+    }
+
+    /// The seed of the order of the examples in the epochs.
+    #[must_use]
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// The number of classes; `None` for the classes implied by the targets.
+    #[must_use]
+    pub fn num_classes(&self) -> Option<usize> {
+        self.num_classes
+    }
+
+    /// The arithmetic, threads and projection solver.
+    #[must_use]
+    pub fn settings(&self) -> Settings {
+        self.settings
+    }
+
+    /// Trains on `input` with `targets` (one per example) from zero duals:
+    /// [`Solver::fit_from`] with [`Start::default`].
+    ///
+    /// # Errors
+    /// As [`Solver::fit_from`].
+    ///
+    /// ```
+    /// use libsdca::{Loss, Matrix, Solver, Status, Targets};
+    ///
+    /// let x = Matrix::new(&[1.0, 0.0, 0.0, 1.0, -1.0, -1.0], 3, 2)?;
+    /// let q = Matrix::new(&[0.8, 0.1, 0.1, 0.1, 0.8, 0.1, 0.1, 0.1, 0.8], 3, 3)?;
+    /// let model = Solver::default().fit(x, Targets::Probabilities(q))?;
+    /// assert!(model.has_probability_targets() && model.status() == Status::Solved);
+    /// # Ok::<(), libsdca::Error>(())
+    /// ```
+    pub fn fit<'x, 'y, T: Real>(
+        &self,
+        input: impl Into<Input<'x, T>>,
+        targets: impl Into<Targets<'y, T>>,
+    ) -> Result<Model<T>> {
+        self.fit_from(input, targets, &Start::default())
+    }
+
+    /// Trains on `input` with `targets` (one per example) from `start`.
+    ///
+    /// The single-label losses take [`Targets::Labels`], the multilabel ones
+    /// label sets of between 1 and num_classes - 1 labels, and `CrossEntropy`
+    /// also [`Targets::Probabilities`]. The model keeps the storage type `T`;
+    /// see [`crate::Precision`] for the arithmetic.
+    ///
+    /// # Errors
+    /// [`crate::Error::InvalidArgument`] for an empty or nonfinite input, a
+    /// kernel that is not square, symmetric and positive semidefinite (to
+    /// tolerance), a loss that is not a training objective, targets of a kind
+    /// the loss does not take or of the wrong size, invalid labels, loss
+    /// parameters or solver settings (such as shrinking other than
+    /// [`Shrinking::Auto`] for an entropy loss), a center with [`Input::Kernel`],
+    /// an infeasible initial dual, a precision the data type does not take, or
+    /// sizes beyond the native BLAS integers; [`crate::Error::Native`] for a
+    /// native failure or a library that does not match the crate. Not
+    /// converging or a numerical failure of training is no error: see
+    /// [`Model::status`].
+    pub fn fit_from<'x, 'y, T: Real>(
+        &self,
+        input: impl Into<Input<'x, T>>,
+        targets: impl Into<Targets<'y, T>>,
+        start: &Start<'_, T>,
+    ) -> Result<Model<T>> {
+        native::handshake()?;
+        let execution = native::execution::<T>(&self.settings)?;
+        let (x, kernel) = match input.into() {
+            Input::Features(x) => (x, false),
+            Input::Kernel(x) => (x, true),
+        };
+        let (n, d) = (x.rows(), x.cols());
+        if n == 0 || d == 0 {
+            return invalid("input must be a nonempty matrix");
+        }
+        if kernel && n != d {
+            return invalid(format!(
+                "Input::Kernel must be a square Gram matrix, not {n}x{d}"
+            ));
+        }
+        let targets = targets.into();
+        let classes = match self.num_classes {
+            Some(classes) => classes,
+            None => implied_classes(&targets)?,
+        };
+        if classes < 2 {
+            return invalid(format!("num_classes must be at least 2, not {classes}"));
+        }
+        // Before the buffers of (n, classes) and (d, classes) are allocated.
+        let sizes = [
             n,
+            d,
             classes,
-            void(logits.data()),
-            targets.data().as_ptr(),
-            void(previous),
-            options.norm2,
-            out.as_mut_ptr().cast(),
-        )
-    })?;
-    Ok(out)
-}
-
-/// Train a soft-target (distillation) model on features `x` (n, d), or on a
-/// Gram matrix (n, n) if `options.kernel`, with target probability matrix
-/// `targets` (n, num_classes).
-pub fn fit_distillation<T: Real>(
-    x: Matrix<'_, T>,
-    targets: Matrix<'_, f64>,
-    options: &FitOptions<'_, T>,
-) -> Result<Model<T>> {
-    let code = ready::<T>(options.precision)?;
-    if x.rows() == 0 || x.cols() == 0 {
-        return invalid("X must be a nonempty matrix");
-    }
-    finite(x.data())?;
-    if options.kernel && x.rows() != x.cols() {
-        return invalid("Training kernel must be square");
-    }
-    if let Some(c) = options.num_classes {
-        if c < 2 {
-            return invalid("num_classes must be >=2");
+            d.saturating_mul(classes),
+            n.saturating_mul(classes),
+        ];
+        let limit = native::max_extent();
+        if sizes.iter().any(|&size| size > limit) {
+            return invalid("Dimensions exceed the native BLAS integer limit");
         }
-    }
-    let (n, d) = (x.rows(), x.cols());
-    let classes = check_distribution(targets, n, options.num_classes)?;
-    if [
-        n,
-        d,
-        classes,
-        d.saturating_mul(classes),
-        n.saturating_mul(classes),
-    ]
-    .iter()
-    .any(|&size| size > i32::MAX as usize)
-    {
-        return invalid("Dimensions exceed the native BLAS integer limit");
-    }
-    let problem = Problem {
-        x,
-        labels: Vec::new(),
-        offsets: None,
-        objective: Objective::CrossEntropy,
-        classes,
-    };
-    positive(options.c, "C")?;
-    smoothing(options.gamma)?;
-    check_k(options.k, classes)?;
-    check_norms(&problem, options)?;
-    if options.eval_epoch < 1 {
-        return invalid("eval_epoch must be >=1");
-    }
-    if !(options.tol.is_finite() && options.tol >= 0.0) {
-        return invalid("tol must be finite and nonnegative");
-    }
-    let center = center(&problem, options)?;
-    let dual = match options.initial_dual {
-        None => None,
-        Some(initial) => {
+        self.check_objective(classes)?;
+        let targets = targets::native(self.loss, &targets, n, classes, true)?;
+        let options = ffi::FitOptions {
+            c: self.c,
+            tol: self.tol,
+            max_epoch: self.max_epoch,
+            eval_epoch: self.eval_epoch,
+            eval_on_start: c_int::from(self.eval_on_start),
+            recompute_primal: c_int::from(self.recompute_primal),
+            shrinking: self.shrinking.code(),
+            seed: self.seed,
+            ..Default::default()
+        };
+        let rows = native::history_rows(&options)?;
+        let mut history = Vec::new();
+        if history
+            .try_reserve_exact(rows * ffi::HISTORY_FIELDS)
+            .is_err()
+        {
+            return invalid("max_epoch / eval_epoch is too large for the history buffer");
+        }
+        history.resize(rows * ffi::HISTORY_FIELDS, 0.0);
+        let center = match start.center {
+            None => None,
+            Some(_) if kernel => {
+                return invalid("Start::center is for Input::Features, not Input::Kernel");
+            }
+            Some(center) => Some(column_major(center, d, classes)?),
+        };
+        if let Some(initial) = start.initial_dual {
             if initial.len() != n * classes {
-                return invalid("initial_dual must have shape (n, num_classes)");
+                return invalid(format!(
+                    "initial_dual must have the {n}x{classes} entries of (n, num_classes), not {}",
+                    initial.len()
+                ));
             }
-            finite(initial)?;
-            let eps = 32.0 * T::EPSILON;
-            let slack = eps * options.c;
-            for i in 0..n {
-                let row = &initial[i * classes..(i + 1) * classes];
-                let q = targets.row(i);
-                // Relative to the largest entry: near the f64 maximum, the sum of |v| overflows.
-                let largest = row.iter().fold(0.0f64, |m, v| m.max(v.f64().abs()));
-                let unit = if largest > 0.0 { largest } else { 1.0 };
-                let sum: f64 = row.iter().map(|v| v.f64() / unit).sum();
-                let size: f64 = row.iter().map(|v| (v.f64() / unit).abs()).sum();
-                if sum.abs() > eps * size {
-                    return invalid("initial_dual rows must sum to zero to storage precision");
-                }
-                if (0..classes).any(|j| {
-                    let v = row[j].f64();
-                    v > options.c * q[j] + slack || v < options.c * (q[j] - 1.0) - slack
-                }) {
-                    return invalid("initial_dual is outside the distillation feasible set");
-                }
-            }
-            Some(initial.to_vec())
         }
-    };
-    let warm = dual.is_some();
-    let mut w = match (&dual, options.kernel) {
-        (_, true) => Vec::new(),
-        (Some(a), false) => warm_primal(x, a, classes, center.as_deref()),
-        (None, false) => vec![T::default(); d * classes],
-    };
-    let mut a = dual.unwrap_or_else(|| vec![T::default(); n * classes]);
-    let rows = history_rows(options)?;
-    let mut history = Vec::new();
-    if history.try_reserve_exact(rows * HISTORY.len()).is_err() {
-        return invalid("max_epoch / eval_epoch is too large for the history buffer");
-    }
-    history.resize(rows * HISTORY.len(), 0.0);
-    let native_options = ffi::Options {
-        precision: code,
-        c: options.c,
-        projection_precision: options.projection_precision.id(),
-        max_epoch: options.max_epoch,
-        eval_epoch: options.eval_epoch,
-        tol: options.tol,
-        eval_on_start: c_int::from(options.eval_on_start),
-        recompute_primal: c_int::from(options.recompute_primal),
-        kernel: c_int::from(options.kernel),
-        warm: c_int::from(warm),
-        shrinking: options.shrinking.id(),
-        ..Default::default()
-    };
-    let mut result = ffi::FitResult::default();
-    // SAFETY: the buffers have the sizes of the C ABI documentation.
-    native(|| unsafe {
-        ffi::sdca_fit_distillation(
-            &native_options,
+        let mut weights = vec![T::default(); if kernel { 0 } else { d * classes }];
+        let mut dual = vec![T::default(); n * classes];
+        let input = ffi::Input {
+            kind: if kernel {
+                ffi::INPUT_KERNEL
+            } else {
+                ffi::INPUT_FEATURES
+            },
+            dtype: T::DTYPE_CODE,
             n,
             d,
-            classes,
-            void(x.data()),
-            targets.data().as_ptr(),
-            optional(center.as_deref()).cast(),
-            if options.kernel {
-                ptr::null_mut()
-            } else {
-                w.as_mut_ptr().cast()
-            },
-            a.as_mut_ptr().cast(),
-            history.as_mut_ptr(),
-            rows,
-            &mut result,
-        )
-    })?;
-    let weights = (!options.kernel).then(|| {
-        (0..d * classes)
-            .map(|i| w[(i % classes) * d + i / classes])
-            .collect()
-    });
-    Ok(Model {
-        weights,
-        dual: a,
-        history: History::new(&history, result.history_used),
-        status: Status::from_id(result.status.into()),
-        epochs: result.epochs,
-        kernel: options.kernel,
-        objective: Objective::CrossEntropy,
-        num_classes: classes,
-    })
-}
-
-/// Validated training input in the layout of the native solver.
-struct Problem<'a, T> {
-    x: Matrix<'a, T>,
-    labels: Vec<i64>,
-    offsets: Option<Vec<i64>>,
-    objective: Objective,
-    classes: usize,
-}
-
-fn problem<'x, T: Real>(
-    x: Matrix<'x, T>,
-    y: &Targets<'_>,
-    options: &FitOptions<'_, T>,
-) -> Result<Problem<'x, T>> {
-    if x.rows() == 0 || x.cols() == 0 {
-        return invalid("X must be a nonempty matrix");
-    }
-    finite(x.data())?;
-    // The library checks a kernel's symmetry and Cauchy-Schwarz bounds.
-    if options.kernel && x.rows() != x.cols() {
-        return invalid("Training kernel must be square");
-    }
-    let objective = resolve(options.objective, y);
-    let classes = match options.num_classes {
-        Some(c) => c,
-        None => y.implied_classes()?,
-    };
-    if classes < 2 {
-        return invalid("num_classes must be >=2");
-    }
-    let (n, d) = (x.rows(), x.cols());
-    if [
-        n,
-        d,
-        classes,
-        d.saturating_mul(classes),
-        n.saturating_mul(classes),
-    ]
-    .iter()
-    .any(|&size| size > i32::MAX as usize)
-    {
-        return invalid("Dimensions exceed the native BLAS integer limit");
-    }
-    let (labels, offsets) = targets(y, n, classes, objective)?;
-    Ok(Problem {
-        x,
-        labels,
-        offsets,
-        objective,
-        classes,
-    })
-}
-
-/// Nonzero squared norms must keep C*norm2 normal; zero rows have zero scores.
-fn check_norms<T: Real>(problem: &Problem<'_, T>, options: &FitOptions<'_, T>) -> Result<()> {
-    let x = problem.x;
-    let norms: Vec<f64> = (0..x.rows())
-        .map(|i| {
-            if options.kernel {
-                x.row(i)[i].f64()
-            } else {
-                x.row(i).iter().map(|v| v.f64() * v.f64()).sum()
-            }
+            x: void(x.data()),
+            ..Default::default()
+        };
+        let mut result = ffi::FitResult::default();
+        // SAFETY: the buffers have the sizes of the C ABI documentation, the
+        // targets point into storage that outlives the call, and the weights
+        // and center are NULL for a kernel.
+        call(unsafe {
+            ffi::sdca_model_fit(
+                &self.loss.abi(self.settings.projection_precision),
+                &options,
+                &execution,
+                &input,
+                classes,
+                &targets.abi(),
+                center.as_deref().map_or(ptr::null(), <[T]>::as_ptr).cast(),
+                start.initial_dual.map_or(ptr::null(), <[T]>::as_ptr).cast(),
+                if kernel {
+                    ptr::null_mut()
+                } else {
+                    weights.as_mut_ptr().cast()
+                },
+                dual.as_mut_ptr().cast(),
+                history.as_mut_ptr(),
+                rows,
+                &mut result,
+            )
+        })?;
+        let status = Status::from_code(result.status)?;
+        // W (d, classes) column-major to row-major.
+        let weights = (!kernel).then(|| {
+            (0..d * classes)
+                .map(|i| weights[(i % classes) * d + i / classes])
+                .collect()
+        });
+        Ok(Model {
+            weights,
+            dual,
+            history: Evaluation::history(&history, result.history_rows),
+            status,
+            epochs: result.epochs,
+            loss: self.loss,
+            c: self.c,
+            num_classes: classes,
+            probabilities: matches!(targets, targets::Native::Probabilities(_)),
         })
-        .collect();
-    if norms.iter().any(|&norm| norm < 0.0) {
-        return invalid("A kernel diagonal must be nonnegative");
     }
-    // Zero rows take a block of size C, so C itself must fit the data type.
-    if !(T::MIN_POSITIVE..=T::MAX).contains(&options.c) {
-        return invalid("C, norm2, and C*norm2 must be normal in the data dtype");
-    }
-    let (lo, hi) = norms
-        .iter()
-        .filter(|&&v| v > 0.0)
-        .fold((f64::MAX, 0.0f64), |(lo, hi), &v| (lo.min(v), hi.max(v)));
-    if hi == 0.0 {
-        return Ok(());
-    }
-    check_scale::<T>(options.c, lo)?;
-    check_scale::<T>(options.c, hi)
-}
 
-/// The center (d, classes) in the column-major layout of the native solver.
-fn center<T: Real>(
-    problem: &Problem<'_, T>,
-    options: &FitOptions<'_, T>,
-) -> Result<Option<Vec<T>>> {
-    let Some(center) = options.center else {
-        return Ok(None);
-    };
-    if options.kernel {
-        return invalid("center is only supported for feature input");
-    }
-    let (d, classes) = (problem.x.cols(), problem.classes);
-    if center.len() != d * classes || !center.iter().all(|v| v.f64().is_finite()) {
-        return invalid("center must be finite with shape (d, num_classes)");
-    }
-    Ok(Some(
-        (0..d * classes)
-            .map(|i| center[(i % d) * classes + i / d])
-            .collect(),
-    ))
-}
-
-/// A validated copy of the warm start, the label entry of single-label
-/// rows rebuilt so that rows sum to zero exactly.
-fn dual<T: Real>(problem: &Problem<'_, T>, options: &FitOptions<'_, T>) -> Result<Option<Vec<T>>> {
-    let Some(initial) = options.initial_dual else {
-        return Ok(None);
-    };
-    let (n, classes) = (problem.x.rows(), problem.classes);
-    if initial.len() != n * classes {
-        return invalid("initial_dual must have shape (n, num_classes)");
-    }
-    finite(initial)?;
-    let mut a = initial.to_vec();
-    for i in 0..n {
-        check_initial_row(problem, i, &a[i * classes..(i + 1) * classes], options)?;
-        if problem.offsets.is_none() {
-            let label = problem.labels[i] as usize;
-            let others: f64 = (0..classes)
-                .filter(|&j| j != label)
-                .map(|j| a[i * classes + j].f64())
-                .sum();
-            a[i * classes + label] = T::from_f64(-others);
+    /// New dual blocks (n, classes) of one coordinate step of the loss from
+    /// the blocks `previous` (zeros if `None`) at the scores `logits` (n,
+    /// classes), for examples of squared norm `norm2`, with the loss weight
+    /// and settings of the solver.
+    ///
+    /// The targets are those of [`Solver::fit_from`]; `previous` must be
+    /// feasible for the loss (as the duals of a fit are), which the library
+    /// checks to the rounding of `T`.
+    ///
+    /// # Errors
+    /// [`crate::Error::InvalidArgument`] for logits that are not finite or have
+    /// fewer than one row or two columns (or not `num_classes` columns if
+    /// set), `previous` of another shape, not finite or infeasible, `norm2`
+    /// not finite and positive, `c`, `norm2` or `c * norm2` not normal in the
+    /// data type, and as [`Solver::fit_from`] for the loss and targets;
+    /// [`crate::Error::Native`] for a native failure.
+    ///
+    /// ```
+    /// use libsdca::{Matrix, Solver};
+    ///
+    /// let logits = Matrix::new(&[2.0, -0.5, 1.0], 1, 3)?;
+    /// let a = Solver::default().with_c(3.0).coordinate_update(logits, &[2], 1.0, None)?;
+    /// assert!(a[2] > 0.0 && a.iter().sum::<f64>().abs() < 1e-12);
+    /// # Ok::<(), libsdca::Error>(())
+    /// ```
+    pub fn coordinate_update<'y, T: Real>(
+        &self,
+        logits: Matrix<'_, T>,
+        targets: impl Into<Targets<'y, T>>,
+        norm2: f64,
+        previous: Option<&[T]>,
+    ) -> Result<Vec<T>> {
+        native::handshake()?;
+        let execution = native::execution::<T>(&self.settings)?;
+        check_logits(logits, "logits")?;
+        let (n, classes) = (logits.rows(), logits.cols());
+        if let Some(expected) = self.num_classes {
+            if classes != expected {
+                return invalid(format!(
+                    "logits must have num_classes = {expected} columns, not {classes}"
+                ));
+            }
         }
+        self.check_objective(classes)?;
+        let targets = targets::native(self.loss, &targets.into(), n, classes, true)?;
+        if let Some(previous) = previous {
+            if previous.len() != n * classes {
+                return invalid(format!(
+                    "previous must have the {n}x{classes} entries of logits, not {}",
+                    previous.len()
+                ));
+            }
+        }
+        let norms = vec![norm2; n];
+        let mut out = vec![T::default(); n * classes];
+        // SAFETY: the buffers have the sizes of the C ABI documentation, and
+        // the targets point into storage that outlives the call.
+        call(unsafe {
+            ffi::sdca_dual_update(
+                &self.loss.abi(self.settings.projection_precision),
+                self.c,
+                &execution,
+                T::DTYPE_CODE,
+                n,
+                classes,
+                void(logits.data()),
+                &targets.abi(),
+                previous.map_or(ptr::null(), <[T]>::as_ptr).cast(),
+                norms.as_ptr(),
+                out.as_mut_ptr().cast(),
+            )
+        })?;
+        Ok(out)
     }
-    Ok(Some(a))
-}
 
-fn solve<T: Real>(
-    code: c_int,
-    problem: &Problem<'_, T>,
-    options: &FitOptions<'_, T>,
-    center: Option<Vec<T>>,
-    dual: Option<Vec<T>>,
-) -> Result<Model<T>> {
-    let (n, d, classes) = (problem.x.rows(), problem.x.cols(), problem.classes);
-    let warm = dual.is_some();
-    // A cold start fills W itself (zero or the center).
-    let mut w = match (&dual, options.kernel) {
-        (_, true) => Vec::new(),
-        (Some(a), false) => warm_primal(problem.x, a, classes, center.as_deref()),
-        (None, false) => vec![T::default(); d * classes],
-    };
-    let mut a = dual.unwrap_or_else(|| vec![T::default(); n * classes]);
-    let rows = history_rows(options)?;
-    let mut history = Vec::new();
-    if history.try_reserve_exact(rows * HISTORY.len()).is_err() {
-        return invalid("max_epoch / eval_epoch is too large for the history buffer");
-    }
-    history.resize(rows * HISTORY.len(), 0.0);
-    let native_options = ffi::Options {
-        precision: code,
-        loss: problem.objective.id(),
-        c: options.c,
-        k: options.k,
-        gamma: options.gamma,
-        projection_precision: options.projection_precision.id(),
-        max_epoch: options.max_epoch,
-        eval_epoch: options.eval_epoch,
-        tol: options.tol,
-        eval_on_start: c_int::from(options.eval_on_start),
-        recompute_primal: c_int::from(options.recompute_primal),
-        kernel: c_int::from(options.kernel),
-        warm: c_int::from(warm),
-        shrinking: options.shrinking.id(),
-        ..Default::default()
-    };
-    let mut result = ffi::FitResult::default();
-    // SAFETY: the buffers have the sizes of the C ABI documentation.
-    native(|| unsafe {
-        ffi::sdca_fit(
-            &native_options,
-            n,
-            d,
-            classes,
-            void(problem.x.data()),
-            problem.labels.as_ptr(),
-            optional(problem.offsets.as_deref()),
-            optional(center.as_deref()).cast(),
-            if options.kernel {
-                ptr::null_mut()
+    /// Rejects a loss that is not a training objective, and invalid loss
+    /// parameters for `classes` classes.
+    fn check_objective(&self, classes: usize) -> Result<()> {
+        if !self.loss.is_objective() {
+            let hint = if self.loss.is_distillation() {
+                "; train on target distributions with Loss::CrossEntropy and Targets::Probabilities"
             } else {
-                w.as_mut_ptr().cast()
-            },
-            a.as_mut_ptr().cast(),
-            history.as_mut_ptr(),
-            rows,
-            &mut result,
-        )
-    })?;
-    let weights = (!options.kernel).then(|| {
-        (0..d * classes)
-            .map(|i| w[(i % classes) * d + i / classes])
-            .collect()
-    });
-    Ok(Model {
-        weights,
-        dual: a,
-        history: History::new(&history, result.history_used),
-        status: Status::from_id(result.status.into()),
-        epochs: result.epochs,
-        kernel: options.kernel,
-        objective: problem.objective,
-        num_classes: classes,
-    })
-}
-
-/// Rows of the history: at most max_epoch / eval_epoch + 2 evaluations
-/// (every eval_epoch epochs, up to two between, the start and the end),
-/// checked against overflow.
-fn history_rows<T>(options: &FitOptions<'_, T>) -> Result<usize> {
-    (options.max_epoch / options.eval_epoch)
-        .checked_add(2)
-        .filter(|rows| rows.checked_mul(HISTORY.len()).is_some())
-        .map_or_else(
-            || invalid("max_epoch / eval_epoch is too large for the history buffer"),
-            Ok,
-        )
-}
-
-/// W = center + X' A (d, classes) column-major, accumulated in f64.
-fn warm_primal<T: Real>(x: Matrix<'_, T>, a: &[T], classes: usize, center: Option<&[T]>) -> Vec<T> {
-    let d = x.cols();
-    let mut w: Vec<f64> = center.map_or_else(
-        || vec![0.0; d * classes],
-        |c| c.iter().map(|v| v.f64()).collect(),
-    );
-    for i in 0..x.rows() {
-        let x_row = x.row(i);
-        for j in 0..classes {
-            let aij = a[i * classes + j].f64();
-            if aij == 0.0 {
-                continue;
-            }
-            let col = &mut w[j * d..(j + 1) * d];
-            for (wl, &v) in col.iter_mut().zip(x_row) {
-                *wl += v.f64() * aij;
-            }
+                ""
+            };
+            return invalid(format!(
+                "{} is a loss, not a training objective{hint}",
+                self.loss.name()
+            ));
         }
+        self.loss.check(classes)
     }
-    w.into_iter().map(T::from_f64).collect()
 }
 
-/// Reject a dual block outside the objective's feasible set (to rounding).
-fn check_initial_row<T: Real>(
-    problem: &Problem<'_, T>,
-    i: usize,
-    row: &[T],
-    options: &FitOptions<'_, T>,
-) -> Result<()> {
-    let eps = 32.0 * T::EPSILON;
-    let slack = eps * options.c;
-    let v: Vec<f64> = row.iter().map(|x| x.f64()).collect();
-    // Relative to the largest entry: near the f64 maximum, the sum of |v| overflows.
-    let largest = v.iter().fold(0.0f64, |m, x| m.max(x.abs()));
-    let unit = if largest > 0.0 { largest } else { 1.0 };
-    let (sum, size) = (
-        v.iter().map(|x| x / unit).sum::<f64>(),
-        v.iter().map(|x| (x / unit).abs()).sum::<f64>(),
-    );
-    if sum.abs() > eps * size {
-        return invalid("initial_dual rows must sum to zero to storage precision");
-    }
-    let is_label =
-        |j: usize| Targets::is_positive(&problem.labels, problem.offsets.as_deref(), i, j);
-    // Exact: a positive non-label entry is outside the domain of every dual.
-    if (0..v.len()).any(|j| !is_label(j) && v[j] > 0.0) {
-        return invalid("initial_dual: non-label entries must be nonpositive");
-    }
-    let labels: Vec<f64> = (0..v.len())
-        .filter(|&j| is_label(j))
-        .map(|j| v[j])
-        .collect();
-    let mass: f64 = labels.iter().sum();
-    let c = options.c;
-    // multiclass_hinge has no top-k, as cross_entropy.
-    let topk = if problem.objective == Objective::MulticlassHinge {
-        1
-    } else {
-        options.k
+/// The classes implied by the targets: the largest label plus one, or the
+/// columns of a matrix.
+fn implied_classes<T>(targets: &Targets<'_, T>) -> Result<usize> {
+    let largest = match targets {
+        Targets::Labels(labels) => labels.iter().max().copied(),
+        Targets::Sets(sets) => sets.iter().flatten().max().copied(),
+        Targets::SetSlices(sets) => sets.iter().copied().flatten().max().copied(),
+        Targets::Probabilities(q) | Targets::Teacher(q) => return Ok(q.cols()),
     };
-    let k = topk as f64;
-    match problem.objective {
-        Objective::CrossEntropy | Objective::MultilabelCrossEntropy => {
-            if labels.iter().any(|&x| x > c / labels.len() as f64 + slack) {
-                return invalid("initial_dual is outside the entropy feasible set");
-            }
-        }
-        objective => {
-            if labels.iter().any(|&x| x < -slack) || mass > c + slack {
-                return invalid("initial_dual is outside the feasible set");
-            }
-            let cone = matches!(
-                objective,
-                Objective::TopKCrossEntropy
-                    | Objective::MulticlassHinge
-                    | Objective::TopKHingeAlpha
-            );
-            let cap = objective == Objective::TopKHingeBeta;
-            let cone_slack = (v.len() / topk).max(1) as f64 * 64.0 * T::EPSILON * c;
-            if cone && v.iter().any(|&x| -x > mass / k + cone_slack) {
-                return invalid("initial_dual violates the top-k cone");
-            }
-            if cap && v.iter().any(|&x| -x > c / k + slack) {
-                return invalid("initial_dual violates the top-k cap");
-            }
-        }
+    match largest {
+        None => Ok(0),
+        Some(label) => label.checked_add(1).map_or_else(
+            || invalid("Dimensions exceed the native BLAS integer limit"),
+            Ok,
+        ),
     }
-    Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_handshake_rejects_another_abi_or_history_layout() {
-        assert_eq!(check_abi(ABI_VERSION, HISTORY.len()), Ok(()));
-        // ABI 4 builds take positional options.
-        assert!(check_abi(4, HISTORY.len())
-            .unwrap_err()
-            .to_string()
-            .contains("C ABI"));
-        let abi = check_abi(ABI_VERSION + 1, HISTORY.len()).unwrap_err();
-        assert!(abi.to_string().contains("C ABI"));
-        let layout = check_abi(ABI_VERSION, HISTORY.len() + 1).unwrap_err();
-        assert!(layout.to_string().contains("history layout"));
+/// The center (d, classes), row-major, in the column-major layout of the C ABI.
+fn column_major<T: Real>(center: &[T], d: usize, classes: usize) -> Result<Vec<T>> {
+    if center.len() != d * classes {
+        return invalid(format!(
+            "Start::center must have the {d}x{classes} entries of (d, num_classes), not {}",
+            center.len()
+        ));
     }
+    Ok((0..d * classes)
+        .map(|i| center[(i % d) * classes + i / d])
+        .collect())
 }

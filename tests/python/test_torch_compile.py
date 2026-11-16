@@ -9,7 +9,7 @@ import libsdca.torch as lt
 import pytest
 import torch
 from libsdca import _cpu, _ops
-from libsdca.torch import sdca_loss
+from named_losses import loss as named_loss
 
 LOSSES: list[tuple[str, dict[str, Any]]] = [
     ("multiclass_hinge", {}),
@@ -31,7 +31,7 @@ class TestCompiledTensorLosses:
         y = torch.randint(0, 10, (64,), generator=generator)
 
         def f(z: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            return sdca_loss(z, y, loss, backend="torch", reduction="none", **options)
+            return named_loss(lt, loss, z, y, backend="torch", reduction="none", **options)
 
         torch._dynamo.reset()
         torch.testing.assert_close(torch.compile(f)(z, y), f(z, y))
@@ -54,17 +54,20 @@ def _cuda_losses(
         "cross_entropy": lambda z: lt.cross_entropy(z, y),
         "cross_entropy_none": lambda z: lt.cross_entropy(z, y, reduction="none").sum(),
         "weighted": lambda z: lt.cross_entropy(z, ignored, weight.to(z.dtype)),
-        "sdca_loss": lambda z: sdca_loss(z, y, reduction="sum"),
+        # The integer-target entropy kernel (cross_entropy takes the weighted one on CUDA).
+        "entropy": lambda z: lt.topk_cross_entropy(z, y, k=1, reduction="sum"),
         "hinge": lambda z: lt.multiclass_hinge_loss(z, y),
         "smooth_hinge": lambda z: lt.multiclass_hinge_loss(z, y, gamma=0.5),
         "topk_ce": lambda z: lt.topk_cross_entropy(z, y, k=3),
         "topk_hinge": lambda z: lt.topk_hinge_loss(z, y, k=3, variant="alpha"),
         "multilabel_ce": lambda z: lt.multilabel_cross_entropy(z, mask),
         "multilabel_hinge": lambda z: lt.multilabel_hinge_loss(z, mask, gamma=0.5),
-        "distillation": lambda z: lt.distillation_loss(z, teacher.to(z.dtype), 2.0),
+        "distillation": lambda z: lt.distillation_loss(z, teacher.to(z.dtype), temperature=2.0),
         "proximal_distillation": lambda z: lt.proximal_distillation_loss(
-            z, teacher.to(z.dtype), 2.0
+            z, teacher.to(z.dtype), temperature=2.0
         ),
+        "topk_hinge_module": lambda z: lt.TopKHingeLoss(k=2, gamma=0.5)(z, y),
+        "cross_entropy_module": lambda z: lt.CrossEntropyLoss()(z, y),
         "proximal_ce": lambda z: lt.proximal_cross_entropy(z, y),
     }
 
@@ -166,7 +169,7 @@ class TestCompiledCudaLosses:
         for name, op in (
             ("cross_entropy", "weighted_entropy_backward"),
             ("weighted", "weighted_entropy_backward"),
-            ("sdca_loss", "entropy_backward"),
+            ("entropy", "entropy_backward"),
             ("hinge", "hinge_backward"),
             ("topk_hinge", "topk_backward"),
             ("multilabel_ce", "multilabel_backward"),
@@ -193,7 +196,8 @@ class TestCompiledCudaLosses:
             (ops.entropy, (z, y, "none", False)),
             (ops.weighted_entropy, (z, y, w, -100, "mean", True)),
             (ops.weighted_entropy, (z, y, None, 2, "sum", True)),
-            (ops.hinge, (z, y, "mean", True, 0.5)),
+            (ops.hinge, (z, y, "mean", True, 0.5, True)),
+            (ops.hinge, (z, y, "mean", True, 0.5, False)),
             (ops.topk, (z, y, "none", "topk_hinge_beta", 2, 0.0, False)),
             (ops.topk, (z, y, "mean", "topk_cross_entropy", 2, 0.0, True)),
             (ops.multilabel, (z, mask, "cross_entropy", "mean", 0.0, True)),

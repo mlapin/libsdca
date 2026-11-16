@@ -35,7 +35,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from . import _core, _cpu, _cpu_entropy, _cross_entropy, _cuda_launch, _entropy, _ops
-from ._core import _canonical_precision
+from . import _loss_options as _opt
 from ._first_order import first_order, guard
 from ._linear_full_range import FullRange
 from ._torch_distributed import has_dtensor
@@ -824,6 +824,7 @@ def _check(
         raise ValueError("bias must have shape (classes,)")
     if any(t.device != hidden.device for t in tensors):
         raise ValueError("hidden, weight, target and bias must be on the same device")
+    _torch()._check_device(hidden)
     if weight.shape[0] < 2:
         raise ValueError("At least two classes are required")
     shape = hidden.shape[:-1]
@@ -864,11 +865,16 @@ def _composed(
     target: Tensor,
     class_weight: Tensor | None,
     options: dict[str, Any],
+    probabilities: bool = False,
 ) -> Tensor:
-    """cross_entropy of the full (N, classes) logits."""
-    logits = F.linear(hidden, weight, bias).reshape(-1, weight.shape[0])
-    value = _cross_entropy.cross_entropy(logits, target.reshape(-1), class_weight, **options)
-    return value.reshape(target.shape) if options["reduction"] == "none" else value
+    """cross_entropy of the full (N, classes) logits (of class labels, or of class
+    probabilities (..., classes))."""
+    classes = weight.shape[0]
+    logits = F.linear(hidden, weight, bias).reshape(-1, classes)
+    rows = target.reshape(-1, classes) if probabilities else target.reshape(-1)
+    value = _cross_entropy.cross_entropy(logits, rows, class_weight, **options)
+    shape = target.shape[:-1] if probabilities else target.shape
+    return value.reshape(shape) if options["reduction"] == "none" else value
 
 
 def linear_cross_entropy(
@@ -899,10 +905,17 @@ def linear_cross_entropy(
     guarantees relative to the logits computed (no softmax collapse, entries rounded once);
     the GEMMs and their rounding are PyTorch's.
 
+    Label smoothing composes the per-example losses (reduction "none" of the kernels) with
+    the target logits hidden . weight[label] + bias[label] (log-sum-exp = loss + target
+    logit) and hidden . (weight^T w) + bias . w, without the logits. Class probabilities
+    (a floating-point target of shape (..., classes)) compute the logits in full, which have
+    the probabilities' size.
+
     Args:
         hidden: (..., H) floating-point features.
         weight: (classes, H) weights of the linear layer.
-        target: int64 class indices of shape hidden.shape[:-1].
+        target: Class labels (any integer dtype) of shape hidden.shape[:-1], or class
+            probabilities of shape (*hidden.shape[:-1], classes).
         bias: (classes,) bias of the linear layer, or None.
         class_weight, ignore_index, reduction, label_smoothing, backend, precision: as the
             weight and the other options of cross_entropy. backend "auto" takes the CPU
@@ -916,20 +929,59 @@ def linear_cross_entropy(
     float64 logits). Gradients are first order.
 
     Raises:
+        TypeError: For arguments of the wrong type.
         ValueError: For invalid inputs or options (on the CPU also for nonfinite logits or
             targets out of range; on CUDA those give NaN).
     """
-    _cross_entropy._options(class_weight, ignore_index, reduction, label_smoothing)
+    eps = _cross_entropy._options(class_weight, ignore_index, reduction, label_smoothing)
+    _opt.check_backend(backend, _cross_entropy._BACKENDS)
     options: dict[str, Any] = dict(
         ignore_index=ignore_index, reduction=reduction, backend=backend, precision=precision
     )
     if has_dtensor(hidden, weight, target, bias, class_weight):
         # The full logits: correct, not memory-efficient.
+        options["label_smoothing"] = label_smoothing
         return _composed(hidden, weight, bias, target, class_weight, options)
+    _check_types(hidden, weight, target, bias, chunk_bytes, recompute)
+    if target.is_floating_point():
+        expected = (*hidden.shape[:-1], weight.shape[0]) if weight.ndim == 2 else None
+        if expected is None or target.shape != expected:
+            raise ValueError(
+                f"class probabilities must have shape {expected} (hidden.shape[:-1] and the "
+                f"classes), not {tuple(target.shape)}"
+            )
+        options["label_smoothing"] = label_smoothing
+        return _composed(hidden, weight, bias, target, class_weight, options, probabilities=True)
+    target = _labels(target)
+    if backend == "kernel":
+        _require_row_kernel(hidden, weight, bias, backend)
+        backend = "auto"
+        options["backend"] = backend
+    if eps > 0:
+        return _smoothed(
+            hidden, weight, target, bias, class_weight, eps, options, chunk_bytes, recompute
+        )
+    return _chunked(hidden, weight, target, bias, class_weight, options, chunk_bytes, recompute)
+
+
+def _chunked(
+    hidden: Tensor,
+    weight: Tensor,
+    target: Tensor,
+    bias: Tensor | None,
+    class_weight: Tensor | None,
+    options: dict[str, Any],
+    chunk_bytes: int | None,
+    recompute: bool,
+) -> Tensor:
+    """linear_cross_entropy of int64 labels without label smoothing: the row kernels on
+    chunks of the logits."""
+    ignore_index, reduction = options["ignore_index"], options["reduction"]
+    backend, precision = options["backend"], options["precision"]
     shape, classes = _check(hidden, weight, target, bias)
     budget = _check_options(class_weight, classes, hidden.device, chunk_bytes)
     dtype = compute_dtype(hidden, weight, bias)
-    canonical = _canonical_precision(precision)
+    canonical = _cross_entropy._torch()._precision(precision)
     if dtype == torch.float64 and canonical == "float32":
         raise ValueError("float64 logits require precision='float64' or None")
     kernel = _kernel(hidden.device, dtype, classes, backend)
@@ -950,13 +1002,158 @@ def linear_cross_entropy(
     return loss.reshape(shape) if reduction == "none" else loss
 
 
-def explain(
-    hidden: Tensor, weight: Tensor, bias: Tensor | None = None, *, backend: str = "auto"
+def _check_types(
+    hidden: object,
+    weight: object,
+    target: object,
+    bias: object,
+    chunk_bytes: object,
+    recompute: object,
+) -> None:
+    """TypeError for arguments of the wrong type."""
+    for name, t in (("hidden", hidden), ("weight", weight), ("target", target), ("bias", bias)):
+        if not (isinstance(t, torch.Tensor) or (name == "bias" and t is None)):
+            raise TypeError(f"{name} must be a tensor, not {type(t).__name__}")
+    if chunk_bytes is not None and (
+        isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int)
+    ):
+        raise TypeError(f"chunk_bytes must be None or an integer, not {type(chunk_bytes).__name__}")
+    if not isinstance(recompute, bool):
+        raise TypeError(f"recompute must be a bool, not {type(recompute).__name__}")
+
+
+def _labels(target: Tensor) -> Tensor:
+    """int64 class labels (any integer dtype is cast); TypeError for boolean targets."""
+    if target.dtype == torch.int64:
+        return target
+    if target.dtype == torch.bool or target.is_complex():
+        raise TypeError(
+            "linear_cross_entropy takes integer class labels or floating-point class "
+            f"probabilities, not {target.dtype}"
+        )
+    return target.long()
+
+
+def _smoothed(
+    hidden: Tensor,
+    weight: Tensor,
+    target: Tensor,
+    bias: Tensor | None,
+    class_weight: Tensor | None,
+    eps: float,
+    options: dict[str, Any],
+    chunk_bytes: int | None,
+    recompute: bool,
+) -> Tensor:
+    """linear_cross_entropy with label smoothing eps > 0, as PyTorch's cross_entropy:
+    (1 - eps) w[y] loss + (eps / C) sum_j w_j (lse - z_j) per example (0 where ignored),
+    reduced as the weighted loss. The kernels give the unweighted per-example losses."""
+    ignore_index, reduction = options["ignore_index"], options["reduction"]
+    shape, classes = _check(hidden, weight, target, bias)
+    _check_options(class_weight, classes, hidden.device, chunk_bytes)
+    loss = linear_cross_entropy(
+        hidden,
+        weight,
+        target,
+        bias,
+        ignore_index=ignore_index,
+        reduction="none",
+        backend=options["backend"],
+        precision=options["precision"],
+        chunk_bytes=chunk_bytes,
+        recompute=recompute,
+    )
+    canonical = _cross_entropy._torch()._precision(options["precision"])
+    dtype = compute_dtype(hidden, weight, bias)
+    work = torch.float64 if canonical == "float64" or dtype == torch.float64 else torch.float32
+    ignored = target == ignore_index
+    labels = target.masked_fill(ignored, 0).clamp(0, classes - 1)
+    h, w = hidden.to(work), weight.to(work)
+    b = None if bias is None else bias.to(work)
+    picked = (h * w[labels]).sum(-1)
+    if b is not None:
+        picked = picked + b[labels]
+    lse = loss.to(work) + picked
+    if class_weight is None:
+        total, mix, row = float(classes), w.sum(0), torch.ones_like(lse)
+        offset = None if b is None else b.sum()
+    else:
+        cw = _valid_class_weight(class_weight.to(work))
+        total, mix, row = cw.sum(), cw @ w, cw[labels]
+        offset = None if b is None else cw @ b
+    linear = h @ mix if offset is None else h @ mix + offset
+    row = row.masked_fill(ignored, 0)
+    smooth = (total * lse - linear).masked_fill(ignored, 0)
+    values = (1 - eps) * (row * loss.to(work)) + (eps / classes) * smooth
+    if reduction == "none":
+        return values.to(loss.dtype)
+    if reduction == "sum":
+        return values.sum().to(loss.dtype)
+    return (values.sum() / row.sum()).to(loss.dtype)
+
+
+def _valid_class_weight(class_weight: Tensor) -> Tensor:
+    """Finite nonnegative class weights: ValueError on the CPU, NaN elsewhere."""
+    valid = torch.isfinite(class_weight).all() & (class_weight >= 0).all()
+    if class_weight.is_cuda or _ops.is_compiling():
+        return class_weight.masked_fill(~valid, math.nan)
+    if not bool(valid):
+        raise ValueError("weight must be finite and nonnegative")
+    return class_weight
+
+
+def _row_kernel(
+    hidden: Tensor, weight: Tensor, bias: Tensor | None, backend: str
 ) -> tuple[str, str]:
     """(row kernel, compute dtype) of a linear_cross_entropy call of these tensors."""
     dtype = compute_dtype(hidden, weight, bias)
     kernel = _kernel(hidden.device, dtype, weight.shape[0], backend)
     return KERNELS[kernel], str(dtype).removeprefix("torch.")
+
+
+def _require_row_kernel(hidden: Tensor, weight: Tensor, bias: Tensor | None, backend: str) -> None:
+    kernel, dtype = _row_kernel(hidden, weight, bias, "auto")
+    if kernel not in ("cpu-kernel", "triton"):
+        raise NotImplementedError(
+            f"backend='kernel': no fused kernel computes these {dtype} rows ({kernel} would)"
+        )
+
+
+def explain(
+    hidden: Tensor,
+    weight: Tensor,
+    target: Tensor,
+    bias: Tensor | None = None,
+    class_weight: Tensor | None = None,
+    ignore_index: int = -100,
+    reduction: str = "mean",
+    label_smoothing: float = 0.0,
+    backend: str = "auto",
+    precision: object = None,
+    chunk_bytes: int | None = None,
+    recompute: bool = False,
+) -> tuple[str, str]:
+    """explain_backend of linear_cross_entropy (its arguments)."""
+    eps = _cross_entropy._options(class_weight, ignore_index, reduction, label_smoothing)
+    if has_dtensor(hidden, weight, target, bias, class_weight):
+        return "torch", "DTensor inputs: cross_entropy of the full logits"
+    _check_types(hidden, weight, target, bias, chunk_bytes, recompute)
+    if target.is_floating_point():
+        return "torch", "class probabilities: log_softmax of the full logits in tensor operations"
+    route = "auto" if backend == "kernel" else backend
+    _check(hidden, weight, _labels(target), bias)
+    kernel, dtype = _row_kernel(hidden, weight, bias, route)
+    names = {"cpu-kernel": "kernel", "triton": "kernel"}
+    where = {
+        "cpu-kernel": "the CPU extension's rows",
+        "triton": "fused Triton rows",
+        "native": "the native library's rows",
+        "torch": "tensor-operation rows",
+    }[kernel]
+    reason = f"{where} between chunked GEMMs ({dtype} logits)"
+    if eps > 0:
+        reason += "; label smoothing adds the target logits and a GEMV in tensor operations"
+    return names.get(kernel, kernel), reason
 
 
 class LinearCrossEntropyLoss(nn.Module):
@@ -978,6 +1175,11 @@ class LinearCrossEntropyLoss(nn.Module):
     ) -> None:
         super().__init__()
         _cross_entropy._options(class_weight, ignore_index, reduction, label_smoothing)
+        _opt.check_backend(backend, _cross_entropy._BACKENDS)
+        _cross_entropy._torch()._precision(precision)
+        _check_options(None, 2, torch.device("cpu"), chunk_bytes)
+        if not isinstance(recompute, bool):
+            raise TypeError(f"recompute must be a bool, not {type(recompute).__name__}")
         self.register_buffer("class_weight", class_weight)
         self.ignore_index = ignore_index
         self.reduction = reduction
@@ -1006,9 +1208,23 @@ class LinearCrossEntropyLoss(nn.Module):
             recompute=self.recompute,
         )
 
-    def extra_repr(self) -> str:
-        return (
-            f"ignore_index={self.ignore_index}, reduction={self.reduction!r}, "
-            f"backend={self.backend!r}, precision={self.precision!r}, "
-            f"chunk_bytes={self.chunk_bytes}, recompute={self.recompute}"
+    def _options(self) -> dict[str, Any]:
+        return dict(
+            ignore_index=self.ignore_index,
+            reduction=self.reduction,
+            label_smoothing=self.label_smoothing,
+            backend=self.backend,
+            precision=self.precision,
+            chunk_bytes=self.chunk_bytes,
+            recompute=self.recompute,
         )
+
+    def _explain(
+        self, hidden: Tensor, weight: Tensor, target: Tensor, bias: Tensor | None = None
+    ) -> tuple[str, str]:
+        return explain(
+            hidden, weight, target, bias, class_weight=self.class_weight, **self._options()
+        )
+
+    def extra_repr(self) -> str:
+        return ", ".join(f"{key}={value!r}" for key, value in self._options().items())

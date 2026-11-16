@@ -41,55 +41,37 @@ inline kernel_input<Data> make_input_kernel(const size_type num_examples, const 
   return kernel_input<Data>(num_examples, num_examples, kernel);
 }
 
+// One label in [0, num_classes) per example.
 template <typename Iterator>
-inline multiclass_output make_output_multiclass(Iterator first, Iterator last) {
-  auto v = copy_class_labels(first, last);
-  auto minmax = validate_labels(v.begin(), v.end());
-  return multiclass_output(*minmax.second + 1, v);
+inline multiclass_output make_output_multiclass(Iterator first, Iterator last,
+                                                const size_type num_classes) {
+  return multiclass_output(num_classes, copy_class_labels(first, last));
 }
 
-// Most efficient: A vector of labels and a vector of offsets per example
-// Directly corresponds to Matlab's sparse matrix format as follows:
-//    labels:  ir array (row index = class label);
-//    offsets: jc array (num_labels per example = jc[j+1] - jc[j]).
-template <typename Iterator>
+// Label sets as a label array and offsets (num_examples + 1, from 0): the
+// sorted labels of example i are labels[offsets[i]] .. labels[offsets[i + 1] - 1],
+// as the row indices (ir) and column offsets (jc) of a sparse matrix.
+template <typename Iterator, typename OffsetIterator>
 inline multilabel_output make_output_multilabel(Iterator label_first, Iterator label_last,
-                                                Iterator offset_first, Iterator offset_last) {
-  auto v = copy_class_labels(label_first, label_last);
-  auto u = copy_class_labels(offset_first, offset_last);
-  auto minmax = validate_labels(v.begin(), v.end());
-  const size_type num_classes = *minmax.second + 1;
-  validate_labels_and_offsets(num_classes, v, u);
-  return multilabel_output(num_classes, v, u);
+                                                OffsetIterator offset_first,
+                                                OffsetIterator offset_last,
+                                                const size_type num_classes) {
+  return multilabel_output(num_classes, copy_class_labels(label_first, label_last),
+                           copy_class_labels(offset_first, offset_last));
 }
 
-// A vector of labels per example (i.e., a vector of vectors)
+// Label sets as one sorted label vector per example.
 template <typename Type>
-inline multilabel_output make_output_multilabel(std::vector<std::vector<Type>>& labels) {
+inline multilabel_output make_output_multilabel(const std::vector<std::vector<Type>>& labels,
+                                                const size_type num_classes) {
   std::vector<size_type> v;
-  std::vector<size_type> u;
-  u.push_back(0);  // zero offset
-  std::for_each(labels.begin(), labels.end(), [&](std::vector<Type>& yi) {
-    auto checked = copy_class_labels(yi.begin(), yi.end());
+  std::vector<size_type> u(1, 0);
+  for (const auto& yi : labels) {
+    const auto checked = copy_class_labels(yi.begin(), yi.end());
     v.insert(v.end(), checked.begin(), checked.end());
-    u.push_back(u.back() + yi.size());
-  });
-  auto minmax = validate_labels(v.begin(), v.end());
-  const size_type num_classes = *minmax.second + 1;
-  validate_labels_and_offsets(num_classes, v, u);
-  return multilabel_output(num_classes, v, u);
-}
-
-// Special case: multiclass setting (a vector of one label per example)
-template <typename Iterator>
-inline multilabel_output make_output_multilabel(Iterator first, Iterator last) {
-  auto v = copy_class_labels(first, last);
-  std::vector<sdca::size_type> u(v.size() + 1);
-  std::iota(u.begin(), u.end(), 0);
-  auto minmax = validate_labels(v.begin(), v.end());
-  const size_type num_classes = *minmax.second + 1;
-  validate_labels_and_offsets(num_classes, v, u);
-  return multilabel_output(num_classes, v, u);
+    u.push_back(v.size());
+  }
+  return multilabel_output(num_classes, std::move(v), std::move(u));
 }
 
 template <typename Data>

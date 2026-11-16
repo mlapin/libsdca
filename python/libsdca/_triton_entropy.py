@@ -5,15 +5,21 @@ Rows up to _MAX_BLOCK columns stay in registers; wider ones stream column chunks
 in float32 and keeps the row statistics, losses and per-row factors in float64.
 """
 
-import functools
-from typing import Any
+from __future__ import annotations
 
-import torch
+import functools
+from typing import TYPE_CHECKING, Any
+
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
 
 from . import _cuda_launch, _triton_reduce
+
+if TYPE_CHECKING:
+    import torch
+else:
+    from ._cuda_launch import torch
 
 _REDUCTIONS = {"none": 0, "mean": 1, "sum": 2}
 # Row statistics: 3 per row (maximum and _row_factors), then values, logs and invalid

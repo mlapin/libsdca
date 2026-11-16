@@ -4,7 +4,7 @@
 template <typename Data, typename Result, typename Context>
 inline void test_solver_check_converged(Context& ctx) {
   // The certificate adds the evaluation's rounding bound (about 1e-13 here).
-  ctx.criteria.epsilon =
+  ctx.criteria.tol =
       std::max(1e-11, 64 * std::max(static_cast<double>(std::numeric_limits<Data>::epsilon()),
                                     static_cast<double>(std::numeric_limits<Result>::epsilon())));
 
@@ -18,7 +18,7 @@ inline void test_solver_check_converged(Context& ctx) {
   EXPECT_TRUE(std::isfinite(eval.primal) && std::isfinite(eval.dual));
   EXPECT_GE(eval.primal + eval.gap_error, eval.dual);
   const double scale = std::max(std::abs(double(eval.primal)), std::abs(double(eval.dual)));
-  EXPECT_LE(double(eval.primal - eval.dual) + eval.gap_error, ctx.criteria.epsilon * scale);
+  EXPECT_LE(double(eval.primal - eval.dual) + eval.gap_error, ctx.criteria.tol * scale);
 }
 
 template <typename Data, typename Result, template <typename> class Input,
@@ -59,7 +59,7 @@ inline void test_solver_basic_tests_feature_in(Output out, Objective<Data, Resul
 
   // Use features
   auto ctx_feat = sdca::make_context(sdca::make_input_feature(d, n, &X[0]), std::move(out),
-                                     std::move(objective), &A[0], &W[0]);
+                                     std::move(objective), &W[0], &A[0]);
 
   test_solver_check_converged<Data, Result>(ctx_feat);
   test_solver_check_performance(ctx_feat, expected_performance);
@@ -68,7 +68,7 @@ inline void test_solver_basic_tests_feature_in(Output out, Objective<Data, Resul
   std::vector<Data> K(n * n);
   sdca::blas_int D = static_cast<sdca::blas_int>(d);
   sdca::blas_int N = static_cast<sdca::blas_int>(n);
-  sdca::sdca_blas_gemm(N, N, D, &X[0], D, &X[0], D, &K[0], CblasTrans);
+  sdca::sdca_blas_gemm(N, N, D, &X[0], D, &X[0], D, &K[0], sdca::CblasTrans);
 
   // Warm restart - use the same dual variables as above
   auto ctx_warm =
@@ -88,7 +88,7 @@ inline void test_solver_basic_tests_feature_in(Output out, Objective<Data, Resul
   for (sdca::size_type j = 0; j < d * m; ++j) W[j] = W0[j] *= Data(0.5);
   auto ctx_prox =
       sdca::make_context(sdca::make_input_feature(d, n, &X[0]), std::move(ctx_warm.train.out),
-                         std::move(ctx_warm.objective), &A[0], &W[0]);
+                         std::move(ctx_warm.objective), &W[0], &A[0]);
 
   // Note: the solver expects that W = W0 before the first iteration;
   // therefore, the W is not reset to 0
@@ -151,56 +151,60 @@ inline void test_solver_multilabel_basic(Objective<Data, Result> objective) {
   X = {0, 2, 1, 1, 2, 1, 2, 2, 1, 2, 1, 1, 2, 0, 1};
 
   Y = {{0}, {0, 1}, {1}, {1, 2}, {2}};
-  test_solver_basic_tests_feature_in(sdca::make_output_multilabel(Y), objective, n, X, accuracy);
+  test_solver_basic_tests_feature_in(sdca::make_output_multilabel(Y, 3), objective, n, X, accuracy);
 }
 
 template <typename Data, typename Result>
 inline void test_solver_multiclass_basic_all() {
   Result C = 4;
   auto multiclass_output_maker = [](std::vector<sdca::size_type>& Y) {
-    return sdca::make_output_multiclass(Y.begin(), Y.end());
+    return sdca::make_output_multiclass(Y.begin(), Y.end(), 2);
   };
 
   test_solver_multiclass_basic(multiclass_output_maker,
-                               sdca::make_objective_l2_entropy<Data, Result>(C));
+                               sdca::make_objective_l2_cross_entropy<Data, Result>(C));
 
   test_solver_multiclass_basic(multiclass_output_maker,
-                               sdca::make_objective_l2_entropy_topk<Data, Result>(C));
+                               sdca::make_objective_l2_topk_cross_entropy<Data, Result>(C, 1));
 
   test_solver_multiclass_basic(multiclass_output_maker,
-                               sdca::make_objective_l2_hinge_topk<Data, Result>(C));
+                               sdca::make_objective_l2_topk_hinge_alpha<Data, Result>(C, 1));
+
+  test_solver_multiclass_basic(
+      multiclass_output_maker,
+      sdca::make_objective_l2_topk_hinge_alpha_smooth<Data, Result>(C, 1, 1));
 
   test_solver_multiclass_basic(multiclass_output_maker,
-                               sdca::make_objective_l2_hinge_topk_smooth<Data, Result>(C));
+                               sdca::make_objective_l2_topk_hinge_beta<Data, Result>(C, 1));
 
-  test_solver_multiclass_basic(multiclass_output_maker,
-                               sdca::make_objective_l2_topk_hinge<Data, Result>(C));
-
-  test_solver_multiclass_basic(multiclass_output_maker,
-                               sdca::make_objective_l2_topk_hinge_smooth<Data, Result>(C));
+  test_solver_multiclass_basic(
+      multiclass_output_maker,
+      sdca::make_objective_l2_topk_hinge_beta_smooth<Data, Result>(C, 1, 1));
 
   auto multilabel_output_maker = [](std::vector<sdca::size_type>& Y) {
-    return sdca::make_output_multilabel(Y.begin(), Y.end());
+    std::vector<sdca::size_type> offsets(Y.size() + 1);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    return sdca::make_output_multilabel(Y.begin(), Y.end(), offsets.begin(), offsets.end(), 2);
   };
 
   test_solver_multiclass_basic(multilabel_output_maker,
-                               sdca::make_objective_l2_multilabel_entropy<Data, Result>(C));
+                               sdca::make_objective_l2_multilabel_cross_entropy<Data, Result>(C));
 
   test_solver_multiclass_basic(multilabel_output_maker,
                                sdca::make_objective_l2_multilabel_hinge<Data, Result>(C));
 
   test_solver_multiclass_basic(multilabel_output_maker,
-                               sdca::make_objective_l2_multilabel_hinge_smooth<Data, Result>(C));
+                               sdca::make_objective_l2_multilabel_hinge_smooth<Data, Result>(C, 1));
 }
 
 template <typename Data, typename Result>
 inline void test_solver_multilabel_basic_all() {
   Result C = 4;
-  test_solver_multilabel_basic(sdca::make_objective_l2_multilabel_entropy<Data, Result>(C));
+  test_solver_multilabel_basic(sdca::make_objective_l2_multilabel_cross_entropy<Data, Result>(C));
 
   test_solver_multilabel_basic(sdca::make_objective_l2_multilabel_hinge<Data, Result>(C));
 
-  test_solver_multilabel_basic(sdca::make_objective_l2_multilabel_hinge_smooth<Data, Result>(C));
+  test_solver_multilabel_basic(sdca::make_objective_l2_multilabel_hinge_smooth<Data, Result>(C, 1));
 }
 
 TEST(SolverTest, multiclass_basic_problems_all_objectives) {
@@ -229,20 +233,20 @@ static void test_early_evaluations(const bool on_start, const sdca::size_type ma
     for (sdca::size_type j = 0; j < d; ++j) X[d * i + j] = Data(noise(gen) + (j == Y[i] ? 1.5 : 0));
   }
   auto make = [&]() {
-    return sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
-                              sdca::make_output_multiclass(Y.begin(), Y.end()),
-                              sdca::make_objective_l2_entropy<Data, Data>(Data(1)), &A[0], &W[0]);
+    return sdca::make_context(
+        sdca::make_input_feature(d, n, &X[0]), sdca::make_output_multiclass(Y.begin(), Y.end(), m),
+        sdca::make_objective_l2_cross_entropy<Data, Data>(Data(1)), &W[0], &A[0]);
   };
   if (warm) {
     auto start = make();
     start.criteria.max_epoch = 3;
-    start.criteria.epsilon = 0;
+    start.criteria.tol = 0;
     sdca::make_solver(start).solve();
   }
   auto ctx = make();
   ctx.criteria.eval_epoch = every;
   ctx.criteria.max_epoch = max_epoch;
-  ctx.criteria.epsilon = tol;
+  ctx.criteria.tol = tol;
   ctx.criteria.eval_on_start = on_start;
   sdca::make_solver(ctx).solve();
   sdca::size_type off = 0;
@@ -284,10 +288,10 @@ TEST(SolverTest, early_evaluation_stops_before_the_schedule) {
     std::fill(W.begin(), W.end(), 0.);
     std::fill(A.begin(), A.end(), 0.);
     auto ctx = sdca::make_context(
-        sdca::make_input_feature(d, n, &X[0]), sdca::make_output_multiclass(Y.begin(), Y.end()),
-        sdca::make_objective_l2_entropy<double, double>(1.), &A[0], &W[0]);
+        sdca::make_input_feature(d, n, &X[0]), sdca::make_output_multiclass(Y.begin(), Y.end(), m),
+        sdca::make_objective_l2_cross_entropy<double, double>(1.), &W[0], &A[0]);
     ctx.criteria.eval_epoch = every;
-    ctx.criteria.epsilon = every == 1 ? 0. : 1.01 * gaps.at(14);
+    ctx.criteria.tol = every == 1 ? 0. : 1.01 * gaps.at(14);
     ctx.criteria.max_epoch = 40;
     sdca::make_solver(ctx).solve();
     if (every == 1) {
@@ -328,10 +332,10 @@ static void test_shrinking(const Objective<double, double>& objective, const int
     for (int run = 0; run < 2; ++run) {
       std::vector<double> W(d * m), A(m * n);
       auto ctx = sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
-                                    sdca::make_output_multiclass(Y.begin(), Y.end()),
-                                    Objective<double, double>(objective), &A[0], &W[0]);
+                                    sdca::make_output_multiclass(Y.begin(), Y.end(), m),
+                                    Objective<double, double>(objective), &W[0], &A[0]);
       ctx.criteria.shrinking = mode;
-      ctx.criteria.epsilon = 1e-6;
+      ctx.criteria.tol = 1e-6;
       ctx.criteria.max_epoch = 20000;
       ctx.criteria.num_threads = run == 0 ? 1 : 3;
       auto solver = sdca::make_solver(ctx);
@@ -355,8 +359,8 @@ static void test_shrinking(const Objective<double, double>& objective, const int
 
       // A fresh evaluation of the final iterate gives the reported objectives.
       auto check = sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
-                                      sdca::make_output_multiclass(Y.begin(), Y.end()),
-                                      Objective<double, double>(objective), &A[0], &W[0]);
+                                      sdca::make_output_multiclass(Y.begin(), Y.end(), m),
+                                      Objective<double, double>(objective), &W[0], &A[0]);
       check.criteria.max_epoch = 0;
       check.criteria.eval_on_start = true;
       sdca::make_solver(check).solve();
@@ -389,10 +393,10 @@ static void test_screening_is_safe(const Objective<double, double>& objective) {
     std::vector<double> W(d * m);
     A.assign(m * n, 0);
     auto ctx = sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
-                                  sdca::make_output_multiclass(Y.begin(), Y.end()),
-                                  Objective<double, double>(objective), &A[0], &W[0]);
+                                  sdca::make_output_multiclass(Y.begin(), Y.end(), m),
+                                  Objective<double, double>(objective), &W[0], &A[0]);
     ctx.criteria.shrinking = mode;
-    ctx.criteria.epsilon = tol;
+    ctx.criteria.tol = tol;
     ctx.criteria.max_epoch = 100000;
     ctx.criteria.eval_epoch = 5;
     auto solver = sdca::make_solver(ctx);
@@ -411,7 +415,7 @@ static void test_screening_is_safe(const Objective<double, double>& objective) {
     for (sdca::size_type c = 0; c < m; ++c) {
       if (!classes[m * i + c]) continue;
       ++marked;
-      EXPECT_LE(std::abs(best[m * i + c]), 1e-7) << where << " example " << i << " class " << c;
+      EXPECT_LE(std::abs(best[m * i + c]), 1e-9) << where << " example " << i << " class " << c;
     }
   EXPECT_GT(marked, 0UL) << where;
   EXPECT_GT(std::count(examples.begin(), examples.end(), char(1)), 0) << where;
@@ -419,21 +423,21 @@ static void test_screening_is_safe(const Objective<double, double>& objective) {
 
 TEST(SolverTest, screening_is_safe) {
   sdca::logging::set_level(sdca::logging::level::warning);
-  test_screening_is_safe(sdca::make_objective_l2_hinge_topk<double, double>(1.));
-  test_screening_is_safe(sdca::make_objective_l2_hinge_topk<double, double>(1., 3));
-  test_screening_is_safe(sdca::make_objective_l2_topk_hinge<double, double>(1., 3));
-  test_screening_is_safe(sdca::make_objective_l2_hinge_topk_smooth<double, double>(1.));
-  test_screening_is_safe(sdca::make_objective_l2_topk_hinge_smooth<double, double>(1., 3));
+  test_screening_is_safe(sdca::make_objective_l2_topk_hinge_alpha<double, double>(1., 1));
+  test_screening_is_safe(sdca::make_objective_l2_topk_hinge_alpha<double, double>(1., 3));
+  test_screening_is_safe(sdca::make_objective_l2_topk_hinge_beta<double, double>(1., 3));
+  test_screening_is_safe(sdca::make_objective_l2_topk_hinge_alpha_smooth<double, double>(1., 1, 1));
+  test_screening_is_safe(sdca::make_objective_l2_topk_hinge_beta_smooth<double, double>(1., 3, 1));
 }
 TEST(SolverTest, shrinking_keeps_the_certificate) {
   sdca::logging::set_level(sdca::logging::level::warning);
-  test_shrinking(sdca::make_objective_l2_hinge_topk<double, double>(1.), 1);
-  test_shrinking(sdca::make_objective_l2_hinge_topk<double, double>(1., 2), 1);
-  test_shrinking(sdca::make_objective_l2_topk_hinge<double, double>(1., 2), 1);
-  test_shrinking(sdca::make_objective_l2_hinge_topk_smooth<double, double>(1.), -1);
-  test_shrinking(sdca::make_objective_l2_topk_hinge_smooth<double, double>(1.), -1);
-  test_shrinking(sdca::make_objective_l2_entropy<double, double>(1.), 0);
-  test_shrinking(sdca::make_objective_l2_entropy_topk<double, double>(1., 2), 0);
+  test_shrinking(sdca::make_objective_l2_topk_hinge_alpha<double, double>(1., 1), 1);
+  test_shrinking(sdca::make_objective_l2_topk_hinge_alpha<double, double>(1., 2), 1);
+  test_shrinking(sdca::make_objective_l2_topk_hinge_beta<double, double>(1., 2), 1);
+  test_shrinking(sdca::make_objective_l2_topk_hinge_alpha_smooth<double, double>(1., 1, 1), -1);
+  test_shrinking(sdca::make_objective_l2_topk_hinge_beta_smooth<double, double>(1., 1, 1), -1);
+  test_shrinking(sdca::make_objective_l2_cross_entropy<double, double>(1.), 0);
+  test_shrinking(sdca::make_objective_l2_topk_cross_entropy<double, double>(1., 2), 0);
 }
 
 // A step on the label and the classes of nonzero dual (whole = false) holds
@@ -451,10 +455,10 @@ static void test_part_steps(const Objective<double, double>& objective) {
     for (sdca::size_type j = 0; j < d; ++j) X[d * i + j] = noise(gen) + (j == Y[i] % d ? 1.5 : 0);
   }
   auto ctx = sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
-                                sdca::make_output_multiclass(Y.begin(), Y.end()),
-                                Objective<double, double>(objective), &A[0], &W[0]);
+                                sdca::make_output_multiclass(Y.begin(), Y.end(), m),
+                                Objective<double, double>(objective), &W[0], &A[0]);
   ctx.criteria.max_epoch = 5;
-  ctx.criteria.epsilon = 0;
+  ctx.criteria.tol = 0;
   ctx.criteria.shrinking = sdca::shrinking_mode::off;
   sdca::make_solver(ctx).solve();
 
@@ -503,11 +507,11 @@ static void test_part_steps(const Objective<double, double>& objective) {
 
 TEST(SolverTest, part_steps_match_whole_steps) {
   sdca::logging::set_level(sdca::logging::level::warning);
-  test_part_steps(sdca::make_objective_l2_hinge_topk<double, double>(1.));
-  test_part_steps(sdca::make_objective_l2_hinge_topk<double, double>(1., 3));
-  test_part_steps(sdca::make_objective_l2_topk_hinge<double, double>(1., 2));
-  test_part_steps(sdca::make_objective_l2_hinge_topk_smooth<double, double>(1., 2));
-  test_part_steps(sdca::make_objective_l2_topk_hinge_smooth<double, double>(1., 2));
+  test_part_steps(sdca::make_objective_l2_topk_hinge_alpha<double, double>(1., 1));
+  test_part_steps(sdca::make_objective_l2_topk_hinge_alpha<double, double>(1., 3));
+  test_part_steps(sdca::make_objective_l2_topk_hinge_beta<double, double>(1., 2));
+  test_part_steps(sdca::make_objective_l2_topk_hinge_alpha_smooth<double, double>(1., 2, 1));
+  test_part_steps(sdca::make_objective_l2_topk_hinge_beta_smooth<double, double>(1., 2, 1));
 }
 
 // Float data with double results: the solve keeps W and the duals in double
@@ -518,7 +522,7 @@ template <typename Context>
 static std::pair<sdca::solver_status, typename Context::train_eval_type> wide_solve(
     Context&& ctx, const sdca::size_type max_epoch, const double epsilon, const bool on_start,
     const std::size_t threads) {
-  ctx.criteria.epsilon = epsilon;
+  ctx.criteria.tol = epsilon;
   ctx.criteria.max_epoch = max_epoch;
   ctx.criteria.eval_on_start = on_start;
   ctx.criteria.num_threads = threads;
@@ -553,7 +557,7 @@ static void test_wide_iterate(const Objective<float, double>& objective, const O
                                              Objective<float, double>(objective), &A[0]),
                           max_epoch, epsilon, on_start, threads);
       return wide_solve(sdca::make_context(sdca::make_input_feature(d, n, &X[0]), Output(output),
-                                           Objective<float, double>(objective), &A[0], &W[0]),
+                                           Objective<float, double>(objective), &W[0], &A[0]),
                         max_epoch, epsilon, on_start, threads);
     };
     const auto fit = solve(100000, tol, false);
@@ -572,21 +576,22 @@ TEST(SolverTest, wide_iterate_certifies_the_returned_values) {
   sdca::logging::set_level(sdca::logging::level::warning);
   std::vector<sdca::size_type> y(300);
   for (sdca::size_type i = 0; i < y.size(); ++i) y[i] = i % 5;
-  const auto multiclass = sdca::make_output_multiclass(y.begin(), y.end());
+  const auto multiclass = sdca::make_output_multiclass(y.begin(), y.end(), 5);
   std::vector<std::vector<sdca::size_type>> labels(300);
   for (sdca::size_type i = 0; i < labels.size(); ++i)
     labels[i] = {std::min(i % 5, (i + 1) % 5), std::max(i % 5, (i + 1) % 5)};
-  const auto multilabel = sdca::make_output_multilabel(labels);
+  const auto multilabel = sdca::make_output_multilabel(labels, 5);
   for (const bool kernel : {false, true}) {
-    test_wide_iterate(sdca::make_objective_l2_hinge_topk<float, double>(1.), multiclass, kernel,
+    test_wide_iterate(sdca::make_objective_l2_topk_hinge_alpha<float, double>(1., 1), multiclass,
+                      kernel, 1e-6);
+    test_wide_iterate(sdca::make_objective_l2_topk_hinge_beta<float, double>(1., 2), multiclass,
+                      kernel, 1e-6);
+    test_wide_iterate(sdca::make_objective_l2_cross_entropy<float, double>(1.), multiclass, kernel,
                       1e-6);
-    test_wide_iterate(sdca::make_objective_l2_topk_hinge<float, double>(1., 2), multiclass, kernel,
-                      1e-6);
-    test_wide_iterate(sdca::make_objective_l2_entropy<float, double>(1.), multiclass, kernel, 1e-6);
     test_wide_iterate(sdca::make_objective_l2_multilabel_hinge<float, double>(1.), multilabel,
                       kernel, 1e-6);
-    test_wide_iterate(sdca::make_objective_l2_multilabel_entropy<float, double>(1.), multilabel,
-                      kernel, 1e-6);
+    test_wide_iterate(sdca::make_objective_l2_multilabel_cross_entropy<float, double>(1.),
+                      multilabel, kernel, 1e-6);
   }
 }
 

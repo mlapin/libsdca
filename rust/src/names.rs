@@ -1,17 +1,18 @@
-//! The shared vocabulary: the same names and ids as the C ABI and Python.
+//! The named settings shared with the C ABI and the other interfaces.
 use std::fmt;
 use std::str::FromStr;
 
-use crate::error::Error;
+use crate::error::{Error, Result};
 
 macro_rules! named {
     ($(#[$doc:meta])* $name:ident { $($(#[$vdoc:meta])* $variant:ident = $id:literal, $text:literal),+ $(,)? }) => {
         $(#[$doc])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[non_exhaustive]
         pub enum $name { $($(#[$vdoc])* $variant = $id),+ }
 
         impl $name {
-            /// Every value, in id order.
+            /// Every value, in the order of the C ABI codes.
             pub const ALL: &'static [$name] = &[$($name::$variant),+];
 
             /// The name shared with the other interfaces, which `str::parse` reads.
@@ -20,8 +21,9 @@ macro_rules! named {
                 match self { $($name::$variant => $text),+ }
             }
 
+            /// The C ABI code.
             #[allow(dead_code)]
-            pub(crate) fn id(self) -> i32 {
+            pub(crate) fn code(self) -> i32 {
                 self as i32
             }
         }
@@ -35,48 +37,67 @@ macro_rules! named {
 }
 
 macro_rules! parse {
-    ($name:ident, $what:literal $(, $alias:literal => $value:expr)*) => {
+    ($name:ident, $what:literal) => {
         impl FromStr for $name {
             type Err = Error;
-            fn from_str(text: &str) -> Result<Self, Error> {
-                $(if text == $alias { return Ok($value); })*
-                $name::ALL.iter().copied().find(|v| v.name() == text).ok_or_else(|| {
-                    Error::InvalidArgument(format!(concat!("Unknown ", $what, ": {}"), text))
-                })
+
+            /// Parses [`Self::name`].
+            fn from_str(text: &str) -> Result<Self> {
+                $name::ALL
+                    .iter()
+                    .copied()
+                    .find(|v| v.name() == text)
+                    .ok_or_else(|| {
+                        Error::InvalidArgument(format!(concat!("Unknown ", $what, ": {}"), text))
+                    })
             }
         }
     };
 }
 
 named! {
-    /// The working arithmetic of the solver, coordinate steps and losses; see
-    /// [`crate::Real::DEFAULT_PRECISION`]. `str::parse` also takes "fp32" and
-    /// "single" for Float32, "fp64" and "double" for Float64.
-    #[non_exhaustive]
+    /// The working arithmetic of training, coordinate steps and losses (the
+    /// codes of enum sdca_precision).
+    ///
+    /// `None` in [`crate::Settings::precision`] is [`crate::Real::DEFAULT_PRECISION`]
+    /// of the data.
+    ///
+    /// ```
+    /// use libsdca::Precision;
+    ///
+    /// assert_eq!("float32".parse::<Precision>()?, Precision::Float32);
+    /// assert!("double".parse::<Precision>().is_err());
+    /// assert_eq!(Precision::Float64.to_string(), "float64");
+    /// # Ok::<(), libsdca::Error>(())
+    /// ```
     Precision {
-        /// Float working arithmetic on f32 data: faster entropy steps.
-        Float32 = 0, "float32",
-        /// Double working arithmetic on f32 or f64 data.
+        /// Float work on f32 data (f64 data rejects it): faster entropy steps,
+        /// accurate to float rounding of the scores.
+        Float32 = 1, "float32",
+        /// Double work on f32 or f64 data.
         Float64 = 2, "float64",
     }
 }
-parse!(
-    Precision,
-    "precision",
-    "fp32" => Precision::Float32,
-    "single" => Precision::Float32,
-    "fp64" => Precision::Float64,
-    "double" => Precision::Float64
-);
+parse!(Precision, "precision");
 
 named! {
-    /// How the hinge projections solve (multilabel_hinge's two-simplex steps
-    /// and smooth loss values; the top-k hinges run the extended solver in
-    /// both). See "Projection precision" in docs/API.md.
-    #[non_exhaustive]
+    /// How the hinge projections solve: the two-simplex steps and smooth loss
+    /// values of multilabel_hinge; the other losses ignore it (the top-k
+    /// hinges always run the extended solver). See "Projection precision" in
+    /// docs/API.md.
+    ///
+    /// ```
+    /// use libsdca::ProjectionPrecision;
+    ///
+    /// assert_eq!(ProjectionPrecision::default(), ProjectionPrecision::Float64);
+    /// assert_eq!("extended".parse::<ProjectionPrecision>()?, ProjectionPrecision::Extended);
+    /// # Ok::<(), libsdca::Error>(())
+    /// ```
+    #[derive(Default)]
     ProjectionPrecision {
         /// Double-precision solve with a per-call check; a failed check
         /// re-solves with the extended solver. The default.
+        #[default]
         Float64 = 0, "float64",
         /// Always the extended-precision solver.
         Extended = 1, "extended",
@@ -85,126 +106,92 @@ named! {
 parse!(ProjectionPrecision, "projection_precision");
 
 named! {
-    /// What the epochs of [`crate::fit`] leave out for the hinge objectives; the
-    /// entropy objectives update every class of every example whatever the
-    /// value, and every evaluation covers every example. See "Shrinking" in
-    /// docs/API.md.
-    #[non_exhaustive]
+    /// What the epochs of [`crate::Solver::fit`] leave out for the hinge
+    /// losses. The entropy losses update every class of every example and take
+    /// `Auto` only (another value is an [`crate::Error::InvalidArgument`]).
+    /// Every evaluation covers every example, so [`Status::Solved`] means the
+    /// same in every mode. See "Shrinking" in docs/API.md.
+    ///
+    /// ```
+    /// use libsdca::Shrinking;
+    ///
+    /// assert_eq!(Shrinking::default(), Shrinking::Auto);
+    /// assert_eq!("safe".parse::<Shrinking>()?, Shrinking::Safe);
+    /// # Ok::<(), libsdca::Error>(())
+    /// ```
+    #[derive(Default)]
     Shrinking {
-        /// Both kinds below. The default.
+        /// The library's choice, currently `Both`; it may change. The default.
+        #[default]
         Auto = 0, "auto",
         /// Every class of every example in every epoch.
         Off = 1, "off",
-        /// Between full passes (every tenth epoch), skip the examples whose
-        /// last step left their duals unchanged and step an example on its
-        /// classes of nonzero dual.
+        /// Between full passes (after `eval_epoch` full passes of work, at most
+        /// 50 epochs), skip the examples whose last step left their duals
+        /// unchanged and step an example on its classes of nonzero dual.
         Heuristic = 2, "heuristic",
-        /// Leave out for good the zero duals that the certified gap proves
-        /// zero at the optimum (gap-safe screening; single-label hinges on
-        /// features).
+        /// Leave out for good the zero duals that the duality gap proves zero
+        /// at the optimum (gap-safe screening; single-label hinges on features).
         Safe = 3, "safe",
-        /// Heuristic and safe.
+        /// `Heuristic` and `Safe`.
         Both = 4, "both",
     }
 }
 parse!(Shrinking, "shrinking");
 
 named! {
-    /// Training objectives of [`crate::fit`]; the last two take label sets. The
-    /// hinges are smoothed by `gamma > 0` (`gamma = 0`: nonsmooth).
-    #[non_exhaustive]
-    Objective {
-        /// Softmax cross-entropy.
-        CrossEntropy = 0, "cross_entropy",
-        /// Top-k cross-entropy (top-k entropy); cross-entropy at k = 1.
-        TopKCrossEntropy = 1, "topk_cross_entropy",
-        /// Multiclass hinge of Crammer and Singer (k = 1).
-        MulticlassHinge = 2, "multiclass_hinge",
-        /// Hinge of the average of the k largest margins.
-        TopKHingeAlpha = 3, "topk_hinge_alpha",
-        /// Average of the k largest hinges.
-        TopKHingeBeta = 4, "topk_hinge_beta",
-        /// Multilabel hinge.
-        MultilabelHinge = 5, "multilabel_hinge",
-        /// Cross-entropy with a uniform target over the labels.
-        MultilabelCrossEntropy = 6, "multilabel_cross_entropy",
-    }
-}
-parse!(Objective, "objective", "topk_hinge" => Objective::TopKHingeBeta);
-
-impl Objective {
-    /// Alias for [`Objective::TopKHingeBeta`], the default top-k hinge variant.
-    #[allow(non_upper_case_globals)]
-    pub const TopKHinge: Self = Self::TopKHingeBeta;
-
-    /// Whether the objective takes label sets.
-    #[must_use]
-    pub fn is_multilabel(self) -> bool {
-        self.id() >= Objective::MultilabelHinge.id()
-    }
-}
-
-named! {
-    /// Losses of [`crate::loss_and_grad`]: the objectives and
-    /// proximal_cross_entropy.
-    #[non_exhaustive]
-    Loss {
-        /// Softmax cross-entropy (uniform target over the labels of a set).
-        CrossEntropy = 0, "cross_entropy",
-        /// Top-k cross-entropy (top-k entropy); cross-entropy at k = 1.
-        TopKCrossEntropy = 1, "topk_cross_entropy",
-        /// Multiclass hinge of Crammer and Singer (k = 1).
-        MulticlassHinge = 2, "multiclass_hinge",
-        /// Hinge of the average of the k largest margins.
-        TopKHingeAlpha = 3, "topk_hinge_alpha",
-        /// Average of the k largest hinges.
-        TopKHingeBeta = 4, "topk_hinge_beta",
-        /// Multilabel hinge.
-        MultilabelHinge = 5, "multilabel_hinge",
-        /// Cross-entropy with a uniform target over the labels.
-        MultilabelCrossEntropy = 6, "multilabel_cross_entropy",
-        /// Moreau envelope of the cross-entropy with step alpha.
-        ProximalCrossEntropy = 7, "proximal_cross_entropy",
-    }
-}
-parse!(Loss, "loss", "topk_hinge" => Loss::TopKHingeBeta);
-
-impl Loss {
-    /// Alias for [`Loss::TopKHingeBeta`], the default top-k hinge variant.
-    #[allow(non_upper_case_globals)]
-    pub const TopKHinge: Self = Self::TopKHingeBeta;
-}
-
-named! {
-    /// Solver status; only Solved certifies the duality gap.
-    #[non_exhaustive]
+    /// Why [`crate::Solver::fit`] stopped; only `Solved` guarantees the duality gap.
+    ///
+    /// ```
+    /// use libsdca::Status;
+    ///
+    /// assert_eq!("max_epoch".parse::<Status>()?, Status::MaxEpoch);
+    /// assert_eq!(Status::Solved.to_string(), "solved");
+    /// # Ok::<(), libsdca::Error>(())
+    /// ```
     Status {
-        /// Not started.
-        None = 0, "none",
-        /// Running.
-        Solving = 1, "solving",
         /// The relative duality gap reached the tolerance.
-        Solved = 2, "solved",
+        Solved = 0, "solved",
         /// The objectives stopped improving.
-        NoProgress = 3, "no_progress",
+        NoProgress = 1, "no_progress",
         /// The epoch limit was reached.
-        MaxEpoch = 4, "max_epoch",
-        /// The CPU time limit was reached (MATLAB only: [`crate::fit`] sets none).
-        MaxCpuTime = 5, "max_cpu_time",
-        /// The wall time limit was reached (MATLAB only: [`crate::fit`] sets none).
-        MaxWallTime = 6, "max_wall_time",
-        /// A numerical failure.
-        Failed = 7, "failed",
+        MaxEpoch = 2, "max_epoch",
+        /// A numerical failure: the model holds the last consistent iterate.
+        Failed = 3, "failed",
     }
 }
 parse!(Status, "status");
 
 impl Status {
-    pub(crate) fn from_id(id: i64) -> Status {
+    /// The status of a C ABI code; a code that a finished fit cannot report
+    /// is a native error.
+    pub(crate) fn from_code(code: i32) -> Result<Status> {
         Status::ALL
             .iter()
             .copied()
-            .find(|s| i64::from(s.id()) == id)
-            .unwrap_or(Status::Failed)
+            .find(|status| status.code() == code)
+            .ok_or_else(|| Error::Native(format!("The native solver returned status {code}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_codes_map_to_the_finished_states_only() {
+        let known = [
+            (0, Status::Solved),
+            (1, Status::NoProgress),
+            (2, Status::MaxEpoch),
+            (3, Status::Failed),
+        ];
+        for (code, status) in known {
+            assert_eq!(Status::from_code(code), Ok(status));
+        }
+        // Codes beyond enum sdca_status.
+        for code in [-1, 4, 7] {
+            assert!(matches!(Status::from_code(code), Err(Error::Native(_))));
+        }
     }
 }

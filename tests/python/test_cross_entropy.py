@@ -3,18 +3,19 @@
 from types import SimpleNamespace
 from unittest import mock
 
+import libsdca.torch
 import mpmath as mp
 import pytest
 import torch
-from libsdca import (
+from libsdca import _cpu_entropy, _cross_entropy
+from libsdca.torch import (
     CrossEntropyLoss,
     ProximalCrossEntropyLoss,
     TopKCrossEntropyLoss,
     TopKHingeLoss,
-    _cpu_entropy,
-    _cross_entropy,
+    cross_entropy,
 )
-from libsdca.torch import cross_entropy, sdca_loss
+from named_losses import loss as named_loss
 
 
 class CrossEntropyTests:
@@ -118,6 +119,24 @@ class CrossEntropyTests:
                 torch.testing.assert_close(value, reference, equal_nan=True)
                 value.sum().backward()
                 torch.testing.assert_close(z.grad, torch.zeros_like(z))
+
+    def test_ignored_rows_may_be_nonfinite(self, subtests: pytest.Subtests):
+        z = torch.randn(4, 5, dtype=torch.double)
+        z[1, 2], z[2, 0] = float("inf"), float("nan")
+        y = torch.tensor([0, -100, -100, 3])
+        for weight in (None, torch.linspace(0.5, 2, 5, dtype=torch.double)):
+            for reduction in ("none", "sum", "mean"):
+                with subtests.test(weight=weight is not None, reduction=reduction):
+                    results = []
+                    for backend in ("native", "torch"):
+                        x = z.clone().requires_grad_()
+                        value = cross_entropy(x, y, weight, reduction=reduction, backend=backend)
+                        results.append((value, torch.autograd.grad(value.sum(), x)[0]))
+                    torch.testing.assert_close(results[1], results[0])
+                    assert not bool(results[1][1][1:3].any())
+        z[0, 1] = float("inf")
+        with pytest.raises(ValueError, match="finite"):
+            cross_entropy(z, y, backend="torch")
 
     def test_zero_weight_mean_matches_pytorch(self):
         z = torch.randn(2, 3, dtype=torch.double, requires_grad=True)
@@ -308,8 +327,8 @@ class CrossEntropyTests:
     def test_unsupported_and_invalid_arguments(self, subtests: pytest.Subtests):
         z, y = torch.zeros(2, 3), torch.tensor([0, 1])
         for options in [
-            dict(label_smoothing=0.1),
-            dict(ignore_index=True),
+            dict(label_smoothing=1.1),
+            dict(label_smoothing=-0.1),
             dict(reduction="bad"),
             dict(weight=torch.ones(2)),
             dict(weight=torch.tensor([1.0, -1.0, 1.0])),
@@ -317,8 +336,21 @@ class CrossEntropyTests:
         ]:
             with subtests.test(options=options), pytest.raises(ValueError):
                 cross_entropy(z, y, **options)
-        with pytest.raises(ValueError, match="probability targets"):
-            cross_entropy(z, torch.ones(2, 3) / 3)
+        for options in [dict(ignore_index=True), dict(ignore_index=1.0), dict(reduction=1)]:
+            with subtests.test(options=options), pytest.raises(TypeError):
+                cross_entropy(z, y, **options)
+        with pytest.raises(TypeError, match="boolean"):
+            cross_entropy(z, torch.ones(2, 3, dtype=torch.bool))
+        # Class probabilities, as torch: of the logits' shape, without an ignored label.
+        probabilities = torch.ones(2, 3) / 3
+        torch.testing.assert_close(
+            cross_entropy(z, probabilities),
+            torch.nn.functional.cross_entropy(z, probabilities),
+        )
+        with pytest.raises(ValueError, match="logits' shape"):
+            cross_entropy(z, torch.ones(2, 2) / 2)
+        with pytest.raises(ValueError, match="ignore_index"):
+            cross_entropy(z, probabilities, ignore_index=0)
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
     def test_cuda_dtypes_weights_ignores_and_reductions(self, subtests: pytest.Subtests):
@@ -407,15 +439,15 @@ class CrossEntropyTests:
         z = torch.randn(3, 4, dtype=torch.double, requires_grad=True)
         y = torch.tensor([0, 1, 2])
         cases = [
-            (TopKCrossEntropyLoss(2, backend="torch"), "topk_cross_entropy", dict(k=2)),
-            (TopKHingeLoss(2, backend="torch", variant="alpha"), "topk_hinge_alpha", dict(k=2)),
+            (TopKCrossEntropyLoss(k=2, backend="torch"), "topk_cross_entropy", dict(k=2)),
+            (TopKHingeLoss(k=2, backend="torch", variant="alpha"), "topk_hinge_alpha", dict(k=2)),
             (
-                TopKHingeLoss(2, variant="beta", gamma=0.3, backend="torch"),
+                TopKHingeLoss(k=2, variant="beta", gamma=0.3, backend="torch"),
                 "topk_hinge_beta",
                 dict(k=2, gamma=0.3),
             ),
             (
-                ProximalCrossEntropyLoss(0.3, backend="torch"),
+                ProximalCrossEntropyLoss(alpha=0.3, backend="torch"),
                 "proximal_cross_entropy",
                 dict(alpha=0.3),
             ),
@@ -423,7 +455,8 @@ class CrossEntropyTests:
         for module, objective, options in cases:
             with subtests.test(objective=objective):
                 torch.testing.assert_close(
-                    module(z, y), sdca_loss(z, y, objective, backend="torch", **options)
+                    module(z, y),
+                    named_loss(libsdca.torch, objective, z, y, backend="torch", **options),
                 )
 
 

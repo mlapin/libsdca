@@ -11,6 +11,7 @@ import torch
 from torch import nn
 
 from . import _cpu, _cpu_entropy, _entropy, _ops
+from . import _loss_options as _opt
 from ._torch_distributed import call_with_dtensors, has_dtensor
 
 
@@ -339,17 +340,23 @@ def _weighted_gradient(
 
 def _options(
     weight: torch.Tensor | None, ignore_index: int, reduction: str, label_smoothing: float
-) -> None:
+) -> float:
+    """Check the options of cross_entropy; label_smoothing as a float."""
     if not isinstance(ignore_index, int) or isinstance(ignore_index, bool):
-        raise ValueError("ignore_index must be an integer")
+        raise TypeError(f"ignore_index must be an integer, not {type(ignore_index).__name__}")
     if not -(2**63) <= ignore_index < 2**63:
         raise ValueError("ignore_index must fit in int64")
-    if reduction not in ("none", "sum", "mean"):
-        raise ValueError("reduction must be none, sum, or mean")
-    if label_smoothing != 0:
-        raise ValueError("label_smoothing is not supported; use 0.0")
-    if weight is not None and (not isinstance(weight, torch.Tensor) or weight.requires_grad):
-        raise ValueError("weight must be a tensor that does not require gradients")
+    _opt.check_reduction(reduction)
+    eps = _opt.check_label_smoothing(label_smoothing)
+    if weight is not None:
+        if not isinstance(weight, torch.Tensor):
+            raise TypeError(f"weight must be None or a tensor, not {type(weight).__name__}")
+        if weight.requires_grad:
+            raise ValueError("weight must not require gradients")
+    return eps
+
+
+_BACKENDS = ("auto", "kernel", "native", "torch")
 
 
 def cross_entropy(
@@ -363,16 +370,30 @@ def cross_entropy(
     backend: str = "auto",
     precision: object = None,
 ) -> torch.Tensor:
-    """Stable cross-entropy of (C,), (N,C) or (N,C,...) finite logits and int64 targets.
+    """Stable cross-entropy of (C,), (N, C) or (N, C, ...) logits, as
+    torch.nn.functional.cross_entropy.
 
-    Matches PyTorch's class axis, weights, ignored labels and reductions. Half inputs
-    return float32 losses. Probability targets and nonzero smoothing raise ValueError.
-    Every call keeps float64 row statistics and supports double backward. On the CPU the
-    CPU extension or the native library computes weighted and ignored rows too; auto CUDA
-    fuses unweighted rows of every supported dtype up to 2**25 classes.
-    Class-weighted float64 CUDA rows use full-range log-domain fused kernels. Under
-    torch.func transforms every device takes the tensor operations, with CUDA's NaN
-    validation.
+    target holds class labels (any integer dtype) of the logits' shape without the class
+    dimension, or class probabilities of the logits' shape (floating point). weight,
+    ignore_index (labels only), reduction and label_smoothing in [0, 1] follow PyTorch,
+    including the weighted mean. Half inputs return float32 losses. Integer labels without
+    smoothing run the fused kernels: every call keeps float64 row statistics and supports
+    double backward; on the CPU the CPU extension or the native library computes weighted and
+    ignored rows too, and auto CUDA fuses rows of every supported dtype up to 2**25 classes.
+    Label smoothing adds (eps / C) times the smoothing term (a logsumexp in tensor
+    operations) to (1 - eps) times that loss; probability targets take log_softmax in
+    tensor operations. Both work in float32 for 16-bit logits (else the logits' dtype, or
+    float64 for precision="float64").
+
+    backend: "auto", "kernel" (as "auto", raising NotImplementedError where no fused kernel
+    runs), "native" (the native library, CPU tensors) or "torch" (tensor operations).
+    precision: None, "float32" or "float64" (or torch.float32, torch.float64).
+
+    Raises:
+        TypeError: For arguments of the wrong type (a boolean target).
+        ValueError: For invalid shapes or options; on the CPU also for nonfinite logits,
+            labels out of range or invalid class weights (CUDA and torch.func transforms give
+            NaN instead).
     """
     fast = _fast_cpu(
         input, target, weight, ignore_index, reduction, label_smoothing, backend, precision
@@ -391,22 +412,165 @@ def cross_entropy(
             backend=backend,
             precision=precision,
         )
-    _options(weight, ignore_index, reduction, label_smoothing)
+    eps = _options(weight, ignore_index, reduction, label_smoothing)
     mod = _torch()
     mod._check_tensors(input, target)
     canonical = mod._check_precision(input, precision)
-    if backend not in ("auto", "native", "torch"):
-        raise ValueError("Unknown backend")
+    _opt.check_backend(backend, _BACKENDS)
+    dim = 0 if input.ndim == 1 else 1
+    classes = input.shape[dim]
+    if classes < 2:
+        raise ValueError("At least two classes are required")
+    if target.is_floating_point():
+        return _probabilities(input, target, weight, ignore_index, reduction, eps, canonical)
+    target = _class_labels(input, target, dim)
+    if eps > 0:
+        nll = cross_entropy(
+            input,
+            target,
+            weight,
+            ignore_index=ignore_index,
+            reduction=reduction,
+            backend=backend,
+            precision=canonical,
+        )
+        smooth = _smoothing(input, target, weight, ignore_index, reduction, canonical)
+        return ((1 - eps) * nll + (eps / classes) * smooth).to(nll.dtype)
+    if backend == "kernel":
+        mod._require_kernel(_label_route(input, target, weight, ignore_index, "auto", canonical))
+        backend = "auto"
+    return _labels_loss(input, target, weight, ignore_index, reduction, backend, canonical)
+
+
+def _class_labels(input: torch.Tensor, target: torch.Tensor, dim: int) -> torch.Tensor:
+    """int64 class labels of the logits' shape without dim (any integer dtype is cast)."""
+    if target.dtype != torch.int64:
+        if target.dtype == torch.bool or target.is_complex():
+            hint = (
+                "; multilabel_cross_entropy takes boolean masks"
+                if target.dtype == torch.bool
+                else ""
+            )
+            raise TypeError(
+                f"cross_entropy takes integer class labels or floating-point class "
+                f"probabilities, not {target.dtype}{hint}"
+            )
+        target = target.long()
+    shape = input.shape[:dim] + input.shape[dim + 1 :]
+    if target.shape != shape:
+        raise ValueError(
+            f"class labels must have shape {tuple(shape)} (the logits' shape without the "
+            f"class dimension 1), not {tuple(target.shape)}"
+        )
+    return target
+
+
+def _work_dtype(input: torch.Tensor, precision: str | None) -> torch.dtype:
+    """float32 work for 16-bit and float32 logits, float64 for float64 logits or
+    precision="float64"."""
+    if precision == "float64" or input.dtype == torch.float64:
+        return torch.float64
+    return torch.float32
+
+
+def _class_weight(weight: torch.Tensor, input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    """Checked class weights in dtype, NaN where invalid off the checked CPU path."""
+    classes = input.shape[0 if input.ndim == 1 else 1]
+    checked = not (input.is_cuda or _ops.is_compiling() or _ops.transformed())
+    _check_weight(weight, input, classes, check_values=checked)
+    w = weight.to(dtype)
+    if not checked:
+        valid = torch.isfinite(w).all() & (w >= 0).all()
+        w = w.masked_fill(~valid, math.nan)
+    return w
+
+
+def _smoothing(
+    input: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None,
+    ignore_index: int,
+    reduction: str,
+    precision: str | None,
+) -> torch.Tensor:
+    """PyTorch's label-smoothing term: -sum_j w_j log p_j per example (w = 1 without class
+    weights), zero where ignored, summed, or for the mean divided by the sum of the label
+    weights (the count of examples without class weights)."""
+    dim = 0 if input.ndim == 1 else 1
+    work = _work_dtype(input, precision)
+    z = input.movedim(dim, -1).to(work)
+    lse = torch.logsumexp(z, -1)
+    ignored = target == ignore_index
+    if weight is None:
+        smooth = z.shape[-1] * lse - z.sum(-1)
+        label_weight = (~ignored).to(work)
+    else:
+        w = _class_weight(weight, input, work)
+        smooth = w.sum() * lse - (z * w).sum(-1)
+        labels = target.masked_fill(ignored, 0).clamp(0, z.shape[-1] - 1)
+        label_weight = w[labels].masked_fill(ignored, 0)
+    smooth = smooth.masked_fill(ignored, 0)
+    if reduction == "none":
+        return smooth
+    if reduction == "sum":
+        return smooth.sum()
+    return smooth.sum() / label_weight.sum()
+
+
+def _probabilities(
+    input: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None,
+    ignore_index: int,
+    reduction: str,
+    eps: float,
+    precision: str | None,
+) -> torch.Tensor:
+    """Cross-entropy of class probabilities, as PyTorch: -sum_j w_j t_j log p_j per example
+    (t smoothed to (1 - eps) t + eps / C); the mean divides by the number of examples."""
+    if target.shape != input.shape:
+        raise ValueError(
+            f"class probabilities must have the logits' shape {tuple(input.shape)}, not "
+            f"{tuple(target.shape)}"
+        )
+    if ignore_index >= 0:
+        raise ValueError("ignore_index is not supported with class probabilities")
+    dim = 0 if input.ndim == 1 else 1
+    classes = input.shape[dim]
+    work = _work_dtype(input, precision)
+    log_p = torch.log_softmax(input.to(work), dim)
+    t = target.to(work)
+    if eps > 0:
+        t = t * (1 - eps) + eps / classes
+    product = log_p * t
+    if weight is not None:
+        shape = [1] * input.ndim
+        shape[dim] = classes
+        product = product * _class_weight(weight, input, work).reshape(shape)
+    value_dtype = _cpu.value_dtype(input)
+    if reduction == "none":
+        return (-product.sum(dim)).to(value_dtype)
+    total = -product.sum()
+    if reduction == "sum":
+        return total.to(value_dtype)
+    return (total / (input.numel() // classes)).to(value_dtype)
+
+
+def _labels_loss(
+    input: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None,
+    ignore_index: int,
+    reduction: str,
+    backend: str,
+    canonical: str | None,
+) -> torch.Tensor:
+    """cross_entropy of checked int64 labels without smoothing (backend not "kernel")."""
+    mod = _torch()
     transformed = _ops.transformed()
     dim = 0 if input.ndim == 1 else 1
     classes = input.shape[dim]
-    shape = input.shape[:dim] + input.shape[dim + 1 :]
-    if classes < 2:
-        raise ValueError("At least two classes are required")
-    if target.dtype != torch.int64 or target.shape != shape:
-        raise ValueError(
-            "target must contain int64 class indices; probability targets are unsupported"
-        )
+    shape = target.shape
     checked = not (input.is_cuda or _ops.is_compiling() or transformed)
     _check_weight(weight, input, classes, check_values=checked)
     if target.numel() == 0:
@@ -417,14 +581,34 @@ def cross_entropy(
         return value.reshape(shape) if reduction == "none" else value
     # Without ignored rows (a data-dependent test, not traced) the shared entropy op applies.
     if checked and weight is None and not bool((target == ignore_index).any()):
-        return mod.sdca_loss(
-            input, target, dim=dim, reduction=reduction, backend=backend, precision=canonical
+        return mod._resolved_loss(
+            input, target, "cross_entropy", backend, 1, 1.0, 1.0, reduction, dim, canonical, 1
         )
     if backend == "auto" and not transformed:
         fp32 = canonical != "float64" and input.dtype != torch.float64
         fused_value = _fused_weighted(input, target, weight, ignore_index, reduction, dim, fp32)
         if fused_value is not None:
             return fused_value.reshape(shape) if reduction == "none" else fused_value
+    return _tensor_labels_loss(
+        input, target, weight, ignore_index, reduction, backend, checked, transformed
+    )
+
+
+def _tensor_labels_loss(
+    input: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None,
+    ignore_index: int,
+    reduction: str,
+    backend: str,
+    checked: bool,
+    transformed: bool,
+) -> torch.Tensor:
+    """_labels_loss in float64 tensor operations (checked: with the synchronizing row
+    checks; transformed: under torch.func transforms)."""
+    dim = 0 if input.ndim == 1 else 1
+    classes = input.shape[dim]
+    shape = target.shape
     ignored = target == ignore_index
     if backend == "native":
         raise ValueError(
@@ -432,13 +616,9 @@ def cross_entropy(
             "use backend='torch' otherwise"
         )
     labels = target.masked_fill(ignored, 0).reshape(-1)
+    z = input.movedim(dim, -1).reshape(-1, classes)
     if checked:
-        mod._raise_failed(
-            [
-                (~mod._finite(input), "logits must be finite floating-point values"),
-                (((labels < 0) | (labels >= classes)).any(), "Target index out of range"),
-            ]
-        )
+        z = _checked_rows(z, labels, ignored.reshape(-1))
     safe_labels = labels.clamp(0, classes - 1)
     row_weight = (
         torch.ones_like(labels, dtype=torch.float64)
@@ -453,10 +633,128 @@ def cross_entropy(
             valid_w = torch.isfinite(weight).all() & (weight >= 0).all()
             bad_row = bad_row | ~valid_w
         row_weight = row_weight.masked_fill(bad_row, math.nan)
-    z = input.movedim(dim, -1).reshape(-1, classes)
     entropy = _TransformedEntropy if transformed else _WeightedEntropy
     value = entropy.apply(z, labels, row_weight, ignored.reshape(-1), reduction)[0]
     return value.reshape(shape) if reduction == "none" else value
+
+
+def _label_route(
+    input: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None,
+    ignore_index: int,
+    backend: str,
+    canonical: str | None,
+) -> tuple[str, str]:
+    """explain_backend's (backend, reason) of _labels_loss (backend "auto", "native" or
+    "torch")."""
+    mod = _torch()
+    dim = 0 if input.ndim == 1 else 1
+    transformed = _ops.transformed()
+    fp32 = canonical != "float64" and input.dtype != torch.float64
+    arithmetic = "float32 exponentials, float64 row statistics" if fp32 else "float64"
+    if input.device.type == "cpu" and backend != "torch" and not transformed:
+        return _cpu_label_route(input, backend, dim, arithmetic)
+    checked = not (input.is_cuda or _ops.is_compiling() or transformed)
+    if checked and weight is None and target.numel() and not bool((target == ignore_index).any()):
+        call = mod._bind("topk_cross_entropy", k=1, dim=dim, backend=backend, precision=canonical)
+        return mod._explain_loss(call, input, target)
+    if backend == "auto" and not transformed and target.numel():
+        if _can_fuse_weighted(input, target, ignore_index, dim):
+            return "kernel", f"fused Triton weighted-entropy kernels ({arithmetic})"
+    return _tensor_label_route(backend, transformed)
+
+
+def _cpu_label_route(
+    input: torch.Tensor, backend: str, dim: int, arithmetic: str
+) -> tuple[str, str]:
+    """_label_route on CPU outside torch.func transforms (backend "auto" or "native"):
+    the CPU extension's kernel or the native library."""
+    classes = input.shape[dim]
+    extension = backend == "auto" and _cpu_entropy.enabled()
+    z = input.movedim(dim, -1) if input.ndim > 2 else input
+    if _cpu.entropy_implementation(z, extension, classes) == _cpu.EXTENSION:
+        return "kernel", f"the CPU extension's cross-entropy kernel ({arithmetic})"
+    why = (
+        ""
+        if backend == "native"
+        else f"; the CPU extension is unavailable ({_cpu_entropy.why_not()})"
+    )
+    if backend == "auto" and extension:
+        why = " (float64 rows wider than the extension's)"
+    return "native", f"the native library ({arithmetic}){why}"
+
+
+def _tensor_label_route(backend: str, transformed: bool) -> tuple[str, str]:
+    """_label_route of the tensor operations; backend "native" raises."""
+    if backend == "native":
+        raise ValueError("Native losses require CPU tensors; use backend='torch' otherwise")
+    why = "backend='torch'" if backend == "torch" else "no fused kernel applies"
+    if transformed:
+        why = "torch.func transforms"
+    return "torch", f"float64 tensor operations ({why})"
+
+
+def explain(
+    input: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None = None,
+    ignore_index: int = -100,
+    reduction: str = "mean",
+    label_smoothing: float = 0.0,
+    backend: str = "auto",
+    precision: object = None,
+) -> tuple[str, str]:
+    """explain_backend of cross_entropy (its arguments)."""
+    mod = _torch()
+    if has_dtensor(input, target, weight):
+        mod._dtensor_mesh(input, target, weight)
+        explained = explain(
+            mod._stand_in(input),
+            mod._stand_in(target),
+            mod._stand_in(weight),
+            ignore_index=ignore_index,
+            reduction=reduction,
+            label_smoothing=label_smoothing,
+            backend=backend,
+            precision=precision,
+        )
+        return mod._gathered(explained)
+    eps = _options(weight, ignore_index, reduction, label_smoothing)
+    mod._check_tensors(input, target)
+    canonical = mod._check_precision(input, precision)
+    _opt.check_backend(backend, _BACKENDS)
+    dim = 0 if input.ndim == 1 else 1
+    if input.shape[dim] < 2:
+        raise ValueError("At least two classes are required")
+    if target.is_floating_point():
+        work = str(_work_dtype(input, canonical)).removeprefix("torch.")
+        return "torch", f"class probabilities: log_softmax in {work} tensor operations"
+    target = _class_labels(input, target, dim)
+    if weight is not None:
+        _check_weight(weight, input, input.shape[dim], check_values=False)
+    route = "auto" if backend == "kernel" else backend
+    name, reason = _label_route(input, target, weight, ignore_index, route, canonical)
+    if eps > 0:
+        reason += "; label smoothing adds a logsumexp term in tensor operations"
+    return name, reason
+
+
+def _checked_rows(z: torch.Tensor, labels: torch.Tensor, ignored: torch.Tensor) -> torch.Tensor:
+    """z (rows, classes) after the CPU value checks, with zero ignored rows if they are
+    nonfinite: as the native losses, ignored rows may hold any values and get zero gradients."""
+    mod, counted = _torch(), z
+    if bool(ignored.any()):
+        counted = z[~ignored]
+        if not bool(mod._finite(z[ignored])):
+            z = z.masked_fill(ignored[:, None], 0)
+    mod._raise_failed(
+        [
+            (~mod._finite(counted), "logits must be finite floating-point values"),
+            (((labels < 0) | (labels >= z.shape[1])).any(), "Target index out of range"),
+        ]
+    )
+    return z
 
 
 _FAST_DTYPES = (torch.float32, torch.bfloat16, torch.float16, torch.float64)
@@ -584,6 +882,8 @@ def _cpu_cross_entropy(
 def _check_weight(
     weight: torch.Tensor | None, logits: torch.Tensor, classes: int, *, check_values: bool = True
 ) -> None:
+    """Class weights: a (classes,) tensor on the logits' device in their dtype (float32 for
+    16-bit logits under autocast); finite and nonnegative where check_values."""
     if weight is None:
         return
     autocast_weight = (
@@ -591,9 +891,12 @@ def _check_weight(
         and weight.dtype == torch.float32
         and _autocast_enabled(logits.device.type)
     )
-    dtype_matches = weight.dtype == logits.dtype or autocast_weight
-    if weight.shape != (classes,) or weight.device != logits.device or not dtype_matches:
-        raise ValueError("weight must have shape (classes,) and the logits' device and dtype")
+    if weight.dtype != logits.dtype and not autocast_weight:
+        raise TypeError(f"weight must have the logits' dtype {logits.dtype}, not {weight.dtype}")
+    if weight.shape != (classes,):
+        raise ValueError(f"weight must have shape ({classes},), not {tuple(weight.shape)}")
+    if weight.device != logits.device:
+        raise ValueError("weight and logits must be on the same device")
     if check_values and not bool(torch.isfinite(weight).all() & (weight >= 0).all()):
         raise ValueError("weight must be finite and nonnegative")
 
@@ -607,7 +910,8 @@ def _autocast_enabled(device: str) -> bool:
 
 
 class CrossEntropyLoss(nn.Module):
-    """cross_entropy as a module; weight is a buffer moved by .to() and saved in state_dict()."""
+    """cross_entropy as a module (torch.nn.CrossEntropyLoss's arguments); weight is a buffer
+    moved by .to() and saved in state_dict()."""
 
     weight: torch.Tensor | None
 
@@ -623,6 +927,8 @@ class CrossEntropyLoss(nn.Module):
     ) -> None:
         super().__init__()
         _options(weight, ignore_index, reduction, label_smoothing)
+        _opt.check_backend(backend, _BACKENDS)
+        _torch()._precision(precision)
         self.register_buffer("weight", weight)
         self.ignore_index = ignore_index
         self.reduction = reduction
@@ -643,8 +949,17 @@ class CrossEntropyLoss(nn.Module):
             precision=self.precision,
         )
 
-    def extra_repr(self) -> str:
-        return (
-            f"ignore_index={self.ignore_index}, reduction={self.reduction!r}, "
-            f"backend={self.backend!r}, precision={self.precision!r}"
+    def _options(self) -> dict[str, Any]:
+        return dict(
+            ignore_index=self.ignore_index,
+            reduction=self.reduction,
+            label_smoothing=self.label_smoothing,
+            backend=self.backend,
+            precision=self.precision,
         )
+
+    def _explain(self, input: torch.Tensor, target: torch.Tensor) -> tuple[str, str]:
+        return explain(input, target, self.weight, **self._options())
+
+    def extra_repr(self) -> str:
+        return ", ".join(f"{key}={value!r}" for key, value in self._options().items())

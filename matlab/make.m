@@ -3,7 +3,7 @@
 %
 
 % Library version and the names for the mex files
-LIBSDCA_VERSION = '0.3.1';
+LIBSDCA_VERSION = strtrim(fileread(fullfile(fileparts(mfilename('fullpath')), '..', 'VERSION')));
 MEX_PROX = 'matsdca_prox';
 MEX_SOLVE = 'matsdca_fit';
 MEX_LOSS = 'matsdca_loss';

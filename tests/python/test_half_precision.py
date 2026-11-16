@@ -13,15 +13,14 @@ import torch
 from libsdca import _cpu_entropy
 from libsdca.torch import (
     distillation_loss,
-    explain_backend,
     proximal_distillation_loss,
-    sdca_loss,
 )
+from named_losses import explain_route, torch_loss
 
 HALF = (torch.float16, torch.bfloat16)
 EPS32 = torch.finfo(torch.float32).eps
 # float32 work: values within 100 float32 eps of max(|loss|, 1), gradient entries within 2000
-# eps of the row's largest entry (top-k entropy's float32 threshold solve), as numerics.md.
+# eps of the row's largest entry (top-k entropy's float32 threshold solve), as docs/API.md, Known limits.
 VALUE_EPS, ROW_EPS = 100, 2000
 # (loss, target kind, k, gamma): integer targets ("index") or boolean masks ("mask").
 CASES = [
@@ -36,13 +35,14 @@ CASES = [
     ("multilabel_hinge", "mask", 1, 0.0),
     ("multilabel_hinge", "mask", 1, 0.5),
     ("proximal_cross_entropy", "index", 1, 0.0),
-    ("proximal_cross_entropy", "mask", 1, 0.0),
 ]
 
 # Teacher-logit losses; the CPU extension computes them in float64 (proximal) or float32.
 DISTILLATION = {
-    "distillation": lambda x, t, **kw: distillation_loss(x, t, 2.0, **kw),
-    "proximal_distillation": lambda x, t, **kw: proximal_distillation_loss(x, t, 2.0, 0.7, **kw),
+    "distillation": lambda x, t, **kw: distillation_loss(x, t, temperature=2.0, **kw),
+    "proximal_distillation": lambda x, t, **kw: proximal_distillation_loss(
+        x, t, temperature=2.0, alpha=0.7, **kw
+    ),
 }
 
 
@@ -89,7 +89,7 @@ def _run(
     precision: str | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x = z.detach().clone().requires_grad_()
-    value = sdca_loss(x, target, loss, k=k, gamma=gamma, reduction=reduction, precision=precision)
+    value = torch_loss(x, target, loss, k=k, gamma=gamma, reduction=reduction, precision=precision)
     weights = torch.linspace(0.5, 2.0, value.numel(), dtype=value.dtype, device=value.device)
     value.backward(weights.reshape(value.shape))
     assert x.grad is not None
@@ -130,7 +130,7 @@ class HalfPrecisionTests:
                                 dtype=dtype,
                                 requires_grad=True,
                             )
-                            value = sdca_loss(
+                            value = torch_loss(
                                 x,
                                 torch.zeros(2, device=device, dtype=torch.int64),
                                 loss,
@@ -237,11 +237,11 @@ class HalfPrecisionTests:
                     z = torch.randn(4, 9).to(device, dtype)
                     target = _targets(kind, 4, 9, self.gen).to(device)
                     message = f"{device} {dtype} {loss} {kind} k={k} gamma={gamma}"
-                    name, reason = explain_backend(z, target, loss, k=k, gamma=gamma)
+                    name, reason = explain_route(z, target, loss, k=k, gamma=gamma)
                     assert _arithmetic(loss, kind, k, device) in reason, message
                     if device == "cuda":
                         assert name in ("cuda-launcher", "triton"), message + reason
-                    name, reason = explain_backend(
+                    name, reason = explain_route(
                         z, target, loss, k=k, gamma=gamma, precision="float64"
                     )
                     assert "float64" in reason, message
@@ -268,7 +268,7 @@ class HalfPrecisionTests:
                     torch.cuda.synchronize()
                     base = torch.cuda.memory_allocated()
                     torch.cuda.reset_peak_memory_stats()
-                    sdca_loss(x, target, loss, k=k, gamma=gamma).backward()
+                    torch_loss(x, target, loss, k=k, gamma=gamma).backward()
                     torch.cuda.synchronize()
                 extra = torch.cuda.max_memory_allocated() - base
                 assert x.grad is not None
@@ -315,7 +315,7 @@ class NativeHalfEntropyTests:
                 results = []
                 for backend in ("auto", "torch"):
                     x = z.clone().requires_grad_()
-                    v = sdca_loss(x, y, reduction=reduction, backend=backend)
+                    v = torch_loss(x, y, reduction=reduction, backend=backend)
                     up = torch.linspace(0.5, 2.0, 40) if reduction == "none" else torch.tensor(3.0)
                     (g,) = torch.autograd.grad(v, x, up)
                     results.append((v, g))
@@ -326,8 +326,8 @@ class NativeHalfEntropyTests:
                     unit = torch.finfo(dtype).eps * grad64.double().abs().amax(-1, keepdim=True)
                     assert bool(((grad.double() - grad64.double()).abs() <= unit).all())
                     expected = "cpu-kernel" if _cpu_entropy.enabled() else "native"
-                    assert explain_backend(z, y)[0] == expected
+                    assert explain_route(z, y)[0] == expected
                 x = z.clone().requires_grad_()
-                (g,) = torch.autograd.grad(sdca_loss(x, y), x, create_graph=True)
+                (g,) = torch.autograd.grad(torch_loss(x, y), x, create_graph=True)
                 (h,) = torch.autograd.grad(g.float().square().sum(), x)
                 assert bool(h.isfinite().all())

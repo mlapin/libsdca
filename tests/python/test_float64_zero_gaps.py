@@ -1,8 +1,8 @@
 """float64 logits [0] * p + [-gap] * (C - p) (the first p positive) at gaps 700 to 752, where
 the losses and entries become float64 subnormals and then zero, against 60-digit references.
 
-Every entry is within the release budget (numerics.md, how it is verified: 64 output eps plus
-one subnormal quantum), with the CPU extension on and off. Beyond the spread of normal
+Every entry is within the release budget (64 output eps plus one subnormal
+quantum), with the CPU extension on and off. Beyond the spread of normal
 exponentials (-708) the boolean-mask rows once summed exp(z - max) of every competitor, each
 rounded into subnormals first: the extension's loss and positive entries were off by up to
 2e4 quanta at 1,000 classes, and the native library's rows of two positives by up to 124.
@@ -16,8 +16,8 @@ import mpmath as mp
 import pytest
 import torch
 from libsdca import _cpu_entropy
-from libsdca.torch import sdca_loss
 from mpmath_types import MPReal
+from named_losses import torch_loss
 
 PATHS = {"cpu-native": "off", **({"cpu-kernel": "on"} if _cpu_entropy.buildable() else {})}
 # name -> (loss, mask target)
@@ -43,7 +43,7 @@ def _evaluate(
         target = torch.zeros(len(GAPS), classes, dtype=torch.bool)
         target[:, :positives] = True
     with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": PATHS[path]}):
-        value = sdca_loss(x, target, loss, reduction="none")
+        value = torch_loss(x, target, loss, reduction="none")
         (gradient,) = torch.autograd.grad(value.sum(), x)
     return value.tolist(), gradient[:, 0].tolist(), gradient[:, -1].tolist()
 

@@ -206,14 +206,32 @@ SDCA_ROW_KERNEL void residual_kernel(std::size_t count, const double* t, const d
   residual_lanes(count, t, q, log_q, guess, alpha, r);
 }
 
+// Terms per lane summed plainly before add_block takes them.
+const std::size_t sum_block = 16;
+
+// The total of the compensated lane sums of add_block.
+SDCA_ROW_INLINE double block_total(const double* sum, const double* carry) {
+  double total = 0, correction = 0;
+  for (std::size_t l = 0; l < 2 * row_lanes; ++l) {
+    const double y = (l < row_lanes ? sum[l] : -carry[l - row_lanes]) - correction;
+    const double t = total + y;
+    correction = (t - total) - y;
+    total = t;
+  }
+  return total;
+}
+
 // The other classes' terms of the residual sum at their probabilities prob (in place: r =
-// -min(prob, 1)): sums[0] += sum min(prob, 1), sums[1] += sum prob u and sums[2] -= sum prob u^3
-// over the unclipped, u = 1 / (1 + alpha prob) into weights (0 where clipped). Whether any is.
+// -min(prob, 1)): sums[0] += sum min(prob, 1) (compensated: plain sums of many equal terms
+// move the threshold), sums[1] += sum prob u and sums[2] -= sum prob u^3 over the unclipped,
+// u = 1 / (1 + alpha prob) into weights (0 where clipped). Whether any is.
 SDCA_ROW_KERNEL bool others_terms_kernel(std::size_t n, double alpha, double* r, double* weights,
                                          double* sums) {
-  double mass[row_lanes], d1[row_lanes], d2[row_lanes];
+  double mass[row_lanes], carry[row_lanes], block[row_lanes], d1[row_lanes], d2[row_lanes];
   std::uint64_t clipped[row_lanes];
-  for (std::size_t l = 0; l < row_lanes; ++l) mass[l] = d1[l] = d2[l] = 0, clipped[l] = 0;
+  for (std::size_t l = 0; l < row_lanes; ++l)
+    mass[l] = carry[l] = block[l] = d1[l] = d2[l] = 0, clipped[l] = 0;
+  std::size_t blocks = 0;
   for (std::size_t begin = 0; begin < n; begin += row_lanes) {
     const std::size_t count = n - begin < row_lanes ? n - begin : row_lanes;
     double out[row_lanes], u[row_lanes];
@@ -224,16 +242,22 @@ SDCA_ROW_KERNEL bool others_terms_kernel(std::size_t n, double alpha, double* r,
       u[l] = select_double(over, 0.0, ul);
       const double slope = kept * u[l];
       out[l] = -kept;
-      mass[l] += kept;
+      block[l] += kept;
       d1[l] += slope;
       d2[l] -= (slope * u[l]) * u[l];
       clipped[l] |= over;
     }
+    if (++blocks == sum_block) {
+      add_block(block, mass, carry);
+      for (std::size_t l = 0; l < row_lanes; ++l) block[l] = 0;
+      blocks = 0;
+    }
     for (std::size_t l = 0; l < count; ++l) r[begin + l] = out[l], weights[begin + l] = u[l];
   }
+  add_block(block, mass, carry);
   std::uint64_t any = 0;
-  for (std::size_t l = 0; l < row_lanes; ++l)
-    sums[0] += mass[l], sums[1] += d1[l], sums[2] += d2[l], any |= clipped[l];
+  for (std::size_t l = 0; l < row_lanes; ++l) sums[1] += d1[l], sums[2] += d2[l], any |= clipped[l];
+  sums[0] += block_total(mass, carry);
   return any != 0;
 }
 
@@ -253,14 +277,7 @@ SDCA_ROW_KERNEL double fixed_point_kernel(std::size_t n, std::size_t p, const do
     }
     add_block(terms, sum, carry);
   }
-  double total = 0, correction = 0;
-  for (std::size_t l = 0; l < 2 * row_lanes; ++l) {
-    const double y = (l < row_lanes ? sum[l] : -carry[l - row_lanes]) - correction;
-    const double t = total + y;
-    correction = (t - total) - y;
-    total = t;
-  }
-  return total;
+  return block_total(sum, carry);
 }
 
 // The Taylor model of the proximal probabilities about an evaluated threshold
@@ -326,8 +343,9 @@ SDCA_ROW_KERNEL void model_moments_kernel(std::size_t n, const double* r, const 
 SDCA_ROW_KERNEL void model_expand_kernel(std::size_t n, const double* r, const double* u,
                                          double target, const double* b, double* out, double* sum,
                                          double* magnitude) {
-  double total[row_lanes], size[row_lanes];
-  for (std::size_t l = 0; l < row_lanes; ++l) total[l] = size[l] = 0;
+  double total[row_lanes], carry[row_lanes], block[row_lanes], size[row_lanes];
+  for (std::size_t l = 0; l < row_lanes; ++l) total[l] = carry[l] = block[l] = size[l] = 0;
+  std::size_t blocks = 0;
   for (std::size_t begin = 0; begin < n; begin += row_lanes) {
     const std::size_t count = n - begin < row_lanes ? n - begin : row_lanes;
     double next[row_lanes];
@@ -336,12 +354,19 @@ SDCA_ROW_KERNEL void model_expand_kernel(std::size_t n, const double* r, const d
       double s = b[model_powers - 1];
       for (int m = model_powers - 2; m > 0; --m) s = s * w + b[m];
       next[l] = rl - (target - rl) * (s * w);
-      total[l] += next[l] - (l < count ? 0.0 : target);
+      block[l] += next[l] - (l < count ? 0.0 : target);
       size[l] += std::fabs(next[l]) - (l < count ? 0.0 : std::fabs(target));
+    }
+    if (++blocks == sum_block) {
+      add_block(block, total, carry);
+      for (std::size_t l = 0; l < row_lanes; ++l) block[l] = 0;
+      blocks = 0;
     }
     for (std::size_t l = 0; l < count; ++l) out[begin + l] = next[l];
   }
-  for (std::size_t l = 0; l < row_lanes; ++l) *sum += total[l], *magnitude += size[l];
+  add_block(block, total, carry);
+  for (std::size_t l = 0; l < row_lanes; ++l) *magnitude += size[l];
+  *sum += block_total(total, carry);
 }
 
 // out_j = r_j - pi_j s(u_j) (pi = -neg_pi) over j < n for the coefficients b; the sum of out

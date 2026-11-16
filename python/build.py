@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from sdca_build import blas_config
+from sdca_build import blas_config, version
 
 
 def build(backend: str | None = None, output: str | Path | None = None) -> Path:
@@ -31,7 +31,7 @@ def build(backend: str | None = None, output: str | Path | None = None) -> Path:
         "-pthread",
         "-D" + macro,
         "-DSDCA_USE_CHRONO",
-        '-DSDCA_VERSION="0.3.1"',
+        f'-DSDCA_VERSION="{version()}"',
         *flags,
         "-I",
         str(ROOT / "include"),

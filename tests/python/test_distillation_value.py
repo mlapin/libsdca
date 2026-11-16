@@ -4,14 +4,14 @@ import contextlib
 
 import pytest
 import torch
-from libsdca.torch import distillation_loss
+from libsdca.torch import Reduction, distillation_loss
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 @pytest.mark.parametrize("reduction", ["none", "sum", "mean"])
-def test_distillation_inference_and_training_routes(dtype: torch.dtype, reduction: str):
+def test_distillation_inference_and_training_routes(dtype: torch.dtype, reduction: Reduction):
     pytest.importorskip("triton")
     from libsdca import _triton_distillation as kernels
 
@@ -32,7 +32,7 @@ def test_distillation_inference_and_training_routes(dtype: torch.dtype, reductio
         }[mode]
         with context():
             for fn in (distillation_loss, compiled):
-                value = fn(x, t, 2.0, reduction=reduction)
+                value = fn(x, t, temperature=2.0, reduction=reduction)
                 assert not value.requires_grad
                 torch.testing.assert_close(
                     value, expected, rtol=8 * torch.finfo(value.dtype).eps, atol=0
@@ -43,7 +43,7 @@ def test_distillation_inference_and_training_routes(dtype: torch.dtype, reductio
     for fn in (distillation_loss, compiled):
         x = student.detach().requires_grad_()
         t = teacher.detach().requires_grad_()
-        value = fn(x, t, 2.0, reduction=reduction)
+        value = fn(x, t, temperature=2.0, reduction=reduction)
         gradient, teacher_gradient = torch.autograd.grad(value, (x, t), upstream, allow_unused=True)
         torch.testing.assert_close(gradient, expected_grad, rtol=0, atol=0)
         assert teacher_gradient is None

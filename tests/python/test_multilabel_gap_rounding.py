@@ -8,7 +8,7 @@ import mpmath as mp
 import pytest
 import torch
 from libsdca import _cpu_entropy
-from libsdca.torch import sdca_loss
+from named_losses import torch_loss
 
 ROWS = [
     [40.1234567, 40.1234567, -29.3456789, -29.7654321],
@@ -49,7 +49,7 @@ def test_tied_positives_large_nonintegral_gap(
     mask = torch.zeros_like(z, dtype=torch.bool)
     mask[:, :2] = True
     with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": extension}):
-        value = sdca_loss(
+        value = torch_loss(
             z,
             mask,
             "multilabel_cross_entropy",

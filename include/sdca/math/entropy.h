@@ -905,10 +905,13 @@ struct entropy_block_solver {
       dt = next;
     }
     const T eps = std::numeric_limits<T>::epsilon();
-    // The resolution of t and of f is eps relative to at least tiny: they can underflow.
+    // The resolution of f is eps relative to at least tiny (it can underflow). An error d in
+    // t moves every probability by the relative factor exp(-d): a bracket within 64 eps, in
+    // absolute terms near t = 0, holds the probabilities to the 64 eps of the contract (a
+    // root at the bracket's end 0 is otherwise out of reach of the bisection).
     if (!std::isfinite(f) ||
         (std::abs(f) > T(256) * eps * std::max(magnitude, tiny) &&
-         hi - lo > T(64) * eps * std::max({std::abs(lo), std::abs(hi), tiny}))) {
+         hi - lo > T(64) * eps * std::max({std::abs(lo), std::abs(hi), T(1)}))) {
       throw std::runtime_error("Entropy normalization did not converge");
     }
     return dt;
@@ -974,11 +977,11 @@ struct entropy_block_solver {
         }
       }
     }
-    Sum sum(0);
+    row_sum<Data, Sum> sum;
     for (Int j = 0; j < n; ++j) {
-      if (j != pivot) sum += Sum(out[j]);
+      if (j != pivot) sum.add(Sum(out[j]));
     }
-    out[pivot] = Data(-sum);
+    out[pivot] = Data(-sum.value());
   }
 };
 
@@ -1055,20 +1058,23 @@ Result entropy_prox_loss_ptr(Int n, Int p, Result alpha, const Result* v, Result
   block.expanded = expanded.data();
   const Result dt = block.solve();
   block.duals(Result(1), dt, out);
-  Result cross(0), penalty(0);
+  // Summed in double: a float sum of n terms drifts by O(n) float eps.
+  using Sum = typename std::common_type<Result, double>::type;
+  Result cross(0);
+  detail::row_sum<Result, Sum> penalty;
   for (Int j = 0; j < p; ++j) cross -= block.label_log_probability(dt, j);
   // duals() recovered the one-label mass even if the root residual underflowed.
   if (p == 1 && out[0] <= Result(0.5)) cross = -std::log1p(-out[0]);
   // alpha out_j first: out_j^2 can underflow where the product does not.
-  for (Int j = 0; j < n; ++j) penalty += (alpha * out[j]) * out[j];
+  for (Int j = 0; j < n; ++j) penalty.add(Sum(alpha * out[j]) * Sum(out[j]));
   if (!std::isfinite(cross)) {
     // A finite mean need not have a representable unnormalized sum. Keep the
     // ordinary accumulation unchanged; divide each term only on overflow.
     cross = Result(0);
     for (Int j = 0; j < p; ++j) cross -= block.label_log_probability(dt, j) / Result(p);
-    return cross + penalty / 2;
+    return Result(Sum(cross) + penalty.value() / 2);
   }
-  return cross / Result(p) + penalty / 2;
+  return Result(Sum(cross / Result(p)) + penalty.value() / 2);
 }
 
 // Working precision of an SDCA entropy block update, chosen by the caller

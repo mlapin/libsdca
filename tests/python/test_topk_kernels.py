@@ -11,15 +11,15 @@ from collections.abc import Sequence
 from typing import Any
 from unittest import mock
 
-import libsdca
 import mpmath as mp
 import pytest
 import torch
 import torch.nn.functional as F
 from libsdca import _cpu_entropy, _cuda_launch, _topk
 from libsdca import torch as sdca_torch
-from libsdca.torch import explain_backend, sdca_loss
 from mpmath_types import MPReal
+from named_losses import explain_route, torch_loss
+from numpy_api import mask_loss_and_grad
 from topk_rows import CAPPED_GAPS, capped_reference, capped_rows
 
 try:
@@ -87,13 +87,13 @@ def fused(
     reduction: str = "none",
     upstream: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Value and gradient of the fused kernels (through sdca_loss on CUDA) in their default
+    """Value and gradient of the fused kernels (through torch_loss on CUDA) in their default
     arithmetic: float32 exponentials of non-float64 logits."""
     upstream = _upstream(z, reduction) if upstream is None else upstream
     if z.is_cuda:
         x = z.clone().requires_grad_()
         name, gamma = _public(loss, gamma)
-        value = sdca_loss(x, y, name, k=k, gamma=gamma, reduction=reduction)
+        value = torch_loss(x, y, name, k=k, gamma=gamma, reduction=reduction)
         value.backward(upstream)
         assert x.grad is not None
         return value.detach(), x.grad
@@ -136,7 +136,7 @@ def native(
     upstream = _upstream(z, reduction) if upstream is None else upstream
     y = y.cpu()
     name, gamma = _public(loss, gamma)
-    values, gradients = libsdca.loss_and_grad(
+    values, gradients = mask_loss_and_grad(
         z.double().cpu().numpy(), y.numpy(), name, k=k, gamma=gamma
     )
     value, gradient = _scaled(
@@ -683,30 +683,25 @@ class TopkDispatchTests:
         for loss in LOSSES:
             for k in (2, 32):
                 assert (
-                    explain_backend(z, y, _public(loss)[0], gamma=_public(loss)[1], k=k)[0]
+                    explain_route(z, y, _public(loss)[0], gamma=_public(loss)[1], k=k)[0]
                     == fused_name
                 ), loss
-            name, reason = explain_backend(z, y, _public(loss)[0], gamma=_public(loss)[1], k=33)
+            name, reason = explain_route(z, y, _public(loss)[0], gamma=_public(loss)[1], k=33)
             assert name == "torch"
             assert "k <= 32" in reason
+            # precision="float32" is float32 work: the kernels of None.
             assert (
-                explain_backend(
+                explain_route(
                     z, y, _public(loss)[0], gamma=_public(loss)[1], k=2, precision="float32"
                 )[0]
-                == "torch"
+                == fused_name
             )
-            mask = F.one_hot(y, 40).bool()
-            assert (
-                explain_backend(z, mask, _public(loss)[0], gamma=_public(loss)[1], k=2)[0]
-                == "torch"
-            )
-        assert explain_backend(z, y, "topk_cross_entropy", k=39)[0] == "torch"
+        assert explain_route(z, y, "topk_cross_entropy", k=39)[0] == "torch"
         # Outside the kernels the tensor path still computes the loss.
         for loss, k in (("topk_cross_entropy", 39), ("topk_hinge_alpha", 33)):
-            value = sdca_loss(z.double(), y, _public(loss)[0], gamma=_public(loss)[1], k=k)
-            mask = F.one_hot(y, 40).bool()
-            expected = sdca_loss(
-                z.double(), mask, _public(loss)[0], gamma=_public(loss)[1], k=k, backend="torch"
+            value = torch_loss(z.double(), y, _public(loss)[0], gamma=_public(loss)[1], k=k)
+            expected = torch_loss(
+                z.double(), y, _public(loss)[0], gamma=_public(loss)[1], k=k, backend="torch"
             )
             torch.testing.assert_close(value, expected, rtol=0, atol=0)
 
@@ -716,7 +711,7 @@ class TopkDispatchTests:
                 host, _ = _cuda_launch.status()
                 expected = "cuda-launcher" if host is not None else "triton"
                 z, y = self._data(5, 50, torch.float64)
-                assert explain_backend(z, y, "topk_hinge_alpha", k=3)[0] == expected, setting
+                assert explain_route(z, y, "topk_hinge_alpha", k=3)[0] == expected, setting
                 for loss in LOSSES:
                     for reduction in ("none", "mean"):
                         fused(*self._data(5, 50, torch.float64), loss, 3, reduction=reduction)
@@ -739,7 +734,7 @@ class TopkDispatchTests:
                 default = fused(z, y, loss, 5)
                 launched = apply.called
             with _setting("off"), _python_launches() as apply:
-                name, reason = explain_backend(z, y, _public(loss)[0], gamma=_public(loss)[1], k=5)
+                name, reason = explain_route(z, y, _public(loss)[0], gamma=_public(loss)[1], k=5)
                 assert name == "triton", loss
                 assert "SDCA_CUDA_LAUNCHER=off" in reason
                 forced = fused(z, y, loss, 5)
@@ -767,10 +762,10 @@ class TopkDispatchTests:
             a = z.clone().requires_grad_()
             b = z.clone().requires_grad_()
             torch.testing.assert_close(
-                sdca_loss(
+                torch_loss(
                     a, y, _public(loss)[0], gamma=_public(loss)[1], k=2, dim=1, reduction="none"
                 ),
-                sdca_loss(
+                torch_loss(
                     b.movedim(1, -1),
                     y,
                     _public(loss)[0],
@@ -781,7 +776,9 @@ class TopkDispatchTests:
             )
             x = z.movedim(1, -1).clone().requires_grad_()
             (g,) = torch.autograd.grad(
-                sdca_loss(x, y, _public(loss)[0], gamma=_public(loss)[1], k=2), x, create_graph=True
+                torch_loss(x, y, _public(loss)[0], gamma=_public(loss)[1], k=2),
+                x,
+                create_graph=True,
             )
             with pytest.raises(RuntimeError):
                 torch.autograd.grad(g.sum(), x)
@@ -845,16 +842,16 @@ class TopkDispatchTests:
             name, gamma = _public(loss)
             with torch.cuda.stream(stream):
                 for _ in range(2):
-                    (warm,) = torch.autograd.grad(sdca_loss(x, yt, name, k=3, gamma=gamma), x)
+                    (warm,) = torch.autograd.grad(torch_loss(x, yt, name, k=3, gamma=gamma), x)
                     del warm
             torch.cuda.current_stream().wait_stream(stream)
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
-                val = sdca_loss(x, yt, name, k=3, gamma=gamma)
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                val = torch_loss(x, yt, name, k=3, gamma=gamma)
                 (captured,) = torch.autograd.grad(val, x)
             with torch.no_grad():
                 x.normal_()
-            ref_val = sdca_loss(x, yt, name, k=3, gamma=gamma)
+            ref_val = torch_loss(x, yt, name, k=3, gamma=gamma)
             (expected,) = torch.autograd.grad(ref_val, x)
             graph.replay()
             torch.cuda.synchronize()
@@ -874,14 +871,14 @@ class CpuTopkExtensionTests:
                 y = torch.randint(0, c, (n,), generator=gen)
                 for k in sorted({2, 4, min(65, c - 1), c - 1}):
                     for loss in LOSSES:
-                        name, reason = explain_backend(
+                        name, reason = explain_route(
                             z64, y, _public(loss)[0], gamma=_public(loss)[1], k=k
                         )
                         assert name == "cpu-kernel", f"{loss} k={k}: {reason}"
                         for reduction in ("none", "mean", "sum"):
                             u = _upstream(z64, reduction, -0.75)
                             x = z64.clone().requires_grad_()
-                            val = sdca_loss(
+                            val = torch_loss(
                                 x,
                                 y,
                                 _public(loss)[0],
@@ -907,11 +904,11 @@ class CpuTopkExtensionTests:
                 z = z64.to(dtype)
                 for loss in LOSSES:
                     assert (
-                        explain_backend(z, y, _public(loss)[0], gamma=_public(loss)[1], k=3)[0]
+                        explain_route(z, y, _public(loss)[0], gamma=_public(loss)[1], k=3)[0]
                         == "cpu-kernel"
                     )
                     x = z.clone().requires_grad_()
-                    val = sdca_loss(
+                    val = torch_loss(
                         x, y, _public(loss)[0], k=3, gamma=_public(loss)[1], reduction="mean"
                     )
                     val.backward()
@@ -928,7 +925,7 @@ class CpuTopkExtensionTests:
             for loss in LOSSES:
                 for k in (2, 3, 5):
                     x = ties.clone().requires_grad_()
-                    val = sdca_loss(
+                    val = torch_loss(
                         x, ty, _public(loss)[0], k=k, gamma=_public(loss)[1], reduction="none"
                     )
                     val.sum().backward()
@@ -954,7 +951,7 @@ class CpuTopkExtensionTests:
                     ([[0.0, 1.0, 2.0]], [-1]),
                 ):
                     with pytest.raises(ValueError):
-                        sdca_loss(
+                        torch_loss(
                             torch.tensor(bad_z, dtype=torch.float64),
                             torch.tensor(bad_y),
                             _public(loss)[0],

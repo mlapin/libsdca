@@ -1,12 +1,11 @@
-"""The native tensor entry points: sdca_cross_entropy_forward/backward and
-sdca_loss_gradient_rows, on all four storage dtypes.
+"""The internal tensor entry points: sdca_internal_cross_entropy_forward/backward and
+sdca_internal_loss_rows, on all four storage dtypes.
 
-References: the float64 native entry points (sdca_entropy_forward/gradient and
-sdca_loss_gradient, bitwise), float64 PyTorch, and 60-digit mpmath values of the
-represented logits for the float32 arithmetic.
+References: double arithmetic on float32/float64 copies of the scores and the public
+sdca_loss_evaluate (libsdca.loss_and_grad, bitwise), float64 PyTorch, and 60-digit mpmath
+values of the represented logits for the float32 arithmetic.
 """
 
-import ctypes
 import math
 from typing import Any
 
@@ -16,12 +15,13 @@ import pytest
 import torch
 import torch.nn.functional as F
 from libsdca import _core, loss_and_grad
+from numpy_api import make_loss
 
 CODES = {torch.float32: 0, torch.float64: 1, torch.float16: 2, torch.bfloat16: 3}
 HALVES = (torch.float16, torch.bfloat16)
 FLOATS = (torch.float32, *HALVES)
 DTYPES = (*FLOATS, torch.float64)
-STATS = _core.ENTROPY_STATS
+STATS = 5  # the row statistics of sdca_internal_cross_entropy_forward
 # The float32 contract of TORCH.md, as test_fused_entropy: relative loss and target errors
 # in float32 eps and eps of the logits dtype, competitor errors relative to the row's largest
 # entry.
@@ -117,15 +117,12 @@ def round_into(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
 def native64(
     z: torch.Tensor, y: torch.Tensor, scale: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Values, stats and scaled gradients of the float64 native entry points on z (float32
-    for float32 storage, else float64 copies of the scores)."""
+    """Values, stats and scaled gradients in double arithmetic on z (float32 for float32
+    storage, else float64 copies of the scores)."""
     x = z.float() if z.dtype == torch.float32 else z.double()
-    values, stats = _core._entropy_forward(x.numpy(), y.numpy(), 1, True)
-    assert stats is not None
-    g = torch.empty_like(x)
+    values, stats, _ = forward(x, y)
     s = scale.expand(len(z)).contiguous()
-    _core._entropy_gradient(x.numpy(), y.numpy(), stats, s.numpy(), 1, g.numpy())
-    return torch.from_numpy(values), torch.from_numpy(stats), g
+    return values, stats, backward(x, y, stats, s)
 
 
 def mp_reference(z: torch.Tensor, y: torch.Tensor, scale: torch.Tensor) -> tuple[list, list]:
@@ -414,7 +411,7 @@ class NativeCrossEntropyTests:
         with pytest.raises(ValueError, match="float64 storage needs double arithmetic"):
             forward(z.double(), y, fp32=True)
         values = torch.empty(n, dtype=torch.float64)
-        lib, function = _core._tensor_entry("sdca_cross_entropy_forward")
+        lib, function = _core._tensor_entry("sdca_internal_cross_entropy_forward")
         address = _core._tensor_options(False, 1)[1]
         args = (z.data_ptr(), y.data_ptr(), -100, None, values.data_ptr(), None, None)
         assert function(address, 4, n, c, *args) == -2
@@ -503,15 +500,13 @@ def loss_rows(
 
 def loss_gradient(
     z: np.ndarray, target: np.ndarray, loss: str, precision: str, **options: Any
-) -> tuple[np.ndarray, np.ndarray]:
-    """sdca_loss_gradient itself (loss_and_grad takes sdca_loss_gradient_rows)."""
-    solver = _core._solver(z, precision)
-    positive = solver._positive_labels(target, *z.shape)
-    values, gradients = np.empty(len(z)), np.empty_like(z)
-    fields = _core._options(precision=solver.code, loss=_core._IDS[loss], **options)
-    pointers = map(_core._ptr, (z, positive, values, gradients))
-    solver._call("sdca_loss_gradient", ctypes.byref(fields), *z.shape, *pointers)
-    return values, gradients
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """sdca_loss_evaluate of the target kinds it takes (labels, or a mask for the multilabel
+    losses); None for the others."""
+    multilabel = loss in ("multilabel_hinge", "multilabel_cross_entropy")
+    if multilabel != (target.dtype == np.bool_):
+        return None
+    return loss_and_grad(z, target, make_loss(loss, **options), precision=precision)
 
 
 class NativeLossRowsTests:
@@ -529,7 +524,7 @@ class NativeLossRowsTests:
             return [labels, mask, F.one_hot(labels, c).bool()]
         return [labels, F.one_hot(labels, c).bool()]
 
-    def test_float_storage_matches_sdca_loss_gradient(self):
+    def test_float_storage_matches_sdca_loss_evaluate(self):
         for loss, options in LOSS_OPTIONS:
             for dtype in (torch.float32, torch.float64):
                 z = (3 * torch.randn(40, 9, generator=self.gen)).to(dtype)
@@ -538,12 +533,12 @@ class NativeLossRowsTests:
                         precision = "float32" if fp32 else "float64"
                         y = target.numpy()
                         expected = loss_gradient(z.numpy(), y, loss, precision, **options)
+                        if expected is None:
+                            continue
                         rows = [t.numpy() for t in loss_rows(z, target, loss, fp32, **options)]
-                        given = loss_and_grad(z.numpy(), y, loss, precision=precision, **options)
                         msg = f"{loss} {options} {dtype} fp32={fp32}"
-                        for values, grad in (rows, given):
-                            assert np.array_equal(values, expected[0]), msg
-                            assert np.array_equal(grad, expected[1]), msg
+                        assert np.array_equal(rows[0], expected[0]), msg
+                        assert np.array_equal(rows[1], expected[1]), msg
 
     def test_sixteen_bit_storage_equals_float32_of_the_upcast_scores(self):
         for loss, options in LOSS_OPTIONS:
@@ -626,7 +621,7 @@ class NativeLossRowsTests:
 def test_topk_entropy_rows_across_the_cap_boundary():
     """Top-k cross-entropy rows whose largest competitor share is just below, at and above
     1/k (entropy's pass serves the uncapped rows) against the tensor operations."""
-    from libsdca.torch import sdca_loss
+    from named_losses import torch_loss
 
     k, c = 5, 40
     rows = []
@@ -643,7 +638,7 @@ def test_topk_entropy_rows_across_the_cap_boundary():
         x = z.float() if fp32 else z
         values, grad = loss_rows(x, y, "topk_cross_entropy", fp32, k=k)
         ref = z.clone().requires_grad_()
-        expected = sdca_loss(ref, y, "topk_cross_entropy", k=k, backend="torch", reduction="none")
+        expected = torch_loss(ref, y, "topk_cross_entropy", k=k, backend="torch", reduction="none")
         expected.sum().backward()
         assert ref.grad is not None
         tol = 1e-5 if fp32 else 1e-13

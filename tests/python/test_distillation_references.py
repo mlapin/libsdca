@@ -7,7 +7,7 @@ import mpmath as mp
 import numpy as np
 import pytest
 
-# Relative error budget in working eps, as numerics.md: the CPU paths and JAX measure at most
+# Relative error budget in working eps (docs/API.md, Known limits): the CPU paths and JAX measure at most
 # 0.15 eps on these cases.
 BUDGET = 64
 
@@ -83,14 +83,18 @@ def proximal_reference(
 
 def check_reference(
     values: np.ndarray,
-    gradients: np.ndarray,
+    gradients: np.ndarray | None,
     student: np.ndarray,
     teacher: np.ndarray,
     temperature: float,
+    expected: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> None:
-    expected_value, expected_gradient = reference(student, teacher, temperature)
+    """values and gradients (unless None) within the budget of the reference (or expected)."""
+    expected_value, expected_gradient = expected or reference(student, teacher, temperature)
     info = np.finfo(student.dtype)
     np.testing.assert_allclose(values, expected_value, rtol=float(BUDGET * info.eps), atol=0)
+    if gradients is None:
+        return
     # Check every component relative to its own magnitude, including the
     # tiny tail; a unit-scale absolute tolerance would hide this regression.
     np.testing.assert_allclose(
@@ -122,7 +126,7 @@ class DistillationReferenceTests:
                 with subtests.test(device=device, dtype=dtype, temperature=temperature):
                     x = torch.tensor(students, device=device, requires_grad=True)
                     t = torch.tensor(teachers, device=device)
-                    value = distillation_loss(x, t, temperature, reduction="none")
+                    value = distillation_loss(x, t, temperature=temperature, reduction="none")
                     (gradient,) = torch.autograd.grad(value.sum(), x)
                     expected_value, expected_gradient = reference(students, teachers, temperature)
                     info = _finfo(dtype)
@@ -164,7 +168,7 @@ class DistillationReferenceTests:
                         z = torch.tensor(student, device=device, requires_grad=True)
                         t = torch.tensor(teacher, device=device)
                         value = distillation_loss(
-                            z, t, temperature, reduction="none", precision=precision
+                            z, t, temperature=temperature, reduction="none", precision=precision
                         )
                         (gradient,) = torch.autograd.grad(value.sum(), z)
                         check_reference(

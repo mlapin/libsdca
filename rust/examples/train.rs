@@ -1,5 +1,5 @@
-//! Train a softmax classifier and a top-2 entropy classifier on toy data.
-use libsdca::{fit, loss_and_grad, FitOptions, Loss, LossOptions, Matrix, Objective};
+//! Train a softmax classifier and a top-2 SVM on toy data.
+use libsdca::{Loss, Matrix, Solver};
 
 fn main() -> libsdca::Result<()> {
     // Three classes around the vertices of a triangle, row-major (n, d).
@@ -8,22 +8,12 @@ fn main() -> libsdca::Result<()> {
     ];
     let y = [0, 0, 1, 1, 2, 2];
     let x = Matrix::new(&x, 6, 2)?;
-    for objective in [Objective::CrossEntropy, Objective::TopKCrossEntropy] {
-        let options = FitOptions {
-            c: 10.0,
-            objective,
-            k: 2,
-            ..Default::default()
-        };
-        let model = fit(x, &y, &options)?;
+    for loss in [Loss::cross_entropy(), Loss::topk_hinge(2)] {
+        let model = Solver::new(loss).with_c(10.0).fit(x, &y)?;
         let scores = model.decision_function(x)?;
-        let options = LossOptions {
-            loss: Loss::TopKHingeAlpha,
-            ..Default::default()
-        };
-        let (losses, _) = loss_and_grad(Matrix::new(&scores, 6, 3)?, &y, &options)?;
+        let (losses, _) = loss.loss_and_grad(Matrix::new(&scores, 6, 3)?, &y)?;
         println!(
-            "{objective}: {} after {} epochs, predictions {:?}, mean hinge {:.3}",
+            "{loss}: {} after {} epochs, predictions {:?}, mean loss {:.3}",
             model.status(),
             model.epochs(),
             model.predict(x)?,

@@ -1,11 +1,14 @@
 """The jax backend of libsdca.jax against the native losses, under jit, grad and vmap."""
 
+import concurrent.futures
 import contextlib
 import functools
 import inspect
+import json
 import math
 import os
 import textwrap
+import time
 from collections.abc import Iterator
 from fractions import Fraction
 from typing import Any
@@ -18,9 +21,13 @@ import numpy as np
 import pytest
 from child_process import run_python
 from jax.typing import ArrayLike
-from libsdca import LOSSES, _jax_losses, loss_and_grad
+from libsdca import _jax_fusion, _jax_losses
 from libsdca import jax as sdca_jax
-from libsdca.jax import sdca_loss
+from libsdca._core import _LABEL_LOSSES as LOSSES
+from libsdca.jax import Backend
+from named_losses import jax_loss as named_loss
+from numpy_api import distillation_loss_and_grad, proximal_distillation_loss_and_grad
+from numpy_api import mask_loss_and_grad as loss_and_grad
 from topk_rows import CAPPED_GAPS, capped_reference, capped_rows
 
 jax.config.update("jax_enable_x64", True)
@@ -63,14 +70,12 @@ def options_of(objective: str, classes: int) -> list[dict[str, Any]]:
 def targets_of(
     objective: str, examples: int, classes: int, rng: np.random.Generator
 ) -> list[np.ndarray]:
-    """Labels and/or masks with a positive and a negative label."""
+    """Labels, or masks with a positive and a negative label for the multilabel losses."""
     labels = rng.integers(0, classes, examples)
     mask = rng.random((examples, classes)) < 0.4
     rows = np.arange(examples)
     mask[rows, labels] = True
     mask[rows, (labels + 1) % classes] = False
-    if objective == "proximal_cross_entropy":
-        return [labels, mask]
     return [mask] if objective.startswith("multilabel") else [labels]
 
 
@@ -98,7 +103,7 @@ def run(
     z: np.ndarray,
     target: np.ndarray,
     objective: str,
-    backend: str,
+    backend: Backend,
     weights: np.ndarray,
     jit: bool = False,
     **options: Any,
@@ -106,7 +111,7 @@ def run(
     """Per-example values and the gradient of their weighted sum."""
 
     def f(x: jax.Array) -> tuple[jax.Array, jax.Array]:
-        per = sdca_loss(x, target, objective, backend=backend, reduction="none", **options)
+        per = named_loss(x, target, objective, backend=backend, reduction="none", **options)
         return (per * weights).sum(), per
 
     g = jax.value_and_grad(f, has_aux=True)
@@ -128,7 +133,8 @@ class JaxBackendTests:
         """Values and weighted gradients of the jax backend against loss_and_grad (outside XLA,
         whose CPU threads flush subnormals)."""
         weights = np.linspace(0.5, 2.0, len(z)).astype(z.dtype)
-        values, gradients = loss_and_grad(z, target, objective, **options)
+        reference_options = {"precision": "float64", **options}
+        values, gradients = loss_and_grad(z, target, objective, **reference_options)
         expected = values.astype(z.dtype), gradients * weights[:, None]
         actual = run(z, target, objective, "jax", weights, jit, **options)
         message = f"{objective} {options} {z.dtype} {np.asarray(target).dtype}"
@@ -157,6 +163,10 @@ class JaxBackendTests:
                             continue
                         ran = True
                         for options in options_of(objective, classes):
+                            if objective == "proximal_cross_entropy" and dtype == np.float32:
+                                # Keep this tight fp64-reference check; conformance separately
+                                # checks the faster fp32 default against its work-precision bound.
+                                options = {**options, "precision": "float64"}
                             atol = rtol * scale / (options.get("gamma") or 1.0)
                             self.check(z, target, objective, rtol, atol, **options)
         assert ran, part
@@ -229,8 +239,7 @@ class JaxBackendTests:
             np.testing.assert_array_equal(index, order, err_msg=str(dtype))
 
     def test_hinge_margins_tied_by_rounding(self):
-        """A smaller score whose margin rounds to the k-th largest one: the subgradient takes
-        the lowest such class, as the native losses, from every margin."""
+        """Rounded margin ties match the native losses; top-1 selects the largest score."""
         half = 0.5 - 2.0**-54  # 1 + half - 0 rounds to 1.5 in float64
         rows = [
             [0.0, half, 0.5, -1.0, -2.0, -3.0],
@@ -249,25 +258,18 @@ class JaxBackendTests:
             for k in [1, 2]:
                 self.check(z, np.zeros(2, int), objective, 1e-7, 1e-7, jit=True, k=k)
 
-    def test_k1_hinge_rechecks_the_next_score_of_the_row(self):
-        """k = 1 in float32 beside a far label score: the next representable score ties the
-        largest margin; where the row's next score does not, the largest score's subgradient
-        holds, else every margin gives the lowest tied class (as off the CPU)."""
+    def test_k1_hinge_orders_scores_before_rounding_margins(self):
+        """The largest represented score wins even if a smaller score's margin rounds equal.
+        The array implementation uses this rule on CPU and on other devices."""
         far = [[-1e10, -5000.0, 1.0, -7000.0], [0.0, 0.5, -1.0, 0.25]]
         tied = [[-1e10, 0.5, 1.0, -7000.0], [0.0, 0.5, -1.0, 0.25]]
-        for rows, holds, top in [(far, True, [2, 1]), (tied, False, [1, 1])]:
+        for rows in (far, tied):
             z = np.array(rows, np.float32)
             labels = np.zeros(2, int)
-            positive = jnp.asarray(np.eye(4, dtype=bool)[labels])
             for objective in ["topk_hinge_alpha", "topk_hinge_beta"]:
-                (_, _, _, held), recheck = _jax_losses._hinge_scores(
-                    jnp.asarray(z), jnp.asarray(z[:, :1]), positive, jnp.float32, objective, 1
-                )
-                assert recheck is not None
-                assert not bool(held.any()) and bool(recheck().all()) == holds
 
                 def loss(x: jax.Array, objective: str = objective) -> jax.Array:
-                    return sdca_loss(
+                    return named_loss(
                         x,
                         labels,
                         objective,
@@ -278,7 +280,7 @@ class JaxBackendTests:
                     )
 
                 expected = np.zeros_like(z)
-                expected[:, 0], expected[[0, 1], top] = -1, 1
+                expected[:, 0], expected[[0, 1], [2, 1]] = -1, 1
                 for cpu in (True, False):
                     with traced_for(cpu):
                         gradient = jax.jit(jax.grad(loss))(z)
@@ -334,7 +336,9 @@ class JaxBackendTests:
                     (text, on), (other, off) = (traced(f, c, z, target) for c in (True, False))
                     message = f"{objective} k={k} {dtype.__name__}"
                     if objective in ("topk_hinge_alpha", "topk_hinge_beta"):
-                        assert "cond[" in text, message
+                        # Top-1 selects represented scores directly on both platforms;
+                        # only k > 1 keeps the CPU margin-selection conditionals.
+                        assert ("cond[" in text) == (k > 1), message
                         assert other.count("cond[") == (k > 1 and dtype == np.float32), message
                     # To the rounding of a sum (jaxlib 0.12 orders the k = 5 sum differently).
                     for a, e in zip(off, on, strict=True):
@@ -377,7 +381,7 @@ class JaxBackendTests:
         ran = False
         rng = np.random.default_rng(7)
         batch = 3 * rng.normal(size=(3, 6, 7))
-        masks = None
+
         for objective in TENSOR:
             options: dict[str, Any] = dict(k=2, gamma=0.6, alpha=0.9)
             labels = rng.integers(0, 7, (3, 6))
@@ -394,7 +398,7 @@ class JaxBackendTests:
                 objective: str = objective,
                 options: dict[str, Any] = options,
             ) -> jax.Array:
-                return sdca_loss(x, t, objective, backend="jax", **options)
+                return named_loss(x, t, objective, backend="jax", **options)
 
             for in_axes, target in [((0, 0), targets), ((0, None), targets[0])]:
 
@@ -416,19 +420,11 @@ class JaxBackendTests:
         assert ran, part
         if part != TENSOR[-1]:
             return
-        # Traced masks: proximal_entropy pads its labels to every class.
-        assert masks is not None
-        z, mask = batch[0], masks[0]
-        native = sdca_loss(z, mask, "proximal_cross_entropy", backend="native", reduction="none")
-        traced = jax.jit(
-            lambda x, t: sdca_loss(x, t, "proximal_cross_entropy", backend="jax", reduction="none")
-        )(z, mask)
-        np.testing.assert_allclose(traced, native, rtol=1e-13)
         # (examples, classes, height, width) with axis=1.
         z4, l4 = rng.normal(size=(2, 7, 3, 2)), rng.integers(0, 7, (2, 3, 2))
         for objective in ["topk_hinge_beta", "proximal_cross_entropy"]:
             values = [
-                sdca_loss(z4, l4, objective, axis=1, k=2, backend=b, reduction="none")
+                named_loss(z4, l4, objective, axis=1, k=2, backend=b, reduction="none")
                 for b in ("native", "jax")
             ]
             np.testing.assert_allclose(values[1], values[0], rtol=1e-13)
@@ -442,14 +438,16 @@ class JaxBackendTests:
         mask = np.eye(4, dtype=bool)[labels] | (rng.random((33, 4)) < 0.3)
         mask &= ~np.eye(4, dtype=bool)[(labels + 1) % 4]
         for objective in TENSOR:
-            target = mask if objective.startswith("multilabel") else np.eye(4, dtype=bool)[labels]
+            multilabel = objective.startswith("multilabel")
+            target = mask if multilabel else labels
             for gamma in (0.0, 30.0):
                 options: dict[str, Any] = dict(k=2, gamma=gamma, alpha=0.9, reduction="none")
-                expected = sdca_loss(z, target, objective, backend="native", **options)
-                for t in (target.T, np.ascontiguousarray(target.T)):
+                expected = named_loss(z, target, objective, backend="native", **options)
+                moved = (target.T, np.ascontiguousarray(target.T)) if multilabel else (labels,)
+                for t in moved:
 
                     def f(x: jax.Array, t: np.ndarray = t) -> jax.Array:
-                        return sdca_loss(x, t, objective, backend="jax", axis=0, **options)
+                        return named_loss(x, t, objective, backend="jax", axis=0, **options)
 
                     np.testing.assert_allclose(
                         jax.jit(f)(z.T), expected, rtol=1e-13, atol=1e-15, err_msg=objective
@@ -473,7 +471,7 @@ class JaxBackendTests:
                     rows = slice(None)
                     if objective == "topk_hinge_alpha":
                         # A mean margin of zero up to rounding admits either subgradient.
-                        value = sdca_loss(z, target, objective, reduction="none", **options)
+                        value = named_loss(z, target, objective, reduction="none", **options)
                         rows = np.abs(np.asarray(value)) > 1e-12
                     self.check(z[rows], target[rows], objective, 1e-12, 1e-12, **options)
         assert ran, part
@@ -525,7 +523,7 @@ class JaxBackendTests:
                 if objective.startswith("multilabel"):
                     targets = [mask]
                 elif objective == "proximal_cross_entropy":
-                    targets = [first, first + 1, mask]
+                    targets = [first, first + 1]
                 settings = options_of(objective, classes)
                 if objective in SMOOTH:
                     settings += [dict(s, gamma=g) for s in settings[::3] for g in (1e-20, 1e20)]
@@ -555,13 +553,12 @@ class JaxBackendTests:
                     width = Fraction(gamma) * (2 if objective.startswith("multilabel") else 1)
                     v = min(Fraction(1), max(Fraction(0), h / width)) if smooth else h > 0
                     value = h * v - width * v * v / 2 if smooth else max(h, 0)
-                    targets = [np.array([[True, False]])]
-                    if "multilabel" not in objective:
-                        targets.append(np.array([0]))
+                    multilabel = "multilabel" in objective
+                    targets = [np.array([[True, False]]) if multilabel else np.array([0])]
                     for target in targets:
                         actual, gradient = jax.jit(
                             jax.value_and_grad(
-                                lambda x, t=target, o=objective, g=gamma: sdca_loss(
+                                lambda x, t=target, o=objective, g=gamma: named_loss(
                                     x, t, o, gamma=g, backend="jax"
                                 )
                             )
@@ -584,13 +581,13 @@ class JaxBackendTests:
         target = np.array([0])
         for k in [2, 3]:
             near = np.array([[-700.0, 1.0, 700.0, -0.3, 0.2]])
-            expected = jax.grad(lambda x, k=k: sdca_loss(x, target, "topk_cross_entropy", k=k))(
+            expected = jax.grad(lambda x, k=k: named_loss(x, target, "topk_cross_entropy", k=k))(
                 near
             )
             for gap in [1e16, 1e30]:
                 z = np.array([[-gap, 1.0, gap, -0.3, 0.2]])
                 actual = jax.grad(
-                    lambda x, k=k: sdca_loss(x, target, "topk_cross_entropy", k=k, backend="jax")
+                    lambda x, k=k: named_loss(x, target, "topk_cross_entropy", k=k, backend="jax")
                 )(z)
                 np.testing.assert_allclose(actual, expected, rtol=3e-13, atol=0)
 
@@ -606,7 +603,7 @@ class JaxBackendTests:
             target = np.zeros(len(gaps), np.int32)
 
             def loss(x: jax.Array, k: int = k, target: np.ndarray = target) -> jax.Array:
-                return sdca_loss(
+                return named_loss(
                     x, target, "topk_cross_entropy", k=k, backend="jax", reduction="none"
                 )
 
@@ -633,9 +630,12 @@ class JaxBackendTests:
             for backend in ("jax", "native"):
 
                 def loss(
-                    x: jax.Array, k: int = k, backend: str = backend, target: np.ndarray = target
+                    x: jax.Array,
+                    k: int = k,
+                    backend: Backend = backend,
+                    target: np.ndarray = target,
                 ) -> jax.Array:
-                    return sdca_loss(
+                    return named_loss(
                         x, target, "topk_cross_entropy", k=k, backend=backend, reduction="none"
                     )
 
@@ -649,59 +649,15 @@ class JaxBackendTests:
                             error = abs(mp.mpf(float(got)) - ref) / abs(ref)
                             assert error <= 64 * eps, (name, error / eps)
 
-    def test_proximal_entropy_mean_without_overflow(self, subtests: pytest.Subtests):
-        largest = np.finfo(np.float64).max
-        logits = np.array([[0.0, -largest, -largest, 0.0]])
-        positive = np.array([[True, True, True, False]])
-        expected_value = float(Fraction.from_float(float(largest)) * 2 / 3)
-        # The two far labels have vanishing probabilities. For the two visible
-        # classes, stationarity gives p = sigmoid(4/3 - 2p) at alpha=1.
-        lo, hi = 0.0, 1.0
-        for _ in range(60):
-            mid = (lo + hi) / 2
-            if mid < 1 / (1 + math.exp(2 * mid - 4 / 3)):
-                lo = mid
-            else:
-                hi = mid
-        p = (lo + hi) / 2
-        expected_gradient = [[p - 1 / 3, -1 / 3, -1 / 3, 1 - p]]
-        for reduction in ("none", "mean", "sum"):
-
-            def loss(
-                x: jax.Array, upstream: float, reduction: str = reduction
-            ) -> tuple[jax.Array, jax.Array]:
-                values = sdca_loss(
-                    x,
-                    positive,
-                    "proximal_cross_entropy",
-                    backend="jax",
-                    alpha=1.0,
-                    reduction=reduction,
-                )
-                return values.sum() * upstream, values
-
-            function = jax.value_and_grad(loss, has_aux=True)
-            expected = np.array([expected_value]) if reduction == "none" else expected_value
-            for compiled in (False, True):
-                evaluate = jax.jit(function) if compiled else function
-                for upstream in (1.0, 2.0**-10, 3.5):
-                    with subtests.test(reduction=reduction, jit=compiled, upstream=upstream):
-                        (_, value), gradient = evaluate(logits, upstream)
-                        np.testing.assert_allclose(value, expected, rtol=4e-15, atol=0)
-                        np.testing.assert_allclose(
-                            gradient,
-                            np.asarray(expected_gradient) * upstream,
-                            rtol=1e-12,
-                            atol=1e-14,
-                        )
-
     def test_proximal_entropy_unsupported_float64_spread(self, subtests: pytest.Subtests):
         largest = np.finfo(np.float64).max
         logits = np.array([[largest, -largest, 0.0], [0.0, 0.0, 0.0]])
         labels = np.array([0, 0])
 
         def loss(x: jax.Array) -> tuple[jax.Array, jax.Array]:
-            values = sdca_loss(x, labels, "proximal_cross_entropy", backend="jax", reduction="none")
+            values = named_loss(
+                x, labels, "proximal_cross_entropy", backend="jax", reduction="none"
+            )
             return values.sum(), values
 
         function = jax.value_and_grad(loss, has_aux=True)
@@ -714,26 +670,22 @@ class JaxBackendTests:
                 assert np.isfinite(gradient[1]).all()
 
     def test_proximal_entropy_references_and_stationarity(self):
-        # Equal label scores reach log 2; a^2 underflows at alpha = 1e300 (80-digit solve).
-        cases = [
-            (np.array([[1e16, 0.0, 0.0]]), np.array([[True, True, False]]), 1e50, math.log(2)),
-            (np.zeros((1, 2)), np.array([0]), 1e300, 1.1762794618348152e-295),
-        ]
+        # a^2 underflows at alpha = 1e300 (80-digit solve).
+        cases = [(np.zeros((1, 2)), np.array([0]), 1e300, 1.1762794618348152e-295)]
         for z, target, alpha, expected in cases:
             value = float(
-                sdca_loss(z, target, "proximal_cross_entropy", alpha=alpha, backend="jax")
+                named_loss(z, target, "proximal_cross_entropy", alpha=alpha, backend="jax")
             )
             assert abs(value / expected - 1.0) <= 1e-13
         # g = softmax(z - alpha g) - q, and the value is at most H(q, z).
         rng = np.random.default_rng(9)
         z = 4 * rng.normal(size=(32, 7))
         for target in targets_of("proximal_cross_entropy", 32, 7, rng):
-            mask = target if target.dtype == bool else np.eye(7, dtype=bool)[target]
-            q = mask / mask.sum(-1, keepdims=True)
+            q = np.eye(7)[target]
             for alpha in [1e-3, 0.5, 20.0]:
 
                 def f(x: jax.Array, target: np.ndarray = target, alpha: float = alpha) -> jax.Array:
-                    return sdca_loss(
+                    return named_loss(
                         x,
                         target,
                         "proximal_cross_entropy",
@@ -766,7 +718,7 @@ class JaxBackendTests:
                         results = [
                             jax.jit(
                                 jax.value_and_grad(
-                                    lambda x, p=p, t=target, o=objective, s=options: sdca_loss(
+                                    lambda x, p=p, t=target, o=objective, s=options: named_loss(
                                         x, t, o, backend="jax", precision=p, reduction="sum", **s
                                     )
                                 )
@@ -786,9 +738,9 @@ class JaxBackendTests:
                 if (objective, 40) != part:
                     continue
                 ran = True
-                expected = sdca_loss(z, np.array([0, 1]), objective, gamma=gamma, reduction="none")
+                expected = named_loss(z, np.array([0, 1]), objective, gamma=gamma, reduction="none")
                 actual = jax.jit(
-                    lambda x, o=objective, g=gamma: sdca_loss(
+                    lambda x, o=objective, g=gamma: named_loss(
                         x,
                         np.array([0, 1]),
                         o,
@@ -810,7 +762,7 @@ class JaxBackendTests:
             for k in [500, 999]:
                 gradient = jax.jit(
                     jax.grad(
-                        lambda x, o=objective, k=k: sdca_loss(
+                        lambda x, o=objective, k=k: named_loss(
                             x, labels, o, k=k, backend="jax", precision="float32", reduction="sum"
                         )
                     )
@@ -836,7 +788,7 @@ class JaxBackendTests:
                     objective: str = objective,
                     options: dict[str, Any] = options,
                 ) -> jax.Array:
-                    return sdca_loss(x, target, objective, reduction="sum", **options)
+                    return named_loss(x, target, objective, reduction="sum", **options)
 
                 value, gradient = jax.value_and_grad(f)(jnp.asarray(z, dtype))
                 expected = jax.value_and_grad(f)(jnp.asarray(z, dtype).astype(np.float32))
@@ -850,14 +802,15 @@ class JaxBackendTests:
         z = np.zeros((2, 3))
         cases = [
             ("topk_hinge_alpha", np.array([3, 0])),
-            ("topk_hinge_alpha", np.array([[True, True, False], [True, False, False]])),
+            ("topk_hinge_beta", np.array([-1, 0])),
             ("multilabel_hinge", np.array([[True, True, True], [True, False, False]])),
-            ("proximal_cross_entropy", np.array([[False, False, False], [True, False, False]])),
-            ("proximal_cross_entropy", np.array([[True, True, True], [True, False, False]])),
+            ("multilabel_cross_entropy", np.array([[False, False, False], [True, False, False]])),
+            ("proximal_cross_entropy", np.array([-1, 0])),
+            ("proximal_cross_entropy", np.array([3, 0])),
         ]
         for objective, target in cases:
             values = jax.jit(
-                lambda x, t, o=objective: sdca_loss(x, t, o, backend="jax", reduction="none")
+                lambda x, t, o=objective: named_loss(x, t, o, backend="jax", reduction="none")
             )(z, target)
             assert bool(jnp.isnan(values[0])), objective
             assert bool(jnp.isfinite(values[1])), objective
@@ -867,7 +820,7 @@ class JaxBackendTests:
         labels = np.array([0, 5, 2, 1])
 
         def lowered(**options: Any) -> str:
-            f = jax.jit(lambda x: sdca_loss(x, labels, "topk_hinge_beta", k=2, **options))
+            f = jax.jit(lambda x: named_loss(x, labels, "topk_hinge_beta", k=2, **options))
             return jax.jit(jax.grad(f)).lower(z).as_text()
 
         # auto: jax on an accelerator; on the CPU for small calls, the nonsmooth multiclass and
@@ -880,7 +833,7 @@ class JaxBackendTests:
 
         def wide_lowered(objective: str, **options: Any) -> str:
             target = mask if objective.startswith("multilabel") else rows
-            f = jax.jit(lambda x: sdca_loss(x, target, objective, **options))
+            f = jax.jit(lambda x: named_loss(x, target, objective, **options))
             return jax.jit(jax.grad(f)).lower(wide).as_text()
 
         cpu = jax.default_backend() == "cpu"
@@ -896,7 +849,7 @@ class JaxBackendTests:
             ("proximal_cross_entropy", {}, cpu),
         ]:
             assert calls_native(wide_lowered(objective, **options)) == native, objective
-        small = jax.jit(lambda x: sdca_loss(x, labels, "proximal_cross_entropy"))
+        small = jax.jit(lambda x: named_loss(x, labels, "proximal_cross_entropy"))
         assert calls_native(small.lower(z).as_text()) == cpu
         # Off the CPU the native backend is a host callback.
         with mock.patch.object(sdca_jax, "_accelerator", return_value=True):
@@ -908,43 +861,45 @@ class JaxBackendTests:
             return
         # A host callback could not be exported.
         exported = export.export(
-            jax.jit(lambda x: sdca_loss(x, labels, "proximal_cross_entropy", backend="jax"))
+            jax.jit(lambda x: named_loss(x, labels, "proximal_cross_entropy", backend="jax"))
         )(jax.ShapeDtypeStruct(z.shape, z.dtype))
         np.testing.assert_allclose(
-            exported.call(z), sdca_loss(z, labels, "proximal_cross_entropy"), rtol=1e-13
+            exported.call(z), named_loss(z, labels, "proximal_cross_entropy"), rtol=1e-13
         )
 
     def test_without_x64(self):
-        """Without jax_enable_x64, auto keeps float64 losses native; precision="float32" runs."""
+        """Without fused CUDA kernels or x64, auto keeps float64 losses native."""
         code = textwrap.dedent(
             """
             from unittest import mock
             import jax, numpy as np
             from libsdca import jax as sdca_jax
-            from libsdca.jax import sdca_loss
+            from named_losses import jax_loss as named_loss
             z = np.random.default_rng(3).normal(size=(4, 6)).astype(np.float32)
             labels = np.array([0, 5, 2, 1])
             def text(**options):
-                f = lambda x: sdca_loss(x, labels, "topk_hinge_alpha", k=2, **options)
+                f = lambda x: named_loss(x, labels, "topk_hinge_alpha", k=2, **options)
                 return jax.jit(jax.grad(f)).lower(z).as_text()
             with mock.patch.object(sdca_jax, "_accelerator", return_value=True):
                 assert "callback" in text()
                 assert "callback" not in text(precision="float32")
                 assert "f64" not in text(precision="float32")
+                # The smoothed hinges form their entries in float64: native without x64.
+                assert "callback" in text(gamma=1.0, precision="float32")
             try:
-                sdca_loss(z, labels, "topk_hinge_alpha", backend="jax")
+                named_loss(z, labels, "topk_hinge_alpha", backend="jax")
                 raise AssertionError("no error")
             except ValueError as error:
                 assert "jax_enable_x64" in str(error)
             for objective in ["topk_hinge_alpha", "proximal_cross_entropy", "multilabel_hinge"]:
                 target = np.eye(6, dtype=bool)[labels] if "multi" in objective else labels
-                a = sdca_loss(z, target, objective, backend="jax", precision="float32")
-                b = sdca_loss(z, target, objective, backend="native", precision="float32")
+                a = named_loss(z, target, objective, backend="jax", precision="float32")
+                b = named_loss(z, target, objective, backend="native", precision="float32")
                 np.testing.assert_allclose(a, b, rtol=2e-5, err_msg=objective)
             print("ok")
             """
         )
-        env = dict(os.environ, JAX_ENABLE_X64="0")
+        env = dict(os.environ, JAX_ENABLE_X64="0", SDCA_JAX_CUDA="off")
         result = run_python("-c", code, capture_output=True, text=True, env=env, check=False)
         assert result.returncode == 0, result.stderr
         assert "ok" in result.stdout
@@ -983,8 +938,10 @@ def test_distillation_independent_offsets(dtype: type[np.floating[Any]]):
     teacher = np.stack([varying, uniform, varying])
     expected_value, expected_gradient = reference(student, teacher, 1.0)
     x, t = jnp.asarray(student), jnp.asarray(teacher)
-    value = sdca_jax.distillation_loss(x, t, 1.0, reduction="none")
-    gradient = jax.grad(lambda z: sdca_jax.distillation_loss(z, t, 1.0, reduction="sum"))(x)
+    value = sdca_jax.distillation_loss(x, t, temperature=1.0, reduction="none")
+    gradient = jax.grad(
+        lambda z: sdca_jax.distillation_loss(z, t, temperature=1.0, reduction="sum")
+    )(x)
     eps = float(np.finfo(dtype).eps)
     np.testing.assert_allclose(value, expected_value, rtol=64 * eps, atol=0)
     np.testing.assert_allclose(gradient, expected_gradient, rtol=64 * eps, atol=0)
@@ -1004,16 +961,212 @@ def test_single_thread_cpu_reads_the_xla_thread_count():
             assert sdca_jax._single_thread_cpu() is single, flags
 
 
+def fused_cases(rows: int, classes: int) -> dict[str, tuple[Any, np.ndarray, Any]]:
+    """Per fenced loss family: the loss of (student, target), the target, and the float64
+    native losses and gradients of float32 scores z."""
+    rng = np.random.default_rng(5)
+    labels = rng.integers(0, classes, rows)
+    mask = rng.random((rows, classes)) < 0.01
+    mask[np.arange(rows), labels] = True
+    teacher = (rng.standard_normal((rows, classes)) * 3).astype(np.float32)
+
+    def native(name: str, target: np.ndarray) -> Any:
+        return lambda z: loss_and_grad(np.float64(z), target, name)
+
+    return {
+        "cross_entropy": (
+            lambda z, y: named_loss(z, y, reduction="sum"),
+            labels,
+            native("cross_entropy", labels),
+        ),
+        "multilabel_cross_entropy": (
+            lambda z, y: named_loss(z, y, "multilabel_cross_entropy", reduction="sum"),
+            mask,
+            native("multilabel_cross_entropy", mask),
+        ),
+        "distillation": (
+            lambda z, t: sdca_jax.distillation_loss(z, t, temperature=2.0, reduction="sum"),
+            teacher,
+            lambda z: distillation_loss_and_grad(
+                np.float64(z), np.float64(teacher), temperature=2.0, alpha=0.0
+            ),
+        ),
+        "proximal_distillation": (
+            lambda z, t: sdca_jax.proximal_distillation_loss(
+                z, t, temperature=2.0, alpha=0.5, reduction="sum"
+            ),
+            teacher,
+            lambda z: proximal_distillation_loss_and_grad(
+                np.float64(z), np.float64(teacher), temperature=2.0, alpha=0.5
+            ),
+        ),
+    }
+
+
+@pytest.mark.skipif(jax.default_backend() != "cpu", reason="the fences are CPU passes")
+@pytest.mark.parametrize("fusion", ["fenced", "unfenced"])
+@mock.patch.dict(os.environ, {"SDCA_JAX_FFI": "off"})
+def test_cpu_fusion_setting_forces_either_variant(fusion: str):
+    """SDCA_JAX_CPU_FUSION, read when a loss is traced, fences every pass of each fenced loss
+    family above 16,384 scores or none (on any machine, any thread count); both variants
+    differ only in summation order and stay within float32 rounding of float64 losses."""
+    rows, classes = 48, 1000
+    z = (np.random.default_rng(6).standard_normal((rows, classes)) * 3).astype(np.float32)
+    eps = float(np.finfo(np.float32).eps)
+    with mock.patch.dict(os.environ, {"SDCA_JAX_CPU_FUSION": fusion, "SDCA_NUM_THREADS": "1"}):
+        for family, (loss, target, native) in fused_cases(rows, classes).items():
+            with mock.patch.object(sdca_jax, "_fenced", wraps=sdca_jax._fenced) as fence:
+                value, gradient = jax.jit(jax.value_and_grad(loss))(jnp.asarray(z), target)
+            assert (fence.call_count > 0) == (fusion == "fenced"), family
+            values, expected = native(z)
+            assert float(value) == pytest.approx(values.sum(), rel=64 * eps), family
+            scale = np.abs(expected).max()
+            np.testing.assert_allclose(gradient, expected, rtol=0, atol=64 * eps * scale)
+            # Small calls are never fenced.
+            with mock.patch.object(sdca_jax, "_fenced", wraps=sdca_jax._fenced) as fence:
+                jax.make_jaxpr(jax.value_and_grad(loss))(jnp.asarray(z[:8]), target[:8])
+            assert fence.call_count == 0, family
+        # distillation_loss without its gradient (distillation_value).
+        loss, teacher, native = fused_cases(rows, classes)["distillation"]
+        with mock.patch.object(sdca_jax, "_fenced", wraps=sdca_jax._fenced) as fence:
+            value = jax.jit(loss)(jnp.asarray(z), teacher)
+        assert (fence.call_count > 0) == (fusion == "fenced")
+        assert float(value) == pytest.approx(native(z)[0].sum(), rel=64 * eps)
+
+
+@mock.patch.dict(os.environ, {"SDCA_JAX_FFI": "off"})
+def test_cpu_fusion_rejects_unknown_settings():
+    z = jnp.zeros((64, 512), jnp.float32)
+    with mock.patch.dict(os.environ, {"SDCA_JAX_CPU_FUSION": "fast"}):
+        with pytest.raises(ValueError, match="SDCA_JAX_CPU_FUSION must be auto, fenced or"):
+            _jax_fusion.mode()
+        if jax.default_backend() == "cpu":
+            with pytest.raises(ValueError, match="SDCA_JAX_CPU_FUSION must be auto, fenced or"):
+                jax.make_jaxpr(lambda s: sdca_jax.distillation_loss(s, z))(z)
+        else:
+            # A CPU tuning switch must not affect the shared CUDA kernels.
+            jax.make_jaxpr(lambda s: sdca_jax.distillation_loss(s, z))(z)
+    with mock.patch.dict(os.environ, {"SDCA_JAX_CPU_FUSION": " Unfenced "}):
+        assert _jax_fusion.mode() == "unfenced"
+    with mock.patch.dict(os.environ, {"SDCA_JAX_CPU_FUSION": ""}):
+        assert _jax_fusion.mode() == "auto"
+
+
+@contextlib.contextmanager
+def fresh_fusion(cache: Any) -> Iterator[None]:
+    """auto with an empty decision cache in this process and its disk cache at cache."""
+    environment = {"SDCA_JAX_CPU_FUSION": "auto", "SDCA_CACHE_DIR": str(cache)}
+    with mock.patch.dict(os.environ, environment), mock.patch.dict(_jax_fusion._decisions):
+        _jax_fusion._decisions.clear()
+        yield
+
+
+def test_cpu_fusion_auto_calibrates_once_and_caches(tmp_path: Any):
+    """auto keeps the fences unless the unfenced variant takes at most MARGIN of their time;
+    each calibrated family calibrates once (also with several threads asking), and its
+    decision is cached on disk for the machine key."""
+    timings = {
+        "distillation": {"fenced_s": 1.0, "unfenced_s": 0.5, "seconds": 0.1},
+        "cross_entropy": {"fenced_s": 1.0, "unfenced_s": 0.9, "seconds": 0.1},
+    }
+    calls: list[str] = []
+    distillation = ("distillation", jnp.float32, False)
+
+    def calibrate(family: str, dtype: str) -> dict[str, float]:
+        calls.append(family)
+        time.sleep(0.05)
+        return timings[family]
+
+    with fresh_fusion(tmp_path), mock.patch.object(_jax_fusion, "calibrate", calibrate):
+        with concurrent.futures.ThreadPoolExecutor(4) as pool:
+            fenced = list(pool.map(lambda _: _jax_fusion.fenced(*distillation), range(8)))
+        assert fenced == [False] * 8 and calls == ["distillation"]
+        assert _jax_fusion.fenced("cross_entropy", jnp.float64, False) is True
+        # Proximal distillation is not timed: it keeps the heuristic.
+        assert _jax_fusion.fenced("proximal_distillation", jnp.float32, False) is True
+        assert calls == ["distillation", "cross_entropy"]
+        records = [json.loads(p.read_text()) for p in tmp_path.glob("jax_cpu_fusion_*.json")]
+        assert sorted((r["family"], r["dtype"], r["fenced"]) for r in records) == [
+            ("cross_entropy", "float64", True),
+            ("distillation", "float32", False),
+        ]
+        assert all(r["key"] == _jax_fusion.machine_key(False) for r in records)
+    # A later process reads the records; 16-bit scores (bfloat16 and float16 alike) or another
+    # key (here one thread) calibrate anew.
+    with fresh_fusion(tmp_path), mock.patch.object(_jax_fusion, "calibrate", calibrate):
+        assert _jax_fusion.fenced(*distillation) is False
+        assert calls == ["distillation", "cross_entropy"]
+        _jax_fusion.fenced("distillation", jnp.bfloat16, False)
+        _jax_fusion.fenced("distillation", jnp.float16, False)
+        _jax_fusion.fenced("distillation", jnp.float32, True)
+        assert calls == ["distillation", "cross_entropy", "distillation", "distillation"]
+
+
+def test_cpu_fusion_auto_falls_back_to_the_heuristic(tmp_path: Any, caplog: Any):
+    """A failed calibration takes the heuristic (fenced, but the gradient of distillation on
+    one thread), with a warning, and caches nothing on disk."""
+
+    def calibrate(family: str, dtype: str) -> dict[str, float]:
+        raise RuntimeError("no CPU device")
+
+    def fenced(family: str, single_thread: bool) -> bool:
+        return _jax_fusion.fenced(family, jnp.float32, single_thread)
+
+    with fresh_fusion(tmp_path), mock.patch.object(_jax_fusion, "calibrate", calibrate):
+        assert fenced("multilabel_cross_entropy", False) is True
+        assert fenced("distillation", False) is True
+        assert fenced("distillation", True) is False
+        assert fenced("proximal_distillation", True) is False
+        assert fenced("distillation_value", True) is True
+        assert fenced("cross_entropy", True) is True
+    assert "calibration of distillation (float32) failed (no CPU device)" in caplog.text
+    assert not list(tmp_path.glob("jax_cpu_fusion_*"))
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_cpu_fusion_calibration_preserves_precision_context(enabled: bool):
+    def timed(family: str, dtype: str) -> dict[str, Any]:
+        assert bool(jax.config.jax_enable_x64) == enabled
+        assert dtype == ("float64" if enabled else "float32")
+        return {"checked": True}
+
+    with _jax_fusion._precision_scope(enabled), mock.patch.object(_jax_fusion, "_timed", timed):
+        dtype = _jax_fusion.calibration_dtype(jnp.float64 if enabled else jnp.float32)
+        assert _jax_fusion.calibrate("distillation", dtype) == {"checked": True}
+
+
+@pytest.mark.skipif(jax.default_backend() != "cpu", reason="the fences are CPU passes")
+def test_cpu_fusion_auto_calibrates_while_a_loss_is_traced(tmp_path: Any):
+    """The first trace of a loss under auto calibrates its family on concrete arrays in a
+    thread of its own, inside the caller's jit trace, and the traced loss is right."""
+    rows, classes = 48, 1000
+    z = (np.random.default_rng(7).standard_normal((rows, classes)) * 3).astype(np.float32)
+    loss, labels, native = fused_cases(rows, classes)["cross_entropy"]
+    with fresh_fusion(tmp_path), mock.patch.dict(os.environ):
+        os.environ.pop("SDCA_NUM_THREADS", None)
+        os.environ.pop("OMP_NUM_THREADS", None)
+        value, gradient = jax.jit(jax.value_and_grad(loss))(jnp.asarray(z), labels)
+        (record,) = [json.loads(p.read_text()) for p in tmp_path.glob("jax_cpu_fusion_*.json")]
+    assert record["family"] == "cross_entropy" and record["dtype"] == "float32"
+    assert record["key"]["cpu"]
+    assert record["fenced_s"] > 0 and record["unfenced_s"] > 0 and record["seconds"] < 30
+    assert record["fenced"] == (record["unfenced_s"] > _jax_fusion.MARGIN * record["fenced_s"])
+    values, expected = native(z)
+    eps = float(np.finfo(np.float32).eps)
+    assert float(value) == pytest.approx(values.sum(), rel=64 * eps)
+    np.testing.assert_allclose(gradient, expected, rtol=0, atol=64 * eps)
+
+
 @pytest.mark.parametrize("backend", ["native", "jax"])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
-def test_all_capped_mean_of_scores_near_finfo_max(backend: str, dtype: str):
+def test_all_capped_mean_of_scores_near_finfo_max(backend: Backend, dtype: str):
     # k = C - 1 caps every competitor: the loss is the mean of the score differences, whose
     # terms (1.5 S here) overflow although the mean (5 S / 6) does not.
     big = float(np.finfo(dtype).max)
     x = jnp.asarray([[-big / 2, big, big, -big]], dtype=dtype)
     y = jnp.zeros(1, dtype=jnp.int32)
     value, gradient = jax.value_and_grad(
-        lambda z: sdca_jax.topk_cross_entropy(z, y, 3, backend=backend)
+        lambda z: sdca_jax.topk_cross_entropy(z, y, k=3, backend=backend)
     )(x)
     eps = float(np.finfo(dtype).eps)
     assert float(value) == pytest.approx(5 * (big / 6), rel=64 * eps)
@@ -1022,11 +1175,50 @@ def test_all_capped_mean_of_scores_near_finfo_max(backend: str, dtype: str):
 
 
 @pytest.mark.parametrize("backend", ["native", "jax"])
-def test_all_capped_mean_beyond_double_double_limit(backend: str):
-    # LIMIT (docs/numerics.md): differences at 2^200, 2^100 and 1 lose the 1 in the
+def test_all_capped_mean_beyond_double_double_limit(backend: Backend):
+    # LIMIT (docs/API.md, Known limits): differences at 2^200, 2^100 and 1 lose the 1 in the
     # double-double mean (exact 1/4); the documented result is log 5, not worse.
     h, m = 2.0**200, 2.0**100
     x = jnp.asarray([[m / 4, h, m, 1, -h]], dtype="float64")
-    value = float(sdca_jax.topk_cross_entropy(x, jnp.zeros(1, dtype=jnp.int32), 4, backend=backend))
+    value = float(
+        sdca_jax.topk_cross_entropy(x, jnp.zeros(1, dtype=jnp.int32), k=4, backend=backend)
+    )
     exact = math.log1p(4 * math.exp(0.25))
     assert abs(value - exact) <= exact - math.log(5) + 1e-15
+
+
+@pytest.mark.skipif(jax.default_backend() != "cpu", reason="XLA:CPU flushes subnormals")
+@pytest.mark.parametrize(
+    ("loss", "entropy"),
+    [
+        (lambda z, **o: sdca_jax.cross_entropy(z, jnp.zeros(1, dtype=jnp.int32), **o), False),
+        (
+            lambda z, **o: sdca_jax.multilabel_cross_entropy(
+                z, jnp.arange(z.shape[1])[None] == 0, **o
+            ),
+            False,
+        ),
+        (lambda z, **o: sdca_jax.distillation_loss(z, z, **o), True),
+        (lambda z, **o: sdca_jax.proximal_distillation_loss(z, z, **o), True),
+        (
+            lambda z, **o: sdca_jax.topk_cross_entropy(z, jnp.zeros(1, dtype=jnp.int32), k=1, **o),
+            False,
+        ),
+    ],
+    ids=["cross_entropy", "multilabel", "distillation", "proximal_distillation", "topk_k1"],
+)
+def test_float32_cpu_aggregate_tail(loss: Any, entropy: bool):
+    # Each exp(-90) is a float32 subnormal that XLA:CPU flushes; the far-tail rescan keeps
+    # their sum, a normal number. Equal student and teacher logits give
+    # the teacher's entropy log1p(t) + 90 t / (1 + t).
+    x = jnp.full((1, 1000), -90.0, dtype="float32").at[0, 0].set(0.0)
+    tail = 999 * mp.exp(-90)
+    exact = float(mp.log1p(tail) + (90 * tail / (1 + tail) if entropy else 0))
+    eps = float(jnp.finfo(jnp.float32).eps)
+    value, gradient = jax.value_and_grad(lambda z: loss(z, reduction="sum"))(x)
+    assert float(value) == pytest.approx(exact, rel=64 * eps, abs=0)
+    assert float(gradient[0, 0]) == pytest.approx(
+        0 if entropy else -float(tail / (1 + tail)), rel=64 * eps, abs=0
+    )
+    # Working precision does not change the float32 output dtype.
+    assert float(loss(x, precision="float64")) == float(np.float32(exact))

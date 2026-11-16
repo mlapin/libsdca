@@ -1,12 +1,13 @@
-"""cross_entropy under torch.func transforms, against torch.nn.functional.cross_entropy."""
+"""cross_entropy under torch.func transforms, against torch.nn.functional.cross_entropy, and
+the other losses (first order) against torch.autograd."""
 
 from collections.abc import Callable
 
+import libsdca.torch as L
 import pytest
 import torch
 import torch.nn.functional as F
-from libsdca import CrossEntropyLoss
-from libsdca.torch import cross_entropy
+from libsdca.torch import CrossEntropyLoss, cross_entropy
 
 DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 Loss = Callable[..., torch.Tensor]
@@ -107,3 +108,96 @@ class TorchFuncTests:
         z, y, _ = inputs(device)
         with pytest.raises(ValueError, match="torch.func"):
             torch.func.grad(lambda t: cross_entropy(t, y, backend="native"))(z)
+
+
+def _first_order_losses(
+    z: torch.Tensor, y: torch.Tensor
+) -> dict[str, tuple[torch.Tensor, Callable[[torch.Tensor, torch.Tensor, str], torch.Tensor]]]:
+    """Every first-order loss of logits like z: its target (labels y, a mask or teacher logits
+    derived from them) and the call loss(logits, target, reduction)."""
+    classes = z.shape[-1]
+    mask = F.one_hot(y, classes).bool() | F.one_hot((y + 2) % classes, classes).bool()
+    teacher = 3 * F.one_hot(y, classes).to(z.dtype)
+    weight = torch.linspace(0.5, 2, classes, dtype=z.dtype)
+    return {
+        "topk_cross_entropy": (y, lambda t, o, r: L.topk_cross_entropy(t, o, k=2, reduction=r)),
+        "multiclass_hinge": (
+            y,
+            lambda t, o, r: L.multiclass_hinge_loss(t, o, gamma=0.5, reduction=r),
+        ),
+        "topk_hinge_alpha": (
+            y,
+            lambda t, o, r: L.topk_hinge_loss(t, o, k=2, variant="alpha", reduction=r),
+        ),
+        "topk_hinge_beta": (y, lambda t, o, r: L.TopKHingeLoss(k=1, reduction=r)(t, o)),
+        "proximal_cross_entropy": (y, lambda t, o, r: L.proximal_cross_entropy(t, o, reduction=r)),
+        "weighted_hinge": (
+            y,
+            lambda t, o, r: L.topk_hinge_loss(t, o, k=2, weight=weight, reduction=r),
+        ),
+        "multilabel_cross_entropy": (
+            mask,
+            lambda t, m, r: L.multilabel_cross_entropy(t, m, reduction=r),
+        ),
+        "multilabel_hinge": (mask, lambda t, m, r: L.multilabel_hinge_loss(t, m, reduction=r)),
+        "distillation_loss": (
+            teacher,
+            lambda t, s, r: L.distillation_loss(t, s, temperature=2.0, reduction=r),
+        ),
+        "proximal_distillation_loss": (
+            teacher,
+            lambda t, s, r: L.proximal_distillation_loss(t, s, reduction=r),
+        ),
+    }
+
+
+def test_other_losses_support_transforms(subtests: pytest.Subtests):
+    """grad, vmap (per-sample gradients, batched rows) and jacrev agree with torch.autograd;
+    the losses are first order, so a hessian raises."""
+    z, y, _ = inputs("cpu")
+    y = y.clamp(min=0)
+    for name, (target, loss) in _first_order_losses(z, y).items():
+        with subtests.test(loss=name):
+            x = z.clone().requires_grad_()
+            for reduction in ("mean", "sum"):
+                (expected,) = torch.autograd.grad(loss(x, target, reduction), x)
+                actual = torch.func.grad(lambda t: loss(t, target, reduction))(z)
+                torch.testing.assert_close(actual, expected, rtol=1e-12, atol=1e-15)
+            rows = loss(z, target, "none")
+            per_sample = torch.func.vmap(
+                torch.func.grad(lambda t, other: loss(t[None], other[None], "sum"))
+            )(z, target)
+            (dense,) = torch.autograd.grad(loss(x, target, "sum"), x)
+            torch.testing.assert_close(per_sample, dense, rtol=1e-12, atol=1e-15)
+            other = target.roll(1, 0)
+            batched = torch.func.vmap(lambda t, o: loss(t, o, "none"))(
+                torch.stack([z, 2 * z]), torch.stack([target, other])
+            )
+            torch.testing.assert_close(batched[0], rows, rtol=0, atol=0)
+            torch.testing.assert_close(batched[1], loss(2 * z, other, "none"), rtol=0, atol=0)
+            jacobian = torch.func.jacrev(lambda t: loss(t, target, "none"))(z)
+            for i in range(z.shape[0]):
+                (row,) = torch.autograd.grad(loss(x, target, "none")[i], x)
+                torch.testing.assert_close(jacobian[i], row, rtol=1e-12, atol=1e-15)
+            with pytest.raises(RuntimeError, match="first derivatives only"):
+                torch.func.hessian(lambda t: loss(t, target, "sum"))(z)
+
+
+def test_transformed_cpu_losses_validate_labels():
+    """Under transforms the CPU kernels validate as in eager mode (ValueError)."""
+    z, y, _ = inputs("cpu")
+    y = y.clamp(min=0)
+    y[0] = 7
+    with pytest.raises(ValueError, match="out of range"):
+        torch.func.grad(lambda t: L.topk_cross_entropy(t, y, k=2))(z)
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_transformed_power_normal_boundaries(device: str):
+    from libsdca._entropy import _power
+
+    exponents = torch.arange(-1022, 1024, dtype=torch.int64, device=device)
+    expected = _power(exponents)
+    actual = torch.func.vmap(_power)(exponents)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    assert torch.isfinite(actual).all() and (actual > 0).all()

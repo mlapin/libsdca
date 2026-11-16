@@ -9,6 +9,11 @@ Under pytest-xdist (-n) each worker gets an equal share of the CPUs as OMP_NUM_T
 (unless set), the CPU extension is built once before the workers start, tests marked slow
 or long start first (one per worker under --dist worksteal), and tests marked serial are
 deselected: run them in a second pass, -m serial without -n. CI passes -m "not long".
+SDCA_JAX_CPU_FUSION is "fenced" unless set.
+
+--conformance ci runs the CI profile of the conformance matrix (test_conformance in
+test_conformance_*.py; conformance/cells.py, ci_profile), about a tenth of its cells; the
+default, full, runs them all.
 """
 
 from __future__ import annotations
@@ -27,7 +32,9 @@ HERE = Path(__file__).resolve().parent
 SOURCE = HERE.parents[1] / "python"
 GROUPS = ("core", "torch", "jax")
 # Tests of source-tree helpers, not of the installed package.
-SOURCE_ONLY = {"test_build_config.py"}
+SOURCE_ONLY = {
+    "test_build_config.py",
+}
 SERIAL = "serial: needs the machine to itself (timing); deselected under -n, run with -m serial"
 SLOW = "slow: takes about a minute on a loaded machine; started first under -n"
 LONG = "long: over a minute on a 4-CPU runner; started first under -n, CI deselects it"
@@ -46,6 +53,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="core, torch, jax or all (default: core and the installed optional groups)",
     )
     parser.addoption("--installed", action="store_true", help="test the installed package")
+    parser.addoption(
+        "--conformance",
+        choices=["full", "ci"],
+        default="full",
+        help="the conformance cells to run: all (default) or the CI profile",
+    )
 
 
 def group(path: Path) -> str:
@@ -79,6 +92,15 @@ def tested_libsdca(installed: bool) -> Path:
     location = Path(libsdca.__file__).resolve()
     if installed and location.is_relative_to(SOURCE):
         raise pytest.UsageError(f"--installed imported libsdca from the source tree: {location}")
+    from libsdca._core import _library_path, stale_build
+
+    library = Path(_library_path(None))
+    reason = stale_build(library) if library.exists() else None
+    if reason:
+        raise pytest.UsageError(
+            f"{library} is older than its sources ({reason}): rebuild it "
+            "('python python/build.py' or 'pip install -e .') or delete it"
+        )
     return location
 
 
@@ -98,6 +120,9 @@ def pytest_configure(config: pytest.Config) -> None:
     workers = int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1"))
     if hasattr(config, "workerinput") and "OMP_NUM_THREADS" not in os.environ:
         os.environ["OMP_NUM_THREADS"] = str(max(1, available_cpus() // workers))
+    # One fusion of the JAX CPU passes for every machine (auto would time both under the
+    # load of the tests); its tests force each, and a run may set the other.
+    os.environ.setdefault("SDCA_JAX_CPU_FUSION", "fenced")
     config.addinivalue_line("markers", SERIAL)
     config.addinivalue_line("markers", SLOW)
     config.addinivalue_line("markers", LONG)
@@ -150,7 +175,25 @@ def slow_first(items: list[pytest.Item], workers: int) -> list[pytest.Item]:
     return ordered + list(rest)
 
 
+def outside_ci_profile(item: pytest.Item) -> bool:
+    """Whether item is a conformance cell outside the CI profile."""
+    if not isinstance(item, pytest.Function) or item.originalname != "test_conformance":
+        return False
+    if not item.path.name.startswith("test_conformance_"):
+        return False
+    from conformance.cells import Cell, ci_profile
+
+    cell = item.callspec.params["cell"]
+    assert isinstance(cell, Cell)
+    return cell.id not in ci_profile(cell.backend.framework)
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if config.getoption("conformance") == "ci":
+        outside = [item for item in items if outside_ci_profile(item)]
+        if outside:
+            config.hook.pytest_deselected(items=outside)
+            items[:] = [item for item in items if not outside_ci_profile(item)]
     if not distributed(config):
         return
     serial = [item for item in items if item.get_closest_marker("serial")]
@@ -158,6 +201,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         config.hook.pytest_deselected(items=serial)
     kept = [item for item in items if not item.get_closest_marker("serial")]
     items[:] = slow_first(kept, int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1")))
+
+
+@pytest.fixture(autouse=True)
+def _seeded_torch() -> None:
+    """The same global torch draws in every test, whatever ran before it on the worker."""
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        torch.manual_seed(0)
 
 
 @pytest.fixture(autouse=True)

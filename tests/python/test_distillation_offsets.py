@@ -5,8 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-from libsdca.torch import distillation_loss
-from test_distillation import evaluate, paths
+from test_distillation import evaluate, loss_fn, paths
 from test_distillation_references import reference
 
 
@@ -32,6 +31,6 @@ def test_independent_offsets(
         with subtests.test(path=name), context():
             x = torch.tensor(student, device=device)
             t = torch.tensor(teacher, device=device)
-            value, gradient = evaluate(distillation_loss, x, t, 1.0)
+            value, gradient = evaluate(loss_fn(False, 0.0), x, t, 1.0)
             np.testing.assert_allclose(value.cpu(), expected_value, rtol=64 * eps, atol=0)
             np.testing.assert_allclose(gradient.cpu(), expected_gradient, rtol=64 * eps, atol=0)

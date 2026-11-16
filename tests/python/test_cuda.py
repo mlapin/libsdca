@@ -9,7 +9,14 @@ import math
 
 import pytest
 import torch
-from libsdca.torch import DistillationLoss, SDCALoss, distillation_loss, sdca_loss
+from libsdca.torch import (
+    DistillationLoss,
+    distillation_loss,
+    multiclass_hinge_loss,
+    proximal_cross_entropy,
+    topk_cross_entropy,
+)
+from named_losses import torch_loss, torch_module
 from torch.autograd import gradcheck, gradgradcheck
 
 
@@ -24,7 +31,7 @@ class CudaTests:
             z = torch.randn(4, 7, device=self.device, dtype=dtype, requires_grad=True)
             target = torch.tensor([0, 2, 4, 6], device=self.device)
             weights = torch.tensor([0.0, -2.0, 0.5, 3.0], device=self.device, dtype=dtype)
-            actual = sdca_loss(z, target, backend="torch", reduction="none")
+            actual = torch_loss(z, target, backend="torch", reduction="none")
             actual.backward(weights)
             ref = z.detach().cpu().double().requires_grad_()
             expected = torch.nn.functional.cross_entropy(ref, target.cpu(), reduction="none")
@@ -55,7 +62,7 @@ class CudaTests:
                     dtype=dtype,
                     requires_grad=True,
                 )
-                actual = sdca_loss(
+                actual = torch_loss(
                     z,
                     torch.tensor([0, 0], device=self.device),
                     backend="torch",
@@ -90,7 +97,7 @@ class CudaTests:
                 requires_grad=True,
             )
             mask = torch.tensor([[True, True, True], [True, True, False]], device=self.device)
-            sdca_loss(z, mask, backend="torch", reduction="sum").backward()
+            torch_loss(z, mask, backend="torch", reduction="sum").backward()
             assert z.grad is not None
             torch.testing.assert_close(z.grad[0], z.detach()[0] / 3, rtol=2e-6, atol=1e-20)
             assert z.grad[1, 0].item() < 0
@@ -105,14 +112,14 @@ class CudaTests:
         )
         assert not z.is_contiguous()
         labels = torch.tensor([[0, 1, 2], [3, 4, 0]], device=self.device)
-        values = sdca_loss(z, labels, backend="torch", dim=1, reduction="none")
+        values = torch_loss(z, labels, backend="torch", dim=1, reduction="none")
         values.sum().backward()
         reference = torch.nn.functional.cross_entropy(z.detach(), labels, reduction="none")
         torch.testing.assert_close(values, reference)
         permutation = torch.tensor([2, 4, 0, 1, 3], device=self.device)
         inverse = torch.argsort(permutation)
         shifted = (z.detach()[:, permutation, :] + 1024).requires_grad_()
-        changed = sdca_loss(shifted, inverse[labels], backend="torch", dim=-2, reduction="sum")
+        changed = torch_loss(shifted, inverse[labels], backend="torch", dim=-2, reduction="sum")
         changed.backward()
         torch.testing.assert_close(changed, values.sum(), atol=1e-12, rtol=1e-12)
         assert z.grad is not None
@@ -125,7 +132,7 @@ class CudaTests:
         )
 
         def fn(x: torch.Tensor) -> torch.Tensor:
-            return sdca_loss(x, mask, backend="torch")
+            return torch_loss(x, mask, backend="torch")
 
         assert gradcheck(fn, (z,))
         assert gradgradcheck(fn, (z,))
@@ -211,52 +218,54 @@ class CudaTests:
     def test_validation_and_unsupported_cuda_native_paths(self):
         z = torch.zeros(2, 3, device=self.device)
         y = torch.tensor([0, 1], device=self.device)
-        for options in [
-            dict(backend="bad"),
-            dict(backend="torch", loss="bad"),
-            dict(backend="native"),
-            dict(backend="torch", k=True),
-            dict(backend="torch", gamma=-1.0),
-            dict(backend="torch", alpha=float("nan")),
-            dict(backend="torch", reduction="bad"),
+        for fn, options, error in [
+            (topk_cross_entropy, dict(k=1, backend="bad"), ValueError),
+            (topk_cross_entropy, dict(k=1, backend="native"), ValueError),
+            (topk_cross_entropy, dict(k=True, backend="torch"), TypeError),
+            (multiclass_hinge_loss, dict(backend="torch", gamma=-1.0), ValueError),
+            (proximal_cross_entropy, dict(backend="torch", alpha=float("nan")), ValueError),
+            (topk_cross_entropy, dict(k=1, backend="torch", reduction="bad"), ValueError),
         ]:
-            with pytest.raises(ValueError):
-                sdca_loss(z, y, **options)
-        for target in [
-            y.cpu(),
-            y.float(),
-        ]:
-            with pytest.raises(ValueError):
-                sdca_loss(z, target, backend="torch")
+            with pytest.raises(error):
+                fn(z, y, **options)
+        with pytest.raises(ValueError):
+            torch_loss(z, y.cpu(), backend="torch")
+        with pytest.raises(TypeError):
+            torch_loss(z, y.float(), backend="torch")
         for target in [
             torch.tensor([0, 3], device=self.device),
             torch.zeros_like(z, dtype=torch.bool),
         ]:
-            assert bool(sdca_loss(z, target, backend="torch").isnan().any())
-        assert bool(sdca_loss(z.fill_(float("nan")), y, backend="torch").isnan().all())
+            assert bool(torch_loss(z, target, backend="torch").isnan().any())
+        assert bool(torch_loss(z.fill_(float("nan")), y, backend="torch").isnan().all())
         z.zero_()
-        for logits, target in [(None, y), (z.to(torch.int64), y), (z[:, :1], y)]:
-            with pytest.raises(ValueError):
-                sdca_loss(logits, target, backend="torch")
+        for logits, target, error in [
+            (None, y, TypeError),
+            (z.to(torch.int64), y, TypeError),
+            (z[:, :1], y, ValueError),
+        ]:
+            with pytest.raises(error):
+                torch_loss(logits, target, backend="torch")
+        # Teachers of another floating-point dtype are promoted with the student.
+        torch.testing.assert_close(
+            distillation_loss(z, z.double()), distillation_loss(z.double(), z.double())
+        )
         for teacher, options in [
             (z.cpu(), {}),
-            (z.double(), {}),
             (z[:1], {}),
             (z, dict(temperature=0)),
             (z, dict(reduction="bad")),
         ]:
             with pytest.raises(ValueError):
                 distillation_loss(z, teacher, **options)
-        for student, teacher in [
-            (z.to(torch.int64), z.to(torch.int64)),
-            (z[:, :1], z[:, :1]),
-        ]:
-            with pytest.raises(ValueError):
-                distillation_loss(student, teacher)
+        with pytest.raises(TypeError):
+            distillation_loss(z.to(torch.int64), z.to(torch.int64))
+        with pytest.raises(ValueError):
+            distillation_loss(z[:, :1], z[:, :1])
         assert bool(distillation_loss(z, z + float("inf")).isnan().all())
         for reduction in ("none", "sum", "mean"):
             empty_losses = (
-                sdca_loss(z[:0], y[:0], backend="torch", reduction=reduction),
+                torch_loss(z[:0], y[:0], backend="torch", reduction=reduction),
                 distillation_loss(z[:0], z[:0], reduction=reduction),
             )
             for value in empty_losses:
@@ -272,7 +281,7 @@ class CudaTests:
         y = torch.arange(4, device=self.device).repeat(8) % 3
         model = torch.nn.Linear(4, 3, device=self.device)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.8)
-        criterion = SDCALoss(backend="torch")
+        criterion = torch_module(backend="torch")
         first = criterion(model(x), y).item()
         for _ in range(30):
             optimizer.zero_grad()

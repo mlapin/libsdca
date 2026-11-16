@@ -3,7 +3,7 @@
 import mpmath as mp
 import numpy as np
 import pytest
-from libsdca import Solver
+from numpy_api import Solver
 
 
 class CenteredCertificateTests:

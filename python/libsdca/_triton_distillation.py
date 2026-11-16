@@ -15,16 +15,19 @@ from __future__ import annotations
 import functools
 import math
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import torch
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
 
 from . import _cuda_launch, _triton_reduce
-from ._first_order import first_order
 from ._triton_prox import _lambert_w_exp, _log, _near_residual, _probability
+
+if TYPE_CHECKING:
+    import torch
+else:
+    from ._cuda_launch import torch
 
 _CHUNK = 4096
 # Wider proximal rows stream tiles of _STREAM_BLOCK columns.
@@ -78,7 +81,7 @@ else:
 def _bounded_expm1(x):
     """expm1 on [-2, 2]; float32 fits (expm1(x) - x) / x**2, float64 keeps libdevice."""
     if x.dtype == tl.float32:
-        # Degree-8 fit, then x * (1 + x * p(x)); exact signed zero and tiny x.
+        # Degree-8 Chebyshev fit on [-2, 2], then x * (1 + x * p(x)); exact signed zero and tiny x.
         p = tl.full(x.shape, 2.9499494758056244e-07, tl.float32)
         p = tl.fma(p, x, 2.9900852496211883e-06)
         p = tl.fma(p, x, 2.4742717869230546e-05)
@@ -130,6 +133,15 @@ def _load_pair(S_ptr, T_ptr, offsets, valid, FP32: tl.constexpr):
 
 
 @triton.jit
+def _load_finite(S_ptr, T_ptr, offsets, valid, FP32: tl.constexpr):
+    """_load_pair with the nonfinite entries in place of their count."""
+    cs = _work(tl.load(S_ptr + offsets, mask=valid, other=0.0), FP32)
+    ct = _work(tl.load(T_ptr + offsets, mask=valid, other=0.0), FP32)
+    nonfinite = valid & (~_finite(cs) | ~_finite(ct))
+    return tl.where(valid & _finite(cs), cs, 0.0), tl.where(valid & _finite(ct), ct, 0.0), nonfinite
+
+
+@triton.jit
 def _scaled(cs, ct, valid, s_max, t_max, temp, LARGE_T: tl.constexpr):
     """Centered, temperature-scaled student and teacher logits (-inf off the row)."""
     neg_inf: tl.constexpr = -float("inf")
@@ -162,6 +174,110 @@ def _correction_term(dn, p, s, shift):
     """exp(log(p) + dn) - p, from the student logits where |dn| >= 1."""
     clamped_dn = tl.minimum(tl.maximum(dn, -1.0), 1.0)
     return tl.where(tl.abs(dn) < 1.0, p * _bounded_expm1(clamped_dn), _exp(s + shift) - p)
+
+
+# Float32 work loses the terms of centered, scaled logits below _FAR_GAP (each below
+# exp(-80) < 2^-115) to subnormals: under 2^-149 per term and unit of its weight (at most the
+# scaled student spread S), C * S * 2^-149 per row. Rows with such a logit take the forward
+# again in far sums (_far_row) if their loss is below a bound 2^29 above that error, C * S *
+# 2^-120 (C * 2^-90 where a row's pass computes no minima: spreads up to 2^30), or their
+# sum(u) is below C * 2^-100. Far sums take exponentials below _FAR_GAP at x + 64 (exact for
+# |x| < 256) and scale them by exp(-64) in float64; every helper with a FAR argument reduces
+# to the float32 sums without it. The bounds come from statistics the rows compute anyway:
+# the minima of wide rows, else a count of far entries in the sum of nonfinite ones.
+_FAR_GAP = tl.constexpr(-80.0)
+_FAR_VALUE = tl.constexpr(2.0**-120)
+_FAR_LOSS = tl.constexpr(2.0**-90)
+_FAR_SUM = tl.constexpr(2.0**-100)
+_FAR_COUNT = tl.constexpr(8192)  # above the entries of a row in registers
+
+
+@triton.jit
+def _flags(nonfinite, valid, s, t, C, axis: tl.constexpr, FP32: tl.constexpr):
+    """Invalid rows and, in float32 work, the loss bound of valid rows with a centered,
+    scaled logit below _FAR_GAP (-1 for other rows), from one sum along axis."""
+    count = nonfinite.to(tl.int32)
+    if FP32:
+        count += (valid & (tl.minimum(s, t) < _FAR_GAP)).to(tl.int32) * _FAR_COUNT
+    flags = tl.sum(count, axis)
+    bad = flags % _FAR_COUNT > 0
+    return bad, tl.where(~bad & (flags >= _FAR_COUNT), _FAR_LOSS * C, -1.0)
+
+
+@triton.jit
+def _far_bound(s_min, t_min, s_max, t_max, bad, temp, C, LARGE_T: tl.constexpr):
+    """The loss bound of valid rows with a centered, scaled logit below _FAR_GAP (-1 for
+    other rows), from the raw minima."""
+    s_low = _temp_diff(s_min, s_max, temp, LARGE_T)
+    far = ~bad & (tl.minimum(s_low, _temp_diff(t_min, t_max, temp, LARGE_T)) < _FAR_GAP)
+    return tl.where(far, _FAR_VALUE * C * (1.0 - s_low), -1.0)
+
+
+@triton.jit
+def _needs_far(bound, value, u_sum, C, VALUE_ONLY: tl.constexpr = False):
+    """Whether a float32-work row with loss bound, loss value and sum(u) takes far sums."""
+    need = value < bound
+    if not VALUE_ONLY:
+        need = need | ((bound > 0) & (tl.abs(u_sum) < _FAR_SUM * C))
+    return need
+
+
+@triton.jit
+def _far_exp(x, FAR: tl.constexpr, FAST: tl.constexpr = False):
+    """exp(x) as a working-precision value and its float64 scale (1 unless FAR)."""
+    if FAR:
+        far = x < _FAR_GAP
+        shifted = x + tl.where(far, 64.0, 0.0)
+        value = _exp32(shifted) if FAST else _exp(shifted)
+        return value, tl.where(far, tl.full([], 1.603810890548638e-28, tl.float64), 1.0)
+    else:
+        return (_exp32(x) if FAST else _exp(x)), 1.0
+
+
+@triton.jit
+def _far_term(x, scale, FAR: tl.constexpr):
+    """A term of _far_exp values times their scale in float64 (x itself unless FAR)."""
+    if FAR:
+        return x.to(tl.float64) * scale
+    else:
+        return x
+
+
+@triton.jit
+def _unshifted(e, x, FAR: tl.constexpr):
+    """A _far_exp value for sums beside a 1 (normalizers): far terms vanish there."""
+    if FAR:
+        return tl.where(x < _FAR_GAP, 0.0, e)
+    else:
+        return e
+
+
+@triton.jit
+def _far_correction_term(dn, p, p_scale, s, shift, FAR: tl.constexpr):
+    """_correction_term, in float64 from scaled teacher probabilities if FAR."""
+    if FAR:
+        clamped_dn = tl.minimum(tl.maximum(dn, -1.0), 1.0)
+        e, e_scale = _far_exp(s + shift, FAR)
+        near = _far_term(p * _bounded_expm1(clamped_dn), p_scale, FAR)
+        return tl.where(
+            tl.abs(dn) < 1.0, near, _far_term(e, e_scale, FAR) - _far_term(p, p_scale, FAR)
+        )
+    else:
+        return _correction_term(dn, p, s, shift)
+
+
+@triton.jit
+def _far_u(logratio, p, p_scale, q, q_scale, valid, FAR: tl.constexpr):
+    """_u, in float64 from scaled probabilities if FAR."""
+    if FAR:
+        clamped_lr = tl.minimum(tl.maximum(logratio, -1.0), 1.0)
+        near = _far_term(p * _bounded_expm1(clamped_lr), p_scale, FAR)
+        u = tl.where(
+            tl.abs(logratio) < 1.0, near, _far_term(q, q_scale, FAR) - _far_term(p, p_scale, FAR)
+        )
+        return tl.where(valid, u, 0.0)
+    else:
+        return _u(logratio, p, q, valid)
 
 
 @triton.jit
@@ -280,21 +396,20 @@ def _register_rows(
     S_ptr, T_ptr, ST_ptr, N, temp, C: tl.constexpr, B: tl.constexpr, FP32: tl.constexpr,
     LARGE_T: tl.constexpr, EPS: tl.constexpr, VALUE_ONLY: tl.constexpr, ROWS: tl.constexpr,
 ):  # fmt: skip
-    """Loss and statistics of ROWS rows held in registers [ROWS, B]."""
+    """Loss and statistics of ROWS rows held in registers [ROWS, B], and the rows that take
+    far sums (_needs_far)."""
     neg_inf: tl.constexpr = -float("inf")
     row = tl.program_id(0).to(tl.int64) * ROWS + tl.arange(0, ROWS)
     row_valid = row < N
     j = tl.arange(0, B)[None, :]
     valid = row_valid[:, None] & (j < C)
     offsets = row[:, None] * C + j
-    cs = _work(tl.load(S_ptr + offsets, mask=valid, other=0.0), FP32)
-    ct = _work(tl.load(T_ptr + offsets, mask=valid, other=0.0), FP32)
-    bad = tl.sum((valid & (~_finite(cs) | ~_finite(ct))).to(tl.int32), 1) > 0
-    cs = tl.where(valid & _finite(cs), cs, 0.0)
-    ct = tl.where(valid & _finite(ct), ct, 0.0)
+    cs, ct, nonfinite = _load_finite(S_ptr, T_ptr, offsets, valid, FP32)
     s_max = tl.max(tl.where(valid, cs, neg_inf), 1)
     t_max = tl.max(tl.where(valid, ct, neg_inf), 1)
     s, t = _scaled(cs, ct, valid, s_max[:, None], t_max[:, None], temp, LARGE_T)
+    # Wide rows take their far flags from the minima below.
+    bad, bound = _flags(nonfinite, valid, s, t, C, 1, FP32 and (VALUE_ONLY or C <= 16))
     s_idx = tl.argmax(s, 1)[:, None]
     s_other = tl.where(j == s_idx, neg_inf, s)
     s_top = tl.max(s_other, 1)
@@ -305,6 +420,7 @@ def _register_rows(
     p = et / t_sum[:, None]
     mass = valid & (p > 0)
     value = tl.sum(tl.where(mass, p * ((0.0 - s) + s_lognorm[:, None]), 0.0), 1)
+    need = _needs_far(bound, value, value, C, True)
     if VALUE_ONLY:
         tl.store(ST_ptr + row, tl.where(bad, float("nan"), value).to(tl.float64), mask=row_valid)
         tl.store(ST_ptr + N.to(tl.int64) + row, bad.to(tl.float64), mask=row_valid)
@@ -327,11 +443,14 @@ def _register_rows(
             ranged = _finite((s_max - s_min) + (t_max - t_min))
             pivot = 0.5 * ranged.to(tl.float32) - simple.to(tl.float32)
             u_simple = tl.sum(tl.where(valid, p * _bounded_expm1(dn), 0.0), 1)
+            if FP32:
+                bound = _far_bound(s_min, t_min, s_max, t_max, bad, temp, C, LARGE_T)
         if C > 16 and tl.max((~simple).to(tl.int32), 0) == 0:
             _store_row(
                 ST_ptr + row, N, bad, value, s_max, t_max, s_sum, t_sum, s_lognorm, s_lognorm,
                 mean_delta, mean_delta, s_max * 0.0, u_simple, pivot, row_valid,
             )  # fmt: skip
+            need = _needs_far(bound, value, u_simple, C)
         else:
             t_idx = tl.argmax(t, 1)[:, None]
             t_other = tl.where(j == t_idx, neg_inf, t)
@@ -357,6 +476,8 @@ def _register_rows(
                 ST_ptr + row, N, bad, value, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm,
                 mean_delta, rel_mean, correction, u_sum, pivot, row_valid,
             )  # fmt: skip
+            need = _needs_far(bound, value, u_sum, C)
+    return need
 
 
 @triton.jit
@@ -373,42 +494,57 @@ def _register_row(
     LARGE_T: tl.constexpr,
     EPS: tl.constexpr,
     VALUE_ONLY: tl.constexpr = False,
+    FAR: tl.constexpr = False,
 ):
     """Loss and statistics of a row held in registers, as _stats."""
     neg_inf: tl.constexpr = -float("inf")
     j = tl.arange(0, B)
     valid = j < C
-    cs, ct, bad = _load_pair(S_ptr, T_ptr, row * C + j, valid, FP32)
+    cs, ct, nonfinite = _load_finite(S_ptr, T_ptr, row * C + j, valid, FP32)
     s_max = tl.max(tl.where(valid, cs, neg_inf), 0)
     t_max = tl.max(tl.where(valid, ct, neg_inf), 0)
     s, t = _scaled(cs, ct, valid, s_max, t_max, temp, LARGE_T)
+    # Wide rows take their far flags from the minima below.
+    bad, bound = _flags(nonfinite, valid, s, t, C, 0, FP32 and (VALUE_ONLY or C <= 16))
     s_lognorm = _register_lognorm(s, j, EPS)
-    et = _exp(t)
-    t_sum = tl.sum(et, 0)
+    # p and q below carry the float64 scales t_scale and s_scale (_far_exp).
+    et, t_scale = _far_exp(t, FAR)
+    t_sum = tl.sum(_unshifted(et, t, FAR), 0)
     p = et / t_sum
     mass = valid & (p > 0)
-    value = tl.sum(tl.where(mass, p * ((0.0 - s) + s_lognorm), 0.0), 0)
+    value = tl.sum(tl.where(mass, _far_term(p * ((0.0 - s) + s_lognorm), t_scale, FAR), 0.0), 0)
+    need = _needs_far(bound, value, value, C, True)
     if VALUE_ONLY:
-        tl.store(W, tl.where(bad > 0, float("nan"), value).to(tl.float64))
-        tl.store(W + N.to(tl.int64), (bad > 0).to(tl.float64))
+        tl.store(W, tl.where(bad, float("nan"), value).to(tl.float64))
+        tl.store(W + N.to(tl.int64), bad.to(tl.float64))
     else:
-        p_sum = tl.sum(tl.where(mass, p, 0.0), 0)
+        p_sum = tl.sum(tl.where(mass, _far_term(p, t_scale, FAR), 0.0), 0)
         delta = _offset_delta(cs, ct, s_max, t_max)
-        mean_delta = tl.sum(tl.where(mass, p * delta, 0.0), 0) / p_sum
-        es = _exp(s)
-        s_sum = tl.sum(es, 0)
+        mean_delta = tl.sum(tl.where(mass, _far_term(p * delta, t_scale, FAR), 0.0), 0)
+        mean_delta = (mean_delta / p_sum).to(temp.dtype)
+        es, s_scale = _far_exp(s, FAR)
+        s_sum = tl.sum(_unshifted(es, s, FAR), 0)
         if C <= 16:
             t_lognorm = _register_lognorm(t, j, EPS)
             q = es / s_sum
             rel_mean = mean_delta
             if LARGE_T:
-                rel_mean = tl.sum(tl.where(mass, p * (s - t), 0.0), 0) / p_sum
+                rel_mean = tl.sum(tl.where(mass, _far_term(p * (s - t), t_scale, FAR), 0.0), 0)
+                rel_mean = (rel_mean / p_sum).to(temp.dtype)
             over = ~_finite(mean_delta)
             dn = _dn(cs, ct, s, t, s_max, t_max, mean_delta, rel_mean, over, temp, LARGE_T)
             shift = _shift(s_max, t_max, mean_delta, rel_mean, over, t_lognorm, temp, LARGE_T)
-            correction = tl.sum(tl.where(valid, _correction_term(dn, p, s, shift), 0.0), 0)
-            u_sum = tl.sum(_u(dn - _log1p(correction), p, q, valid), 0)
-            pivot = tl.argmax(tl.where(valid, p + q, neg_inf), 0).to(tl.float32)
+            correction = tl.sum(
+                tl.where(valid, _far_correction_term(dn, p, t_scale, s, shift, FAR), 0.0),
+                0,
+            ).to(temp.dtype)
+            u_sum = tl.sum(_far_u(dn - _log1p(correction), p, t_scale, q, s_scale, valid, FAR), 0)
+            mass_pq = _far_term(p, t_scale, FAR) + _far_term(q, s_scale, FAR)
+            pivot = tl.argmax(tl.where(valid, mass_pq, neg_inf), 0).to(tl.float32)
+            if FAR:
+                # No pivot (-1): the competitors' gradients round to float32 subnormals one
+                # by one, so the pivot entry takes u - q sum(u) as in wider rows.
+                pivot = pivot * 0.0 - 1.0
         else:
             low = (tl.min(tl.where(valid, delta, float("inf")), 0) - mean_delta) / temp
             high = (tl.max(tl.where(valid, delta, -float("inf")), 0) - mean_delta) / temp
@@ -417,27 +553,39 @@ def _register_row(
             t_min = tl.min(tl.where(valid, ct, float("inf")), 0)
             ranged = _finite((s_max - s_min) + (t_max - t_min))
             pivot = 0.5 * ranged.to(tl.float32) - simple.to(tl.float32)
+            if FP32:
+                bound = _far_bound(s_min, t_min, s_max, t_max, bad, temp, C, LARGE_T)
             if simple:
                 t_lognorm = temp * 0
                 rel_mean = mean_delta
                 correction = temp * 0
                 dn = (delta - mean_delta) / temp
-                u_sum = tl.sum(tl.where(valid, p * _bounded_expm1(dn), 0.0), 0)
+                u_sum = tl.sum(
+                    tl.where(valid, _far_term(p * _bounded_expm1(dn), t_scale, FAR), 0.0), 0
+                )
             else:
                 t_lognorm = _register_lognorm(t, j, EPS)
                 q = es / s_sum
                 rel_mean = mean_delta
                 if LARGE_T:
-                    rel_mean = tl.sum(tl.where(mass, p * (s - t), 0.0), 0) / p_sum
+                    rel_mean = tl.sum(tl.where(mass, _far_term(p * (s - t), t_scale, FAR), 0.0), 0)
+                    rel_mean = (rel_mean / p_sum).to(temp.dtype)
                 over = ~_finite(mean_delta)
                 dn = _dn(cs, ct, s, t, s_max, t_max, mean_delta, rel_mean, over, temp, LARGE_T)
                 shift = _shift(s_max, t_max, mean_delta, rel_mean, over, t_lognorm, temp, LARGE_T)
-                correction = tl.sum(tl.where(valid, _correction_term(dn, p, s, shift), 0.0), 0)
-                u_sum = tl.sum(_u(dn - _log1p(correction), p, q, valid), 0)
+                correction = tl.sum(
+                    tl.where(valid, _far_correction_term(dn, p, t_scale, s, shift, FAR), 0.0),
+                    0,
+                ).to(temp.dtype)
+                u_sum = tl.sum(
+                    _far_u(dn - _log1p(correction), p, t_scale, q, s_scale, valid, FAR), 0
+                )
         _store_row(
-            W, N, bad > 0, value, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm, mean_delta,
+            W, N, bad, value, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm, mean_delta,
             rel_mean, correction, u_sum, pivot,
         )  # fmt: skip
+        need = _needs_far(bound, value, u_sum, C)
+    return need
 
 
 @triton.jit
@@ -445,25 +593,29 @@ def _value_tile(
     S_ptr, T_ptr, base, start, C, rtemp, s_max, t_max, rs, rt, s_lognorm, mean_delta,
     rel_mean, over, log1p_c, simple, B: tl.constexpr, FP32: tl.constexpr,
     LARGE_T: tl.constexpr, MASKED: tl.constexpr, VALUE_ONLY: tl.constexpr,
+    FAR: tl.constexpr = False,
 ):  # fmt: skip
-    """A lean tile's terms p log q of the value and its residuals u."""
-    k, valid, p, s, logratio = _lean_tile(
+    """A lean tile's terms p log q of the value and its residuals u, in float64."""
+    k, valid, p, p_scale, s, logratio = _far_lean_tile(
         S_ptr, T_ptr, base, start, C, rtemp, s_max, t_max, rt, mean_delta, rel_mean, over,
-        log1p_c, B, FP32, LARGE_T, MASKED,
+        log1p_c, B, FP32, LARGE_T, MASKED, FAR=FAR
     )  # fmt: skip
-    value = tl.where(p > 0, p * (s - s_lognorm), 0.0)
+    value = tl.where(p > 0, _far_term(p * (s - s_lognorm), p_scale, FAR), 0.0)
     u = value * 0
     if not VALUE_ONLY:
         # Let d be the centered, unnormalized log-ratio. Then
         # u = p expm1(d) = q (1 + sum(u)) - p, so u - q sum(u) is q - p.
         # Bounding |d| by 2 keeps this cancellation-resistant residual well scaled.
         if simple:
-            u = p * _bounded_expm1(logratio)
+            u = _far_term(p * _bounded_expm1(logratio), p_scale, FAR)
             if MASKED:
                 u = tl.where(valid, u, 0.0)
         else:
-            es = _exp32(s) if FP32 and not MASKED else _exp(s)
-            u = _u(logratio, p, es * rs, valid)
+            if MASKED:
+                es, q_scale = _far_exp(s, FAR)
+            else:
+                es, q_scale = _far_exp(s, FAR, FP32)
+            u = _far_u(logratio, p, p_scale, es * rs, q_scale, valid, FAR)
     return value, u
 
 
@@ -471,7 +623,7 @@ def _value_tile(
 def _stream_value(
     S_ptr, T_ptr, base, C: tl.constexpr, temp, s_max, t_max, s_sum, t_sum, s_lognorm,
     t_lognorm, mean_delta, rel_mean, simple, B: tl.constexpr, FP32: tl.constexpr,
-    LARGE_T: tl.constexpr, VALUE_ONLY: tl.constexpr,
+    LARGE_T: tl.constexpr, VALUE_ONLY: tl.constexpr, FAR: tl.constexpr = False
 ):  # fmt: skip
     """The value, sum(u) (float64 lane sums) and the correction of a streamed row."""
     over = ~_finite(mean_delta)
@@ -480,7 +632,7 @@ def _stream_value(
         if ~simple:
             correction = _stream_correction(
                 S_ptr, T_ptr, base, C, temp, s_max, t_max, t_sum, t_lognorm, mean_delta,
-                rel_mean, over, B, FP32, LARGE_T,
+                rel_mean, over, B, FP32, LARGE_T, FAR=FAR
             )  # fmt: skip
     # Wide rows form every gradient entry independently, so no pivot is needed.
     rtemp, rs, rt = _reciprocal(temp), _reciprocal(s_sum), _reciprocal(t_sum)
@@ -491,14 +643,14 @@ def _stream_value(
     for start in range(0, FULL, B):
         v, u = _value_tile(
             S_ptr, T_ptr, base, start, C, rtemp, s_max, t_max, rs, rt, s_lognorm, mean_delta,
-            rel_mean, over, log1p_c, simple, B, FP32, LARGE_T, False, VALUE_ONLY,
+            rel_mean, over, log1p_c, simple, B, FP32, LARGE_T, False, VALUE_ONLY, FAR=FAR
         )  # fmt: skip
         value -= v.to(tl.float64)
         u_sum += u.to(tl.float64)
     if FULL < C:
         v, u = _value_tile(
             S_ptr, T_ptr, base, FULL, C, rtemp, s_max, t_max, rs, rt, s_lognorm, mean_delta,
-            rel_mean, over, log1p_c, simple, B, FP32, LARGE_T, True, VALUE_ONLY,
+            rel_mean, over, log1p_c, simple, B, FP32, LARGE_T, True, VALUE_ONLY, FAR=FAR
         )  # fmt: skip
         value -= v.to(tl.float64)
         u_sum += u.to(tl.float64)
@@ -519,6 +671,7 @@ def _streamed_row(
     LARGE_T: tl.constexpr,
     EPS: tl.constexpr,
     VALUE_ONLY: tl.constexpr = False,
+    FAR: tl.constexpr = False,
 ):
     """Streamed loss and optional backward statistics, sharing the proximal row helpers.
 
@@ -527,32 +680,34 @@ def _streamed_row(
     base = row * C
     if VALUE_ONLY and FP32:
         # FP64 work keeps the normalized-per-term scan: its unnormalized sum could overflow.
-        bad, _sm, _tm, _ss, _ts, _sln, _tln, value = _stream_normalizers(
-            S_ptr, T_ptr, base, C, temp, B, FP32, LARGE_T, EPS, False, True, True
+        bad, _sm, _tm, _ss, _ts, _sln, _tln, value, bound = _stream_normalizers(
+            S_ptr, T_ptr, base, C, temp, B, FP32, LARGE_T, EPS, False, True, True, FAR=FAR
         )
+        need = _needs_far(bound, value, value, C, True)
     else:
         (
             bad, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm, mean_delta, rel_mean, simple,
-            ranged,
+            ranged, bound,
         ) = _stream_normalizers(
-            S_ptr, T_ptr, base, C, temp, B, FP32, LARGE_T, EPS, True, False, True
+            S_ptr, T_ptr, base, C, temp, B, FP32, LARGE_T, EPS, True, False, True, FAR=FAR
         )  # fmt: skip
         if LARGE_T:
             if ranged:
                 value, u_sum, correction = _stream_value(
                     S_ptr, T_ptr, base, C, temp, s_max, t_max, s_sum, t_sum, s_lognorm,
-                    t_lognorm, mean_delta, rel_mean, simple, B, FP32, False, VALUE_ONLY,
+                    t_lognorm, mean_delta, rel_mean, simple, B, FP32, False, VALUE_ONLY, FAR=FAR
                 )  # fmt: skip
             else:
                 value, u_sum, correction = _stream_value(
                     S_ptr, T_ptr, base, C, temp, s_max, t_max, s_sum, t_sum, s_lognorm,
-                    t_lognorm, mean_delta, rel_mean, simple, B, FP32, True, VALUE_ONLY,
+                    t_lognorm, mean_delta, rel_mean, simple, B, FP32, True, VALUE_ONLY, FAR=FAR
                 )  # fmt: skip
         else:
             value, u_sum, correction = _stream_value(
                 S_ptr, T_ptr, base, C, temp, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm,
-                mean_delta, rel_mean, simple, B, FP32, False, VALUE_ONLY,
+                mean_delta, rel_mean, simple, B, FP32, False, VALUE_ONLY, FAR=FAR
             )  # fmt: skip
+        need = _needs_far(bound, value, value, C, True)
         if not VALUE_ONLY:
             u_sum = tl.sum(u_sum, 0)
             # Wide rows do not use a pivot: its slot records which residual backward recomputes
@@ -563,9 +718,30 @@ def _streamed_row(
                 W, N, bad, value, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm, mean_delta,
                 rel_mean, correction, u_sum, pivot,
             )  # fmt: skip
+            need = _needs_far(bound, value, u_sum, C)
     if VALUE_ONLY:
         tl.store(W, tl.where(bad, float("nan"), value))
         tl.store(W + N.to(tl.int64), bad.to(tl.float64))
+    return need
+
+
+@triton.jit(noinline=True)
+def _far_row(
+    S_ptr, T_ptr, ST_ptr, N, temp, row, C: tl.constexpr, B: tl.constexpr,
+    LARGE_T: tl.constexpr, EPS: tl.constexpr, VALUE_ONLY: tl.constexpr,
+):  # fmt: skip
+    """A float32-work row's forward again in far sums, over the statistics stored for it (a
+    call, keeping the kernels' other rows as they compile without it)."""
+    if B < C:
+        _streamed_row(
+            S_ptr, T_ptr, ST_ptr + row, N, temp, row, C, B, True, LARGE_T, EPS, VALUE_ONLY,
+            FAR=True,
+        )  # fmt: skip
+    else:
+        _register_row(
+            S_ptr, T_ptr, ST_ptr + row, N, temp, row, C, B, True, LARGE_T, EPS, VALUE_ONLY,
+            FAR=True,
+        )  # fmt: skip
 
 
 @triton.jit(do_not_specialize=["N"])
@@ -586,21 +762,40 @@ def _forward(
     dtype: tl.constexpr = tl.float32 if FP32 else tl.float64
     temp = tl.load(TEMP_ptr).to(dtype)
     if ROWS > 1:
-        _register_rows(
+        first = tl.program_id(0).to(tl.int64) * ROWS
+        need = _register_rows(
             S_ptr, T_ptr, ST_ptr, N.to(tl.int64), temp, C, B, FP32, LARGE_T, EPS, VALUE_ONLY, ROWS
         )
+        if FP32:
+            if tl.max(need.to(tl.int32), 0) > 0:
+                # The rows' statistics are stored by other threads than _far_row's.
+                tl.debug_barrier()
+                lanes = tl.arange(0, ROWS)
+                for r in range(ROWS):
+                    if tl.max((need & (lanes == r)).to(tl.int32), 0) > 0:
+                        _far_row(
+                            S_ptr, T_ptr, ST_ptr, N.to(tl.int64), temp, first + r, C, B,
+                            LARGE_T, EPS, VALUE_ONLY,
+                        )  # fmt: skip
     else:
         row = tl.program_id(0).to(tl.int64)
         if B < C:
-            _streamed_row(
+            need = _streamed_row(
                 S_ptr, T_ptr, ST_ptr + row, N.to(tl.int64), temp, row, C, B, FP32, LARGE_T,
                 EPS, VALUE_ONLY,
             )  # fmt: skip
         else:
-            _register_row(
+            need = _register_row(
                 S_ptr, T_ptr, ST_ptr + row, N.to(tl.int64), temp, row, C, B, FP32, LARGE_T,
                 EPS, VALUE_ONLY,
             )  # fmt: skip
+        if FP32:
+            if need:
+                tl.debug_barrier()
+                _far_row(
+                    S_ptr, T_ptr, ST_ptr, N.to(tl.int64), temp, row, C, B, LARGE_T, EPS,
+                    VALUE_ONLY,
+                )  # fmt: skip
 
 
 @triton.jit
@@ -726,7 +921,7 @@ def _backward_rows(
         pivot = tl.minimum(tl.maximum(code, 0.0), C - 1).to(tl.int64)
         keep = valid & (j != pivot)
         others = tl.sum(tl.where(keep, g, 0.0), 1)[:, None]
-        g = tl.where(j == pivot, -others, g)
+        g = tl.where((j == pivot) & (code >= 0), -others, g)
     g = tl.where(bad, float("nan"), (g / temp) * weight)
     tl.store(G_ptr + offsets, g.to(G_ptr.dtype.element_ty), mask=valid)
 
@@ -764,7 +959,8 @@ def _backward(
         s_lognorm, t_lognorm = _slot(W, n, 6, dtype), _slot(W, n, 7, dtype)
         mean_delta, rel_mean = _slot(W, n, 8, dtype), _slot(W, n, 9, dtype)
         correction, u_sum = _slot(W, n, 10, dtype), _slot(W, n, 11, dtype)
-        pivot = tl.minimum(tl.maximum(tl.load(W + 12 * n), 0.0), C - 1).to(tl.int64)
+        closing = tl.load(W + 12 * n)
+        pivot = tl.minimum(tl.maximum(closing, 0.0), C - 1).to(tl.int64)
         over = ~_finite(mean_delta)
         if REDUCTION == 0:
             weight = tl.load(U_ptr + row).to(dtype)
@@ -783,10 +979,15 @@ def _backward(
                 keep = valid & (k != pivot)
                 others += tl.where(keep, g, 0.0)
                 g = tl.where(bad, float("nan"), (g / temp) * weight)
-                tl.store(G_ptr + row * C + k, g.to(G_ptr.dtype.element_ty), mask=keep)
-            g = -tl.sum(others, 0)
-            g = tl.where(bad, float("nan"), (g / temp) * weight)
-            tl.store(G_ptr + row * C + pivot, g.to(G_ptr.dtype.element_ty))
+                tl.store(
+                    G_ptr + row * C + k,
+                    g.to(G_ptr.dtype.element_ty),
+                    mask=valid & ((k != pivot) | (closing < 0)),
+                )
+            if closing >= 0:
+                g = -tl.sum(others, 0)
+                g = tl.where(bad, float("nan"), (g / temp) * weight)
+                tl.store(G_ptr + row * C + pivot, g.to(G_ptr.dtype.element_ty))
         else:
             code = tl.load(W + 12 * n)
             simple = code < 0
@@ -894,32 +1095,27 @@ def _omega_step(omega, f, magnitude, d1, d2, lo, hi, EPS: tl.constexpr, TINY: tl
     return tl.where(done, omega, following), lo, hi, done
 
 
-@triton.jit(do_not_specialize=["N"])
-def _prox_kernel(
-    S_ptr,
-    T_ptr,
-    PARAMS_ptr,
-    LOSS_ptr,
-    GRAD_ptr,
-    N,
-    C: tl.constexpr,
-    B: tl.constexpr,
-    FP32: tl.constexpr,
-    LARGE_T: tl.constexpr,
-    EPS: tl.constexpr,
-    TINY: tl.constexpr,
-    CUT: tl.constexpr,
-    LARGE: tl.constexpr,
-    STEPS: tl.constexpr,
+@triton.jit
+def _prox_params(PARAMS_ptr, dtype: tl.constexpr):
+    """Temperature, alpha and log(alpha) in dtype."""
+    return (
+        tl.load(PARAMS_ptr).to(dtype),
+        tl.load(PARAMS_ptr + 1).to(dtype),
+        tl.load(PARAMS_ptr + 2).to(dtype),
+    )
+
+
+@triton.jit
+def _prox_row(
+    S_ptr, T_ptr, LOSS_ptr, GRAD_ptr, row, temp, alpha, log_alpha, C: tl.constexpr,
+    B: tl.constexpr, FP32: tl.constexpr, LARGE_T: tl.constexpr, EPS: tl.constexpr,
+    TINY: tl.constexpr, CUT: tl.constexpr, LARGE: tl.constexpr, STEPS: tl.constexpr,
     RES_STEPS: tl.constexpr,
-):
-    dtype: tl.constexpr = tl.float32 if FP32 else tl.float64
-    row = tl.program_id(0).to(tl.int64)
+):  # fmt: skip
+    """Store a row's loss and gradient held in registers; return whether a float32-work row
+    takes float64 work again (_needs_far of its loss and sum(u))."""
     j = tl.arange(0, B)
     valid = j < C
-    temp = tl.load(PARAMS_ptr).to(dtype)
-    alpha = tl.load(PARAMS_ptr + 1).to(dtype)
-    log_alpha = tl.load(PARAMS_ptr + 2).to(dtype)
     bad, _, p, q, log_q, log_p, logratio, u = _stats(
         S_ptr, T_ptr, temp, row, C, B, FP32, LARGE_T, EPS
     )
@@ -943,7 +1139,13 @@ def _prox_kernel(
         EPS, TINY, CUT, LARGE, STEPS, RES_STEPS, FP32,
     )  # fmt: skip
     pivot = tl.argmax(tl.where(valid, p + q, -float("inf")), 0)
-    r = tl.where(j == pivot, -tl.sum(tl.where(j == pivot, 0.0, r), 0), r)
+    # Closing the sum protects a dominant class's tiny residual. On ordinary
+    # float32 rows it instead concentrates every other entry's rounding error
+    # into one component, growing its relative error with the class count.
+    close = j == pivot
+    if FP32:
+        close = close & (p + q > 1.0)
+    r = tl.where(close, -tl.sum(tl.where(j == pivot, 0.0, r), 0), r)
     # H from log pi (log1p where r is small), and alpha r_j first in the penalty.
     log_pi = _log_pi(r, p, log_p, log_q, omega, alpha, log_alpha, CUT, LARGE, STEPS, FP32)
     cross = -tl.sum(tl.where(valid & (p > 0), p * log_pi, 0.0), 0)
@@ -953,6 +1155,67 @@ def _prox_kernel(
     tl.store(LOSS_ptr + row, tl.where(bad, nan, value).to(LOSS_ptr.dtype.element_ty))
     grad = tl.where(bad, nan, -r / temp).to(GRAD_ptr.dtype.element_ty)
     tl.store(GRAD_ptr + row * C + j, grad, mask=valid)
+    need = bad & False
+    if FP32:
+        # log q <= s and log p <= t flag the rows with far entries (and more); -log q weighs
+        # the loss terms of the teacher's probabilities.
+        q_low = tl.min(tl.where(valid, log_q, 0.0), 0)
+        far = ~bad & (tl.minimum(tl.min(tl.where(valid, log_p, 0.0), 0), q_low) < _FAR_GAP)
+        bound = tl.where(far, _FAR_VALUE * C * (1.0 - q_low), -1.0)
+        need = _needs_far(bound, value, tl.sum(u, 0), C)
+    return need
+
+
+# Float64 work's constants of the proximal kernels.
+_EPS64 = tl.constexpr(2.220446049250313e-16)
+_TINY64 = tl.constexpr(2.2250738585072014e-308)
+
+
+@triton.jit(noinline=True)
+def _prox_far_row(
+    S_ptr, T_ptr, PARAMS_ptr, LOSS_ptr, GRAD_ptr, row, C: tl.constexpr, B: tl.constexpr,
+    LARGE_T: tl.constexpr,
+):  # fmt: skip
+    """A float32-work row of _prox_kernel again in float64 work, from float64 parameters (a
+    call, keeping the kernel's other rows as they compile without it)."""
+    temp, alpha, log_alpha = _prox_params(PARAMS_ptr, tl.float64)
+    _prox_row(
+        S_ptr, T_ptr, LOSS_ptr, GRAD_ptr, row, temp, alpha, log_alpha, C, B, False, LARGE_T,
+        _EPS64, _TINY64, -36.0, 1e16, 3, 6,
+    )  # fmt: skip
+
+
+@triton.jit(do_not_specialize=["N"])
+def _prox_kernel(
+    S_ptr,
+    T_ptr,
+    PARAMS_ptr,
+    PARAMS64_ptr,
+    LOSS_ptr,
+    GRAD_ptr,
+    N,
+    C: tl.constexpr,
+    B: tl.constexpr,
+    FP32: tl.constexpr,
+    LARGE_T: tl.constexpr,
+    EPS: tl.constexpr,
+    TINY: tl.constexpr,
+    CUT: tl.constexpr,
+    LARGE: tl.constexpr,
+    STEPS: tl.constexpr,
+    RES_STEPS: tl.constexpr,
+):
+    dtype: tl.constexpr = tl.float32 if FP32 else tl.float64
+    row = tl.program_id(0).to(tl.int64)
+    temp, alpha, log_alpha = _prox_params(PARAMS_ptr, dtype)
+    need = _prox_row(
+        S_ptr, T_ptr, LOSS_ptr, GRAD_ptr, row, temp, alpha, log_alpha, C, B, FP32, LARGE_T,
+        EPS, TINY, CUT, LARGE, STEPS, RES_STEPS,
+    )  # fmt: skip
+    if FP32:
+        if need:
+            tl.debug_barrier()
+            _prox_far_row(S_ptr, T_ptr, PARAMS64_ptr, LOSS_ptr, GRAD_ptr, row, C, B, LARGE_T)
 
 
 @triton.jit
@@ -1039,6 +1302,27 @@ def _lean_tile(
 
 
 @triton.jit
+def _far_lean_tile(
+    S_ptr, T_ptr, base, start, C, rtemp, s_max, t_max, rt, mean_delta, rel_mean, over, log1p_c,
+    B: tl.constexpr, FP32: tl.constexpr, LARGE_T: tl.constexpr, MASKED: tl.constexpr,
+    FAR: tl.constexpr = False,
+):  # fmt: skip
+    """_lean_tile with p scaled by 1 / p_scale (_far_exp), for the forward sums."""
+    k, valid = _lean_columns(start, C, B, MASKED)
+    cs, ct = _lean_pair(S_ptr, T_ptr, base + k, valid, FP32, MASKED)
+    s, t = _lean_scaled(cs, ct, valid, s_max, t_max, rtemp, LARGE_T, MASKED)
+    if MASKED:
+        et, p_scale = _far_exp(t, FAR)
+    else:
+        et, p_scale = _far_exp(t, FAR, FP32)
+    p = et * rt
+    dn = (_offset_delta(cs, ct, s_max, t_max) - mean_delta) * rtemp
+    if LARGE_T:
+        dn = tl.where(over, (s - t) - rel_mean, dn)
+    return k, valid, p, p_scale, s, dn - log1p_c
+
+
+@triton.jit
 def _top_two(m1, i1, m2, x, k):
     """Keep two maxima per lane; defer communication until the entire row is read."""
     rise = x > m1
@@ -1066,6 +1350,7 @@ def _stream_relative_mean(
     B: tl.constexpr,
     FP32: tl.constexpr,
     LARGE_T: tl.constexpr,
+    FAR: tl.constexpr = False,
 ):
     j = tl.arange(0, B)
     total = tl.zeros([B], tl.float64)
@@ -1073,8 +1358,9 @@ def _stream_relative_mean(
         valid = start + j < C
         cs, ct, _ = _load_pair(S_ptr, T_ptr, base + start + j, valid, FP32)
         s, t = _scaled(cs, ct, valid, s_max, t_max, temp, LARGE_T)
-        p = _exp(t) / t_sum
-        total += tl.where(valid & (p > 0), p * (s - t), 0.0).to(tl.float64)
+        et, p_scale = _far_exp(t, FAR)
+        p = et / t_sum
+        total += tl.where(valid & (p > 0), _far_term(p * (s - t), p_scale, FAR), 0.0).to(tl.float64)
     return tl.sum(total, 0).to(temp.dtype)
 
 
@@ -1083,7 +1369,7 @@ def _normalizer_tile(
     S_ptr, T_ptr, base, start, C, temp, rtemp, s_max, t_max, s_orig, t_orig, s_idx, t_idx,
     s_other, t_other, weighted_gap, delta_sum, low, high, B: tl.constexpr, FP32: tl.constexpr,
     LARGE_T: tl.constexpr, WITH_MEAN: tl.constexpr, WITH_VALUE: tl.constexpr,
-    LEAN: tl.constexpr, MASKED: tl.constexpr,
+    LEAN: tl.constexpr, MASKED: tl.constexpr, FAR: tl.constexpr = False
 ):  # fmt: skip
     """Add a tile to the lane sums of the tails, the value gap and the mean difference, and
     to the difference bounds; lean tiles scale by rtemp = 1 / temp."""
@@ -1095,9 +1381,12 @@ def _normalizer_tile(
         cs, ct, _ = _load_pair(S_ptr, T_ptr, base + k, valid, FP32)
         s, t = _scaled(cs, ct, valid, s_max, t_max, temp, LARGE_T)
     if LEAN and FP32 and not MASKED:
-        es, et = _exp32(s), _exp32(t)
+        es = _exp32(s)
+        et_w, t_scale = _far_exp(t, FAR, True)
     else:
-        es, et = _exp(s), _exp(t)
+        es = _exp(s)
+        et_w, t_scale = _far_exp(t, FAR)
+    et = _unshifted(et_w, t, FAR)
     if s_orig == 0:
         s_terms = es
     else:
@@ -1111,13 +1400,15 @@ def _normalizer_tile(
     if WITH_VALUE:
         # Used only with FP32 work: widening before the product/sum keeps every finite
         # term and their C-term total in range. Guard zero teacher mass beside inf gaps.
-        term = et.to(tl.float64) * (0.0 - s.to(tl.float64))
-        weighted_gap += tl.where(valid & (et > 0), term, 0.0)
+        term = _far_term(et_w, t_scale, FAR).to(tl.float64) * (0.0 - s.to(tl.float64))
+        weighted_gap += tl.where(valid & (et_w > 0), term, 0.0)
     if WITH_MEAN:
         delta = _offset_delta(cs, ct, s_max, t_max)
         low = tl.minimum(low, tl.where(valid, delta, float("inf")))
         high = tl.maximum(high, tl.where(valid, delta, -float("inf")))
-        delta_sum += tl.where(valid & (et > 0), et * delta, 0.0).to(tl.float64)
+        delta_sum += tl.where(valid & (et_w > 0), _far_term(et_w * delta, t_scale, FAR), 0.0).to(
+            tl.float64
+        )
     return s_other, t_other, weighted_gap, delta_sum, low, high
 
 
@@ -1126,6 +1417,7 @@ def _lean_normalizers(
     S_ptr, T_ptr, base, C: tl.constexpr, temp, s_max, t_max, s_orig, t_orig, s_idx, t_idx,
     s_other, t_other, weighted_gap, delta_sum, low, high, B: tl.constexpr, FP32: tl.constexpr,
     LARGE_T: tl.constexpr, WITH_MEAN: tl.constexpr, WITH_VALUE: tl.constexpr,
+    FAR: tl.constexpr = False,
 ):  # fmt: skip
     """The normalizer pass over unmasked full tiles and a masked tail."""
     rtemp = _reciprocal(temp)
@@ -1134,22 +1426,41 @@ def _lean_normalizers(
         s_other, t_other, weighted_gap, delta_sum, low, high = _normalizer_tile(
             S_ptr, T_ptr, base, start, C, temp, rtemp, s_max, t_max, s_orig, t_orig,
             s_idx, t_idx, s_other, t_other, weighted_gap, delta_sum, low, high,
-            B, FP32, LARGE_T, WITH_MEAN, WITH_VALUE, True, False,
+            B, FP32, LARGE_T, WITH_MEAN, WITH_VALUE, True, False, FAR=FAR
         )  # fmt: skip
     if FULL < C:
         s_other, t_other, weighted_gap, delta_sum, low, high = _normalizer_tile(
             S_ptr, T_ptr, base, FULL, C, temp, rtemp, s_max, t_max, s_orig, t_orig,
             s_idx, t_idx, s_other, t_other, weighted_gap, delta_sum, low, high,
-            B, FP32, LARGE_T, WITH_MEAN, WITH_VALUE, True, True,
+            B, FP32, LARGE_T, WITH_MEAN, WITH_VALUE, True, True, FAR=FAR
         )  # fmt: skip
     return s_other, t_other, weighted_gap, delta_sum, low, high
+
+
+@triton.jit
+def _ranges(
+    s_least, t_least, s_max, t_max, bad, temp, C, FP32: tl.constexpr, LARGE_T: tl.constexpr,
+    LEAN: tl.constexpr,
+):  # fmt: skip
+    """From a streamed row's lane minima: its loss bound (_far_bound, lean float32 rows; else
+    -1), and whether its summed ranges are finite (lean rows at T > 1). Within finite summed
+    ranges, centered logits and their differences are finite: the large-temperature fallbacks
+    are not needed."""
+    s_least, t_least = tl.min(s_least, 0), tl.min(t_least, 0)
+    bound = temp * 0 - 1
+    if LEAN and FP32:
+        bound = _far_bound(s_least, t_least, s_max, t_max, bad, temp, C, LARGE_T)
+    ranged = _finite((s_max - s_least) + (t_max - t_least))
+    if not (LEAN and LARGE_T):
+        ranged = ranged & False
+    return bound, ranged
 
 
 @triton.jit
 def _stream_normalizers(
     S_ptr, T_ptr, base, C, temp, B: tl.constexpr, FP32: tl.constexpr, LARGE_T: tl.constexpr,
     EPS: tl.constexpr, WITH_MEAN: tl.constexpr = False, WITH_VALUE: tl.constexpr = False,
-    LEAN: tl.constexpr = False,
+    LEAN: tl.constexpr = False, FAR: tl.constexpr = False
 ):  # fmt: skip
     """Accumulate lane statistics through the row, then reduce once per statistic. Lean
     rows (C constant) skip the nonfinite selects after the first pass and scale by 1 / temp."""
@@ -1173,7 +1484,7 @@ def _stream_normalizers(
         ct = tl.where(_finite(ct), ct, 0.0)
         s_first, s_idx, s_top = _top_two(s_first, s_idx, s_top, tl.where(valid, cs, neg_inf), k)
         t_first, t_idx, t_top = _top_two(t_first, t_idx, t_top, tl.where(valid, ct, neg_inf), k)
-        if LEAN and LARGE_T:
+        if LEAN and (LARGE_T or FP32):
             s_least = tl.minimum(s_least, tl.where(valid, cs, float("inf")))
             t_least = tl.minimum(t_least, tl.where(valid, ct, float("inf")))
     bad = tl.sum(bad.to(tl.int32), 0) > 0
@@ -1181,9 +1492,7 @@ def _stream_normalizers(
     t_max, t_idx, t_top = _finish_top_two(t_first, t_idx, t_top, C)
     s_top = _temp_diff(s_top, s_max, temp, LARGE_T)
     t_top = _temp_diff(t_top, t_max, temp, LARGE_T)
-    # Within finite summed ranges, centered logits and their differences are finite: the
-    # large-temperature fallbacks are not needed.
-    ranged = _finite((s_max - tl.min(s_least, 0)) + (t_max - tl.min(t_least, 0)))
+    bound, ranged = _ranges(s_least, t_least, s_max, t_max, bad, temp, C, FP32, LARGE_T, LEAN)
     # Normal tails reuse exp(s), exp(t); far tails retain scaling before subnormal rounding.
     cutoff: tl.constexpr = -40.0 if FP32 else -350.0
     s_orig = tl.where(_finite(s_top) & (s_top < cutoff), s_top, 0.0)
@@ -1200,26 +1509,26 @@ def _stream_normalizers(
                 s_other, t_other, weighted_gap, delta_sum, low, high = _lean_normalizers(
                     S_ptr, T_ptr, base, C, temp, s_max, t_max, s_orig, t_orig, s_idx, t_idx,
                     s_other, t_other, weighted_gap, delta_sum, low, high, B, FP32, False,
-                    WITH_MEAN, WITH_VALUE,
+                    WITH_MEAN, WITH_VALUE, FAR=FAR
                 )  # fmt: skip
             else:
                 s_other, t_other, weighted_gap, delta_sum, low, high = _lean_normalizers(
                     S_ptr, T_ptr, base, C, temp, s_max, t_max, s_orig, t_orig, s_idx, t_idx,
                     s_other, t_other, weighted_gap, delta_sum, low, high, B, FP32, True,
-                    WITH_MEAN, WITH_VALUE,
+                    WITH_MEAN, WITH_VALUE, FAR=FAR
                 )  # fmt: skip
         else:
             s_other, t_other, weighted_gap, delta_sum, low, high = _lean_normalizers(
                 S_ptr, T_ptr, base, C, temp, s_max, t_max, s_orig, t_orig, s_idx, t_idx,
                 s_other, t_other, weighted_gap, delta_sum, low, high, B, FP32, False,
-                WITH_MEAN, WITH_VALUE,
+                WITH_MEAN, WITH_VALUE, FAR=FAR
             )  # fmt: skip
     else:
         for start in range(0, C, B):
             s_other, t_other, weighted_gap, delta_sum, low, high = _normalizer_tile(
                 S_ptr, T_ptr, base, start, C, temp, temp, s_max, t_max, s_orig, t_orig,
                 s_idx, t_idx, s_other, t_other, weighted_gap, delta_sum, low, high,
-                B, FP32, LARGE_T, WITH_MEAN, WITH_VALUE, False, True,
+                B, FP32, LARGE_T, WITH_MEAN, WITH_VALUE, False, True, FAR=FAR
             )  # fmt: skip
     s_half, t_half = _exp(s_orig * 0.5), _exp(t_orig * 0.5)
     s_tail = s_half * (s_half * tl.sum(s_other, 0).to(zero.dtype))
@@ -1229,19 +1538,22 @@ def _stream_normalizers(
     s_sum, t_sum = 1 + s_tail, 1 + t_tail
     if WITH_VALUE:
         value = s_lognorm.to(tl.float64) + tl.sum(weighted_gap, 0) / t_sum.to(tl.float64)
-        return bad, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm, value
+        return bad, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm, value, bound
     elif WITH_MEAN:
         mean = (tl.sum(delta_sum, 0) / t_sum).to(zero.dtype)
         relative = mean
         if LARGE_T:
             if ~_finite(mean):
                 relative = _stream_relative_mean(
-                    S_ptr, T_ptr, base, C, temp, s_max, t_max, t_sum, B, FP32, LARGE_T
+                    S_ptr, T_ptr, base, C, temp, s_max, t_max, t_sum, B, FP32, LARGE_T, FAR=FAR
                 )
         lower = (tl.min(low, 0) - mean) / temp
         upper = (tl.max(high, 0) - mean) / temp
         simple = _finite(mean) & (lower >= -2) & (upper <= 2)
-        return bad, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm, mean, relative, simple, ranged
+        return (
+            bad, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm, mean, relative, simple, ranged,
+            bound,
+        )  # fmt: skip
     else:
         return bad, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm
 
@@ -1263,6 +1575,7 @@ def _stream_correction(
     B: tl.constexpr,
     FP32: tl.constexpr,
     LARGE_T: tl.constexpr,
+    FAR: tl.constexpr = False,
 ):
     """The log-ratio correction of a row without a pivot, over lean tiles."""
     shift = _shift(s_max, t_max, mean_delta, rel_mean, over, t_lognorm, temp, LARGE_T)
@@ -1270,17 +1583,19 @@ def _stream_correction(
     correction = tl.zeros([B], tl.float64)
     FULL: tl.constexpr = C // B * B
     for start in range(0, FULL, B):
-        _, _, p, s, dn = _lean_tile(
+        _, _, p, p_scale, s, dn = _far_lean_tile(
             S_ptr, T_ptr, base, start, C, rtemp, s_max, t_max, rt, mean_delta, rel_mean, over,
-            0.0, B, FP32, LARGE_T, False,
+            0.0, B, FP32, LARGE_T, False, FAR=FAR
         )  # fmt: skip
-        correction += _correction_term(dn, p, s, shift).to(tl.float64)
+        correction += _far_correction_term(dn, p, p_scale, s, shift, FAR).to(tl.float64)
     if FULL < C:
-        _, valid, p, s, dn = _lean_tile(
+        _, valid, p, p_scale, s, dn = _far_lean_tile(
             S_ptr, T_ptr, base, FULL, C, rtemp, s_max, t_max, rt, mean_delta, rel_mean, over,
-            0.0, B, FP32, LARGE_T, True,
+            0.0, B, FP32, LARGE_T, True, FAR=FAR
         )  # fmt: skip
-        correction += tl.where(valid, _correction_term(dn, p, s, shift), 0.0).to(tl.float64)
+        correction += tl.where(valid, _far_correction_term(dn, p, p_scale, s, shift, FAR), 0.0).to(
+            tl.float64
+        )
     return tl.sum(correction, 0).to(temp.dtype)
 
 
@@ -1361,6 +1676,12 @@ def _stream_residuals(
         t_lognorm, mean_delta, rel_mean, over, correction, 1, FP32, LARGE_T,
     )  # fmt: skip
     r = (-rest).to(omega.dtype) + tl.zeros([1], omega.dtype)
+    if FP32:
+        direct, _ = _prox_terms(
+            omega, p, log_p, log_q, logratio, alpha, log_alpha, valid,
+            EPS, TINY, CUT, LARGE, STEPS, RES_STEPS, FP32,
+        )  # fmt: skip
+        r = tl.where(p + q > 1.0, r, direct)
     log_pi = _log_pi(r, p, log_p, log_q, omega, alpha, log_alpha, CUT, LARGE, STEPS, FP32)
     cross -= tl.sum(tl.where(p > 0, p * log_pi, 0.0), 0).to(tl.float64)
     value = (cross + (penalty + tl.sum((alpha * r) * r, 0).to(tl.float64)) / 2).to(omega.dtype)
@@ -1376,6 +1697,7 @@ def _prox_stream_kernel(
     S_ptr,
     T_ptr,
     PARAMS_ptr,
+    PARAMS64_ptr,
     LOSS_ptr,
     GRAD_ptr,
     N,
@@ -1392,12 +1714,40 @@ def _prox_stream_kernel(
 ):
     """_prox_kernel over tiles of B columns: the statistics and each step are passes."""
     dtype: tl.constexpr = tl.float32 if FP32 else tl.float64
-    neg_inf: tl.constexpr = -float("inf")
     row = tl.program_id(0).to(tl.int64)
+    temp, alpha, log_alpha = _prox_params(PARAMS_ptr, dtype)
+    need = _prox_stream_row(
+        S_ptr, T_ptr, LOSS_ptr, GRAD_ptr, row, C, temp, alpha, log_alpha, B, FP32, LARGE_T,
+        EPS, TINY, CUT, LARGE, STEPS, RES_STEPS,
+    )  # fmt: skip
+    if FP32:
+        if need:
+            tl.debug_barrier()
+            _prox_stream_far_row(S_ptr, T_ptr, PARAMS64_ptr, LOSS_ptr, GRAD_ptr, row, C, B, LARGE_T)
+
+
+@triton.jit(noinline=True)
+def _prox_stream_far_row(
+    S_ptr, T_ptr, PARAMS_ptr, LOSS_ptr, GRAD_ptr, row, C, B: tl.constexpr, LARGE_T: tl.constexpr
+):  # fmt: skip
+    """_prox_far_row of _prox_stream_kernel."""
+    temp, alpha, log_alpha = _prox_params(PARAMS_ptr, tl.float64)
+    _prox_stream_row(
+        S_ptr, T_ptr, LOSS_ptr, GRAD_ptr, row, C, temp, alpha, log_alpha, B, False, LARGE_T,
+        _EPS64, _TINY64, -36.0, 1e16, 3, 6,
+    )  # fmt: skip
+
+
+@triton.jit
+def _prox_stream_row(
+    S_ptr, T_ptr, LOSS_ptr, GRAD_ptr, row, C, temp, alpha, log_alpha, B: tl.constexpr,
+    FP32: tl.constexpr, LARGE_T: tl.constexpr, EPS: tl.constexpr, TINY: tl.constexpr,
+    CUT: tl.constexpr, LARGE: tl.constexpr, STEPS: tl.constexpr, RES_STEPS: tl.constexpr,
+):  # fmt: skip
+    """_prox_row over tiles of B columns."""
+    dtype: tl.constexpr = tl.float32 if FP32 else tl.float64
+    neg_inf: tl.constexpr = -float("inf")
     base = row * C
-    temp = tl.load(PARAMS_ptr).to(dtype)
-    alpha = tl.load(PARAMS_ptr + 1).to(dtype)
-    log_alpha = tl.load(PARAMS_ptr + 2).to(dtype)
     zero = temp * 0
     bad, s_max, t_max, s_sum, t_sum, s_lognorm, t_lognorm = _stream_normalizers(
         S_ptr, T_ptr, base, C, temp, B, FP32, LARGE_T, EPS
@@ -1410,12 +1760,19 @@ def _prox_stream_kernel(
     u_min = zero - neg_inf
     pq_max = zero + neg_inf
     pivot = C * 0
+    p_low = zero
+    q_low = zero
+    u_sum = tl.zeros([], tl.float64)
     for start in range(0, C, B):
         k, valid, p, q, log_q, log_p, logratio = _stream_tile(
             S_ptr, T_ptr, base, start, C, temp, s_max, t_max, s_sum, t_sum, s_lognorm,
             t_lognorm, mean_delta, rel_mean, over, correction, B, FP32, LARGE_T,
         )  # fmt: skip
         u = _u(logratio, p, q, valid)
+        if FP32:
+            p_low = tl.minimum(p_low, tl.min(tl.where(valid, log_p, 0.0), 0))
+            q_low = tl.minimum(q_low, tl.min(tl.where(valid, log_q, 0.0), 0))
+            u_sum += tl.sum(u, 0).to(tl.float64)
         u_max = tl.maximum(u_max, tl.max(tl.where(valid, u, neg_inf), 0))
         u_min = tl.minimum(u_min, tl.min(tl.where(valid, u, -neg_inf), 0))
         pq = tl.where(valid, p + q, neg_inf)
@@ -1461,6 +1818,8 @@ def _prox_stream_kernel(
         B, FP32, LARGE_T, EPS, TINY, CUT, LARGE, STEPS, RES_STEPS,
     )  # fmt: skip
     tl.store(LOSS_ptr + row, tl.where(bad, float("nan"), value).to(LOSS_ptr.dtype.element_ty))
+    far = ~bad & (tl.minimum(p_low, q_low) < _FAR_GAP)
+    return _needs_far(tl.where(far, _FAR_VALUE * C * (1.0 - q_low), -1.0), value, u_sum, C)
 
 
 _scalars: dict[tuple[int, torch.dtype, tuple[float, ...], int | None], torch.Tensor] = {}
@@ -1520,6 +1879,29 @@ _REDUCTIONS = {"none": 0, "mean": 1, "sum": 2}
 _P, _I = _cuda_launch.POINTER, _cuda_launch.INT32
 
 
+def adaptive(n: int, c: int, dtype: str, fp32: bool, value_only: bool = False) -> bool:
+    """The measured ordinary-row fast path; smaller rows keep the single-launch path."""
+    return (
+        fp32
+        and dtype in ("float32", "bfloat16")
+        and n >= 1024
+        and (256 < c <= 4096 or 16384 <= c <= 32768)
+        and not value_only
+    )
+
+
+def adaptive_shape(c: int) -> tuple[int, int]:
+    """Register width and warps shared by both API launch plans."""
+    return triton.next_power_of_2(c), 4 if c <= 4096 else 16
+
+
+@functools.cache
+def _fast() -> Any:
+    from . import _triton_distillation_fast
+
+    return _triton_distillation_fast
+
+
 def forward(
     student: torch.Tensor,
     teacher: torch.Tensor,
@@ -1544,11 +1926,33 @@ def forward(
         out = torch.empty(shape, device=student.device, dtype=dtype)
         (block, warps), _ = _shapes(c)
         rows = _rows_per_cta(c)
-        _forward[(triton.cdiv(n, rows),)](
-            student, teacher, _scalar_tensor(student.device, work, (temperature,)), stats, n, c,
-            block, work == torch.float32, temperature > 1.0, torch.finfo(work).eps, value_only,
-            rows, num_warps=warps, enable_reflect_ftz=False,
-        )  # fmt: skip
+        temp = _scalar_tensor(student.device, work, (temperature,))
+        if adaptive(
+            n, c, str(student.dtype).removeprefix("torch."), work == torch.float32, value_only
+        ):
+            fast = _fast()
+            fast_block, fast_warps = adaptive_shape(c)
+            fast._forward[(n,)](
+                student, teacher, temp, stats, n, c, fast_block, num_warps=fast_warps
+            )
+            fast._rescue_forward[(n,)](
+                student,
+                teacher,
+                temp,
+                stats,
+                n,
+                c,
+                block,
+                temperature > 1.0,
+                num_warps=warps,
+                enable_reflect_ftz=False,
+            )
+        else:
+            _forward[(triton.cdiv(n, rows),)](
+                student, teacher, temp, stats, n, c,
+                block, work == torch.float32, temperature > 1.0, torch.finfo(work).eps, value_only,
+                rows, num_warps=warps, enable_reflect_ftz=False,
+            )  # fmt: skip
         _triton_reduce.launch(stats, out, n, _REDUCTIONS[reduction], _LAYOUT)
         return out, stats
 
@@ -1570,39 +1974,80 @@ def backward(
         upstream = upstream.to(torch.promote_types(student.dtype, torch.float32)).contiguous()
         _, (block, warps) = _shapes(c)
         rows = _rows_per_cta(c)
-        _backward[(triton.cdiv(n, rows),)](
-            student, teacher, _scalar_tensor(student.device, work, (temperature,)), stats,
-            upstream, gradient, n, c, block, work == torch.float32, temperature > 1.0,
-            _REDUCTIONS[reduction], rows, num_warps=warps, enable_reflect_ftz=False,
-        )  # fmt: skip
+        temp = _scalar_tensor(student.device, work, (temperature,))
+        if adaptive(n, c, str(student.dtype).removeprefix("torch."), work == torch.float32):
+            fast = _fast()
+            fast_block, fast_warps = adaptive_shape(c)
+            fast._backward[(n,)](
+                student,
+                teacher,
+                temp,
+                stats,
+                upstream,
+                gradient,
+                n,
+                c,
+                _REDUCTIONS[reduction],
+                fast_block,
+                num_warps=fast_warps,
+                enable_reflect_ftz=False,
+            )
+            fast._rescue_backward[(n,)](
+                student,
+                teacher,
+                temp,
+                stats,
+                upstream,
+                gradient,
+                n,
+                c,
+                block,
+                temperature > 1.0,
+                _REDUCTIONS[reduction],
+                num_warps=warps,
+                enable_reflect_ftz=False,
+            )
+        else:
+            _backward[(triton.cdiv(n, rows),)](
+                student, teacher, temp, stats, upstream, gradient, n, c, block,
+                work == torch.float32, temperature > 1.0, _REDUCTIONS[reduction], rows,
+                num_warps=warps, enable_reflect_ftz=False,
+            )  # fmt: skip
         return gradient
 
 
-class _Fused(torch.autograd.Function):
-    """Triton-launched distillation_loss: saves the row statistics, not the gradient."""
+@functools.cache
+def _fused() -> Any:
+    """The autograd Function of Triton-launched distillation_loss (defined on first use)."""
+    from ._first_order import first_order
 
-    @staticmethod
-    def forward(
-        ctx: Any,
-        student: torch.Tensor,
-        teacher: torch.Tensor,
-        temperature: float,
-        double: bool,
-        reduction: str,
-    ) -> torch.Tensor:
-        out, stats = forward(student, teacher, temperature, double, reduction)
-        ctx.save_for_backward(student, teacher, stats)
-        ctx.options = (temperature, double, reduction)
-        return out
+    class _Fused(torch.autograd.Function):
+        """Triton-launched distillation_loss: saves the row statistics, not the gradient."""
 
-    @staticmethod
-    @first_order
-    def backward(
-        ctx: Any, *grad_outputs: torch.Tensor
-    ) -> tuple[torch.Tensor, None, None, None, None]:
-        student, teacher, stats = ctx.saved_tensors
-        gradient = backward(student, teacher, stats, grad_outputs[0], *ctx.options)
-        return gradient, None, None, None, None
+        @staticmethod
+        def forward(
+            ctx: Any,
+            student: torch.Tensor,
+            teacher: torch.Tensor,
+            temperature: float,
+            double: bool,
+            reduction: str,
+        ) -> torch.Tensor:
+            out, stats = forward(student, teacher, temperature, double, reduction)
+            ctx.save_for_backward(student, teacher, stats)
+            ctx.options = (temperature, double, reduction)
+            return out
+
+        @staticmethod
+        @first_order
+        def backward(
+            ctx: Any, *grad_outputs: torch.Tensor
+        ) -> tuple[torch.Tensor, None, None, None, None]:
+            student, teacher, stats = ctx.saved_tensors
+            gradient = backward(student, teacher, stats, grad_outputs[0], *ctx.options)
+            return gradient, None, None, None, None
+
+    return _Fused
 
 
 @functools.lru_cache(maxsize=_cuda_launch.CACHE)
@@ -1614,6 +2059,7 @@ def _compiled(
     large_t: bool,
     code: int,
     value_only: bool = False,
+    fast: bool = False,
 ) -> Any:
     """C++ launch handles keyed by shape, arithmetic, reduction and value-only mode."""
     with torch.cuda.device(device):
@@ -1622,7 +2068,7 @@ def _compiled(
         stats = torch.empty(1, device="cuda", dtype=torch.float64)
         out = torch.empty(1, device="cuda", dtype=torch.promote_types(dtype, torch.float32))
         (block, warps), (b_block, b_warps) = _shapes(c)
-        rows = _rows_per_cta(c)
+        rows = 1 if fast else _rows_per_cta(c)
         fp32, eps = work == torch.float32, torch.finfo(work).eps
         # Any int32 N: the kernels do not specialize on it.
         k_fwd = _forward.warmup(
@@ -1634,10 +2080,72 @@ def _compiled(
             num_warps=b_warps, enable_reflect_ftz=False, grid=(1,),
         )  # fmt: skip
         reduce = _triton_reduce.warmup(stats, out, code, _LAYOUT)
+        rescue = []
+        if fast:
+            f = _fast()
+            fast_block, fast_warps = adaptive_shape(c)
+            rf = f._rescue_forward.warmup(
+                z,
+                z,
+                temp,
+                stats,
+                2,
+                c,
+                block,
+                large_t,
+                num_warps=warps,
+                enable_reflect_ftz=False,
+                grid=(1,),
+            )
+            rb = f._rescue_backward.warmup(
+                z,
+                z,
+                temp,
+                stats,
+                out,
+                z,
+                2,
+                c,
+                b_block,
+                large_t,
+                code,
+                num_warps=b_warps,
+                enable_reflect_ftz=False,
+                grid=(1,),
+            )
+            k_fwd = f._forward.warmup(
+                z,
+                z,
+                temp,
+                stats,
+                2,
+                c,
+                fast_block,
+                num_warps=fast_warps,
+                enable_reflect_ftz=False,
+                grid=(1,),
+            )
+            k_bwd = f._backward.warmup(
+                z,
+                z,
+                temp,
+                stats,
+                out,
+                z,
+                2,
+                c,
+                code,
+                fast_block,
+                num_warps=fast_warps,
+                enable_reflect_ftz=False,
+                grid=(1,),
+            )
+            rescue = [(rf, (_P, _P, _P, _P, _I)), (rb, (_P, _P, _P, _P, _P, _P, _I))]
         return _cuda_launch.handles(
             [(k_fwd, (_P, _P, _P, _P, _I))]
             + [(k, (_P, _P, _I)) for k in reduce]
-            + [(k_bwd, (_P, _P, _P, _P, _P, _P, _I))],
+            + [(k_bwd, (_P, _P, _P, _P, _P, _P, _I))]
+            + rescue,
             _triton_reduce.BLOCK,
             _triton_reduce.DIRECT_ROWS,
             0,
@@ -1663,13 +2171,20 @@ def distillation_loss(
             temperature > 1,
             code,
             value_only,
+            adaptive(
+                student.shape[0],
+                student.shape[1],
+                str(student.dtype).removeprefix("torch."),
+                work == torch.float32,
+                value_only,
+            ),
         )
         if not isinstance(handles, str):
             temp = _scalar_tensor(student.device, work, (temperature,))
             return host.distillation_cuda_apply(student, teacher, temp, code, handles)
     if value_only:
         return forward(student, teacher, temperature, double, reduction, True)[0]
-    return _Fused.apply(student, teacher, temperature, double, reduction)
+    return _fused().apply(student, teacher, temperature, double, reduction)
 
 
 def proximal_distillation(
@@ -1683,7 +2198,10 @@ def proximal_distillation(
         fp32 = not double and student.dtype != torch.float64 and holds
         work = torch.float32 if fp32 else torch.float64
         cut, large, steps, res_steps = (-18.0, 1e7, 2, 4) if fp32 else (-36.0, 1e16, 3, 6)
-        params = _scalar_tensor(student.device, work, (temperature, alpha, math.log(alpha)))
+        values = (temperature, alpha, math.log(alpha))
+        params = _scalar_tensor(student.device, work, values)
+        # Float32-work rows with far entries take float64 work again (_prox_far_row).
+        params64 = _scalar_tensor(student.device, torch.float64, values)
         out_dtype = torch.float64 if student.dtype == torch.float64 else torch.float32
         loss = torch.empty(n, dtype=out_dtype, device=student.device)
         # float32 for 16-bit logits: backward scales it before the only rounding.
@@ -1696,6 +2214,7 @@ def proximal_distillation(
                 student,
                 teacher,
                 params,
+                params64,
                 loss,
                 grad,
                 n,

@@ -1,12 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
-project(libsdca)
-
-set(libsdca_MAJOR_VERSION 0)
-set(libsdca_MINOR_VERSION 3)
-set(libsdca_PATCH_VERSION 1)
-set(libsdca_VERSION
-  ${libsdca_MAJOR_VERSION}.${libsdca_MINOR_VERSION}.${libsdca_PATCH_VERSION}
-  )
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" libsdca_VERSION LIMIT_COUNT 1)
+project(libsdca VERSION ${libsdca_VERSION})
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS VERSION)
 add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
 
 # Whether to use <chrono>
@@ -231,6 +226,7 @@ set(libsdca_PROX_SOURCES
 
 set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/loss.h
+  ${libsdca_INCLUDE_PATH}/loss_kind.h
   ${libsdca_INCLUDE_PATH}/solver.h
   ${libsdca_INCLUDE_PATH}/solver/solverdef.h
   ${libsdca_INCLUDE_PATH}/solver/context.h
@@ -248,12 +244,12 @@ set(libsdca_SOLVER_SOURCES
   ${libsdca_INCLUDE_PATH}/solver/eval/types.h
   ${libsdca_INCLUDE_PATH}/solver/eval.h
   ${libsdca_INCLUDE_PATH}/solver/objective/feasible_dual.h
-  ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy.h
-  ${libsdca_INCLUDE_PATH}/solver/objective/l2_entropy_topk.h
-  ${libsdca_INCLUDE_PATH}/solver/objective/l2_hinge_topk.h
-  ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_entropy.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_cross_entropy.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_topk_cross_entropy.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_topk_hinge_alpha.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_cross_entropy.h
   ${libsdca_INCLUDE_PATH}/solver/objective/l2_multilabel_hinge.h
-  ${libsdca_INCLUDE_PATH}/solver/objective/l2_topk_hinge.h
+  ${libsdca_INCLUDE_PATH}/solver/objective/l2_topk_hinge_beta.h
   ${libsdca_INCLUDE_PATH}/solver/objective/objective_base.h
   ${libsdca_INCLUDE_PATH}/solver/objective.h
   ${libsdca_INCLUDE_PATH}/solver/reporting.h
@@ -300,8 +296,7 @@ target_compile_features(libsdca INTERFACE cxx_std_11)
 target_include_directories(libsdca INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include> ${SDCA_BLAS_INCLUDE_DIRS})
-target_compile_definitions(libsdca INTERFACE ${SDCA_BLAS_DEFINITIONS}
-  SDCA_VERSION="${libsdca_VERSION}")
+target_compile_definitions(libsdca INTERFACE ${SDCA_BLAS_DEFINITIONS})
 if(USE_CHRONO)
   target_compile_definitions(libsdca INTERFACE SDCA_USE_CHRONO)
 else()
@@ -322,7 +317,7 @@ if(SDCA_BUILD_C_API)
   target_include_directories(sdca_c INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
   # The shared library version follows SDCA_ABI_VERSION.
-  set_target_properties(sdca_c PROPERTIES OUTPUT_NAME sdca_c VERSION 5 SOVERSION 5
+  set_target_properties(sdca_c PROPERTIES OUTPUT_NAME sdca_c VERSION 6 SOVERSION 6
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
   install(TARGETS sdca_c EXPORT libsdcaTargets
     LIBRARY DESTINATION lib ARCHIVE DESTINATION lib RUNTIME DESTINATION bin)

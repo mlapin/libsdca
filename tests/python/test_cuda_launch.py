@@ -24,7 +24,8 @@ import torch.nn.functional as F
 import torch.utils.cpp_extension  # noqa: F401
 from child_process import run_python
 from libsdca import _cpu_entropy, _cuda_launch, _extensions
-from libsdca.torch import explain_backend, sdca_loss
+from libsdca.torch import explain_backend
+from named_losses import explain_route, torch_loss
 
 # A nonsmooth and a smoothed hinge: (loss, gamma) of _case.
 HINGES = ("topk_hinge_alpha", "topk_hinge_beta_smooth")
@@ -80,7 +81,7 @@ def _reference(
     else:
         mask = F.one_hot(y, z.shape[1]).bool()
         loss, gamma = _case(loss, gamma)
-        value = sdca_loss(x, mask, loss, backend="torch", gamma=gamma, reduction=reduction)
+        value = torch_loss(x, mask, loss, backend="torch", gamma=gamma, reduction=reduction)
     value.backward(torch.full_like(value, 0.75))
     assert x.grad is not None
     return value.detach(), x.grad
@@ -165,11 +166,16 @@ def check_reduction(reduce: types.ModuleType, device: str, sizes: list[int]) -> 
 
 
 def _fused(
-    z: torch.Tensor, y: torch.Tensor, loss: str, reduction: str, gamma: float = 0.5
+    z: torch.Tensor,
+    y: torch.Tensor,
+    loss: str,
+    reduction: str,
+    gamma: float = 0.5,
+    precision: str | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x = z.detach().clone().requires_grad_()
     loss, gamma = _case(loss, gamma)
-    value = sdca_loss(x, y, loss, gamma=gamma, reduction=reduction)
+    value = torch_loss(x, y, loss, gamma=gamma, reduction=reduction, precision=precision)
     value.backward(torch.full_like(value, 0.75))
     assert x.grad is not None
     return value.detach(), x.grad
@@ -289,6 +295,46 @@ class LauncherGateTests:
             # on raises instead.
             with _setting("on"), pytest.raises(RuntimeError, match="no nvcc"):
                 _cuda_launch.status()
+
+    def test_file_system_failure_is_not_recorded(self, tmp_path: Path):
+        """A build that fails on the file system (not the compiler) warns in every process and
+        leaves no record."""
+        triton = types.SimpleNamespace(__version__="3.5.0")
+        failing = mock.patch(
+            "torch.utils.cpp_extension.load", side_effect=OSError("No space left on device")
+        )
+        tools = mock.patch.object(_extensions, "missing_tools", return_value=None)
+        modules = mock.patch.dict(sys.modules, {"triton": triton})
+        directory = mock.patch.dict(os.environ, {"TORCH_EXTENSIONS_DIR": str(tmp_path)})
+        with failing, tools, modules, directory, _setting("auto"):
+            for _ in range(2):
+                _cuda_launch.status.cache_clear()
+                with pytest.warns(RuntimeWarning, match="in this process"):
+                    host, reason = _cuda_launch.status()
+                assert host is None and "No space left on device" in reason
+                assert not _cuda_launch.failure_record("3.5.0").exists()
+
+    def test_existing_build_that_does_not_load_is_not_recorded(self, tmp_path: Path):
+        """A cached build that no longer imports warns in every process that it could not be
+        loaded, names the directory to delete and leaves no record."""
+        triton = types.SimpleNamespace(__version__="3.5.0")
+        tools = mock.patch.object(_extensions, "missing_tools", return_value=None)
+        build = mock.patch.object(_extensions, "_build")
+        modules = mock.patch.dict(sys.modules, {"triton": triton})
+        directory = mock.patch.dict(os.environ, {"TORCH_EXTENSIONS_DIR": str(tmp_path)})
+        with tools, build as built, modules, directory, _setting("auto"):
+            cached = _extensions.build_directory(_cuda_launch._extension("3.5.0"))
+            cached.mkdir()
+            (cached / f"{cached.name}.so").write_bytes(b"not a library")
+            for _ in range(2):
+                _cuda_launch.status.cache_clear()
+                with pytest.warns(RuntimeWarning, match="could not be loaded") as caught:
+                    host, reason = _cuda_launch.status()
+                assert host is None and f"delete {cached} to build it again" in reason
+                assert "did not build" not in reason
+                assert "in this process" in str(caught[0].message)
+                assert not _cuda_launch.failure_record("3.5.0").exists()
+            built.assert_not_called()
 
     def test_missing_tools_hint_once(self):
         triton = types.SimpleNamespace(__version__="3.5.0")
@@ -501,25 +547,25 @@ class LauncherGateTests:
         y = torch.randint(0, 5, (6,))
         mask = F.one_hot(y, 5).bool()
         kernel = _cpu_entropy.enabled()
-        assert explain_backend(z, y)[0] == ("cpu-kernel" if kernel else "native")
+        assert explain_route(z, y)[0] == ("cpu-kernel" if kernel else "native")
         # float64 integer entropy: the extension's rows of at most 32 classes, the native
         # library's wider ones (the same statistics and double extremes either way).
-        assert explain_backend(z.double(), y)[0] == ("cpu-kernel" if kernel else "native")
+        assert explain_route(z.double(), y)[0] == ("cpu-kernel" if kernel else "native")
         wide = torch.randn(6, 33, dtype=torch.float64)
-        assert explain_backend(wide, y)[0] == "native"
-        assert explain_backend(z, y, backend="torch")[0] == "torch"
-        assert explain_backend(z, y, backend="native")[0] == "native"
-        assert explain_backend(z, mask)[0] == ("cpu-kernel" if kernel else "native")
-        assert explain_backend(z, mask, backend="torch")[0] == "torch"
-        hinge = explain_backend(z, y, "topk_hinge_alpha")[0]
+        assert explain_route(wide, y)[0] == "native"
+        assert explain_route(z, y, backend="torch")[0] == "torch"
+        assert explain_route(z, y, backend="native")[0] == "native"
+        assert explain_route(z, mask)[0] == ("cpu-kernel" if kernel else "native")
+        assert explain_route(z, mask, backend="torch")[0] == "torch"
+        hinge = explain_route(z, y, "topk_hinge_alpha")[0]
         assert hinge == ("cpu-kernel" if kernel else "native")
-        name, reason = explain_backend(z, y, "topk_hinge_beta", k=2, backend="torch")
+        name, reason = explain_route(z, y, "topk_hinge_beta", k=2, backend="torch")
         assert name == "torch"
         assert "backend='torch'" in reason
         if not kernel:
-            assert "the CPU extension is unavailable" in explain_backend(z, y)[1]
-        with pytest.raises(ValueError):
-            explain_backend(z, y, "unknown")
+            assert "the CPU extension is unavailable" in explain_route(z, y)[1]
+        with pytest.raises(TypeError, match="not a libsdca.torch loss"):
+            explain_backend(torch.nn.functional.cross_entropy, z, y)
 
 
 @pytest.mark.skipif(
@@ -590,15 +636,17 @@ class FusedLaunchTests:
         assert entropy._compiled.cache_info().maxsize == _cuda_launch.CACHE
 
     def test_large_batch(self):
+        # This tight float64-reference check requests double work explicitly.
+        # Default fp32 work is checked against its contract in conformance.
         # More rows than one reduction block of blocks: the finish loop runs twice.
         n = 2**22 + 3
         z, y = self._data(n, 3, torch.float32)
         z[n // 3] = torch.tensor([0.0, 1e30, -1e30])
         for loss in ("cross_entropy", *HINGES):
-            name, reason = explain_backend(z, y, _case(loss)[0], gamma=_case(loss)[1])
+            name, reason = explain_route(z, y, _case(loss)[0], gamma=_case(loss)[1])
             assert name in ("cuda-launcher", "triton"), reason
             for reduction in ("mean", "sum", "none"):
-                value, grad = _fused(z, y, loss, reduction)
+                value, grad = _fused(z, y, loss, reduction, precision="float64")
                 ref_value, ref_grad = _reference(z, y, loss, reduction)
                 message = f"{loss} {reduction}"
                 rtol = 2e-6 if loss == "cross_entropy" else 2e-7
@@ -608,7 +656,7 @@ class FusedLaunchTests:
                 torch.testing.assert_close(
                     grad.double(), ref_grad, rtol=rtol, atol=1e-30, msg=message
                 )
-                again, _ = _fused(z, y, loss, reduction)
+                again, _ = _fused(z, y, loss, reduction, precision="float64")
                 assert torch.equal(value, again), message
 
     def test_large_batch_reduction_boundaries(self):
@@ -618,28 +666,28 @@ class FusedLaunchTests:
         row = torch.tensor([[0.0, maximum / 4]], dtype=torch.float64, device=self.device)
         z = row.expand(n, 2).contiguous()
         for loss in ("cross_entropy", "topk_hinge_alpha"):
-            value = sdca_loss(z, y, loss)
+            value = torch_loss(z, y, loss)
             assert round(abs(value.item() / (maximum / 4) - 1.0), 12) == 0
-            assert sdca_loss(z, y, loss, reduction="sum").item() == float("inf")
+            assert torch_loss(z, y, loss, reduction="sum").item() == float("inf")
         # Losses below the normal range (about 1.2e-308) sum in the log domain.
         row = torch.tensor([[0.0, -709.0]], dtype=torch.float64, device=self.device)
         z = row.expand(n, 2).contiguous()
-        single = sdca_loss(z[:1], y[:1], reduction="sum").item()
+        single = torch_loss(z[:1], y[:1], reduction="sum").item()
         assert 0 < single
         assert single < torch.finfo(torch.float64).tiny
-        assert round(abs(sdca_loss(z, y).item() / single - 1.0), 12) == 0
-        assert round(abs(sdca_loss(z, y, reduction="sum").item() / (n * single) - 1.0), 12) == 0
+        assert round(abs(torch_loss(z, y).item() / single - 1.0), 12) == 0
+        assert round(abs(torch_loss(z, y, reduction="sum").item() / (n * single) - 1.0), 12) == 0
         # One loss beyond double's range among ordinary rows: a finite log-domain mean.
         z = torch.zeros(n, 2, dtype=torch.float64, device=self.device)
         z[n - 2] = torch.tensor([-maximum, maximum], dtype=torch.float64)
-        value = sdca_loss(z, y).item()
+        value = torch_loss(z, y).item()
         # 2 * maximum overflows a Python float; maximum / n does not.
         assert round(abs(value / (maximum / n * 2) - 1.0), 9) == 0
         # Invalid rows in the last block propagate NaN without host synchronization.
         z = torch.zeros(n, 2, dtype=torch.float32, device=self.device)
         z[n - 1, 1] = float("nan")
         for loss in ("cross_entropy", "topk_hinge_alpha"):
-            assert bool(sdca_loss(z, y, loss).isnan().all())
+            assert bool(torch_loss(z, y, loss).isnan().all())
 
     def test_reduction_kernels_alone(self):
         # One launch up to DIRECT_ROWS rows, block partials above.
@@ -655,7 +703,7 @@ class FusedLaunchTests:
                     default = _fused(z, y, loss, reduction)
                     with _setting("off"):
                         name, gamma = _case(loss)
-                        name, reason = explain_backend(z, y, name, gamma=gamma, reduction=reduction)
+                        name, reason = explain_route(z, y, name, gamma=gamma, reduction=reduction)
                         assert name == "triton"
                         assert "SDCA_CUDA_LAUNCHER=off" in reason
                         forced = _fused(z, y, loss, reduction)
@@ -671,7 +719,7 @@ class FusedLaunchTests:
         with mock.patch.dict(os.environ), mock.patch.object(triton, "__version__", "3.99.0"):
             os.environ.pop(_cuda_launch.ENV, None)
             _cuda_launch.status.cache_clear()
-            name, reason = explain_backend(z, y)
+            name, reason = explain_route(z, y)
             assert name == "triton"
             assert "outside" in reason
             actual = _fused(z, y, "cross_entropy", "mean")
@@ -682,19 +730,19 @@ class FusedLaunchTests:
     def test_explain_backend_on_cuda(self):
         z, y = self._data(4, 6)
         host, reason = _cuda_launch.status()
-        name = explain_backend(z, y)[0]
+        name = explain_route(z, y)[0]
         assert name == ("cuda-launcher" if host is not None else "triton"), reason
         mask = F.one_hot(y, 6).bool()
-        assert explain_backend(z, mask)[0] == name
-        assert explain_backend(z.float(), mask, precision="float32")[0] == "torch"
-        assert explain_backend(z, y, "topk_hinge_beta", k=2)[0] == name
+        assert explain_route(z, mask)[0] == name
+        assert explain_route(z.float(), mask, precision="float32")[0] == name
+        assert explain_route(z, y, "topk_hinge_beta", k=2)[0] == name
         # precision="float32" takes non-float64 logits, as in sdca_loss.
         single = z.float()
-        assert explain_backend(single, y, precision="float32")[0] == name
-        assert explain_backend(single, y, "topk_hinge_alpha", precision="float32")[0] == "torch"
+        assert explain_route(single, y, precision="float32")[0] == name
+        assert explain_route(single, y, "topk_hinge_alpha", precision="float32")[0] == name
         with pytest.raises(ValueError, match="precision"):
-            explain_backend(z, y, precision="float32")
-        assert explain_backend(z, y, "proximal_cross_entropy")[0] == "triton"
+            explain_route(z, y, precision="float32")
+        assert explain_route(z, y, "proximal_cross_entropy")[0] == "triton"
 
     def test_cuda_default_device(self):
         # A fresh process, so each family builds its kernel handles under the CUDA default.
@@ -703,7 +751,8 @@ class FusedLaunchTests:
             import torch
             import torch.nn.functional as F
             from libsdca import _cuda_launch
-            from libsdca.torch import cross_entropy, explain_backend, sdca_loss
+            from libsdca.torch import cross_entropy
+            from named_losses import explain_route, torch_loss
 
             host, reason = _cuda_launch.status()
             if host is None:
@@ -716,11 +765,11 @@ class FusedLaunchTests:
             mask[:, 0] = True
             w = torch.rand(50, device="cuda", generator=gen) + 0.5
             calls = {
-                "cross_entropy": lambda x: sdca_loss(x, y),
+                "cross_entropy": lambda x: torch_loss(x, y),
                 "weighted": lambda x: cross_entropy(x, y, weight=w),
-                "hinge": lambda x: sdca_loss(x, y, "topk_hinge_alpha"),
-                "topk": lambda x: sdca_loss(x, y, "topk_hinge_beta", k=2),
-                "multilabel": lambda x: sdca_loss(x, mask, "multilabel_hinge"),
+                "hinge": lambda x: torch_loss(x, y, "topk_hinge_alpha"),
+                "topk": lambda x: torch_loss(x, y, "topk_hinge_beta", k=2),
+                "multilabel": lambda x: torch_loss(x, mask, "multilabel_hinge"),
             }
 
             def run():
@@ -734,7 +783,7 @@ class FusedLaunchTests:
 
             for target, loss, k in ((y, "cross_entropy", 1), (y, "topk_hinge_alpha", 1),
                                     (y, "topk_hinge_beta", 2), (mask, "multilabel_hinge", 1)):
-                assert explain_backend(z, target, loss, k=k)[0] == "cuda-launcher", loss
+                assert explain_route(z, target, loss, k=k)[0] == "cuda-launcher", loss
             torch.set_default_device("cuda")
             first = run()
             torch.set_default_device("cpu")
@@ -767,9 +816,9 @@ class FusedLaunchTests:
                     ("multilabel_hinge", mask, 1, 0.41),
                 ):
                     with torch.inference_mode():
-                        sdca_loss(z, target, loss, k=k, gamma=gamma)
+                        torch_loss(z, target, loss, k=k, gamma=gamma)
                     x = z.detach().clone().requires_grad_()
-                    value = sdca_loss(x, target, loss, k=k, gamma=gamma)
+                    value = torch_loss(x, target, loss, k=k, gamma=gamma)
                     value.backward()
                     assert x.grad is not None
                     assert bool(x.grad.isfinite().all())

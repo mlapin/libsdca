@@ -9,6 +9,7 @@
 #include "sdca/solver/data.h"
 #include "sdca/solver/objective.h"
 #include "sdca/solver/solverdef.h"
+#include "sdca/utility/logging.h"
 #include "sdca/utility/stopwatch.h"
 
 namespace sdca {
@@ -174,7 +175,7 @@ struct solver_context {
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << objective.to_string() << ", " << "stopping_criteria (" << criteria.to_string() << "), "
         << train.to_string()
         << ", "
@@ -185,7 +186,7 @@ struct solver_context {
 
   inline std::string status_string() const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << "status: " << solver_status_name(status);
     if (train.evals.size() > 0) {
       str << ", " << train.evals.back().to_string(true);
@@ -208,7 +209,8 @@ struct solver_context {
 
   std::string status_name() const { return solver_status_name(status); }
 
-  bool is_dual() const { return primal_variables == nullptr; }
+  // Whether the input is a Gram matrix (no W).
+  bool is_kernel() const { return primal_variables == nullptr; }
 
   bool is_prox() const { return primal_initial != nullptr; }
 
@@ -223,16 +225,21 @@ struct solver_context {
   }
 };
 
-template <typename Data, typename Result, template <typename> class Input, typename Output,
+// A context on features: the weights W (dim-by-m, column-major) and the duals
+// (m-by-n) are the caller's buffers, which a solve reads at its start and
+// writes at each evaluation; center (dim-by-m, may be null) is the W0 of the
+// regularizer 0.5 ||W - W0||^2 and must outlive the context.
+template <typename Data, typename Result, typename Output,
           template <typename, typename> class Objective>
-inline solver_context<Data, Result, Input, Output, Objective> make_context(
-    Input<Data>&& in, Output&& out, Objective<Data, Result>&& objective, Data* dual_variables,
-    Data* primal_variables) {
-  return solver_context<Data, Result, Input, Output, Objective>(
+inline solver_context<Data, Result, feature_input, Output, Objective> make_context(
+    feature_input<Data>&& in, Output&& out, Objective<Data, Result>&& objective,
+    Data* primal_variables, Data* dual_variables, const Data* center = nullptr) {
+  return solver_context<Data, Result, feature_input, Output, Objective>(
       make_dataset_train<eval_type<Result>>(std::move(in), std::move(out)), std::move(objective),
-      dual_variables, primal_variables);
+      dual_variables, primal_variables, center);
 }
 
+// A context on a Gram matrix: the duals (m-by-n) only.
 template <typename Data, typename Result, typename Output,
           template <typename, typename> class Objective>
 inline solver_context<Data, Result, kernel_input, Output, Objective> make_context(

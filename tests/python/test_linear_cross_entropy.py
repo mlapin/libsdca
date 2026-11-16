@@ -12,8 +12,8 @@ import interpreter
 import pytest
 import torch
 import torch.nn.functional as F
-from libsdca import LinearCrossEntropyLoss, _linear_cross_entropy, linear_cross_entropy
-from libsdca.torch import cross_entropy
+from libsdca import _linear_cross_entropy
+from libsdca.torch import LinearCrossEntropyLoss, cross_entropy, linear_cross_entropy
 
 lce = _linear_cross_entropy
 REDUCTIONS = ("none", "sum", "mean")
@@ -388,7 +388,7 @@ class LinearCrossEntropyTests:
         with torch.autocast("cpu", dtype=torch.bfloat16):
             ours = grads(lambda h, w, b: linear_cross_entropy(h, w, y, b), h, w, b)
             theirs = grads(lambda h, w, b: cross_entropy(F.linear(h, w, b), y), h, w, b)
-            assert lce.explain(h, w, b)[1] == "bfloat16"
+            assert lce._row_kernel(h, w, b, "auto")[1] == "bfloat16"
         assert all(t.dtype == torch.float32 for t in ours)
         close(ours, theirs, 2e-2)
         with pytest.raises(ValueError, match="share one floating-point dtype"):
@@ -411,17 +411,30 @@ class LinearCrossEntropyTests:
             "share one floating-point dtype": lambda: linear_cross_entropy(h, w.double(), y, b),
             "hidden must be": lambda: linear_cross_entropy(h, w.T, y, b),
             "bias must have": lambda: linear_cross_entropy(h, w, y, b[:2]),
-            "int64 class indices": lambda: linear_cross_entropy(h, w, y.int(), b),
-            "label_smoothing": lambda: linear_cross_entropy(h, w, y, label_smoothing=0.1),
+            "label_smoothing": lambda: linear_cross_entropy(h, w, y, label_smoothing=1.5),
+            "class probabilities": lambda: linear_cross_entropy(h, w, torch.ones(4, 2), b),
             "chunk_bytes": lambda: linear_cross_entropy(h, w, y, chunk_bytes=0),
             "float64 logits require": lambda: linear_cross_entropy(
                 h.double(), w.double(), y, precision="float32"
             ),
-            "Unknown backend": lambda: linear_cross_entropy(h, w, y, backend="cuda"),
+            "backend must be one of": lambda: linear_cross_entropy(h, w, y, backend="cuda"),
         }
         for message, call in cases.items():
             with subtests.test(message=message), pytest.raises(ValueError, match=message):
                 call()
+        type_errors = {
+            "integer class labels": lambda: linear_cross_entropy(h, w, y.bool(), b),
+            "hidden must be a tensor": lambda: linear_cross_entropy(h.tolist(), w, y, b),  # pyright: ignore[reportArgumentType]
+            "recompute": lambda: linear_cross_entropy(h, w, y, recompute=1),  # pyright: ignore[reportArgumentType]
+            "ignore_index": lambda: linear_cross_entropy(h, w, y, ignore_index=None),  # pyright: ignore[reportArgumentType]
+        }
+        for message, call in type_errors.items():
+            with subtests.test(message=message), pytest.raises(TypeError, match=message):
+                call()
+        # Any integer label dtype is cast.
+        torch.testing.assert_close(
+            linear_cross_entropy(h, w, y.int(), b), linear_cross_entropy(h, w, y, b)
+        )
 
     def test_module(self):
         h, w, b, y, cw = inputs(6, 4, 9, ignored=2)

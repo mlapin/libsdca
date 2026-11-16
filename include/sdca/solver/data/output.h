@@ -35,7 +35,8 @@ struct multiclass_output {
   size_type num_classes = 0;
   std::vector<size_type> labels;
 
-  multiclass_output(const size_type num_classes_, std::vector<size_type>& labels_)
+  // One label in [0, num_classes) per example.
+  multiclass_output(const size_type num_classes_, std::vector<size_type> labels_)
       : num_classes(num_classes_), labels(std::move(labels_)) {
     if (num_classes == 0 || labels.empty() ||
         *std::max_element(labels.begin(), labels.end()) >= num_classes)
@@ -74,8 +75,10 @@ struct multilabel_output {
   std::vector<size_type> labels;
   std::vector<size_type> offsets;
 
-  multilabel_output(const size_type num_classes_, std::vector<size_type>& labels_,
-                    std::vector<size_type>& offsets_)
+  // The sorted labels of example i, in [0, num_classes), are labels[offsets[i]]
+  // .. labels[offsets[i + 1] - 1] (offsets: num_examples + 1 entries from 0).
+  multilabel_output(const size_type num_classes_, std::vector<size_type> labels_,
+                    std::vector<size_type> offsets_)
       : num_classes(num_classes_), labels(std::move(labels_)), offsets(std::move(offsets_)) {
     validate_labels_and_offsets(num_classes, labels, offsets);
   }
@@ -131,20 +134,6 @@ struct multilabel_output {
     }
   }
 };
-
-template <typename Iterator>
-inline std::pair<Iterator, Iterator> validate_labels(Iterator first, Iterator last) {
-  if (first == last) throw std::invalid_argument("Labels must not be empty");
-  auto minmax = std::minmax_element(first, last);
-  if (*minmax.second == std::numeric_limits<size_type>::max())
-    throw std::invalid_argument("Invalid class label");
-  if (*minmax.first == 1) {
-    std::for_each(first, last, [](size_type& x) { x -= 1; });
-  } else if (*minmax.first != 0) {
-    throw std::invalid_argument("Invalid class labels range.");
-  }
-  return minmax;
-}
 
 inline void validate_labels_and_offsets(const size_type num_classes,
                                         const std::vector<size_type>& labels,

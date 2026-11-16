@@ -32,7 +32,7 @@
 // Whether long double extends the precision and exponent range of double
 // (x87, binary128). Where it is double (Apple arm64, MSVC), the extended
 // retries have the range of double: tests beyond it expect an exception or
-// the documented tolerance instead (docs/numerics.md, platform ranges).
+// the documented tolerance instead (docs/API.md, Known limits).
 constexpr bool wide_long_double() {
   return std::numeric_limits<long double>::digits >= 64 &&
          std::numeric_limits<long double>::max_exponent > std::numeric_limits<double>::max_exponent;

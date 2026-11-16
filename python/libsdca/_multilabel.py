@@ -65,8 +65,8 @@ def applies(
     reduction: str,
 ) -> bool:
     """Whether the fused CUDA kernels compute this call: backend "auto", logits with a boolean
-    mask of their shape, no precision="float32" and a known reduction."""
-    if objective not in OBJECTIVES or backend != "auto" or precision == "float32":
+    mask of their shape and a known reduction."""
+    if objective not in OBJECTIVES or backend != "auto":
         return False
     if target.dtype != torch.bool or target.shape != logits.shape or not logits.is_cuda:
         return False
@@ -108,7 +108,7 @@ def explain(
         )
     return (
         "torch",
-        "tensor operations: fused boolean-mask paths need Triton 3.3, no precision='float32', "
+        "tensor operations: fused boolean-mask paths need Triton 3.3, "
         "at most 2**28 rows and 67,107,840 classes",
     )
 

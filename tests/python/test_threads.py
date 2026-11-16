@@ -9,37 +9,43 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import libsdca
 import numpy as np
 import pytest
 from child_process import run_python
-from libsdca import LOSSES, OBJECTIVES, PRECISIONS
+from libsdca import MULTILABEL, OBJECTIVES, PRECISIONS, Distillation, ProximalDistillation
 from libsdca._core import (
-    _IDS,
-    ENTROPY_STATS,
-    MULTILABEL,
-    Solver,
-    _entropy_forward,
-    _entropy_gradient,
-    _options,
-    _ptr,
+    DTYPE_FLOAT32,
+    DTYPE_FLOAT64,
+    TARGET_MASK,
+    _cross_entropy_backward,
+    _cross_entropy_forward,
+    _Execution,
+    _Loss,
+    _make,
+    _native,
+    _Targets,
 )
+from numpy_api import Solver
+
+LABEL_LOSSES = OBJECTIVES + ("proximal_cross_entropy",)
 
 # 2600 x 101 scores take milliseconds per call: the default (automatic) and the
 # explicit counts add threads.
-N, C, THREADS = 2600, 101, (None, 2, 3, 8, 0)
+N, C, THREADS = 2600, 101, (None, 2, 3, 8)
 
 # A fit's evaluations and kernel check, in a child with SDCA_NUM_THREADS set or not.
 FIT = """
 import sys
 import numpy as np
-from libsdca import fit
+from libsdca import Kernel, fit
 rng = np.random.default_rng(5)
 x = rng.standard_normal((50000, 100))
 y = rng.integers(0, 10, 50000)
 gram = x[:3000, :20] @ x[:3000, :20].T
 arrays = {}
 features = fit(x, y, max_epoch=2, eval_epoch=1, eval_on_start=True)
-kernel = fit(gram, y[:3000], kernel=True, max_epoch=2, eval_epoch=1)
+kernel = fit(Kernel(gram), y[:3000], max_epoch=2, eval_epoch=1)
 for name, model in (("features", features), ("kernel", kernel)):
     arrays[name + "_a"] = model.dual
     for field in ("primal", "dual", "relative_gap"):
@@ -52,14 +58,14 @@ np.savez(sys.argv[1], **arrays)
 # A long coordinate step with the default count, in a fresh process: its threads before and after.
 GROW = """
 import numpy as np
-from libsdca import coordinate_update
+from libsdca import TopKHingeAlpha, coordinate_update
 def threads():
     with open("/proc/self/status") as status:
         return next(int(line.split()[1]) for line in status if line.startswith("Threads:"))
 rng = np.random.default_rng(6)
 z, y = rng.standard_normal((10000, 101)), rng.integers(0, 101, 10000)
 before = threads()
-coordinate_update(z, y, "topk_hinge_alpha", k=3)
+coordinate_update(z, y, TopKHingeAlpha(3))
 print(before, threads())
 """
 
@@ -84,11 +90,8 @@ class ThreadTests:
         z, labels, mask = _problem()
         for precision in PRECISIONS:
             solver = Solver(precision)
-            for loss in LOSSES:
-                targets = [labels, mask] if loss == "cross_entropy" else [labels]
-                if loss.startswith("multilabel") or loss == "proximal_cross_entropy":
-                    targets = [mask]
-                for target in targets:
+            for loss in LABEL_LOSSES:
+                for target in [mask] if loss in MULTILABEL else [labels]:
                     options: dict[str, Any] = dict(k=3, gamma=0.5, alpha=0.7)
                     v1, g1 = solver.loss_and_grad(z, target, loss, num_threads=1, **options)
                     for threads in THREADS:
@@ -97,6 +100,13 @@ class ThreadTests:
                                 z, target, loss, num_threads=threads, **options
                             )
                             assert _same(v, v1) and _same(g, g1)
+            teacher = z[::-1].copy()
+            for loss in (Distillation(2.0), ProximalDistillation(2.0, 0.5)):
+                v1, g1 = libsdca.loss_and_grad(z, teacher, loss, num_threads=1)
+                for threads in THREADS:
+                    with subtests.test(precision=precision, loss=loss, threads=threads):
+                        v, g = libsdca.loss_and_grad(z, teacher, loss, num_threads=threads)
+                        assert _same(v, v1) and _same(g, g1)
 
     def test_coordinate_steps_do_not_depend_on_the_thread_count(self, subtests: pytest.Subtests):
         z, labels, mask = _problem(1)
@@ -122,7 +132,7 @@ class ThreadTests:
 
         def call() -> None:
             for _ in range(3):
-                values = solver.loss_and_grad(z, labels, "topk_hinge_beta", k=2, num_threads=0)
+                values = solver.loss_and_grad(z, labels, "topk_hinge_beta", k=2, num_threads=None)
                 results.append(values)
 
         callers = [threading.Thread(target=call) for _ in range(4)]
@@ -160,80 +170,81 @@ class ThreadTests:
         before, after = map(int, out.stdout.split())
         assert after > before
 
-    def test_a_failing_row_leaves_the_outputs_as_given(self):
+    def test_an_invalid_row_leaves_the_outputs_as_given(self):
         z, labels, _ = _problem(3)
         mask = np.zeros((N, C), np.uint8)
         mask[np.arange(N), labels] = 1
-        mask[2000, (labels[2000] + 1) % C] = 1  # Two targets: topk_hinge_alpha fails on this row.
-        solver = Solver()
+        mask[2000] = 1  # Every class: multilabel_hinge needs a negative one.
+        lib = _native().lib
         for threads in (1, 8):
             values, grad = np.full(N, 7.0), np.full_like(z, 7.0)
-            options = _options(loss=_IDS["topk_hinge_alpha"], num_threads=threads)
-            args = (ctypes.byref(options), N, C, _ptr(z), _ptr(mask), _ptr(values), _ptr(grad))
-            with pytest.raises(ValueError, match="exactly one target"):
-                solver._call("sdca_loss_gradient", *args)
+            loss = _make(_Loss, kind=5)
+            execution = _make(_Execution, num_threads=threads)
+            targets = _make(_Targets, kind=TARGET_MASK, mask=mask.ctypes.data)
+            code = lib.sdca_loss_evaluate(
+                ctypes.byref(loss),
+                ctypes.byref(execution),
+                DTYPE_FLOAT64,
+                N,
+                C,
+                z.ctypes.data,
+                ctypes.byref(targets),
+                values.ctypes.data,
+                grad.ctypes.data,
+            )
+            assert code == -2 and b"class outside" in lib.sdca_last_error()
             assert np.all(values == 7.0) and np.all(grad == 7.0)
 
-    def test_entropy_entry_points_match_the_loss_rows(self, subtests: pytest.Subtests):
+    def test_internal_cross_entropy_matches_the_loss_rows(self, subtests: pytest.Subtests):
         z, labels, _ = _problem(4)
         z[5, (labels[5] + 1) % C] -= 2000  # a derivative below double's normal range
-        for dtype in (np.float64, np.float32):
+        for dtype, code in ((np.float64, DTYPE_FLOAT64), (np.float32, DTYPE_FLOAT32)):
             x = z.astype(dtype)
-            v1, g1 = Solver(dtype=dtype).loss_and_grad(x, labels, num_threads=1)
+            v1, g1 = Solver("float64", dtype=dtype).loss_and_grad(x, labels, num_threads=1)
             for threads in THREADS:
                 with subtests.test(dtype=dtype, threads=threads):
-                    values, stats = _entropy_forward(x, labels, threads, True)
-                    assert stats is not None
-                    out = np.empty_like(x)
-                    _entropy_gradient(x, labels, stats, np.ones(N), threads, out)
+                    values, stats = np.empty(N), np.empty((N, 5))
+                    _cross_entropy_forward(
+                        x.ctypes.data, code, N, C, labels.ctypes.data, -100, None,
+                        values.ctypes.data, stats.ctypes.data, num_threads=threads,
+                    )  # fmt: skip
+                    out, scale = np.empty_like(x), np.ones(1)
+                    _cross_entropy_backward(
+                        x.ctypes.data, code, N, C, labels.ctypes.data, -100, None,
+                        stats.ctypes.data, scale.ctypes.data, 0, out.ctypes.data,
+                        num_threads=threads,
+                    )  # fmt: skip
                     assert _same(values, v1) and _same(out, g1)
-                    assert _same(_entropy_forward(x, labels, threads, False)[0], v1)
                     assert stats[:, -1].tolist() == [float(i == 5) for i in range(N)]
-            _, stats = _entropy_forward(x, labels, 8, True)
-            assert stats is not None
-            scale = np.linspace(-3.0, 3.0, N, dtype=np.float64)
-            out = np.empty_like(x)
-            _entropy_gradient(x, labels, stats, scale, 8, out)
-            expected = (g1.astype(np.float64) * scale[:, None]).astype(dtype)
-            assert np.abs(out - expected).max() <= 8 * np.finfo(dtype).eps
 
-    def test_entropy_forward_fails_without_writing(self):
-        z, labels, _ = _problem(5)
-        bad = labels.copy()
-        bad[2000] = C
-        nan = z.copy()
-        nan[2000, 3] = np.nan
-        for x, y, message in ((z, bad, "Labels"), (nan, labels, "Logits must be finite")):
-            values, stats = np.full(N, 7.0), np.full((N, ENTROPY_STATS), 7.0)
-            options = _options(num_threads=8)
-            args = (ctypes.byref(options), N, C, _ptr(x), _ptr(y), _ptr(values), _ptr(stats))
-            with pytest.raises(ValueError, match=message):
-                Solver()._call("sdca_entropy_forward", *args)
-            assert np.all(values == 7.0) and np.all(stats == 7.0)
-
-    def test_thread_options_reach_both_native_entry_points(self, subtests: pytest.Subtests):
-        # The C++ barrier tests exercise actual workers and environment defaults;
-        # here verify that the public bindings pass the requested ABI values.
-        solver = Solver()
+    def test_thread_options_reach_the_native_entry_points(self, subtests: pytest.Subtests):
+        native = _native()
         z, labels = np.zeros((2, 3)), np.array([0, 1])
-        for threads in (None, 0, 1, 4):
-            expected = ctypes.c_size_t(-1).value if threads is None else threads
+        for threads in (None, 1, 4):
+            expected = 0 if threads is None else threads
             with subtests.test(num_threads=threads):
-                with mock.patch.object(solver, "_call", wraps=solver._call) as call:
-                    solver.loss_and_grad(z, labels, num_threads=threads)
-                    assert call.call_args is not None
-                    assert call.call_args.args[0] == "sdca_loss_gradient_rows"
-                    assert call.call_args.args[1]._obj.num_threads == expected
-                    solver.coordinate_update(z, labels, num_threads=threads)
-                    assert call.call_args.args[0] == "sdca_update_objective"
-                    assert call.call_args.args[1]._obj.num_threads == expected
+                with mock.patch.object(native, "call", wraps=native.call) as call:
+                    libsdca.loss_and_grad(z, labels, num_threads=threads)
+                    assert call.call_args.args[0] == "sdca_loss_evaluate"
+                    assert call.call_args.args[2]._obj.num_threads == expected
+                    libsdca.coordinate_update(z, labels, num_threads=threads)
+                    assert call.call_args.args[0] == "sdca_dual_update"
+                    assert call.call_args.args[3]._obj.num_threads == expected
+                    libsdca.fit(np.eye(2), labels, num_threads=threads, max_epoch=1)
+                    assert call.call_args.args[0] == "sdca_model_fit"
+                    assert call.call_args.args[3]._obj.num_threads == expected
 
-    def test_num_threads_must_be_none_or_a_nonnegative_integer(self, subtests: pytest.Subtests):
+    def test_num_threads_must_be_none_or_a_positive_integer(self, subtests: pytest.Subtests):
         z, labels = np.zeros((2, 3)), np.array([0, 1])
-        invalid: list[Any] = [-1, 1.5, True, "2"]
-        for threads in invalid:
+        for threads, error in [
+            (-1, ValueError),
+            (0, ValueError),
+            (1.5, TypeError),
+            (True, TypeError),
+            ("2", TypeError),
+        ]:
             with subtests.test(threads=threads):
-                with pytest.raises(ValueError, match="num_threads"):
-                    Solver().loss_and_grad(z, labels, num_threads=threads)
-                with pytest.raises(ValueError, match="num_threads"):
-                    Solver().coordinate_update(z, labels, num_threads=threads)
+                with pytest.raises(error, match="num_threads"):
+                    libsdca.loss_and_grad(z, labels, num_threads=threads)
+                with pytest.raises(error, match="num_threads"):
+                    libsdca.coordinate_update(z, labels, num_threads=threads)

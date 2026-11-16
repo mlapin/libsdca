@@ -66,7 +66,7 @@ class WeightedCudaTests:
     def test_invalid_inputs_with_higher_derivatives_on_both_launchers(
         self, subtests: pytest.Subtests
     ):
-        from libsdca.torch import sdca_loss
+        from named_losses import torch_loss
 
         try:
             for setting in ("0", "1"):
@@ -81,7 +81,7 @@ class WeightedCudaTests:
                             with subtests.test(
                                 launcher=setting, target=invalid, reduction=reduction
                             ):
-                                value = sdca_loss(z, y, reduction=reduction)
+                                value = torch_loss(z, y, reduction=reduction)
                                 grad = torch.autograd.grad(value.sum(), z, create_graph=True)[0]
                                 assert bool(grad[0].isnan().all())
                                 assert bool(grad[1].isfinite().all())
@@ -323,7 +323,7 @@ class WeightedCudaTests:
         z = torch.randn(3, 5, device="cuda", requires_grad=True)
         y = torch.tensor([0, 1, 2], device="cuda")
         with mock.patch(
-            "libsdca.torch.sdca_loss",
+            "libsdca.torch._resolved_loss",
             side_effect=AssertionError("CUDA cross_entropy must run in one pass"),
         ):
             cross_entropy(z, y).backward()
@@ -402,7 +402,7 @@ class WeightedCudaTests:
             assert bool(cross_entropy(z, y).isnan().all())
 
     def test_cuda_graph_capture_succeeds_without_host_sync(self):
-        from libsdca.torch import sdca_loss
+        from named_losses import torch_loss
 
         stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
@@ -411,11 +411,11 @@ class WeightedCudaTests:
             y = torch.randint(0, 10, (16,), device="cuda")
             w = torch.ones(10, device="cuda")
             # Warmup compilation before graph capture.
-            (sdca_loss(z, y) + cross_entropy(z, y, w)).backward()
+            (torch_loss(z, y) + cross_entropy(z, y, w)).backward()
             z.grad = None
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
-                loss = sdca_loss(z, y) + cross_entropy(z, y, w)
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                loss = torch_loss(z, y) + cross_entropy(z, y, w)
                 loss.backward()
         graph.replay()
         torch.cuda.current_stream().wait_stream(stream)

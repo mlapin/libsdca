@@ -6,8 +6,8 @@
 The MNIST files are downloaded once into --data (about 11 MB) and read with NumPy, so the
 script needs only torch and numpy. Every loss trains the same network from the same
 initialization and batch order: torch-ce (torch.nn.CrossEntropyLoss), libsdca-ce
-(libsdca.CrossEntropyLoss, a drop-in), libsdca-hinge (libsdca.MulticlassHingeLoss with
-gamma = 1, the smoothed Crammer-Singer hinge) and libsdca-top2 (libsdca.TopKCrossEntropyLoss
+(libsdca.torch.CrossEntropyLoss, a drop-in), libsdca-hinge (libsdca.torch.MulticlassHingeLoss with
+gamma = 1, the smoothed Crammer-Singer hinge) and libsdca-top2 (libsdca.torch.TopKCrossEntropyLoss
 with k = 2, scored on top-1 and top-2 accuracy).
 """
 
@@ -19,7 +19,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-import libsdca
+import libsdca.torch
 import numpy as np
 import torch
 from torch import nn
@@ -31,9 +31,9 @@ FILES = {
 }
 LOSSES = {
     "torch-ce": lambda: nn.CrossEntropyLoss(),
-    "libsdca-ce": lambda: libsdca.CrossEntropyLoss(),
-    "libsdca-hinge": lambda: libsdca.MulticlassHingeLoss(gamma=1.0),
-    "libsdca-top2": lambda: libsdca.TopKCrossEntropyLoss(k=2),
+    "libsdca-ce": lambda: libsdca.torch.CrossEntropyLoss(),
+    "libsdca-hinge": lambda: libsdca.torch.MulticlassHingeLoss(gamma=1.0),
+    "libsdca-top2": lambda: libsdca.torch.TopKCrossEntropyLoss(k=2),
 }
 
 

@@ -6,10 +6,16 @@ S[STATUS * N], followed by four partials per BLOCK rows when N exceeds DIRECT_RO
 Up to DIRECT_ROWS rows, one program reduces them in chunks of DIRECT_BLOCK.
 """
 
-import torch
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
+
+if TYPE_CHECKING:
+    import torch
 
 BLOCK = 2048
 WARPS = 8

@@ -187,7 +187,7 @@ def primal(
 ) -> float:
     """0.5 ||W||^2 + C sum loss(X W) in float64 at weights W (d, m), for labels or a mask y;
     the losses without a reference here from float64 libsdca.loss_and_grad."""
-    from libsdca import Solver
+    from numpy_api import Solver
 
     x, w = np.asarray(x, np.float64), np.asarray(w, np.float64)
     scores = x @ w
@@ -196,5 +196,6 @@ def primal(
     if objective in REFERENCED:
         values = reference(scores, positive, objective, **options)[0]
     else:
-        values = Solver("float64").loss_and_grad(scores, positive, objective, **options)[0]
+        target = positive if objective.startswith("multilabel") else positive.argmax(axis=1)
+        values = Solver("float64").loss_and_grad(scores, target, objective, **options)[0]
     return 0.5 * float(np.sum(w * w)) + C * float(values.sum())

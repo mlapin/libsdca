@@ -11,15 +11,49 @@ namespace {
 
 // An objective whose coordinate step throws an invalid_argument.
 template <typename Data, typename Result>
-struct throwing_entropy : sdca::l2_entropy<Data, Result> {
-  throwing_entropy() : sdca::l2_entropy<Data, Result>(1) {}
+struct throwing_entropy : sdca::l2_cross_entropy<Data, Result> {
+  throwing_entropy() : sdca::l2_cross_entropy<Data, Result>(1) {}
   template <typename Int>
   void update_dual_variables(Int, Data, Data*, Data*) const {
     throw std::invalid_argument("step rejected");
   }
 };
 
+// An objective whose evaluation throws, as the hinge projections do on nonfinite scores.
+template <typename Data, typename Result>
+struct throwing_evaluation : sdca::l2_topk_hinge_beta<Data, Result> {
+  throwing_evaluation() : sdca::l2_topk_hinge_beta<Data, Result>(1, 1) {}
+  template <typename D, typename R>
+  explicit throwing_evaluation(const throwing_evaluation<D, R>&) : throwing_evaluation() {}
+  template <typename Int>
+  Result primal_loss(Int, Data*) const {
+    throw std::invalid_argument("evaluation rejected");
+  }
+};
+
 }  // namespace
+
+TEST(SolverValidation, a_failed_evaluation_ends_with_failed_and_no_partial_row) {
+  sdca::logging::set_level(sdca::logging::level::none);
+  for (bool eval_on_start : {false, true}) {
+    double x[] = {1, 2, 0, 1}, a[] = {0, 0, 0, 0}, w[4] = {};
+    std::vector<sdca::size_type> labels = {0, 1};
+    auto ctx =
+        sdca::make_context(sdca::make_input_feature(2, 2, x), sdca::multiclass_output(2, labels),
+                           throwing_evaluation<double, double>(), w, a);
+    ctx.criteria.max_epoch = 3;
+    ctx.criteria.eval_epoch = 1;
+    ctx.criteria.eval_on_start = eval_on_start;
+    if (eval_on_start) {
+      // An evaluation before the first epoch is part of the input checks.
+      EXPECT_THROW(sdca::make_solver(ctx).solve(), std::invalid_argument);
+    } else {
+      EXPECT_NO_THROW(sdca::make_solver(ctx).solve());
+      EXPECT_EQ(sdca::solver_status::failed, ctx.status);
+    }
+    EXPECT_EQ(0u, ctx.train.evals.size());
+  }
+}
 
 TEST(SolverValidation, any_failed_step_ends_with_failed_and_an_evaluation) {
   sdca::logging::set_level(sdca::logging::level::none);
@@ -27,7 +61,7 @@ TEST(SolverValidation, any_failed_step_ends_with_failed_and_an_evaluation) {
   std::vector<sdca::size_type> labels = {0, 1};
   auto ctx =
       sdca::make_context(sdca::make_input_feature(2, 2, x), sdca::multiclass_output(2, labels),
-                         throwing_entropy<double, double>(), a, w);
+                         throwing_entropy<double, double>(), w, a);
   ctx.criteria.max_epoch = 3;
   EXPECT_NO_THROW(sdca::make_solver(ctx).solve());
   EXPECT_EQ(sdca::solver_status::failed, ctx.status);
@@ -42,14 +76,14 @@ TEST(SolverValidation, step_scale_is_checked_before_solving) {
   std::vector<sdca::size_type> labels = {0};
   auto ctx =
       sdca::make_context(sdca::make_input_feature(1, 1, x), sdca::multiclass_output(2, labels),
-                         sdca::l2_entropy<float, double>(1e10), a, w);
+                         sdca::l2_cross_entropy<float, double>(1e10), w, a);
   EXPECT_THROW(sdca::make_solver(ctx).solve(), std::invalid_argument);
   // C itself must fit the data type: a zero row takes a block of size C.
   float zero[] = {0};
   std::vector<sdca::size_type> zero_labels = {0};
   auto big = sdca::make_context(sdca::make_input_feature(1, 1, zero),
                                 sdca::multiclass_output(2, zero_labels),
-                                sdca::l2_entropy<float, double>(1e300), a, w);
+                                sdca::l2_cross_entropy<float, double>(1e300), w, a);
   EXPECT_THROW(sdca::make_solver(big).solve(), std::invalid_argument);
 }
 
@@ -58,7 +92,7 @@ TEST(SolverValidation, top_k_must_suit_the_classes_at_construction) {
   std::vector<sdca::size_type> labels = {0};
   EXPECT_THROW(
       sdca::make_context(sdca::make_input_feature(1, 1, x), sdca::multiclass_output(2, labels),
-                         sdca::l2_topk_hinge<double, double>(1, 2), a, w),
+                         sdca::l2_topk_hinge_beta<double, double>(1, 2), w, a),
       std::invalid_argument);
 }
 
@@ -69,7 +103,7 @@ TEST(SolverValidation, training_kernels_must_be_symmetric_with_a_valid_diagonal)
     std::vector<sdca::size_type> y = labels;
     auto ctx =
         sdca::make_context(sdca::make_input_kernel(2, K.data()), sdca::multiclass_output(2, y),
-                           sdca::l2_entropy<double, double>(1), a.data());
+                           sdca::l2_cross_entropy<double, double>(1), a.data());
     ctx.criteria.max_epoch = 2;
     sdca::make_solver(ctx).solve();
     return ctx.status;
@@ -91,7 +125,7 @@ TEST(SolverValidation, training_kernels_must_be_symmetric_with_a_valid_diagonal)
   std::vector<sdca::size_type> y(n, 0);
   y[1] = 1;
   auto ctx = sdca::make_context(sdca::make_input_kernel(n, K.data()), sdca::multiclass_output(2, y),
-                                sdca::l2_entropy<double, double>(1), a.data());
+                                sdca::l2_cross_entropy<double, double>(1), a.data());
   for (std::size_t threads : {1, 4}) {
     ctx.criteria.num_threads = threads;
     EXPECT_THROW(sdca::make_solver(ctx).solve(), std::invalid_argument);
@@ -104,7 +138,7 @@ TEST(SolverValidation, kernel_primal_is_at_the_stored_duals) {
   double K[] = {1}, a[] = {0.5, -0.4};
   std::vector<sdca::size_type> labels = {0};
   auto ctx = sdca::make_context(sdca::make_input_kernel(1, K), sdca::multiclass_output(2, labels),
-                                sdca::l2_entropy<double, double>(1), a);
+                                sdca::l2_cross_entropy<double, double>(1), a);
   sdca::solver_scratch<double, sdca::kernel_input> scratch;
   sdca::evaluate_dataset(ctx, ctx.train, scratch);
   const auto& e = ctx.train.evals.back();
@@ -136,9 +170,9 @@ TEST(SolverValidation, evaluations_are_identical_for_every_thread_count) {
       if (prox) W = W0;
       std::vector<sdca::size_type> labels = y, test_labels = y,
                                    kernel_labels(y.begin(), y.begin() + nk);
-      auto ctx = sdca::make_context(sdca::make_input_feature(d, n, X.data()),
-                                    sdca::multiclass_output(m, labels),
-                                    sdca::l2_hinge_topk<float, double>(1, 2), A.data(), W.data());
+      auto ctx = sdca::make_context(
+          sdca::make_input_feature(d, n, X.data()), sdca::multiclass_output(m, labels),
+          sdca::l2_topk_hinge_alpha<float, double>(1, 2), W.data(), A.data());
       if (prox) ctx.primal_initial = W0.data();
       ctx.criteria.max_epoch = 2;
       ctx.criteria.eval_epoch = 1;
@@ -148,7 +182,7 @@ TEST(SolverValidation, evaluations_are_identical_for_every_thread_count) {
       sdca::make_solver(ctx).solve();
       auto kctx = sdca::make_context(sdca::make_input_kernel(nk, K.data()),
                                      sdca::multiclass_output(m, kernel_labels),
-                                     sdca::l2_entropy<float, double>(1), B.data());
+                                     sdca::l2_cross_entropy<float, double>(1), B.data());
       kctx.criteria.max_epoch = 2;
       kctx.criteria.eval_epoch = 1;
       kctx.criteria.num_threads = threads;

@@ -8,7 +8,7 @@ from unittest import mock
 import mpmath as mp
 import pytest
 import torch
-from libsdca.torch import topk_cross_entropy
+from libsdca.torch import Backend, topk_cross_entropy
 
 
 @pytest.mark.parametrize(
@@ -24,7 +24,7 @@ from libsdca.torch import topk_cross_entropy
 @pytest.mark.parametrize("classes", [3, 4, 65, 4097])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_topk_target_subnormal(
-    device: str, backend: str, extension: str, classes: int, dtype: torch.dtype
+    device: str, backend: Backend, extension: str, classes: int, dtype: torch.dtype
 ):
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA required")
@@ -67,7 +67,7 @@ def test_topk_target_subnormal(
 )
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_all_capped_mean_of_scores_near_finfo_max(
-    device: str, backend: str, extension: str, dtype: torch.dtype
+    device: str, backend: Backend, extension: str, dtype: torch.dtype
 ):
     # k = C - 1 caps every competitor: the loss is the mean of the score differences, whose
     # terms (1.5 S here) overflow although the mean (5 S / 6) does not.
@@ -100,8 +100,8 @@ def test_all_capped_mean_of_scores_near_finfo_max(
         ("cuda", "torch", "off"),
     ],
 )
-def test_all_capped_mean_beyond_double_double_limit(device: str, backend: str, extension: str):
-    # LIMIT (docs/numerics.md): differences at 2^200, 2^100 and 1 lose the 1 in the
+def test_all_capped_mean_beyond_double_double_limit(device: str, backend: Backend, extension: str):
+    # LIMIT (docs/API.md, Known limits): differences at 2^200, 2^100 and 1 lose the 1 in the
     # double-double mean (exact 1/4); the documented result is log 5, not worse.
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA required")

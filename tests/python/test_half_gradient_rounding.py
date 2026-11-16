@@ -9,7 +9,7 @@ of the stored competitors) collects their rounding: 1.6% of the largest entry he
 upstream), both CPU paths (SDCA_CPU_EXTENSION on and off) and CUDA where available,
 default and float64 precision.
 The Triton kernels run the same checks in Triton's CPU interpreter (TRITON_INTERPRET=1) on a
-few rows under a 2^-12 upstream; triton_check(n=4096) runs them on a CUDA device.
+few rows under a 2^-12 upstream; triton_check also runs directly on CUDA at N = 4096.
 
 The envelope is that of test_half_precision.py: one rounding of each entry (one unit of the
 logits dtype, plus one subnormal quantum), and with float32 work 2,000 float32 eps of the
@@ -25,7 +25,8 @@ import interpreter
 import pytest
 import torch
 from libsdca import _cpu, _cpu_entropy
-from libsdca.torch import distillation_loss, proximal_distillation_loss, sdca_loss
+from libsdca.torch import distillation_loss, proximal_distillation_loss
+from named_losses import torch_loss
 
 N, C = 4096, 1000
 HALF = (torch.float16, torch.bfloat16)
@@ -53,9 +54,9 @@ LOSSES = {
     "proximal_cross_entropy": ("proximal_cross_entropy", "index", 1, 0.0),
 }
 TEACHER: dict[str, Callable[..., torch.Tensor]] = {
-    "distillation_loss": lambda x, t, **kw: distillation_loss(x, t, 2.0, **kw),
+    "distillation_loss": lambda x, t, **kw: distillation_loss(x, t, temperature=2.0, **kw),
     "proximal_distillation_loss": lambda x, t, **kw: proximal_distillation_loss(
-        x, t, 2.0, 0.7, **kw
+        x, t, temperature=2.0, alpha=0.7, **kw
     ),
 }
 
@@ -127,7 +128,7 @@ class HalfGradientRoundingTests:
         target = labels if kind == "index" else mask
 
         def call(x: torch.Tensor, **options: Any) -> torch.Tensor:
-            return sdca_loss(x, target.to(x.device), loss, k=k, gamma=gamma, **options)
+            return torch_loss(x, target.to(x.device), loss, k=k, gamma=gamma, **options)
 
         _paths(z, call, name, reduction)
 
@@ -153,7 +154,7 @@ def _rows(upstream: torch.Tensor, reduction: str, n: int) -> torch.Tensor:
 def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTIONS) -> None:
     """The Triton kernels' 16-bit gradients against the native float64 results, every
     reduction under a 2^-12 upstream (most float16 entries subnormal); run in the interpreter
-    (float16) by HalfGradientKernelTests; call it with n = 4096 on CUDA for both dtypes."""
+    (float16) by HalfGradientKernelTests and on CUDA (both dtypes) at n = 4096."""
     from libsdca import (
         _triton_distillation,
         _triton_entropy,
@@ -177,7 +178,7 @@ def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTION
     worst: dict[str, float] = {}
 
     def reference(
-        call: Callable[[torch.Tensor, str], torch.Tensor],
+        call: Callable[..., torch.Tensor],
         z: torch.Tensor,
         reduction: str,
         upstream: torch.Tensor,
@@ -215,7 +216,7 @@ def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTION
             ):
                 name = kind.removesuffix("_smooth")
                 ref = reference(
-                    lambda x, r: sdca_loss(x, labels, name, k=k, gamma=gamma, reduction=r),
+                    lambda x, r: torch_loss(x, labels, name, k=k, gamma=gamma, reduction=r),
                     z,
                     reduction,
                     u,
@@ -229,7 +230,9 @@ def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTION
             for smooth in (False, True):
                 gamma = 0.5 if smooth else 0.0
                 ref = reference(
-                    lambda x, r: sdca_loss(x, labels, "topk_hinge_alpha", gamma=gamma, reduction=r),
+                    lambda x, r: torch_loss(
+                        x, labels, "topk_hinge_alpha", gamma=gamma, reduction=r
+                    ),
                     z,
                     reduction,
                     u,
@@ -237,7 +240,7 @@ def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTION
                 _, stats = _triton_hinge.forward(z, y, reduction, smooth, gamma)
                 gradient = _triton_hinge.backward(z, y, stats, u, reduction, smooth, gamma)
                 check(f"triton hinge smooth={smooth} {reduction}", z, gradient, ref, 0)
-            ref = reference(lambda x, r: sdca_loss(x, labels, reduction=r), z, reduction, u)
+            ref = reference(lambda x, r: torch_loss(x, labels, reduction=r), z, reduction, u)
             for fp32 in (False, True):
                 _, stats = _triton_entropy.forward(z, y, reduction, fp32)
                 gradient = _triton_entropy.backward(z, y, stats, u, reduction, fp32)
@@ -248,7 +251,10 @@ def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTION
                 ("multilabel_hinge_smooth", "multilabel_hinge", 0.5),
             ):
                 ref = reference(
-                    lambda x, r: sdca_loss(x, mask, loss, gamma=gamma, reduction=r), z, reduction, u
+                    lambda x, r: torch_loss(x, mask, loss, gamma=gamma, reduction=r),
+                    z,
+                    reduction,
+                    u,
                 )
                 for fp32 in (False, True) if objective == "cross_entropy" else (False,):
                     _, stats = _triton_multilabel.forward(z, m, objective, reduction, gamma, fp32)
@@ -261,7 +267,7 @@ def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTION
             for double in (False, True):
                 ref = reference(
                     lambda x, r: distillation_loss(
-                        x, teacher0.to(dtype).double(), 2.0, reduction=r
+                        x, teacher0.to(dtype).double(), temperature=2.0, reduction=r
                     ),
                     z,
                     reduction,
@@ -276,7 +282,7 @@ def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTION
                 )
             # The proximal kernels save float32 gradients; backward scales them, then rounds.
             ref = reference(
-                lambda x, r: sdca_loss(x, labels, "proximal_cross_entropy", reduction=r),
+                lambda x, r: torch_loss(x, labels, "proximal_cross_entropy", reduction=r),
                 z,
                 reduction,
                 u,
@@ -288,7 +294,7 @@ def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTION
                 check(f"triton proximal_entropy {reduction} fp32={fp32}", z, gradient, ref, fp32)
             ref = reference(
                 lambda x, r: proximal_distillation_loss(
-                    x, teacher0.to(dtype).double(), 2.0, 0.7, reduction=r
+                    x, teacher0.to(dtype).double(), temperature=2.0, alpha=0.7, reduction=r
                 ),
                 z,
                 reduction,
@@ -314,6 +320,6 @@ class HalfGradientKernelTests:
     @pytest.mark.parametrize("reduction", REDUCTIONS)
     def test_triton_kernels_in_the_interpreter(self, reduction: str):
         """The Triton kernels' control flow and rounding on CPU tensors (skips without
-        Triton)."""
+        Triton); CUDA runs call triton_check directly."""
         call = f"t.triton_check(reductions=({reduction!r},))"
         interpreter.run(f"import test_half_gradient_rounding as t\n{call}\n")

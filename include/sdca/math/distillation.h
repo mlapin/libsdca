@@ -482,7 +482,10 @@ inline double proximal_distillation_row(std::size_t c, double alpha, const disti
     }
     penalty.add((alpha * r[j]) * r[j]);
   }
-  return cross.value() + penalty.value() / 2;
+  // Both sums are nonnegative. An unrepresentable term produces an infinite
+  // high sum where TwoSum's residual is NaN rather than a valid correction.
+  return (std::isinf(cross.hi) || std::isinf(penalty.hi)) ? std::numeric_limits<double>::infinity()
+                                                          : cross.value() + penalty.value() / 2;
 }
 
 }  // namespace detail

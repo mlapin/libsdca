@@ -1,7 +1,7 @@
 """Logit distillation and proximal distillation with libsdca losses."""
 
 import torch
-from libsdca import (
+from libsdca.torch import (
     CrossEntropyLoss,
     DistillationLoss,
     ProximalDistillationLoss,
@@ -46,15 +46,15 @@ print(f"student/teacher agreement {agree:.3f}")
 
 # The gradient is exactly zero at equal logits.
 z = teacher_logits.clone().requires_grad_()
-distillation_loss(z, teacher_logits, 4.0).backward()
+distillation_loss(z, teacher_logits, temperature=4.0).backward()
 assert torch.count_nonzero(z.grad) == 0
 
 # Proximal distillation: a Moreau envelope that tends to distillation as alpha -> 0.
 s = student(X).detach().double()
 t = teacher_logits.double()
-plain = distillation_loss(s, t, 4.0)
+plain = distillation_loss(s, t, temperature=4.0)
 for alpha in (1.0, 1e-2, 1e-6):
-    prox = proximal_distillation_loss(s, t, 4.0, alpha)
+    prox = proximal_distillation_loss(s, t, temperature=4.0, alpha=alpha)
     print(f"alpha {alpha:7.0e}  proximal {prox.item():.6f}  plain {plain.item():.6f}")
 torch.testing.assert_close(prox, plain, rtol=1e-4, atol=1e-6)
-print("module form:", ProximalDistillationLoss(4.0, alpha=0.5)(s, t).item())
+print("module form:", ProximalDistillationLoss(temperature=4.0, alpha=0.5)(s, t).item())

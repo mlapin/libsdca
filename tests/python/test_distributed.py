@@ -46,14 +46,13 @@ def distributed_worker(rank: int, rendezvous: str, task: str, device: str) -> No
 
 
 def check_dtensor_losses(device: str = "cpu") -> None:
-    from libsdca import LOSSES
+    from libsdca._core import _LABEL_LOSSES as LOSSES
     from libsdca.torch import (
         cross_entropy,
         distillation_loss,
-        explain_backend,
         proximal_distillation_loss,
-        sdca_loss,
     )
+    from named_losses import torch_explain, torch_loss
     from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
     from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
 
@@ -137,9 +136,11 @@ def check_dtensor_losses(device: str = "cpu") -> None:
                                 actual = distillation_loss(z, y, temperature=0.7, **options)
                             elif name == "proximal_distillation":
                                 expected = proximal_distillation_loss(
-                                    local, target, 0.7, 0.4, **options
+                                    local, target, temperature=0.7, alpha=0.4, **options
                                 )
-                                actual = proximal_distillation_loss(z, y, 0.7, 0.4, **options)
+                                actual = proximal_distillation_loss(
+                                    z, y, temperature=0.7, alpha=0.4, **options
+                                )
                             elif name == "weighted_ce":
                                 weight = distribute_tensor(weights.clone(), mesh, [Shard(0)])
                                 expected = cross_entropy(
@@ -149,8 +150,8 @@ def check_dtensor_losses(device: str = "cpu") -> None:
                             else:
                                 objective = "cross_entropy" if name == "entropy_mask" else name
                                 options.update(backend=backend, k=2, gamma=0.6, alpha=0.9)
-                                expected = sdca_loss(local, target, objective, **options)
-                                actual = sdca_loss(z, y, objective, **options)
+                                expected = torch_loss(local, target, objective, **options)
+                                actual = torch_loss(z, y, objective, **options)
                             assert isinstance(actual, DTensor), type(actual)
                             assert actual.placements == (Replicate(),)
                             tolerance = {
@@ -185,30 +186,27 @@ def check_dtensor_losses(device: str = "cpu") -> None:
                             )
             assert last is not None
             z, y = last
-            assert explain_backend(z, y)[0] == "dtensor"
-            for options in (
-                {"loss": "unknown"},
-                {"backend": "unknown"},
-                {"precision": "mixed"},
-            ):
+            assert "DTensor" in torch_explain(z, y)[1]
+            for options in ({"backend": "unknown"}, {"precision": "mixed"}):
                 with pytest.raises(ValueError):
-                    explain_backend(z, y, **options)
+                    torch_explain(z, y, **options)
 
     # Ordinary tensor companions represent global replicated values. This is
     # useful for fixed labels or teachers without a separate DTensor wrapper.
     z = distribute_tensor(scores.double().requires_grad_(), mesh, [Shard(1)])
-    value = sdca_loss(z, labels)
+    value = torch_loss(z, labels)
     assert isinstance(value, DTensor), type(value)
-    torch.testing.assert_close(value.full_tensor(), sdca_loss(scores.double(), labels))
+    torch.testing.assert_close(value.full_tensor(), torch_loss(scores.double(), labels))
     other_mesh = DeviceMesh(device, torch.arange(dist.get_world_size()).reshape(1, -1))
     other_labels = distribute_tensor(labels, other_mesh, [Replicate(), Replicate()])
     with pytest.raises(ValueError, match="same device mesh"):
-        sdca_loss(z, other_labels)
+        torch_loss(z, other_labels)
 
 
 def check_dtensor_mesh_edges(device: str) -> None:
     """Unequal row/class shards and 2-D meshes retain a global mean denominator."""
-    from libsdca.torch import cross_entropy, sdca_loss
+    from libsdca.torch import cross_entropy
+    from named_losses import torch_loss
     from torch.distributed.device_mesh import DeviceMesh
     from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
 
@@ -239,8 +237,8 @@ def check_dtensor_mesh_edges(device: str) -> None:
                         expected = cross_entropy(local, target, weights, ignore_index=-1)
                         actual = cross_entropy(z, y, w, ignore_index=-1)
                     else:
-                        expected = sdca_loss(local, target, objective, k=2)
-                        actual = sdca_loss(z, y, objective, k=2)
+                        expected = torch_loss(local, target, objective, k=2)
+                        actual = torch_loss(z, y, objective, k=2)
                     assert isinstance(actual, DTensor), type(actual)
                     assert actual.placements == tuple(Replicate() for _ in shape)
                     torch.testing.assert_close(
@@ -256,7 +254,8 @@ def check_dtensor_mesh_edges(device: str) -> None:
 
 
 def check_ddp_gradients(rank: int) -> None:
-    from libsdca.torch import cross_entropy, sdca_loss
+    from libsdca.torch import cross_entropy
+    from named_losses import torch_loss
     from torch.nn import functional as F
     from torch.nn.parallel import DistributedDataParallel
 
@@ -272,7 +271,7 @@ def check_ddp_gradients(rank: int) -> None:
     reference = copy.deepcopy(model)
     F.cross_entropy(reference(x), labels).backward()
     local = slice(2 * rank, 2 * rank + 2)
-    for loss, backend in ((cross_entropy, "torch"), (sdca_loss, "torch"), (sdca_loss, "native")):
+    for loss, backend in ((cross_entropy, "torch"), (torch_loss, "torch"), (torch_loss, "native")):
         ddp = DistributedDataParallel(copy.deepcopy(model))
         loss(ddp(x[local]), labels[local], backend=backend).backward()
         for actual, expected in zip(ddp.module.parameters(), reference.parameters(), strict=True):

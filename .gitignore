@@ -1,4 +1,5 @@
 build*
+!build_*.py
 !python/build.py
 !rust/build.rs
 matlab/*.mex*

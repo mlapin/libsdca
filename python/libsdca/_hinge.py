@@ -27,6 +27,7 @@ class _Context(Protocol):
     reduction: str
     smooth: bool
     gamma: float
+    fp32: bool
 
     def save_for_backward(self, *tensors: torch.Tensor) -> None: ...
 
@@ -53,27 +54,28 @@ class _Hinge(torch.autograd.Function):
         reduction: str,
         smooth: bool,
         gamma: float,
+        fp32: bool,
     ) -> torch.Tensor:
         kernel = _kernel()
         assert kernel is not None
-        output, stats = kernel.forward(logits, target, reduction, smooth, gamma)
+        output, stats = kernel.forward(logits, target, reduction, smooth, gamma, fp32)
         ctx.save_for_backward(logits, target, stats)
-        ctx.reduction, ctx.smooth, ctx.gamma = reduction, smooth, gamma
+        ctx.reduction, ctx.smooth, ctx.gamma, ctx.fp32 = reduction, smooth, gamma, fp32
         return output
 
     @staticmethod
     @first_order
     def backward(
         ctx: _Context, *grad_outputs: torch.Tensor
-    ) -> tuple[torch.Tensor, None, None, None, None]:
+    ) -> tuple[torch.Tensor, None, None, None, None, None]:
         (upstream,) = grad_outputs
         logits, target, stats = ctx.saved_tensors
         kernel = _kernel()
         assert kernel is not None
         gradient = kernel.backward(
-            logits, target, stats, upstream, ctx.reduction, ctx.smooth, ctx.gamma
+            logits, target, stats, upstream, ctx.reduction, ctx.smooth, ctx.gamma, ctx.fp32
         )
-        return gradient, None, None, None, None
+        return gradient, None, None, None, None, None
 
 
 def covers(logits: torch.Tensor) -> bool:
@@ -85,14 +87,19 @@ def covers(logits: torch.Tensor) -> bool:
 
 
 def hinge(
-    logits: torch.Tensor, target: torch.Tensor, objective: str, reduction: str, gamma: float
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    objective: str,
+    reduction: str,
+    gamma: float,
+    fp32: bool,
 ) -> torch.Tensor:
     """The k = 1 hinge objective of contiguous (N, C) CUDA logits and (N,) int64 targets."""
     if _ops.compiling():
-        return _ops.hinge(logits, target, reduction, SMOOTH[objective], gamma)
+        return _ops.hinge(logits, target, reduction, SMOOTH[objective], gamma, fp32)
     kernel = _kernel()
     assert kernel is not None
-    out = kernel.apply(logits, target, reduction, SMOOTH[objective], gamma)
+    out = kernel.apply(logits, target, reduction, SMOOTH[objective], gamma, fp32)
     if out is not None:
         return out
-    return _Hinge.apply(logits, target, reduction, SMOOTH[objective], gamma)
+    return _Hinge.apply(logits, target, reduction, SMOOTH[objective], gamma, fp32)

@@ -1,6 +1,6 @@
 """Every libsdca PyTorch loss on one batch: module and functional forms, forward and backward."""
 
-import libsdca as L
+import libsdca.torch as L
 import torch
 
 torch.manual_seed(0)
@@ -66,21 +66,15 @@ cases = [
         labels,
     ),
     (
-        "sdca_loss",
-        L.SDCALoss("topk_hinge_beta", k=2, gamma=0.5),
-        lambda z, t: L.sdca_loss(z, t, "topk_hinge_beta", k=2, gamma=0.5),
-        labels,
-    ),
-    (
         "distillation",
         L.DistillationLoss(temperature=4.0),
-        lambda z, t: L.distillation_loss(z, t, 4.0),
+        lambda z, t: L.distillation_loss(z, t, temperature=4.0),
         teacher,
     ),
     (
         "proximal_distillation",
-        L.ProximalDistillationLoss(4.0, alpha=0.5),
-        lambda z, t: L.proximal_distillation_loss(z, t, 4.0, 0.5),
+        L.ProximalDistillationLoss(temperature=4.0, alpha=0.5),
+        lambda z, t: L.proximal_distillation_loss(z, t, temperature=4.0, alpha=0.5),
         teacher,
     ),
 ]
@@ -90,10 +84,20 @@ for name, module, functional, target in cases:
     (grad,) = torch.autograd.grad(value, logits)
     torch.testing.assert_close(functional(logits, target), value)
     assert torch.isfinite(grad).all()
-    print(f"{name:28s} loss {value.item():8.4f}  |grad| {grad.norm().item():.4f}")
+    path = L.explain_backend(module, logits, target)[0]
+    print(f"{name:28s} loss {value.item():8.4f}  |grad| {grad.norm().item():.4f}  ({path})")
 
 # reduction="none" gives per-example losses; dim selects the class axis.
-per_row = L.TopKHingeLoss(k=2, variant="beta", reduction="none")(logits, labels)
+per_row = L.TopKHingeLoss(k=2, reduction="none")(logits, labels)
 assert per_row.shape == (n,)
 spatial = torch.randn(2, m, 4, 4, device=device)
-assert L.sdca_loss(spatial, torch.randint(m, (2, 4, 4), device=device), dim=1).ndim == 0
+spatial_labels = torch.randint(m, (2, 4, 4), device=device)
+assert L.topk_hinge_loss(spatial, spatial_labels, k=2, dim=1).ndim == 0
+
+# Class weights and an ignored label, with torch's weighted mean.
+weight = torch.rand(m, device=device)
+assert L.TopKHingeLoss(k=2, weight=weight, ignore_index=0)(logits, labels).isfinite()
+
+# torch.func transforms: per-example gradients by vmap over grad.
+per_example = torch.func.vmap(torch.func.grad(lambda z, y: L.topk_hinge_loss(z, y, k=2)))
+assert per_example(logits.detach()[:, None], labels[:, None]).shape == (n, 1, m)

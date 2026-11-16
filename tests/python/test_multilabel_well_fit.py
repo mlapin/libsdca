@@ -12,8 +12,9 @@ import mpmath as mp
 import numpy as np
 import pytest
 import torch
-from libsdca import _cpu_entropy, loss_and_grad
+from libsdca import _cpu_entropy
 from libsdca.torch import multilabel_cross_entropy
+from numpy_api import loss_and_grad
 from test_native_tensor_losses import loss_gradient
 
 EPS = 64
@@ -72,7 +73,9 @@ class WellFitMultilabelTests:
                 z.numpy(), mask.numpy(), "multilabel_cross_entropy", precision=precision
             )
             check(float(np.sum(value)), grad, mask.numpy(), dtype, f"loss_and_grad {precision}")
-            values, gradients = loss_gradient(
+            evaluated = loss_gradient(
                 z.numpy(), mask.numpy(), "multilabel_cross_entropy", precision
             )
+            assert evaluated is not None
+            values, gradients = evaluated
             check(float(values[0]), gradients, mask.numpy(), dtype, f"C API {precision}")

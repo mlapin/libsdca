@@ -4,21 +4,21 @@ import os
 from collections.abc import Callable
 from unittest import mock
 
+import libsdca.torch
 import torch
 from libsdca import _cpu_entropy
 from libsdca.torch import (
     cross_entropy,
     distillation_loss,
     proximal_distillation_loss,
-    sdca_loss,
 )
+from named_losses import loss as named_loss
 
 DTYPES = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 REDUCTIONS = ("none", "sum", "mean")
 # (name, loss, target kind, keyword options): every loss, nonsmooth and smoothed.
 CASES = [
     ("cross_entropy", "cross_entropy", "index", {}),
-    ("cross_entropy mask", "cross_entropy", "mask", {}),
     ("topk_cross_entropy k=1", "topk_cross_entropy", "index", {"k": 1}),
     ("topk_cross_entropy k=2", "topk_cross_entropy", "index", {"k": 2}),
     ("multiclass_hinge", "multiclass_hinge", "index", {}),
@@ -31,7 +31,8 @@ CASES = [
     ("multilabel_hinge gamma", "multilabel_hinge", "mask", {"gamma": 0.5}),
     ("multilabel_cross_entropy", "multilabel_cross_entropy", "mask", {}),
     ("proximal_cross_entropy", "proximal_cross_entropy", "index", {"alpha": 0.5}),
-    ("proximal_cross_entropy mask", "proximal_cross_entropy", "mask", {"alpha": 0.5}),
+    ("weighted topk_hinge_beta", "topk_hinge_beta", "index", {"k": 2, "weight": True}),
+    ("ignored proximal_cross_entropy", "proximal_cross_entropy", "index", {"ignore_index": 3}),
 ]
 
 
@@ -79,9 +80,12 @@ class LossDtypeTests:
                             z, target = self.inputs(kind, device, dtype)
                             for reduction in REDUCTIONS:
                                 message = f"{device} cpu={kernel} {dtype} {name} {reduction}"
+                                if options.get("weight") is True:
+                                    weight = torch.linspace(0.5, 2.0, z.shape[1]).to(device)
+                                    options = {**options, "weight": weight}
                                 self.check(
-                                    lambda x, r, t=target, o=options, n=loss: sdca_loss(
-                                        x, t, n, reduction=r, **o
+                                    lambda x, r, t=target, o=options, n=loss: named_loss(
+                                        libsdca.torch, n, x, t, reduction=r, **o
                                     ),
                                     z,
                                     reduction,
@@ -98,9 +102,11 @@ class LossDtypeTests:
                     "weighted cross_entropy": lambda x, r: cross_entropy(
                         x, labels, weight, reduction=r
                     ),
-                    "distillation": lambda x, r: distillation_loss(x, teacher, 2.0, reduction=r),
+                    "distillation": lambda x, r: distillation_loss(
+                        x, teacher, temperature=2.0, reduction=r
+                    ),
                     "proximal_distillation": lambda x, r: proximal_distillation_loss(
-                        x, teacher, 2.0, 0.5, reduction=r
+                        x, teacher, temperature=2.0, alpha=0.5, reduction=r
                     ),
                 }
                 for name, fn in cases.items():

@@ -9,16 +9,22 @@ sums the short vector; others pass over the row again. FP32 takes the entropy's
 elementwise exponentials in float32; row statistics stay in float64.
 """
 
-import functools
-from typing import Any
+from __future__ import annotations
 
-import torch
+import functools
+from typing import TYPE_CHECKING, Any
+
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
 
 from . import _cuda_launch, _triton_reduce
 from ._triton_hinge import _gamma, _margin, _terms
+
+if TYPE_CHECKING:
+    import torch
+else:
+    from ._cuda_launch import torch
 
 LOSSES = {
     "topk_cross_entropy": 0,
