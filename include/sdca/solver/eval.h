@@ -45,14 +45,14 @@ inline void check_stopping_criteria(Context& ctx) {
     }
     const Work gap = eval.primal - eval.dual;
     const Work max = std::max(std::abs(eval.primal), std::abs(eval.dual));
-    const Work eps_stop = max * static_cast<Work>(criteria.epsilon);
+    const Work eps_stop = max * static_cast<Work>(criteria.tol);
 
     // Solved only if the gap plus its rounding bound meets the tolerance; a
     // tolerance below that bound is never certified.
     if (gap < -eval.gap_error) {
       ctx.status = solver_status::failed;
       reporting::solver_stop_failed(gap, eval.gap_error, eps_stop);
-    } else if (criteria.epsilon > 0 && gap + eval.gap_error <= eps_stop) {
+    } else if (criteria.tol > 0 && gap + eval.gap_error <= eps_stop) {
       ctx.status = solver_status::solved;
     } else if (evals.size() > 1) {
       // Check if the solver is making progress (the iterate's storage limits it)

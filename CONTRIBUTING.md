@@ -33,6 +33,12 @@ OCTAVE_HOME=<prefix> tests/matlab/run_octave_tests.sh
 
 - **Markers:** `slow` and `long` tests are scheduled first under `--dist worksteal` (CI
   deselects `long`); `serial` tests run without `-n` on an unloaded machine.
+- **Conformance matrix:** `--conformance ci` runs about a tenth of the conformance cells
+  (every loss on the default backends, cross-entropy and the multiclass hinge on every
+  backend, dtype and precision), as CI does; the default runs the full matrix. A manual CI
+  run (*Run workflow*, `conformance: full`) runs the full matrix on the hosted runners and,
+  when cells fail, uploads their records (`SDCA_CONFORMANCE_RECORD`) as an artifact; a
+  reviewed failure set of other hardware is added to `known_failures/` as a variant.
 - **CUDA:** On a machine with an NVIDIA GPU, install a CUDA build of PyTorch (and
   of JAX); the same pytest command then runs the CUDA tests, which skip otherwise.
   `python tests/python/release_numerics.py --device cuda --output <dir>` also checks the

@@ -1,8 +1,8 @@
-"""JAX losses: sdca_loss (the LOSSES at the input scores), distillation_loss
-(cross-entropy to a teacher's softmax) and proximal_distillation_loss, under jit, grad
-and vmap. The native backend calls the C ABI through an XLA FFI call on the
-CPU (_jax_ffi) and through jax.pure_callback elsewhere or where the FFI handlers
-do not build; the jax backend computes every loss with jax.numpy on any device
+"""JAX losses under jit, grad and vmap: the cross-entropies, top-k and hinge losses of class
+labels, the multilabel losses of boolean masks, and distillation_loss and
+proximal_distillation_loss of teacher logits. The native backend calls the C ABI through an
+XLA FFI call on the CPU (_jax_ffi) and through jax.pure_callback elsewhere or where the FFI
+handlers do not build; the jax backend computes every loss with jax.numpy on any device
 (entropy to any order, the others first-order reverse mode).
 """
 
@@ -14,7 +14,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 import jax
 import jax.core
@@ -25,17 +25,8 @@ from jax.typing import ArrayLike
 from numpy.typing import DTypeLike
 
 from . import _jax_cpu, _jax_cuda, _jax_ffi, _jax_fusion, _jax_losses
-from ._core import (
-    _IDS,
-    _PRECISION_CODES,
-    TOPK,
-    _canonical_precision,
-    _check_options,
-    _loss_of_kind,
-    _tensor_kind,
-    _topk_hinge_name,
-    loss_and_grad,
-)
+from . import _loss_options as _options
+from ._core import _IDS, _PRECISION_CODES, _host_loss_and_grad
 from ._jax_compat import optimization_barrier as _optimization_barrier
 
 __all__ = [
@@ -46,10 +37,7 @@ __all__ = [
     "multilabel_hinge_loss",
     "proximal_cross_entropy",
     "proximal_distillation_loss",
-    "sdca_loss",
     "topk_cross_entropy",
-    "topk_hinge_alpha_loss",
-    "topk_hinge_beta_loss",
     "topk_hinge_loss",
 ]
 
@@ -207,10 +195,12 @@ def _host(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Native losses (in values_dtype, declared at trace time: XLA's callback thread may see
     another x64 setting) and gradients of any leading shape (vmap broadcasts them), of integer
-    labels (the leading shape) or a label mask."""
+    labels (the leading shape) or a label mask. Rows the native library rejects (traced
+    invalid inputs) give NaN: the call is repeated row by row only after a failure."""
     z, positive = np.asarray(z), np.asarray(positive)
     classes = z.shape[-1]
-    name, nonsmooth = _loss_of_kind(loss)
+    name, nonsmooth = _native_name(loss, positive.dtype == np.bool_)
+    flat = z.reshape(-1, classes)
     if positive.ndim < z.ndim:
         # A scatter into zeros, not a comparison of every class; out of range, a label marks
         # no class (the native call rejects the row).
@@ -220,20 +210,40 @@ def _host(
         target[rows, labels[rows]] = True
     else:
         target = positive.reshape(-1, classes)
-    values, gradients = loss_and_grad(
-        z.reshape(-1, classes),
-        target,
-        name,
-        k=k,
-        gamma=gamma if nonsmooth is None else nonsmooth,
-        alpha=alpha,
-        # The available CPUs, as XLA's own CPU operations, unless SDCA_NUM_THREADS is set.
-        num_threads=None if "SDCA_NUM_THREADS" in os.environ else 0,
-        # Match _attributes: the native JAX adapter owns its precision policy.
-        # Do not inherit a change in the NumPy convenience API's default.
-        precision="float64" if precision is None else precision,
-    )
+
+    def call(rows: slice) -> tuple[np.ndarray, np.ndarray]:
+        return _host_loss_and_grad(
+            flat[rows],
+            target[rows],
+            name,
+            k=k,
+            gamma=gamma if nonsmooth is None else nonsmooth,
+            alpha=alpha,
+            # SDCA_NUM_THREADS, else the available CPUs, as XLA's own CPU operations.
+            num_threads=None,
+            # Match _attributes: the native JAX adapter owns its precision policy.
+            # Do not inherit a change in the NumPy convenience API's default.
+            precision="float64" if precision is None else precision,
+        )
+
+    try:
+        values, gradients = call(slice(None))
+    except (ValueError, RuntimeError):
+        values = np.full(flat.shape[0], np.nan)
+        gradients = np.full(flat.shape, np.nan, flat.dtype)
+        for row in range(flat.shape[0]):
+            try:
+                values[row], gradients[row] = (a[0] for a in call(slice(row, row + 1)))
+            except (ValueError, RuntimeError):
+                pass
     return values.astype(values_dtype).reshape(z.shape[:-1]), gradients.reshape(z.shape)
+
+
+def _native_name(kind: str, mask: bool) -> tuple[str, float | None]:
+    """The native loss of a tensor kind and target (the entropy of a mask is
+    multilabel_cross_entropy), and gamma 0 for a nonsmooth kind (None: the given gamma)."""
+    name, nonsmooth = _options.loss_of_kind(kind)
+    return ("multilabel_cross_entropy" if mask and name == "cross_entropy" else name), nonsmooth
 
 
 def _values_dtype(dtype: DTypeLike) -> DTypeLike:
@@ -267,10 +277,10 @@ def _ffi(z: jax.Array) -> bool:
     return not _accelerator(z) and _jax_ffi.enabled()
 
 
-def _attributes(options: _Options, dtype: DTypeLike) -> dict[str, np.generic]:
-    """The options of the FFI handlers, as _host passes them to loss_and_grad."""
+def _attributes(options: _Options, dtype: DTypeLike, mask: bool) -> dict[str, np.generic]:
+    """The options of the FFI handlers, as _host passes them to _host_loss_and_grad."""
     _, loss, k, gamma, alpha, precision, _ = options
-    name, nonsmooth = _loss_of_kind(loss)
+    name, nonsmooth = _native_name(loss, mask)
     work = "float64" if precision is None else precision
     storage = np.float32 if np.dtype(dtype) == np.float32 else np.float64
     return {
@@ -289,7 +299,9 @@ def _native_call(
     shapes = (values, jax.ShapeDtypeStruct(z.shape, z.dtype))
     if _ffi(z):
         call = jax.ffi.ffi_call(_jax_ffi.GRADIENT, shapes, vmap_method="broadcast_all")
-        values, gradients = call(z, positive, **_attributes(options, z.dtype))
+        values, gradients = call(
+            z, positive, **_attributes(options, z.dtype, positive.dtype == jnp.bool_)
+        )
         return values, gradients
     host = _host_of(options, values.dtype)
     values, gradients = jax.pure_callback(host, shapes, z, positive, vmap_method="broadcast_all")
@@ -301,7 +313,7 @@ def _native_values(z: jax.Array, positive: jax.Array, options: _Options) -> jax.
     shape = jax.ShapeDtypeStruct(z.shape[:-1], _values_dtype(z.dtype))
     if _ffi(z):
         call = jax.ffi.ffi_call(_jax_ffi.VALUES, shape, vmap_method="broadcast_all")
-        return call(z, positive, **_attributes(options, z.dtype))
+        return call(z, positive, **_attributes(options, z.dtype, positive.dtype == jnp.bool_))
     host = _host_of(options, shape.dtype)
 
     def values(z: np.ndarray, positive: np.ndarray) -> np.ndarray:
@@ -364,7 +376,7 @@ def _first_order(gradients: jax.Array) -> jax.Array:
 def _first_order_jvp(
     primals: tuple[jax.Array], tangents: tuple[jax.Array]
 ) -> tuple[jax.Array, jax.Array]:
-    raise TypeError("sdca_loss has no JVP: its derivatives are first-order reverse mode")
+    raise TypeError("This loss has no JVP: its derivatives are first-order reverse mode")
 
 
 def _call(z: jax.Array, positive: jax.Array, options: _Options) -> tuple[jax.Array, jax.Array]:
@@ -376,7 +388,7 @@ def _call(z: jax.Array, positive: jax.Array, options: _Options) -> tuple[jax.Arr
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(2,))
-def _loss(z: jax.Array, positive: jax.Array, options: _Options) -> jax.Array:
+def _rows(z: jax.Array, positive: jax.Array, options: _Options) -> jax.Array:
     if options[0]:
         return _native_values(z, positive, options)
     return _tensor_call(z, positive, options, values_only=True)[0]
@@ -389,7 +401,7 @@ def _saved_bwd(*args: Any) -> tuple[jax.Array, None]:
     return (gradient * ct[..., None]).astype(gradient.dtype), None
 
 
-_loss.defvjp(_call, _saved_bwd)
+_rows.defvjp(_call, _saved_bwd)
 
 
 def _rounded_bwd(*args: Any) -> tuple[jax.Array, None]:
@@ -809,41 +821,63 @@ def _reduced_entropy(z: jax.Array, target: jax.Array, double: bool, reduction: s
     return _reduce(_entropy(z, target, double), reduction, _work(z).dtype)
 
 
-def _targets(
-    target: ArrayLike, logits: jax.Array, axis: int, objective: str
-) -> tuple[jax.Array, int]:
-    """Integer labels (...) or a boolean label mask (..., classes), and a bound on the label
-    count of every example.
-
-    Concrete targets are checked here; traced ones only by the losses (native: on the host).
-    """
-    shape, classes = np.shape(logits), logits.shape[axis]
+def _label_array(
+    target: ArrayLike, shape: tuple[int, ...], axis: int, spec: _options.Spec
+) -> jax.Array:
+    """The integer labels of a single-label loss (logits.shape without axis), values unchecked."""
     t = jnp.asarray(target)
-    if t.dtype == jnp.bool_ and t.shape == shape:
-        if not _concrete(target):
-            return jnp.moveaxis(t, axis, -1), classes
-        count = np.moveaxis(np.asarray(target), axis, -1).sum(-1)
-        if (count == 0).any():
-            raise ValueError("Every example needs a positive label")
-        if objective.removesuffix("_smooth") in TOPK and (count != 1).any():
-            raise ValueError("This loss needs exactly one target")
-        if objective != "cross_entropy" and (count == classes).any():
-            raise ValueError("This loss needs a negative label")
-        return jnp.moveaxis(t, axis, -1), max(1, int(count.max()))
-    if jnp.issubdtype(t.dtype, jnp.integer) and t.shape == shape[:axis] + shape[axis + 1 :]:
+    if t.dtype == jnp.bool_ or not jnp.issubdtype(t.dtype, jnp.integer):
+        hint = (
+            "; boolean masks are the targets of multilabel_cross_entropy and multilabel_hinge_loss"
+            if t.dtype == jnp.bool_
+            else ""
+        )
+        raise TypeError(f"{spec.name} takes integer class labels, not {t.dtype} targets{hint}")
+    expected = shape[:axis] + shape[axis + 1 :]
+    if t.shape != expected:
+        raise ValueError(f"labels must have the logits' shape without the class axis, {expected}")
+    return t
+
+
+def _targets(
+    target: ArrayLike, logits: jax.Array, axis: int, spec: _options.Spec
+) -> tuple[jax.Array, int]:
+    """Integer labels (...) of a single-label loss or the boolean mask (..., classes) of a
+    multilabel one, and a bound on the label count of every example.
+
+    Concrete targets are checked here; traced ones only by the losses (invalid rows give NaN).
+    """
+    shape, classes = tuple(np.shape(logits)), logits.shape[axis]
+    if not spec.multilabel:
+        t = _label_array(target, shape, axis, spec)
         if _concrete(target):
             labels = np.asarray(target)
             if ((labels < 0) | (labels >= classes)).any():
                 raise ValueError("Target index out of range")
         return t, 1
-    raise ValueError("target must contain integer class indices or be a boolean mask")
+    t = jnp.asarray(target)
+    if t.dtype != jnp.bool_:
+        raise TypeError(f"{spec.name} takes a boolean mask of positive labels, not {t.dtype}")
+    if t.shape != shape:
+        raise ValueError(f"the mask must have the logits' shape {shape}")
+    mask = jnp.moveaxis(t, axis, -1)
+    if not _concrete(target):
+        return mask, classes
+    count = np.moveaxis(np.asarray(target), axis, -1).sum(-1)
+    if (count == 0).any():
+        raise ValueError("Every example needs a positive label")
+    if spec.objective != "cross_entropy" and (count == classes).any():
+        raise ValueError("This loss needs a negative label")
+    return mask, max(1, int(count.max()))
 
 
 def _class_last(logits: ArrayLike, axis: int) -> tuple[jax.Array, jax.Array, int]:
     """Validate the class axis and floating dtype, preserving the original array too."""
     x = jnp.asarray(logits)
-    if x.ndim < 1 or not jnp.issubdtype(x.dtype, jnp.floating):
-        raise ValueError("logits must be finite floating-point values")
+    if not jnp.issubdtype(x.dtype, jnp.floating):
+        raise TypeError(f"logits must be a floating-point array, not {x.dtype}")
+    if x.ndim < 1:
+        raise ValueError("logits need a class axis")
     if not -x.ndim <= axis < x.ndim:
         raise ValueError("axis is out of range")
     axis %= x.ndim
@@ -853,78 +887,76 @@ def _class_last(logits: ArrayLike, axis: int) -> tuple[jax.Array, jax.Array, int
     return x, z, axis
 
 
-def sdca_loss(
-    logits: ArrayLike,
-    target: ArrayLike,
-    loss: str = "cross_entropy",
-    *,
-    backend: str = "auto",
-    k: int = 1,
-    gamma: float = 0.0,
-    alpha: float = 1.0,
-    reduction: str = "mean",
-    axis: int = -1,
-    precision: object = None,
-) -> jax.Array:
-    """A loss of the scores (not a differentiable call to libsdca.fit).
+_BACKENDS = ("auto", "native", "jax")
+Reduction = Literal["none", "sum", "mean"]
+Backend = Literal["auto", "native", "jax"]
+_PRECISIONS: dict[object, str] = {
+    np.float32: "float32",
+    np.float64: "float64",
+    np.dtype(np.float32): "float32",
+    np.dtype(np.float64): "float64",
+    jnp.float32: "float32",
+    jnp.float64: "float64",
+}
 
-    Gradients are first-order reverse mode (grad, vjp; not jvp or hessian),
-    except that the jax entropy has derivatives of any order.
 
-    Args:
-        logits: Finite floating-point scores with the class axis
-            (at least two classes and one example).
-        target: Integer class indices of logits.shape without axis, or a
-            boolean mask of logits.shape, as in libsdca.torch.sdca_loss.
-        loss: One of libsdca.LOSSES.
-        backend: "auto" (jax for entropy, and where float64 is enabled or
-            precision="float32": off the CPU, and on it for small calls and,
-            without the FFI handlers, the nonsmooth multiclass and multilabel
-            hinges; else native),
-            "native" (C++ on the host) or "jax" (jax.numpy on any device).
-        k: Top-k parameter in [1, classes-1]; only the topk losses use it.
-        gamma: Hinge smoothing, finite and >= 0 (0: nonsmooth).
-        alpha: proximal_cross_entropy step, finite and positive.
-        reduction: "none", "sum" or "mean".
-        axis: Class axis of logits.
-        precision: As in libsdca.torch.sdca_loss; float64 arithmetic in
-            the jax backend needs jax_enable_x64.
+def _static(value: object, name: str) -> object:
+    """A hyperparameter that selects kernels and arithmetic: a Python number or a concrete 0-d
+    array; a traced value raises TypeError."""
+    if isinstance(value, jax.core.Tracer):
+        raise TypeError(
+            f"{name} must be a static Python number, not a traced value; under jax.jit pass it "
+            "as a static argument or close over it"
+        )
+    if isinstance(value, jax.Array | np.ndarray | np.generic) and np.ndim(value) == 0:
+        return np.asarray(value).item()
+    return value
 
-    Returns:
-        Per-example losses (logits.shape without axis) or their reduction.
 
-    Raises:
-        ValueError: For invalid inputs or options.
-        JaxRuntimeError: If the native loss fails on the host: traced
-            inputs are invalid or a proximal_cross_entropy normalization does not
-            converge. The jax backend gives nan for those examples instead. On the
-            CPU with float64 (or precision="float32"), "auto" picks the backend by
-            objective and size: an invalid traced target of a loss picked by size
-            raises above 16,384 scores and gives nan at or below; under vmap the
-            size of one example decides.
-    """
-    # The private kind of the tensor backend; gamma is 1 for a nonsmooth hinge.
-    objective, kind_k, gamma = _tensor_kind(loss, k, gamma)
-    if backend not in ("auto", "native", "jax"):
-        raise ValueError("Unknown backend")
-    x, z, axis = _class_last(logits, axis)
+class _Common(NamedTuple):
+    """The checked options every loss takes."""
+
+    reduction: str
+    axis: int
+    backend: str
+    precision: str | None
+
+
+def _common(reduction: object, axis: object, backend: object, precision: object) -> _Common:
+    canonical = _options.check_precision_name(precision, _PRECISIONS, "jnp")
+    if canonical == "float64" and not _x64():
+        raise ValueError("precision='float64' needs jax_enable_x64")
+    return _Common(
+        _options.check_reduction(reduction),
+        _options.check_axis(axis, "axis"),
+        _options.check_backend(backend, _BACKENDS),
+        canonical,
+    )
+
+
+def _loss(spec: _options.Spec, logits: ArrayLike, target: ArrayLike, common: _Common) -> jax.Array:
+    """A loss of checked options: the paths of every single-label and multilabel loss."""
+    backend, reduction = common.backend, common.reduction
+    k, gamma, alpha = spec.k, spec.gamma, spec.alpha
+    objective = spec.objective
+    x, z, axis = _class_last(logits, common.axis)
     classes = z.shape[-1]
-    _check_options(k, gamma, alpha, classes)
-    k = kind_k
+    _options.check_classes(k, classes)
     if z.size == 0:
+        _targets(target, x, axis, spec)
         return _empty_loss(z, reduction)
     # Top-k entropy at k = 1 is the entropy of its one target.
     entropy = objective == "cross_entropy" or (objective == "topk_cross_entropy" and k == 1)
-    canonical = _canonical_precision(precision)
+    canonical = common.precision
+    _check_precision(x, canonical, True)
     canonical = _default_precision(canonical, objective, x.dtype, backend, k, classes, z.size)
     work = canonical if entropy else _work_precision(objective, canonical, x)
     tensor = _jax_backend(
         x, "cross_entropy" if entropy else objective, backend, work, gamma, alpha, k, classes
     )
-    _check_precision(x, canonical, tensor)
     if _concrete(x) and not bool(jnp.isfinite(x).all()):
         raise ValueError("logits must be finite floating-point values")
-    target, width = _targets(target, x, axis, objective)
+    target, width = _targets(target, x, axis, spec)
     if backend == "auto":
         fused = _jax_cuda.loss(
             z,
@@ -941,18 +973,129 @@ def sdca_loss(
         if fused is not None:
             return fused
     if tensor and entropy:
-        if objective != "cross_entropy" and target.dtype == jnp.bool_:
-            # Rows without exactly one target (of a traced mask) give nan.
-            target = jnp.where(target.sum(-1) == 1, target.argmax(-1), -1)
         values = _entropy(z, target, canonical == "float64")
     else:
         dtype = z.dtype if z.dtype in (jnp.float32, jnp.float64) else jnp.float32
         # The native library takes the given precision (float64 for None, as fast).
         work = work if tensor else canonical
         options = (not tensor, objective, int(k), float(gamma), float(alpha), work, width)
-        values = _loss(z.astype(dtype), target, options)
+        values = _rows(z.astype(dtype), target, options)
     # Loss values are promote(logits dtype, float32), as libsdca.torch.
     return _reduce(values, reduction, _work(z).dtype)
+
+
+def _weight_array(weight: ArrayLike, classes: int) -> tuple[jax.Array, jax.Array | None]:
+    """Checked class weights (classes,) and, for traced ones, whether they are valid (finite
+    and nonnegative; invalid traced weights give NaN losses)."""
+    w = jnp.asarray(weight)
+    if not jnp.issubdtype(w.dtype, jnp.floating):
+        raise TypeError(f"weight must be a floating-point array, not {w.dtype}")
+    if w.shape != (classes,):
+        raise ValueError(f"weight must have shape (classes,) = ({classes},)")
+    if _concrete(weight):
+        values = np.asarray(weight)
+        if not (np.isfinite(values) & (values >= 0)).all():
+            raise ValueError("weight must be finite and nonnegative")
+        return w, None
+    return w, (jnp.isfinite(w) & (w >= 0)).all()
+
+
+def _smoothing(label_smoothing: object) -> float | jax.Array:
+    """label_smoothing in [0, 1]: a checked Python number, or a traced scalar (unchecked)."""
+    if isinstance(label_smoothing, jax.core.Tracer):
+        if np.ndim(label_smoothing) != 0 or not jnp.issubdtype(label_smoothing.dtype, jnp.floating):
+            raise TypeError("label_smoothing must be a real scalar")
+        return label_smoothing
+    return _options.check_label_smoothing(_static(label_smoothing, "label_smoothing"))
+
+
+def _smoothed(label_smoothing: float | jax.Array) -> bool:
+    return not (isinstance(label_smoothing, float) and label_smoothing == 0.0)
+
+
+def _composed(
+    spec: _options.Spec,
+    logits: ArrayLike,
+    target: ArrayLike,
+    weight: ArrayLike | None,
+    ignore_index: int | None,
+    label_smoothing: float | jax.Array,
+    common: _Common,
+) -> jax.Array:
+    """A single-label loss with class weights, an ignored label or (cross_entropy) label
+    smoothing, as torch.nn.functional.cross_entropy: per-example losses times the weight of
+    their label (0 where ignored), plus for smoothing eps / C times sum_j w_j (lse - z_j); the
+    mean divides by the sum of the label weights."""
+    x, z, axis = _class_last(logits, common.axis)
+    classes = z.shape[-1]
+    labels = _label_array(target, tuple(np.shape(x)), axis, spec)
+    w, valid = (None, None) if weight is None else _weight_array(weight, classes)
+    ignored = None if ignore_index is None else labels == ignore_index
+    if ignored is not None:
+        # Ignored rows may hold any values: they enter as zero logits of label 0.
+        z = jnp.where(ignored[..., None], jnp.zeros((), z.dtype), z)
+        labels = jnp.where(ignored, jnp.zeros((), labels.dtype), labels)
+    values = _loss(spec, z, labels, common._replace(reduction="none", axis=-1))
+    dtype = values.dtype
+    if w is None:
+        rows = jnp.ones(labels.shape, dtype)
+    else:
+        rows = w.astype(dtype)[jnp.clip(labels, 0, classes - 1)]
+    if ignored is not None:
+        rows = jnp.where(ignored, jnp.zeros((), dtype), rows)
+    loss = values * rows
+    if _smoothed(label_smoothing):
+        eps = jnp.asarray(label_smoothing, dtype)
+        log_p = jax.nn.log_softmax(_work(z, common.precision == "float64"), -1)
+        terms = -(log_p if w is None else log_p * w.astype(log_p.dtype)).sum(-1).astype(dtype)
+        if ignored is not None:
+            terms = jnp.where(ignored, jnp.zeros((), dtype), terms)
+        loss = (1 - eps) * loss + eps / classes * terms
+    if valid is not None:
+        loss = jnp.where(valid, loss, jnp.nan)
+    if common.reduction == "none":
+        return loss
+    if common.reduction == "sum":
+        return loss.sum()
+    return loss.sum() / rows.sum()
+
+
+def _probabilities(
+    logits: ArrayLike,
+    target: jax.Array,
+    weight: ArrayLike | None,
+    ignore_index: int | None,
+    label_smoothing: float | jax.Array,
+    common: _Common,
+) -> jax.Array:
+    """cross_entropy of class probabilities, as torch.nn.functional.cross_entropy:
+    -sum_j w_j t_j log softmax(z)_j per example, t smoothed to (1 - eps) t + eps / C; the mean
+    divides by the number of examples."""
+    if ignore_index is not None:
+        raise ValueError("ignore_index is not supported with probability targets")
+    if common.backend == "native":
+        raise NotImplementedError(
+            "probability targets are computed with jax.numpy; use backend='auto' or 'jax'"
+        )
+    x, z, axis = _class_last(logits, common.axis)
+    if target.shape != x.shape:
+        raise ValueError(f"probability targets must have the logits' shape {x.shape}")
+    _check_precision(x, common.precision, True)
+    if _concrete(x) and not bool(jnp.isfinite(x).all()):
+        raise ValueError("logits must be finite floating-point values")
+    classes = z.shape[-1]
+    log_p = jax.nn.log_softmax(_work(z, common.precision == "float64"), -1)
+    t = jnp.moveaxis(target, axis, -1).astype(log_p.dtype)
+    if _smoothed(label_smoothing):
+        eps = jnp.asarray(label_smoothing, log_p.dtype)
+        t = t * (1 - eps) + eps / classes
+    terms = log_p * t
+    if weight is not None:
+        w, valid = _weight_array(weight, classes)
+        terms = terms * w.astype(log_p.dtype)
+        if valid is not None:
+            terms = jnp.where(valid, terms, jnp.nan)
+    return _reduce(-terms.sum(-1), common.reduction, _work(z).dtype)
 
 
 def _single_thread_cpu() -> bool:
@@ -1337,10 +1480,11 @@ _distillation.defvjp(_distillation_fwd, _rounded_bwd)
 def distillation_loss(
     student: ArrayLike,
     teacher: ArrayLike,
-    temperature: float = 1.0,
     *,
-    reduction: str = "mean",
+    temperature: float = 1.0,
+    reduction: Reduction = "mean",
     axis: int = -1,
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
     """Cross-entropy with a fixed teacher distribution softmax(teacher/T).
@@ -1351,47 +1495,68 @@ def distillation_loss(
 
     Args:
         student: Finite floating-point logits with the class axis
-            (at least two classes and one example).
-        teacher: Finite logits of the same shape and dtype.
-        temperature: T, finite and positive.
+            (at least two classes).
+        teacher: Finite floating-point logits of the same shape; a different dtype is
+            promoted with the student's.
+        temperature: T, a static number, finite and positive.
         reduction: "none", "sum" or "mean".
         axis: Class axis of the logits.
-        precision: As in libsdca.torch.distillation_loss; float64 arithmetic needs
-            jax_enable_x64.
+        backend: "auto" (the fused CUDA kernels on NVIDIA GPUs, the native CPU kernels
+            through the FFI handlers, else jax.numpy), "native" (the native CPU kernels;
+            NotImplementedError where they do not run) or "jax" (jax.numpy).
+        precision: None, "float32" or "float64" (or jnp.float32/float64); float64
+            needs jax_enable_x64.
 
     Returns:
         Per-example losses (student.shape without axis) or their reduction.
 
     Raises:
-        ValueError: For invalid inputs or options.
+        TypeError, ValueError: For invalid inputs or options.
     """
-    s, t, double = _distillation_pair(student, teacher, temperature, axis, precision)
+    temperature = _options.check_positive(_static(temperature, "temperature"), "temperature")
+    common = _common(reduction, axis, backend, precision)
+    s, t, double = _distillation_pair(student, teacher, temperature, common)
     if s.size == 0:
-        return _empty_loss(s, reduction)
-    fused = _jax_cuda.distillation(
-        s,
-        t,
-        float(temperature),
-        double,
-        reduction,
-        _distillation_reference,
-        _distillation_reference_gradient,
-    )
-    if fused is not None:
-        return fused
-    fused = _jax_cpu.distillation(
-        s,
-        t,
-        float(temperature),
-        double,
-        reduction,
-        _distillation_reference,
-        _distillation_reference_gradient,
-    )
-    if fused is not None:
-        return fused
-    values = _distillation(s, t, float(temperature), double)
-    return _reduce(values, reduction, _work(s).dtype)
+        return _empty_loss(s, common.reduction)
+    if common.backend == "auto":
+        fused = _jax_cuda.distillation(
+            s,
+            t,
+            temperature,
+            double,
+            common.reduction,
+            _distillation_reference,
+            _distillation_reference_gradient,
+        )
+        if fused is not None:
+            return fused
+    if common.backend != "jax":
+        fused = _jax_cpu.distillation(
+            s,
+            t,
+            temperature,
+            double,
+            common.reduction,
+            _distillation_reference,
+            _distillation_reference_gradient,
+        )
+        if fused is not None:
+            return fused
+        if common.backend == "native":
+            raise NotImplementedError(_native_distillation_absent(s))
+    values = _distillation(s, t, temperature, double)
+    return _reduce(values, common.reduction, _work(s).dtype)
+
+
+def _native_distillation_absent(s: jax.Array) -> str:
+    """Why backend="native" distillation does not run."""
+    if _jax_cuda.on_gpu(s):
+        why = "the logits are on a GPU"
+    elif not _jax_ffi.enabled():
+        why = f"the JAX FFI handlers are unavailable ({_jax_ffi.why_not()})"
+    else:
+        why = "the temperature or dtype is outside the native kernels' range"
+    return f"native distillation runs on the CPU through the FFI handlers, but {why}"
 
 
 def _distillation_reference(
@@ -1419,23 +1584,25 @@ def _distillation_reference_gradient(
 
 
 def _distillation_pair(
-    student: ArrayLike, teacher: ArrayLike, temperature: float, axis: int, precision: object
+    student: ArrayLike, teacher: ArrayLike, temperature: float, common: _Common
 ) -> tuple[jax.Array, jax.Array, bool]:
-    """Checked logits with the class axis last (teacher without gradient), and float64."""
+    """Checked logits with the class axis last (teacher without gradient; a different dtype
+    is promoted), and whether the work is float64."""
     s, t = jnp.asarray(student), jnp.asarray(teacher)
-    if s.shape != t.shape or s.dtype != t.dtype or s.ndim < 1:
-        raise ValueError("Student and teacher must have matching shape and dtype")
-    if not jnp.issubdtype(s.dtype, jnp.floating) or (
-        _concrete(s, t) and not bool(jnp.isfinite(s).all() & jnp.isfinite(t).all())
-    ):
+    for name, x in (("student", s), ("teacher", t)):
+        if not jnp.issubdtype(x.dtype, jnp.floating):
+            raise TypeError(f"{name} logits must be a floating-point array, not {x.dtype}")
+    if s.shape != t.shape or s.ndim < 1:
+        raise ValueError("Student and teacher must have matching shapes with a class axis")
+    if s.dtype != t.dtype:
+        dtype = jnp.promote_types(s.dtype, t.dtype)
+        s, t = s.astype(dtype), t.astype(dtype)
+    if _concrete(s, t) and not bool(jnp.isfinite(s).all() & jnp.isfinite(t).all()):
         raise ValueError("Logits must be finite floating-point arrays")
-    canonical = _canonical_precision(precision)
-    _check_precision(s, canonical, True)
-    if not math.isfinite(temperature) or temperature <= 0:
-        raise ValueError("temperature must be finite and positive")
-    _, s, axis = _class_last(s, axis)
+    _check_precision(s, common.precision, True)
+    _, s, axis = _class_last(s, common.axis)
     t = jnp.moveaxis(jax.lax.stop_gradient(t), axis, -1)
-    return s, t, canonical == "float64"
+    return s, t, common.precision == "float64"
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(2, 3, 4))
@@ -1478,44 +1645,51 @@ _proximal_distillation.defvjp(_proximal_distillation_fwd, _rounded_bwd)
 def proximal_distillation_loss(
     student: ArrayLike,
     teacher: ArrayLike,
+    *,
     temperature: float = 1.0,
     alpha: float = 1.0,
-    *,
-    reduction: str = "mean",
+    reduction: Reduction = "mean",
     axis: int = -1,
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
     """Moreau envelope of distillation_loss with step alpha, as in libsdca.torch.
 
     min_u { H(softmax(teacher/T), softmax(u)) + |u - student/T|^2 / (2 alpha) }; reverse
-    mode and jax.hessian, exactly zero gradient at equal represented logits. alpha outside the float32
-    range computes in float64 (needs jax_enable_x64). alpha is finite and positive; other
-    arguments, the result and errors as in distillation_loss.
+    mode and jax.hessian, exactly zero gradient at equal represented logits. alpha (a static
+    number, finite and positive) outside the float32 range computes in float64 (needs
+    jax_enable_x64). Other arguments, the result and errors as in distillation_loss.
     """
-    s, t, double = _distillation_pair(student, teacher, temperature, axis, precision)
-    if not math.isfinite(alpha) or alpha <= 0:
-        raise ValueError("alpha must be finite and positive")
+    temperature = _options.check_positive(_static(temperature, "temperature"), "temperature")
+    alpha = _options.check_positive(_static(alpha, "alpha"), "alpha")
+    common = _common(reduction, axis, backend, precision)
+    s, t, double = _distillation_pair(student, teacher, temperature, common)
     if not _float32_holds(alpha):
         if not _x64():
             raise ValueError("alpha is outside the float32 range; enable jax_enable_x64")
         double = True
     if s.size == 0:
-        return _empty_loss(s, reduction)
-    fused = _jax_cuda.proximal_distillation(
-        s, t, float(temperature), float(alpha), double, reduction, _proximal_distillation_rows
-    )
-    if fused is not None:
-        return fused
+        return _empty_loss(s, common.reduction)
+    if common.backend == "auto":
+        fused = _jax_cuda.proximal_distillation(
+            s, t, temperature, alpha, double, common.reduction, _proximal_distillation_rows
+        )
+        if fused is not None:
+            return fused
     # Keep explicit fp32 on the array implementation until the native solver
     # exposes selectable work precision. The native default is measured separately.
-    if _canonical_precision(precision) != "float32" or double:
+    if common.backend == "native" or (
+        common.backend == "auto" and (common.precision != "float32" or double)
+    ):
         values = _jax_cpu.proximal_distillation(
-            s, t, float(temperature), float(alpha), double, _proximal_distillation_rows
+            s, t, temperature, alpha, double, _proximal_distillation_rows
         )
         if values is not None:
-            return _reduce(values, reduction, _work(s).dtype)
-    values = _proximal_distillation(s, t, float(temperature), float(alpha), double)
-    return _reduce(values, reduction, _work(s).dtype)
+            return _reduce(values, common.reduction, _work(s).dtype)
+        if common.backend == "native":
+            raise NotImplementedError(_native_distillation_absent(s))
+    values = _proximal_distillation(s, t, temperature, alpha, double)
+    return _reduce(values, common.reduction, _work(s).dtype)
 
 
 def _proximal_distillation_rows(
@@ -1527,240 +1701,212 @@ def _proximal_distillation_rows(
     return value, gradient
 
 
+_CROSS_ENTROPY = _options.spec("cross_entropy")
+_MULTILABEL_CROSS_ENTROPY = _options.spec("multilabel_cross_entropy")
+
+
+def _single_label(
+    spec: _options.Spec,
+    logits: ArrayLike,
+    target: ArrayLike,
+    weight: ArrayLike | None,
+    ignore_index: object,
+    common: _Common,
+) -> jax.Array:
+    """A single-label loss: the loss itself, or composed with class weights or an ignored
+    label."""
+    ignore = _options.check_ignore_index(ignore_index)
+    if weight is None and ignore is None:
+        return _loss(spec, logits, target, common)
+    return _composed(spec, logits, target, weight, ignore, 0.0, common)
+
+
 def cross_entropy(
     logits: ArrayLike,
     target: ArrayLike,
     *,
-    reduction: str = "mean",
+    weight: ArrayLike | None = None,
+    ignore_index: int | None = None,
+    label_smoothing: float = 0.0,
+    reduction: Reduction = "mean",
     axis: int = -1,
-    backend: str = "auto",
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
-    """Softmax cross-entropy loss of integer labels or a boolean mask.
+    """Softmax cross-entropy of class labels or class probabilities, as
+    torch.nn.functional.cross_entropy (with the class axis axis).
 
-    Other arguments, the result and errors as in sdca_loss.
+    Args:
+        logits: Finite floating-point scores with the class axis (at least two classes).
+        target: Integer class labels of logits.shape without axis (any integer dtype), or
+            floating-point class probabilities of logits.shape. Boolean masks are the
+            targets of multilabel_cross_entropy (TypeError here).
+        weight: Class weights (classes,), finite and nonnegative, or None. Each example's
+            loss is multiplied by its label's weight (probabilities: sum_j w_j t_j ...);
+            the mean of labels divides by the sum of those weights, as PyTorch.
+        ignore_index: A label whose examples add nothing (zero loss and gradient; excluded
+            from the mean), or None. Not with probability targets (ValueError).
+        label_smoothing: eps in [0, 1]: the target mixes (1 - eps) of the label (or the
+            probabilities) with eps of the uniform distribution. May be traced.
+        reduction: "none", "sum" or "mean".
+        axis: Class axis of logits.
+        backend: "auto" (jax.numpy, or the fused CUDA kernels on NVIDIA GPUs), "native"
+            (the native library on the host; labels only) or "jax" (jax.numpy).
+        precision: None, "float32" or "float64" (or jnp.float32/float64); float64 needs
+            jax_enable_x64.
+
+    Returns:
+        Per-example losses (logits.shape without axis) or their reduction, in float32 for
+        16-bit logits.
+
+    Raises:
+        TypeError, ValueError: For invalid inputs or options, and for concrete invalid
+            values (nonfinite logits, labels out of range). Traced invalid values give NaN.
+        NotImplementedError: For probability targets with backend="native".
     """
-    return sdca_loss(
-        logits,
-        target,
-        "cross_entropy",
-        backend=backend,
-        reduction=reduction,
-        axis=axis,
-        precision=precision,
-    )
+    common = _common(reduction, axis, backend, precision)
+    ignore = _options.check_ignore_index(ignore_index)
+    eps = _smoothing(label_smoothing)
+    dtype = getattr(target, "dtype", None)
+    if dtype is None:
+        target = jnp.asarray(target)
+        dtype = target.dtype
+    if jnp.issubdtype(dtype, jnp.floating):
+        return _probabilities(logits, jnp.asarray(target), weight, ignore, eps, common)
+    if weight is None and ignore is None and not _smoothed(eps):
+        return _loss(_CROSS_ENTROPY, logits, target, common)
+    return _composed(_CROSS_ENTROPY, logits, target, weight, ignore, eps, common)
 
 
 def topk_cross_entropy(
     logits: ArrayLike,
     target: ArrayLike,
-    k: int = 1,
     *,
-    reduction: str = "mean",
+    k: int,
+    weight: ArrayLike | None = None,
+    ignore_index: int | None = None,
+    reduction: Reduction = "mean",
     axis: int = -1,
-    backend: str = "auto",
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
-    """Top-k cross-entropy (the top-k entropy loss); cross_entropy at k = 1.
+    """Top-k cross-entropy (the top-k entropy loss) of class labels; cross_entropy at k = 1.
 
-    Other arguments, the result and errors as in sdca_loss.
+    k: a static integer in [1, classes - 1]. weight and ignore_index as in cross_entropy;
+    other arguments, the result and errors as in cross_entropy (labels only).
     """
-    return sdca_loss(
-        logits,
-        target,
-        "topk_cross_entropy",
-        k=k,
-        reduction=reduction,
-        axis=axis,
-        backend=backend,
-        precision=precision,
-    )
+    k = _options.check_k(_static(k, "k"))
+    spec = _options.spec("topk_cross_entropy", k=k)
+    common = _common(reduction, axis, backend, precision)
+    return _single_label(spec, logits, target, weight, ignore_index, common)
 
 
 def multiclass_hinge_loss(
     logits: ArrayLike,
     target: ArrayLike,
-    gamma: float = 0.0,
     *,
-    reduction: str = "mean",
+    gamma: float = 0.0,
+    weight: ArrayLike | None = None,
+    ignore_index: int | None = None,
+    reduction: Reduction = "mean",
     axis: int = -1,
-    backend: str = "auto",
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
-    """Multiclass hinge loss of Crammer and Singer, smoothed by gamma > 0.
+    """Multiclass hinge loss of Crammer and Singer, smoothed by gamma > 0 (static, finite).
 
-    Other arguments, the result and errors as in sdca_loss.
+    Other arguments, the result and errors as in topk_cross_entropy.
     """
-    return sdca_loss(
-        logits,
-        target,
-        "multiclass_hinge",
-        gamma=gamma,
-        reduction=reduction,
-        axis=axis,
-        backend=backend,
-        precision=precision,
-    )
+    gamma = _options.check_gamma(_static(gamma, "gamma"))
+    spec = _options.spec("multiclass_hinge", gamma=gamma)
+    common = _common(reduction, axis, backend, precision)
+    return _single_label(spec, logits, target, weight, ignore_index, common)
 
 
 def topk_hinge_loss(
     logits: ArrayLike,
     target: ArrayLike,
-    k: int = 1,
     *,
-    variant: str = "beta",
+    k: int,
+    variant: Literal["alpha", "beta"] = "beta",
     gamma: float = 0.0,
-    reduction: str = "mean",
+    weight: ArrayLike | None = None,
+    ignore_index: int | None = None,
+    reduction: Reduction = "mean",
     axis: int = -1,
-    backend: str = "auto",
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
-    """Top-k hinge loss, smoothed by gamma > 0. Variant "beta" averages the k
-    largest hinges; "alpha" is the hinge of the average of the k largest margins.
+    """Top-k hinge loss, smoothed by gamma > 0 (static, finite). Variant "beta" averages the
+    k largest hinges; "alpha" is the hinge of the average of the k largest margins.
 
-    variant is "alpha" or "beta"; other arguments, the result and errors as in sdca_loss.
+    k: a static integer in [1, classes - 1]. Other arguments, the result and errors as in
+    topk_cross_entropy.
     """
-    name = _topk_hinge_name(variant)
-    return sdca_loss(
-        logits,
-        target,
-        name,
-        k=k,
-        gamma=gamma,
-        reduction=reduction,
-        axis=axis,
-        backend=backend,
-        precision=precision,
-    )
+    k = _options.check_k(_static(k, "k"))
+    name = "topk_hinge_" + _options.check_variant(variant)
+    gamma = _options.check_gamma(_static(gamma, "gamma"))
+    spec = _options.spec(name, k=k, gamma=gamma)
+    common = _common(reduction, axis, backend, precision)
+    return _single_label(spec, logits, target, weight, ignore_index, common)
 
 
-def topk_hinge_alpha_loss(
+def proximal_cross_entropy(
     logits: ArrayLike,
     target: ArrayLike,
-    k: int = 1,
     *,
-    gamma: float = 0.0,
-    reduction: str = "mean",
+    alpha: float = 1.0,
+    weight: ArrayLike | None = None,
+    ignore_index: int | None = None,
+    reduction: Reduction = "mean",
     axis: int = -1,
-    backend: str = "auto",
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
-    """topk_hinge_loss with variant="alpha".
+    """Moreau envelope of the cross-entropy with step alpha (static, finite, positive).
 
-    Other arguments, the result and errors as in sdca_loss.
+    Other arguments, the result and errors as in topk_cross_entropy.
     """
-    return sdca_loss(
-        logits,
-        target,
-        "topk_hinge_alpha",
-        k=k,
-        gamma=gamma,
-        reduction=reduction,
-        axis=axis,
-        backend=backend,
-        precision=precision,
-    )
-
-
-def topk_hinge_beta_loss(
-    logits: ArrayLike,
-    target: ArrayLike,
-    k: int = 1,
-    *,
-    gamma: float = 0.0,
-    reduction: str = "mean",
-    axis: int = -1,
-    backend: str = "auto",
-    precision: object = None,
-) -> jax.Array:
-    """topk_hinge_loss with variant="beta".
-
-    Other arguments, the result and errors as in sdca_loss.
-    """
-    return sdca_loss(
-        logits,
-        target,
-        "topk_hinge_beta",
-        k=k,
-        gamma=gamma,
-        reduction=reduction,
-        axis=axis,
-        backend=backend,
-        precision=precision,
-    )
+    alpha = _options.check_positive(_static(alpha, "alpha"), "alpha")
+    spec = _options.spec("proximal_cross_entropy", alpha=alpha)
+    common = _common(reduction, axis, backend, precision)
+    return _single_label(spec, logits, target, weight, ignore_index, common)
 
 
 def multilabel_cross_entropy(
     logits: ArrayLike,
     target: ArrayLike,
     *,
-    reduction: str = "mean",
+    reduction: Reduction = "mean",
     axis: int = -1,
-    backend: str = "auto",
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
     """Multilabel cross-entropy: uniform target probabilities on the positive labels.
 
-    Other arguments, the result and errors as in sdca_loss.
+    target: a boolean mask of logits.shape with a positive label per example. Other
+    arguments, the result and errors as in cross_entropy.
     """
-    return sdca_loss(
-        logits,
-        target,
-        "multilabel_cross_entropy",
-        reduction=reduction,
-        axis=axis,
-        backend=backend,
-        precision=precision,
-    )
+    common = _common(reduction, axis, backend, precision)
+    return _loss(_MULTILABEL_CROSS_ENTROPY, logits, target, common)
 
 
 def multilabel_hinge_loss(
     logits: ArrayLike,
     target: ArrayLike,
+    *,
     gamma: float = 0.0,
-    *,
-    reduction: str = "mean",
+    reduction: Reduction = "mean",
     axis: int = -1,
-    backend: str = "auto",
+    backend: Backend = "auto",
     precision: object = None,
 ) -> jax.Array:
-    """Multilabel hinge loss, smoothed by gamma > 0.
+    """Multilabel hinge loss, smoothed by gamma > 0 (static, finite).
 
-    Other arguments, the result and errors as in sdca_loss.
+    target: a boolean mask of logits.shape with a positive and a negative label per
+    example. Other arguments, the result and errors as in cross_entropy.
     """
-    return sdca_loss(
-        logits,
-        target,
-        "multilabel_hinge",
-        gamma=gamma,
-        reduction=reduction,
-        axis=axis,
-        backend=backend,
-        precision=precision,
-    )
-
-
-def proximal_cross_entropy(
-    logits: ArrayLike,
-    target: ArrayLike,
-    alpha: float = 1.0,
-    *,
-    reduction: str = "mean",
-    axis: int = -1,
-    backend: str = "auto",
-    precision: object = None,
-) -> jax.Array:
-    """Moreau envelope of the cross-entropy with step alpha.
-
-    Other arguments, the result and errors as in sdca_loss.
-    """
-    return sdca_loss(
-        logits,
-        target,
-        "proximal_cross_entropy",
-        alpha=alpha,
-        reduction=reduction,
-        axis=axis,
-        backend=backend,
-        precision=precision,
-    )
+    gamma = _options.check_gamma(_static(gamma, "gamma"))
+    spec = _options.spec("multilabel_hinge", gamma=gamma)
+    common = _common(reduction, axis, backend, precision)
+    return _loss(spec, logits, target, common)

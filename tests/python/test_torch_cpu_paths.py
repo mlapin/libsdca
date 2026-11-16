@@ -53,9 +53,13 @@ class HalfGradientRoundingTests:
                     y = torch.randint(0, 40, (64,), generator=g)
                     t = (3 * torch.randn(64, 40, generator=g)).to(dtype)
                     with subtests.test(flag=flag, dtype=dtype):
-                        self.check(lambda x, y: sdca.topk_cross_entropy(x, y, 2), z, y)
-                        self.check(lambda x, y: sdca.topk_hinge_loss(x, y, 3, gamma=0.5), z, y)
-                        self.check(lambda x, t: sdca.distillation_loss(x, t.to(x.dtype), 2.0), z, t)
+                        self.check(lambda x, y: sdca.topk_cross_entropy(x, y, k=2), z, y)
+                        self.check(lambda x, y: sdca.topk_hinge_loss(x, y, k=3, gamma=0.5), z, y)
+                        self.check(
+                            lambda x, t: sdca.distillation_loss(x, t.to(x.dtype), temperature=2.0),
+                            z,
+                            t,
+                        )
                         self.check(
                             lambda x, t: sdca.proximal_distillation_loss(x, t.to(x.dtype)), z, t
                         )
@@ -68,7 +72,7 @@ class RetainedGraphTests:
         z = torch.randn(16, 9, generator=g, requires_grad=True)
         y = torch.randint(0, 9, (16,), generator=g)
         for loss in (
-            lambda: sdca.topk_hinge_loss(z, y, 2),
+            lambda: sdca.topk_hinge_loss(z, y, k=2),
             lambda: sdca.distillation_loss(z, z.detach().flip(0)),
             lambda: sdca.multilabel_hinge_loss(z, F.one_hot(y, 9).bool()),
         ):
@@ -102,10 +106,10 @@ class EmptyBatchTests:
         for reduction in ("none", "sum", "mean"):
             reference = F.cross_entropy(torch.zeros(0, 5), y, reduction=reduction)
             calls = {
-                "sdca_loss": lambda x: sdca.sdca_loss(x, y, reduction=reduction),
+                "entropy": lambda x: sdca.topk_cross_entropy(x, y, k=1, reduction=reduction),
                 "cross_entropy": lambda x: sdca.cross_entropy(x, y, reduction=reduction),
                 "hinge": lambda x: sdca.multiclass_hinge_loss(x, y, reduction=reduction),
-                "topk": lambda x: sdca.topk_cross_entropy(x, y, 2, reduction=reduction),
+                "topk": lambda x: sdca.topk_cross_entropy(x, y, k=2, reduction=reduction),
                 "multilabel": lambda x: sdca.multilabel_hinge_loss(
                     x, torch.zeros(0, 5, dtype=torch.bool), reduction=reduction
                 ),
@@ -130,7 +134,9 @@ class EmptyBatchTests:
 
     def test_one_class_still_raises(self) -> None:
         with pytest.raises(ValueError, match="two classes"):
-            sdca.sdca_loss(torch.zeros(3, 1), torch.zeros(3, dtype=torch.int64))
+            sdca.topk_cross_entropy(torch.zeros(3, 1), torch.zeros(3, dtype=torch.int64), k=1)
+        with pytest.raises(ValueError, match="two classes"):
+            sdca.cross_entropy(torch.zeros(3, 1), torch.zeros(3, dtype=torch.int64))
 
 
 class DistillationOffsetTests:
@@ -143,9 +149,9 @@ class DistillationOffsetTests:
             for temperature in (1.0, 4.0):
                 for loss in (sdca.distillation_loss, sdca.proximal_distillation_loss):
                     student = (base + offset).requires_grad_(True)
-                    loss(student, teacher, temperature, reduction="sum").backward()
+                    loss(student, teacher, temperature=temperature, reduction="sum").backward()
                     s64 = student.detach().double().requires_grad_(True)
-                    loss(s64, teacher.double(), temperature, reduction="sum").backward()
+                    loss(s64, teacher.double(), temperature=temperature, reduction="sum").backward()
                     assert student.grad is not None and s64.grad is not None
                     error = (student.grad.double() - s64.grad).abs().max()
                     scale = s64.grad.abs().max()
@@ -190,7 +196,7 @@ class DistillationGradientKernelTests:
             mock.patch.object(_cpu, "loss", _recorded(calls)),
             mock.patch.object(_cpu, "distillation_grad", chooser),
         ):
-            value = sdca.distillation_loss(x, t, temperature, reduction=reduction)
+            value = sdca.distillation_loss(x, t, temperature=temperature, reduction=reduction)
             weights = torch.linspace(0.5, 2.0, value.numel(), dtype=value.dtype)
             if reduction != "none":
                 weights = torch.ones((), dtype=value.dtype)
@@ -224,7 +230,7 @@ class DistillationGradientKernelTests:
             mock.patch.object(_cpu, "loss", _recorded(calls)),
         ):
             with torch.no_grad():
-                sdca.distillation_loss(z.requires_grad_(True), z.flip(1), 2.0)
+                sdca.distillation_loss(z.requires_grad_(True), z.flip(1), temperature=2.0)
             for dtype, temperature, precision in (
                 (torch.float32, 2.0, "float64"),
                 (torch.bfloat16, 2.0, None),
@@ -234,7 +240,9 @@ class DistillationGradientKernelTests:
             ):
                 x = z.detach().to(dtype).requires_grad_(True)
                 # Equal logits: finite at any temperature.
-                sdca.distillation_loss(x, x.detach(), temperature, precision=precision).backward()
+                sdca.distillation_loss(
+                    x, x.detach(), temperature=temperature, precision=precision
+                ).backward()
         assert calls == ["distillation_stats"] * 6
 
     def test_overflowing_factor_scales_over_the_temperature_first(
@@ -384,7 +392,9 @@ class AutomaticExtensionTests:
         reason = "ninja is not installed (pip install ninja, or libsdca[torch])"
         with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": "auto"}):
             with mock.patch.object(_cpu_entropy, "status", return_value=(None, reason)):
-                backend, why = sdca.explain_backend(torch.randn(4, 3), torch.tensor([0, 1, 2, 0]))
+                backend, why = sdca.explain_backend(
+                    sdca.cross_entropy, torch.randn(4, 3), torch.tensor([0, 1, 2, 0])
+                )
         assert backend == "native"
         assert reason in why
 

@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 import torch
 from child_process import pythonpath
-from libsdca import loss_and_grad
+from numpy_api import loss_and_grad
 
 # A float64 row on which Michelot's set alternated between 6 and 5 margins: removing the
 # margin at the threshold rounds the threshold one ulp below it, which re-admitted it.
@@ -76,7 +76,7 @@ def _evaluate(backend: str, z: np.ndarray, y: np.ndarray, loss: str, k: int, gam
     if backend == "interpret":
         import interpreter  # noqa: F401  # the libdevice shims of the interpreter
         from libsdca import _triton_hinge, _triton_topk
-        from libsdca._core import _kind
+        from libsdca._loss_options import spec
 
         zt, yt = torch.from_numpy(z), torch.from_numpy(y)
         ones = torch.ones(len(zt), dtype=zt.dtype)
@@ -85,24 +85,22 @@ def _evaluate(backend: str, z: np.ndarray, y: np.ndarray, loss: str, k: int, gam
             gradient = _triton_hinge.backward(zt, yt, stats, ones, "none", True, gamma)
         else:
             # The kernels take the private kind: the public name with gamma > 0 is smooth.
-            kind = _kind(loss, gamma)
+            kind = spec(loss, k, gamma).objective
             value, stats = _triton_topk.forward(zt, yt, "none", kind, k, gamma)
             gradient = _triton_topk.backward(zt, yt, stats, ones, "none", kind, k, gamma)
         return value.numpy(), gradient.numpy()
-    from libsdca.torch import explain_backend, sdca_loss
+    from named_losses import explain_route, torch_loss
 
     device = "cpu" if backend in ("native", "torch", "cpu-kernel") else "cuda"
     option = "torch" if backend in ("torch", "cuda-torch") else "auto"
     x = torch.tensor(z, device=device, requires_grad=True)
     t = torch.tensor(y, device=device)
-    if backend == "cuda-torch":
-        # A one-hot mask keeps CUDA off the fused kernels, which take class indices.
-        t = torch.nn.functional.one_hot(t, z.shape[1]).bool()
-    taken = explain_backend(x, t, loss, k=k, reduction="none", backend=option)[0]
+    options = dict(k=k, gamma=gamma, reduction="none", backend=option)
+    taken = explain_route(x, t, loss, **options)[0]
     if taken != ("torch" if backend == "cuda-torch" else backend):
         print(f"skip {backend}: {loss} k={k} takes {taken}", flush=True)
         sys.exit(0)
-    value = sdca_loss(x, t, loss, k=k, gamma=gamma, reduction="none", backend=option)
+    value = torch_loss(x, t, loss, **options)
     value.backward(torch.ones_like(value))
     assert x.grad is not None
     return value.detach().cpu().numpy(), x.grad.cpu().numpy()
@@ -146,7 +144,8 @@ def _jax_child():
     # By name: an import statement would put this file in the jax test group.
     jax = importlib.import_module("jax")
     jnp = importlib.import_module("jax.numpy")
-    jax_loss = importlib.import_module("libsdca.jax").sdca_loss
+    module = importlib.import_module("libsdca.jax")
+    named = importlib.import_module("named_losses").loss
 
     jax.config.update("jax_enable_x64", True)
     print("warm", flush=True)
@@ -156,7 +155,7 @@ def _jax_child():
             def total(
                 x: object, y: np.ndarray = y, loss: str = loss, k: int = k, gamma: float = gamma
             ):
-                return jax_loss(x, y, loss, k=k, gamma=gamma, reduction="sum", backend="jax")
+                return named(module, loss, x, y, k=k, gamma=gamma, reduction="sum", backend="jax")
 
             value, gradient = jax.value_and_grad(total)(jnp.asarray(z))
             _check(float(value), np.asarray(gradient), z, y, loss, k, gamma)

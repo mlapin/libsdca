@@ -26,7 +26,7 @@ classifiers with them.
   hinge and entropy losses [4, 5], the multilabel hinge [2] and cross-entropy, logit
   distillation and proximal variants, with nonsmooth or smoothed hinges, and
   `linear_cross_entropy` for a language-model head without its `(N, V)` logits
-  ([losses](#losses)).
+  ([losses](docs/API.md#loss-definitions)).
 - **Many interfaces:** PyTorch modules and functions (with `torch.compile` support), JAX
   functions for `jit`, `grad` and `vmap`, NumPy, a scikit-learn estimator, Rust, header-only
   C++, C and MATLAB/Octave, with the same loss and option names in each
@@ -55,7 +55,7 @@ Then use the losses in place of the PyTorch ones:
 <!-- smoke: torch -->
 ```python
 import torch
-from libsdca import CrossEntropyLoss, TopKHingeLoss
+from libsdca.torch import CrossEntropyLoss, TopKHingeLoss
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 logits = torch.randn(32, 5, device=device, requires_grad=True)
@@ -160,9 +160,10 @@ rng = np.random.default_rng(0)
 X = rng.normal(size=(200, 10))
 y = (X @ rng.normal(size=(10, 3))).argmax(axis=1)
 
-model = libsdca.fit(X, y)                            # cross-entropy (softmax regression)
-model = libsdca.fit(X, y, "topk_hinge_beta", k=2)    # top-2 SVM
-print(model.status, (model.predict(X) == y).mean())
+model = libsdca.fit(X, y)                                  # cross-entropy (softmax regression)
+print(model.status, model.score(X, y))
+model = libsdca.fit(X, y, libsdca.TopKHingeBeta(k=2))      # top-2 SVM
+print(model.status, model.score(X, y))
 ```
 
 ### Python (scikit-learn)
@@ -172,13 +173,14 @@ print(model.status, (model.predict(X) == y).mean())
 <!-- smoke: sklearn -->
 ```python
 import numpy as np
-from libsdca import SDCAClassifier
+from libsdca.sklearn import SDCAClassifier
 
 rng = np.random.default_rng(0)
 X = rng.normal(size=(200, 10))
 y = (X @ rng.normal(size=(10, 3))).argmax(axis=1)
 
 clf = SDCAClassifier().fit(X, y)                          # cross-entropy
+print(clf.status_, clf.score(X, y))
 clf = SDCAClassifier("topk_hinge_beta", k=2).fit(X, y)    # top-2 SVM
 print(clf.status_, clf.score(X, y))
 ```
@@ -190,17 +192,16 @@ In a Cargo project (Rust 1.74+ and a C++11 compiler), run `cargo add libsdca`, s
 
 <!-- smoke: rust -->
 ```rust
-use libsdca::{fit, FitOptions, Matrix, Objective};
+use libsdca::{Loss, Matrix, Solver};
 
 fn main() -> libsdca::Result<()> {
     let x = Matrix::new(&[1.0, 0.0, 0.0, 1.0, -1.0, -1.0], 3, 2)?; // 3 examples, 2 features
     let y = [0, 1, 2];
 
-    let model = fit(x, &y, &FitOptions::default())?; // cross-entropy
+    let model = Solver::new(Loss::cross_entropy()).fit(x, &y)?;
     println!("{} {:?}", model.status(), model.predict(x)?);
 
-    let options = FitOptions { objective: Objective::TopKHingeBeta, k: 2, ..Default::default() };
-    let model = fit(x, &y, &options)?; // top-2 SVM
+    let model = Solver::new(Loss::topk_hinge(2)).fit(x, &y)?; // top-2 SVM
     println!("{} {:?}", model.status(), model.predict(x)?);
     Ok(())
 }
@@ -218,24 +219,31 @@ a C++11 program with the installed include directory and
 #include <utility>
 #include <vector>
 #include "sdca/solver.h"
-#include "sdca/utility/logging.cpp"   // in exactly one translation unit
 
-template <typename Objective>
-bool train(Objective objective) {
-    double features[] = {1, 0, 0, 1, -1, -1};   // 3 examples, 2 features
-    double weights[6] = {}, dual[9] = {};
-    std::vector<sdca::size_type> labels = {0, 1, 2};
-    auto context = sdca::make_context(
-        sdca::make_input_feature(2, 3, features), sdca::multiclass_output(3, labels),
-        std::move(objective), dual, weights);
-    sdca::make_solver(context).solve();
-    return context.status == sdca::solver_status::solved;
-}
+// Trains the objective it is given; solved is whether the gap reached tol.
+struct train {
+    bool& solved;
+    template <typename Objective>
+    void operator()(Objective objective) const {
+        double features[] = {1, 0, 0, 1, -1, -1};   // 3 examples, 2 features
+        double weights[6] = {}, dual[9] = {};       // W (2, 3), A (3, 3)
+        std::vector<int> labels = {0, 1, 2};
+        auto context = sdca::make_context(
+            sdca::make_input_feature(2, 3, features),
+            sdca::make_output_multiclass(labels.begin(), labels.end(), 3),
+            std::move(objective), weights, dual);
+        sdca::make_solver(context).solve();
+        solved = context.status == sdca::solver_status::solved;
+    }
+};
 
 int main() {
-    bool solved = train(sdca::l2_entropy<double, double>(1.0))            // cross-entropy
-                  && train(sdca::l2_topk_hinge<double, double>(1.0, 2));  // top-2 SVM
-    return solved ? 0 : 1;
+    bool entropy = false, hinge = false;
+    sdca::visit_multiclass_objective<double, double>(
+        sdca::cross_entropy_objective(), train{entropy});            // cross-entropy
+    sdca::visit_multiclass_objective<double, double>(
+        sdca::topk_hinge_beta_objective(1.0, 2), train{hinge});      // top-2 hinge
+    return entropy && hinge ? 0 : 1;
 }
 ```
 
@@ -251,13 +259,18 @@ Build with `-DSDCA_BUILD_C_API=ON` as for C++ and link `libsdca_c` (a CMake cons
 
 int main(void) {
     const double scores[] = {0.3, -0.8, 1.2};
-    const uint8_t positive[] = {1, 0, 0};
+    const int64_t label[] = {0};
     double values[1], gradients[3];
-    struct sdca_options options = SDCA_OPTIONS_DEFAULT;   /* cross-entropy */
-    int status = sdca_loss_gradient(&options, 1, 3, scores, positive, values, gradients);
-    options.loss = SDCA_TOPK_HINGE_BETA;                  /* top-2 SVM loss */
-    options.k = 2;
-    status |= sdca_loss_gradient(&options, 1, 3, scores, positive, values, gradients);
+    struct sdca_loss loss = SDCA_LOSS_INIT;               /* cross-entropy */
+    struct sdca_execution execution = SDCA_EXECUTION_INIT;
+    struct sdca_targets targets = SDCA_TARGETS_INIT;      /* class labels */
+    targets.labels = label;
+    int status = sdca_loss_evaluate(&loss, &execution, SDCA_DTYPE_FLOAT64, 1, 3, scores,
+                                    &targets, values, gradients);
+    loss.kind = SDCA_LOSS_TOPK_HINGE_BETA;                /* top-2 SVM loss */
+    loss.k = 2;
+    status |= sdca_loss_evaluate(&loss, &execution, SDCA_DTYPE_FLOAT64, 1, 3, scores,
+                                 &targets, values, gradients);
     return status != SDCA_OK;
 }
 ```
@@ -270,33 +283,14 @@ C++ compiler). In Octave, run `tests/matlab/run_octave_tests.sh`, then `addpath 
 <!-- smoke: matlab -->
 ```matlab
 X = [1 0 -1; 0 1 -1];    % 2 features, 3 examples
-Y = [1 2 3];
-model = matsdca_fit(X, Y);                                                  % cross-entropy
-model = matsdca_fit(X, Y, struct('objective', 'topk_hinge_beta', 'k', 2));  % top-2 SVM
+Y = [1 2 3];             % labels in 1:3
+model = matsdca_fit(X, Y);                                             % cross-entropy
+model = matsdca_fit(X, Y, struct('loss', 'topk_hinge_beta', 'k', 2));  % top-2 hinge
 [~, predicted] = max(model.W' * X);
 ```
 
 More examples: [examples/](examples), [rust/examples](rust/examples) and
 [matlab/demo.m](matlab/demo.m).
-
-## Losses
-
-All interfaces share these loss names:
-
-| Name | Loss | Targets |
-| --- | --- | --- |
-| `cross_entropy` | Softmax cross-entropy | class index |
-| `topk_cross_entropy` | Top-*k* entropy [5] | class index |
-| `multiclass_hinge` | Multiclass hinge (Crammer–Singer SVM) [1] | class index |
-| `topk_hinge_alpha`, `topk_hinge_beta` | Top-*k* hinge $\alpha$ [4] and $\beta$ [5] | class index |
-| `multilabel_hinge` | Multilabel hinge (multilabel SVM) [2] | label sets / boolean mask |
-| `multilabel_cross_entropy` | Multilabel cross-entropy | label sets / boolean mask |
-| `distillation`, `proximal_distillation` | Teacher-logit distillation and its Moreau envelope | teacher logits |
-| `proximal_cross_entropy` | Moreau envelope of cross-entropy | class index |
-
-Hinge losses take `gamma >= 0` (`0`: nonsmooth, `> 0`: smoothed [5]). PyTorch also provides
-`linear_cross_entropy` (linear head + cross-entropy in chunks). Formulas:
-[API.md](docs/API.md#loss-definitions).
 
 ## Documentation
 

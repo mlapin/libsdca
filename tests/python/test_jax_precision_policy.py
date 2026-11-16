@@ -16,7 +16,7 @@ PRELUDE = """
 import jax, numpy as np
 from unittest import mock
 from libsdca import jax as sdca_jax
-from libsdca.jax import sdca_loss
+from named_losses import jax_loss as named_loss
 rng = np.random.default_rng(5)
 z = rng.normal(size=(6, 8)).astype(np.float32)
 labels = np.array([0, 7, 2, 1, 4, 3])
@@ -24,10 +24,10 @@ mask = np.eye(8, dtype=bool)[labels]
 mask[:, 5] = True
 mask[5, 5] = False
 def solve(loss, target, **options):
-    f = lambda x: sdca_loss(x, target, loss, reduction="sum", **options)
+    f = lambda x: named_loss(x, target, loss, reduction="sum", **options)
     return jax.jit(jax.value_and_grad(f))(z)
 def text(loss, target, **options):
-    f = lambda x: sdca_loss(x, target, loss, **options)
+    f = lambda x: named_loss(x, target, loss, **options)
     return jax.jit(jax.grad(f)).lower(z).as_text()
 """
 
@@ -43,7 +43,8 @@ def _run(code: str, x64: bool) -> None:
 def test_without_x64_defaults_keep_the_native_route():
     """Retained double defaults use native without x64; measured fp32 defaults use XLA.
 
-    Explicit fp32 still needs double entries for the smoothed hinges.
+    Explicit fp32 still needs double entries for the smoothed hinges; explicit float64 needs
+    jax_enable_x64.
     """
     _run(
         """
@@ -56,13 +57,17 @@ def test_without_x64_defaults_keep_the_native_route():
             for loss, target, options in float32 + smooth:
                 fp32_default = loss in ("proximal_cross_entropy", "topk_cross_entropy")
                 assert ("callback" in text(loss, target, **options)) == (not fp32_default), loss
-                if fp32_default:
-                    assert "callback" in text(loss, target, precision="float64", **options)
+                try:
+                    text(loss, target, precision="float64", **options)
+                    raise AssertionError("no error")
+                except ValueError as error:
+                    # float64 work needs jax_enable_x64 on every backend.
+                    assert "jax_enable_x64" in str(error)
                 single = text(loss, target, precision="float32", **options)
                 assert ("callback" in single) == (options.get("gamma", 0) > 0), loss
         for loss, target, options in smooth:
             try:
-                sdca_loss(z, target, loss, backend="jax", precision="float32", **options)
+                named_loss(z, target, loss, backend="jax", precision="float32", **options)
                 raise AssertionError("no error")
             except ValueError as error:
                 assert "jax_enable_x64" in str(error)
@@ -77,13 +82,13 @@ def test_without_x64_float32_proximal_rows_beyond_float32_give_nan():
         wide = z.copy()
         wide[2, 0], wide[2, 1] = 3e38, -3e38
         options = dict(backend="jax", precision="float32", reduction="none")
-        values = np.asarray(sdca_loss(wide, labels, "proximal_cross_entropy", **options))
+        values = np.asarray(named_loss(wide, labels, "proximal_cross_entropy", **options))
         assert np.isnan(values[2]) and np.isfinite(np.delete(values, 2)).all(), values
         # The hinges round such rows correctly in float32: the native float64 results.
         for loss in ("multiclass_hinge", "topk_hinge_alpha"):
             k = 2 if "topk" in loss else 1
-            values = sdca_loss(wide, labels, loss, k=k, **options)
-            native = sdca_loss(wide, labels, loss, k=k, backend="native", reduction="none")
+            values = named_loss(wide, labels, loss, k=k, **options)
+            native = named_loss(wide, labels, loss, k=k, backend="native", reduction="none")
             values, native = np.asarray(values), np.asarray(native)
             assert values[2] == native[2], (loss, values[2], native[2])
             np.testing.assert_allclose(values, native, rtol=64 * 2**-23, err_msg=loss)

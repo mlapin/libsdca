@@ -13,7 +13,7 @@ import pytest
 import torch
 from libsdca import _cuda_launch, _multilabel
 from libsdca import torch as sdca_torch
-from libsdca.torch import explain_backend, sdca_loss
+from named_losses import explain_route, torch_loss
 from torch.autograd import gradcheck, gradgradcheck
 
 EPS32 = torch.finfo(torch.float32).eps
@@ -180,7 +180,7 @@ def native(
     """CPU float64 native values and weighted gradients."""
     x = z.detach().cpu().double().requires_grad_()
     name, gamma = _public(objective, gamma)
-    value = sdca_loss(x, mask.cpu(), name, backend="native", gamma=gamma, reduction=reduction)
+    value = torch_loss(x, mask.cpu(), name, backend="native", gamma=gamma, reduction=reduction)
     value.backward(weights.cpu().double() if reduction == "none" else torch.tensor(0.75).double())
     assert x.grad is not None
     return value.detach(), x.grad
@@ -350,7 +350,7 @@ class FusedMultilabelTests:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         x = z.detach().cuda().requires_grad_()
         name, gamma = _public(objective, gamma)
-        value = sdca_loss(x, mask.cuda(), name, gamma=gamma, reduction=reduction, **options)
+        value = torch_loss(x, mask.cuda(), name, gamma=gamma, reduction=reduction, **options)
         upstream = weights if reduction == "none" else torch.tensor(0.75, dtype=value.dtype)
         value.backward(upstream.to(value.dtype).cuda())
         assert x.grad is not None
@@ -361,9 +361,9 @@ class FusedMultilabelTests:
         mask = torch.eye(3, 4, dtype=torch.bool, device="cuda")
         for objective in OBJECTIVES + ("multilabel_cross_entropy",):
             name, gamma = _public(objective)
-            assert explain_backend(z, mask, name, gamma=gamma)[0] in ("cuda-launcher", "triton")
+            assert explain_route(z, mask, name, gamma=gamma)[0] in ("cuda-launcher", "triton")
             # precision="float32" is float32 work: the kernels of None.
-            assert explain_backend(z, mask, name, gamma=gamma, precision="float32")[0] in (
+            assert explain_route(z, mask, name, gamma=gamma, precision="float32")[0] in (
                 "cuda-launcher",
                 "triton",
             )
@@ -445,14 +445,14 @@ class FusedMultilabelTests:
         nan[1, 2] = float("nan")
         for objective in OBJECTIVES:
             assert bool(
-                sdca_loss(
+                torch_loss(
                     z.cuda(), empty.cuda(), _public(objective)[0], gamma=_public(objective)[1]
                 )
                 .isnan()
                 .all()
             )
             assert bool(
-                sdca_loss(
+                torch_loss(
                     nan.cuda(), full.cuda(), _public(objective)[0], gamma=_public(objective)[1]
                 )
                 .isnan()
@@ -460,7 +460,7 @@ class FusedMultilabelTests:
             )
             if objective != "cross_entropy":
                 assert bool(
-                    sdca_loss(
+                    torch_loss(
                         z.cuda(),
                         full.cuda(),
                         _public(objective)[0],
@@ -526,7 +526,7 @@ class FusedMultilabelTests:
         mask = random_mask(6, 5, 2, self.generator).reshape(2, 3, 5).transpose(1, 2)
         for objective in OBJECTIVES:
             x = z.cuda().requires_grad_()
-            values = sdca_loss(
+            values = torch_loss(
                 x,
                 mask.cuda(),
                 _public(objective)[0],
@@ -549,7 +549,7 @@ class FusedMultilabelTests:
             assert x.grad is not None
             torch.testing.assert_close(x.grad.cpu().movedim(1, -1).reshape(-1, 5), expected[1])
             for reduction, reduce in [("sum", torch.sum), ("mean", torch.mean)]:
-                total = sdca_loss(
+                total = torch_loss(
                     x,
                     mask.cuda(),
                     _public(objective)[0],
@@ -565,13 +565,13 @@ class FusedMultilabelTests:
         for reduction in ("none", "mean"):
 
             def entropy(x: torch.Tensor, reduction: str = reduction) -> torch.Tensor:
-                return sdca_loss(x, mask, "multilabel_cross_entropy", reduction=reduction)
+                return torch_loss(x, mask, "multilabel_cross_entropy", reduction=reduction)
 
             assert gradcheck(entropy, (z,))
             assert gradgradcheck(entropy, (z,))
         for objective in OBJECTIVES[1:]:
             gradient = torch.autograd.grad(
-                sdca_loss(z, mask, _public(objective)[0], gamma=_public(objective)[1]),
+                torch_loss(z, mask, _public(objective)[0], gamma=_public(objective)[1]),
                 z,
                 create_graph=True,
             )[0]
@@ -593,7 +593,7 @@ class FusedMultilabelTests:
                     grads = []
                     for backend in ("auto", "torch"):
                         x = z.clone().requires_grad_()
-                        loss = sdca_loss(x, mask, "multilabel_cross_entropy", backend=backend)
+                        loss = torch_loss(x, mask, "multilabel_cross_entropy", backend=backend)
                         (g,) = torch.autograd.grad(
                             loss, x, loss.new_tensor(upstream), create_graph=True
                         )
@@ -629,7 +629,7 @@ class RowLimitTests:
                 try:
                     expected = torch.cat(
                         [
-                            sdca_loss(
+                            torch_loss(
                                 z[s : s + chunk],
                                 mask[s : s + chunk],
                                 loss,
@@ -640,13 +640,13 @@ class RowLimitTests:
                         ]
                     )
                     x = z.detach().requires_grad_()
-                    value = sdca_loss(x, mask, loss, reduction="none", gamma=gamma)
+                    value = torch_loss(x, mask, loss, reduction="none", gamma=gamma)
                     torch.testing.assert_close(
                         value.detach(), expected, rtol=0, atol=0, equal_nan=True
                     )
                     value.backward(torch.ones_like(value))
                     tail = z[-chunk:].detach().requires_grad_()
-                    sdca_loss(
+                    torch_loss(
                         tail, mask[-chunk:], loss, reduction="none", gamma=gamma
                     ).sum().backward()
                     assert x.grad is not None
@@ -654,7 +654,7 @@ class RowLimitTests:
                         x.grad[-chunk:], tail.grad, rtol=0, atol=0, equal_nan=True
                     )
                     del value, x
-                    mean = sdca_loss(z[:-1], mask[:-1], loss, gamma=gamma).double()
+                    mean = torch_loss(z[:-1], mask[:-1], loss, gamma=gamma).double()
                     torch.testing.assert_close(
                         mean, expected[:-1].double().mean(), rtol=1e-3, atol=0
                     )

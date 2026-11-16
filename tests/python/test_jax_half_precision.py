@@ -15,10 +15,11 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
-import libsdca
 import numpy as np
 import pytest
-from libsdca.jax import distillation_loss, proximal_distillation_loss, sdca_loss
+from libsdca.jax import Reduction, distillation_loss, proximal_distillation_loss
+from named_losses import jax_loss as named_loss
+from numpy_api import mask_loss_and_grad
 from test_distillation_references import proximal_reference, reference
 
 jax.config.update("jax_enable_x64", True)
@@ -30,7 +31,6 @@ WIDE_EPS = 64
 # (loss, target kind, k, gamma): every loss family, top-k with k > 1, smooth and nonsmooth.
 CASES = [
     ("cross_entropy", "index", 1, 0.0),
-    ("cross_entropy", "mask", 1, 0.0),
     ("topk_cross_entropy", "index", 1, 0.0),
     ("topk_cross_entropy", "index", 3, 0.0),
     ("multiclass_hinge", "index", 1, 0.0),
@@ -43,9 +43,8 @@ CASES = [
     ("multilabel_hinge", "mask", 1, 0.5),
     ("multilabel_cross_entropy", "mask", 1, 0.0),
     ("proximal_cross_entropy", "index", 1, 0.0),
-    ("proximal_cross_entropy", "mask", 1, 0.0),
 ]
-REDUCTIONS = ("none", "sum", "mean")
+REDUCTIONS: tuple[Reduction, ...] = ("none", "sum", "mean")
 # Small rows (every reduction), and a batch whose mean gradient entries reach float16's
 # subnormals (reduction mean).
 SHAPES = {(6, 37): REDUCTIONS, (512, 64): ("mean",)}
@@ -61,12 +60,14 @@ def _targets(kind: str, n: int, c: int, rng: np.random.Generator) -> np.ndarray:
     return mask
 
 
-def _upstream(reduction: str, n: int) -> np.ndarray:
+def _upstream(reduction: Reduction, n: int) -> np.ndarray:
     """The cotangent: per-row weights (none) or a scalar."""
     return np.linspace(0.5, 2.0, n) if reduction == "none" else np.array(1.5)
 
 
-def _reduced(values: np.ndarray, gradients: np.ndarray, reduction: str) -> tuple[Any, Any, float]:
+def _reduced(
+    values: np.ndarray, gradients: np.ndarray, reduction: Reduction
+) -> tuple[Any, Any, float]:
     """float64 reference rows reduced and scaled by the cotangent, and the rounding budget of
     a float32 sum of float32 rows (0 for reduction none)."""
     n = values.shape[0]
@@ -78,7 +79,7 @@ def _reduced(values: np.ndarray, gradients: np.ndarray, reduction: str) -> tuple
     return values.sum() / divisor, gradients * u / divisor, float(rounding)
 
 
-def _run(f: Any, z: jax.Array, reduction: str) -> tuple[np.ndarray, np.ndarray, Any, Any]:
+def _run(f: Any, z: jax.Array, reduction: Reduction) -> tuple[np.ndarray, np.ndarray, Any, Any]:
     value, vjp = jax.vjp(f, z)
     (gradient,) = vjp(jnp.asarray(_upstream(reduction, z.shape[0]), value.dtype))
     return np.asarray(value, np.float64), np.asarray(gradient, np.float64), value, gradient
@@ -132,9 +133,7 @@ class JaxHalfPrecisionTests:
                 ran = True
                 z = jnp.asarray(source, dtype)
                 represented = np.asarray(z, np.float64)
-                values, gradients = libsdca.loss_and_grad(
-                    represented, target, loss, k=k, gamma=gamma
-                )
+                values, gradients = mask_loss_and_grad(represented, target, loss, k=k, gamma=gamma)
                 for backend in ("jax", "native"):
                     for precision in (None, "float64"):
                         for reduction in reductions:
@@ -145,7 +144,7 @@ class JaxHalfPrecisionTests:
                             with subtests.test(message):
 
                                 def f(x: jax.Array, **kw: Any) -> jax.Array:
-                                    return sdca_loss(
+                                    return named_loss(
                                         x,
                                         target,
                                         loss,
@@ -184,15 +183,20 @@ class JaxHalfPrecisionTests:
                     message = f"{name} {np.dtype(dtype).name} {precision} {reduction}"
                     with subtests.test(message):
 
-                        def f(x: jax.Array, **kw: Any) -> jax.Array:
+                        def f(
+                            x: jax.Array, reduction: Reduction = reduction, **kw: Any
+                        ) -> jax.Array:
                             if name == "distillation":
                                 return distillation_loss(
-                                    x, t, temperature, reduction=reduction, precision=precision
+                                    x,
+                                    t,
+                                    temperature=temperature,
+                                    reduction=reduction,
+                                    precision=precision,
                                 )
                             return proximal_distillation_loss(
-                                x, t, temperature, alpha, reduction=reduction,
-                                precision=precision,
-                            )  # fmt: skip
+                                x, t, temperature=temperature, alpha=alpha, reduction=reduction,
+                                precision=precision)  # fmt: skip
 
                         *_, value, gradient = _run(jax.jit(f), z, reduction)
                         expected = _reduced(*rows, reduction)
@@ -206,9 +210,11 @@ class JaxHalfPrecisionTests:
         z = jnp.asarray([[0.0, -20.0], [0.0, -24.0]], dtype)
         t = jnp.asarray([[0.0, -19.0], [0.0, -22.0]], dtype)
         losses = {
-            "cross_entropy": lambda x: sdca_loss(x, jnp.array([0, 0]), "cross_entropy"),
+            "cross_entropy": lambda x: named_loss(x, jnp.array([0, 0]), "cross_entropy"),
             "distillation": lambda x: distillation_loss(x, t.astype(x.dtype)),
-            "proximal": lambda x: proximal_distillation_loss(x, t.astype(x.dtype), 1.0, 0.5),
+            "proximal": lambda x: proximal_distillation_loss(
+                x, t.astype(x.dtype), temperature=1.0, alpha=0.5
+            ),
         }
         quantum = float(jnp.finfo(dtype).tiny) * float(jnp.finfo(dtype).eps)
         for name, loss in losses.items():

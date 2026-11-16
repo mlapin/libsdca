@@ -29,6 +29,9 @@
 #endif
 
 // SDCA
+#include <cstdint>
+#include <initializer_list>
+
 #include "sdca/solver/solverdef.h"
 #include "sdca/utility/logging.h"
 
@@ -130,7 +133,7 @@ static const char* err_msg[] = {
     "'%s' must be a %llu-by-%llu dimensional matrix of class %s.",
     "Out of memory (cannot allocate memory for '%s').",
     "Failed to read the value of '%s'.",
-    "Invalid labels range (must be 1:T or 0:T-1).",
+    "Invalid labels (must be integers in 1:num_classes).",
     "Invalid cell arrays (must be non-empty and have the same size).",
     "Invalid number of dimensions in features #%llu.",
     "Invalid number of classes in labels #%llu.",
@@ -514,19 +517,81 @@ inline const char* precision_name() {
   return std::is_same<T, float>::value ? "float32" : "float64";
 }
 
-// The loss and objective names shared with the C ABI, Python and Rust, in the
-// order of their ids (the last one is a loss only).
+// The loss names shared with the other interfaces, in the order of their ids
+// (sdca::loss_kind); the first num_training_losses are the training objectives.
 static const char* const shared_names[] = {
-    "cross_entropy",   "topk_cross_entropy", "multiclass_hinge",         "topk_hinge_alpha",
-    "topk_hinge_beta", "multilabel_hinge",   "multilabel_cross_entropy", "proximal_cross_entropy"};
-static const int num_shared_names = 8;
+    "cross_entropy",   "topk_cross_entropy",   "multiclass_hinge",         "topk_hinge_alpha",
+    "topk_hinge_beta", "multilabel_hinge",     "multilabel_cross_entropy", "proximal_cross_entropy",
+    "distillation",    "proximal_distillation"};
+static const int num_shared_names = 10;
+static const int num_training_losses = 7;
+
+// The id of a shared loss name, or -1.
+inline int shared_loss_id(const std::string& name) {
+  for (int i = 0; i < num_shared_names; ++i)
+    if (name == shared_names[i]) return i;
+  return -1;
+}
+
+// The parameters each loss takes (by its id); the others are errors.
+inline bool loss_takes_k(const int id) { return id == 1 || id == 3 || id == 4; }
+inline bool loss_takes_gamma(const int id) { return id >= 2 && id <= 5; }
+inline bool loss_takes_alpha(const int id) { return id == 7 || id == 9; }
+inline bool loss_takes_temperature(const int id) { return id == 8 || id == 9; }
+inline bool loss_is_multilabel(const int id) { return id == 5 || id == 6; }
+
+// Every field of opts must be one of allowed: an unknown or misspelled option is
+// an error, never ignored.
+inline void check_option_names(const mxArray* opts, std::initializer_list<const char*> allowed,
+                               const char* function) {
+  if (opts == nullptr) return;
+  const int count = mxGetNumberOfFields(opts);
+  for (int i = 0; i < count; ++i) {
+    const std::string name = mxGetFieldNameByNumber(opts, i);
+    bool known = false;
+    for (const char* a : allowed) known = known || name == a;
+    if (!known)
+      throw std::invalid_argument("Unknown option '" + name + "'; see " + function + "('help')");
+  }
+}
+
+// opts.name must be absent: the loss does not take it.
+inline void check_not_given(const mxArray* opts, const char* name, const std::string& loss) {
+  if (opts != nullptr && mxGetField(opts, 0, name) != nullptr)
+    throw std::invalid_argument("The loss '" + loss + "' takes no option '" + name + "'");
+}
+
+// Whether opts.precision selects float32 work: 'float32' or 'float64', by
+// default the class of the data; double data computes in float64.
+inline bool float32_work(const mxArray* opts, const bool single_data) {
+  const std::string precision =
+      mxGetFieldValueOrDefault(opts, "precision", std::string(single_data ? "float32" : "float64"));
+  if (precision != "float32" && precision != "float64")
+    throw std::invalid_argument("Unknown precision '" + precision +
+                                "' (use 'float32' or 'float64')");
+  if (precision == "float32" && !single_data)
+    throw std::invalid_argument(
+        "double data computes in float64; pass single data for precision 'float32'");
+  return precision == "float32";
+}
+
+// opts.num_threads: a positive integer, else the default (SDCA_NUM_THREADS, else
+// the available CPUs).
+inline std::size_t num_threads_option(const mxArray* opts) {
+  const std::size_t default_threads = static_cast<std::size_t>(-1);
+  if (opts == nullptr || mxGetField(opts, 0, "num_threads") == nullptr) return default_threads;
+  const std::size_t threads = mxGetFieldValueOrDefault<std::size_t>(opts, "num_threads", 1);
+  if (threads < 1) throw std::invalid_argument("num_threads must be a positive integer");
+  return threads;
+}
 
 //-----------------------------------------------------------------------------
 // Logging in Matlab
 //-----------------------------------------------------------------------------
 
 inline void set_logging_options(const mxArray* opts) {
-  std::string log_level = mxGetFieldValueOrDefault(opts, "log_level", std::string("info"));
+  // Logging is off by default.
+  std::string log_level = mxGetFieldValueOrDefault(opts, "log_level", std::string("none"));
   if (log_level == "none") {
     logging::set_level(logging::level::none);
   } else if (log_level == "warning") {

@@ -23,11 +23,13 @@ from unittest import mock
 
 import jax
 import jax.numpy as jnp
+import named_losses
 import numpy as np
 import pytest
 from jax.interpreters import mlir
 from libsdca import _cuda_launch, _extensions, _jax_cuda, _jax_ffi
 from libsdca import jax as sdca_jax
+from libsdca.jax import Reduction
 
 TRITON = importlib.util.find_spec("triton") is not None
 TORCH = importlib.util.find_spec("torch") is not None
@@ -50,14 +52,16 @@ needs_gpu = pytest.mark.skipif(not _gpu(), reason="no CUDA GPU with the fused JA
 @pytest.mark.parametrize("classes", [300, 1000, 4096, 32000])
 @pytest.mark.parametrize("dtype", ["float32", "bfloat16"])
 @pytest.mark.parametrize("reduction", ["none", "mean", "sum"])
-def test_adaptive_distillation_matches_torch(classes: int, reduction: str, dtype: str) -> None:
+def test_adaptive_distillation_matches_torch(
+    classes: int, reduction: Reduction, dtype: str
+) -> None:
     import torch
     from libsdca.torch import distillation_loss
     from test_distillation_adaptive import mixed_inputs
 
     s, t = (x.to(getattr(torch, dtype)) for x in mixed_inputs(classes))
     s.requires_grad_()
-    expected = distillation_loss(s, t, 2.0, reduction=reduction)
+    expected = distillation_loss(s, t, temperature=2.0, reduction=reduction)
     weight = torch.full_like(expected, 1.7)
     (gradient,) = torch.autograd.grad(expected, s, weight)
     z, teacher = (
@@ -68,7 +72,8 @@ def test_adaptive_distillation_matches_torch(classes: int, reduction: str, dtype
     @jax.jit
     def run(x: jax.Array) -> tuple[jax.Array, jax.Array]:
         value, backward = jax.vjp(
-            lambda a: sdca_jax.distillation_loss(a, teacher, 2.0, reduction=reduction), x
+            lambda a: sdca_jax.distillation_loss(a, teacher, temperature=2.0, reduction=reduction),
+            x,
         )
         return value, backward(upstream)[0]
 
@@ -280,9 +285,9 @@ def test_cpu_calls_never_ask_for_the_kernels():
     with mock.patch.object(_jax_cuda, "status", side_effect=AssertionError("asked")):
         jax.jit(lambda z: sdca_jax.cross_entropy(z, labels))(z)
         sdca_jax.multilabel_cross_entropy(z, mask | (jnp.arange(7) == 0))
-        sdca_jax.distillation_loss(z, teacher, 2.0)
-        sdca_jax.proximal_distillation_loss(z, teacher, 2.0, 0.5)
-        sdca_jax.topk_hinge_loss(z, labels, 2, precision="float32", backend="auto")
+        sdca_jax.distillation_loss(z, teacher, temperature=2.0)
+        sdca_jax.proximal_distillation_loss(z, teacher, temperature=2.0, alpha=0.5)
+        sdca_jax.topk_hinge_loss(z, labels, k=2, precision="float32", backend="auto")
     assert not _jax_cuda.on_gpu(z)
 
 
@@ -322,7 +327,7 @@ def test_padded_elements_are_16_bytes():
 @pytest.mark.skipif(not TORCH, reason="needs torch")
 @pytest.mark.parametrize("reduction", ["none", "mean", "sum"])
 @pytest.mark.parametrize("work", [np.float32, np.float64])
-def test_saved_gradient_backward_is_torchs(reduction: str, work: Any):
+def test_saved_gradient_backward_is_torchs(reduction: Reduction, work: Any):
     """The rows stage's reduction and backward (proximal losses) as libsdca.torch's
     _SavedGradient: the reduced values' cotangent per row in the values' dtype, cast to the
     gradient's dtype, times the gradient, rounded once into the logits' dtype."""
@@ -537,7 +542,13 @@ def test_launch_program_reaches_cuLaunchKernel(tmp_path: Path, batch: int):
 
 
 def _spec(
-    family: str, options: tuple[Any, ...], stage: str, n: int, c: int, dtype: str, reduction: str
+    family: str,
+    options: tuple[Any, ...],
+    stage: str,
+    n: int,
+    c: int,
+    dtype: str,
+    reduction: str,
 ) -> Any:
     return _jax_cuda.Spec(family, options, stage, n, c, dtype, reduction)
 
@@ -971,12 +982,14 @@ EMULATED = [
 ]
 
 
-def _loss(name: str, reduction: str) -> Callable[[jax.Array, jax.Array], jax.Array]:
+def _loss(name: str, reduction: Reduction) -> Callable[[jax.Array, jax.Array], jax.Array]:
     if name == "distillation":
-        return lambda z, t: sdca_jax.distillation_loss(z, t, 2.0, reduction=reduction)
+        return lambda z, t: sdca_jax.distillation_loss(z, t, temperature=2.0, reduction=reduction)
     if name == "proximal_distillation":
-        return lambda z, t: sdca_jax.proximal_distillation_loss(z, t, 2.0, 0.5, reduction=reduction)
-    return lambda z, t: sdca_jax.sdca_loss(z, t, name, reduction=reduction)
+        return lambda z, t: sdca_jax.proximal_distillation_loss(
+            z, t, temperature=2.0, alpha=0.5, reduction=reduction
+        )
+    return lambda z, t: named_losses.loss(sdca_jax, name, z, t, reduction=reduction)
 
 
 def _targets(kind: str, z: np.ndarray) -> np.ndarray:
@@ -993,7 +1006,7 @@ def _targets(kind: str, z: np.ndarray) -> np.ndarray:
 @pytest.mark.usefixtures("emulated_kernels")
 @pytest.mark.parametrize("name, kind", EMULATED)
 @pytest.mark.parametrize("reduction", ["none", "mean", "sum"])
-def test_calls_jit_grad_and_vmap_as_their_references(name: str, kind: str, reduction: str):
+def test_calls_jit_grad_and_vmap_as_their_references(name: str, kind: str, reduction: Reduction):
     """With the kernels emulated by their references, values and gradients under jit, grad and
     vmap (folded or looped) are the references' (_jax_cuda wires the calls, not the math)."""
     rng = np.random.default_rng(2)
@@ -1041,7 +1054,7 @@ def test_entropy_keeps_higher_derivatives():
 
 @pytest.mark.usefixtures("emulated_kernels")
 @pytest.mark.parametrize("reduction", ["none", "mean"])
-def test_nested_partial_and_single_vmaps(reduction: str):
+def test_nested_partial_and_single_vmaps(reduction: Reduction):
     """vmap of vmap (folded twice, or looped twice), over the target alone, and of size 1."""
     rng = np.random.default_rng(6)
     z = (2 * rng.normal(size=(3, 2, 4, 7))).astype(np.float32)
@@ -1134,26 +1147,30 @@ def _gpu_inputs(
     return z, rng.integers(0, c, n).astype(np.int64)
 
 
-def _torch_loss(name: str, z: Any, t: Any, reduction: str, options: dict[str, Any]) -> Any:
+def _torch_loss(name: str, z: Any, t: Any, reduction: Reduction, options: dict[str, Any]) -> Any:
     import libsdca.torch as sdca_torch
 
     if name == "distillation":
-        return sdca_torch.distillation_loss(z, t, options["temperature"], reduction=reduction)
+        return sdca_torch.distillation_loss(
+            z, t, temperature=options["temperature"], reduction=reduction
+        )
     if name == "proximal_distillation":
         return sdca_torch.proximal_distillation_loss(
-            z, t, options["temperature"], options["alpha"], reduction=reduction
+            z, t, temperature=options["temperature"], alpha=options["alpha"], reduction=reduction
         )
-    return sdca_torch.sdca_loss(z, t, name, reduction=reduction, **options)
+    return named_losses.loss(sdca_torch, name, z, t, reduction=reduction, **options)
 
 
-def _jax_loss(name: str, z: Any, t: Any, reduction: str, options: dict[str, Any]) -> Any:
+def _jax_loss(name: str, z: Any, t: Any, reduction: Reduction, options: dict[str, Any]) -> Any:
     if name == "distillation":
-        return sdca_jax.distillation_loss(z, t, options["temperature"], reduction=reduction)
+        return sdca_jax.distillation_loss(
+            z, t, temperature=options["temperature"], reduction=reduction
+        )
     if name == "proximal_distillation":
         return sdca_jax.proximal_distillation_loss(
-            z, t, options["temperature"], options["alpha"], reduction=reduction
+            z, t, temperature=options["temperature"], alpha=options["alpha"], reduction=reduction
         )
-    return sdca_jax.sdca_loss(z, t, name, reduction=reduction, **options)
+    return named_losses.loss(sdca_jax, name, z, t, reduction=reduction, **options)
 
 
 def _bits(x: Any) -> bytes:
@@ -1167,7 +1184,7 @@ def _bits(x: Any) -> bytes:
 @pytest.mark.parametrize("reduction", ["none", "mean", "sum"])
 @pytest.mark.parametrize("case", _gpu_cases(), ids=lambda c: c[0] + str(sorted(c[1].items())))
 def test_values_and_gradients_are_the_torch_cuda_bits(
-    case: tuple[str, dict[str, Any]], reduction: str, shape: tuple[int, int], dtype: str
+    case: tuple[str, dict[str, Any]], reduction: Reduction, shape: tuple[int, int], dtype: str
 ):
     torch = pytest.importorskip("torch")
     name, options = case
@@ -1201,7 +1218,7 @@ def test_values_and_gradients_are_the_torch_cuda_bits(
 @needs_gpu
 @pytest.mark.parametrize("reduction", ["none", "mean", "sum"])
 @pytest.mark.parametrize("case", _gpu_cases(), ids=lambda c: c[0] + str(sorted(c[1].items())))
-def test_vmap_is_the_unbatched_bits(case: tuple[str, dict[str, Any]], reduction: str):
+def test_vmap_is_the_unbatched_bits(case: tuple[str, dict[str, Any]], reduction: Reduction):
     name, options = case
     z, t = _gpu_inputs(name, 6 * 7, 33, "float32", seed=5)
     z = z.reshape(6, 7, 33)

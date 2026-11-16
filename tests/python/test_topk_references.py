@@ -3,7 +3,7 @@
 import mpmath as mp
 import numpy as np
 import pytest
-from libsdca._core import Solver
+from numpy_api import Solver
 from scipy.optimize import minimize
 
 # Whether long double extends double (x87, binary128). Where it is double (Apple
@@ -562,8 +562,15 @@ class TopkReferenceTests:
                 for changed in [None, 1, k - 1]:
                     old = np.r_[k, np.full(k, -1.0)].astype(dtype)
                     if changed is not None:
+                        # Off the top-k cone (k + 1 classes leave one point on it): rejected.
                         old[changed] += 0.5
                         old[changed + 1] -= 0.5
+                        with pytest.raises(ValueError, match="top-k cone"):
+                            solver.coordinate_update(
+                                z[None], [0], C=100.0, previous=old[None],
+                                objective="topk_cross_entropy", k=k,
+                            )  # fmt: skip
+                        continue
                     expected = all_capped_reference(z, old, 100.0)
                     actual = solver.coordinate_update(
                         z[None],

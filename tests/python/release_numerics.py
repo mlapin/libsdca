@@ -32,10 +32,9 @@ import torch
 import torch.nn.functional as F
 from libsdca.torch import (
     distillation_loss,
-    explain_backend,
     proximal_distillation_loss,
-    sdca_loss,
 )
+from named_losses import explain_route, torch_loss
 
 DTYPES = ("float16", "bfloat16", "float32", "float64")
 WIDTHS = (2, 3, 63, 64, 65, 127, 128, 129, 4095, 4096, 4097, 32767, 32768, 32769)
@@ -183,7 +182,7 @@ def entropy_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[dict[
                     precision=precision,
                 )
                 try:
-                    loss = sdca_loss(
+                    loss = torch_loss(
                         z, labels, kind, k=k, reduction="none", backend=backend, precision=precision
                     )
                     (gradient,) = torch.autograd.grad(loss.sum(), z)
@@ -306,11 +305,16 @@ def distillation_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[
                         z = s.detach().requires_grad_()
                         if alpha:
                             loss = proximal_distillation_loss(
-                                z, t, temperature, alpha, reduction="none", precision=precision
+                                z,
+                                t,
+                                temperature=temperature,
+                                alpha=alpha,
+                                reduction="none",
+                                precision=precision,
                             )
                         else:
                             loss = distillation_loss(
-                                z, t, temperature, reduction="none", precision=precision
+                                z, t, temperature=temperature, reduction="none", precision=precision
                             )
                         (gradient,) = torch.autograd.grad(loss.sum(), z)
                         groups = [
@@ -355,7 +359,7 @@ def barron_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[dict[s
         loss = (
             F.cross_entropy(x, y)
             if implementation == "pytorch"
-            else sdca_loss(x, y, backend="torch")
+            else torch_loss(x, y, backend="torch")
         )
         (gradient,) = torch.autograd.grad(loss, x)
         yield dict(
@@ -435,7 +439,7 @@ def multilabel_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[di
             loss_ref, positive, negative = mp.log(den), -(classes - 2) * e / (2 * den), e / den
             for backend in backends:
                 for precision in precisions:
-                    route = explain_backend(
+                    route = explain_route(
                         x,
                         mask,
                         "multilabel_cross_entropy",
@@ -458,7 +462,7 @@ def multilabel_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[di
                     )
                     try:
                         z = x.detach().requires_grad_()
-                        loss = sdca_loss(
+                        loss = torch_loss(
                             z,
                             mask,
                             "multilabel_cross_entropy",

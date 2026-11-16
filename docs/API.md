@@ -33,7 +33,9 @@ $h_j = 1 + z_j - z_y$ ($j \neq y$) sorted as $h_{[1]} \ge h_{[2]} \ge \dots$
   where $H(p, q) = -\sum_j p_j \log q_j$ is the cross-entropy and $p = \mathrm{softmax}(t/T)$.
 - **Hinge smoothing (`gamma`):** `gamma = 0` (default) is the nonsmooth hinge;
   `gamma > 0` is its Moreau envelope $\max_{p \in S} \langle h, p \rangle - \frac{\gamma}{2}\Vert p \Vert_2^2$,
-  which is within $\gamma / 2$ of the nonsmooth loss and has a $(1/\gamma)$-Lipschitz gradient [4].
+  which has a $(1/\gamma)$-Lipschitz gradient [4] and lies below the nonsmooth loss by at most
+  $\gamma / (2k)$ for the single-label hinges ($\gamma / 2$ for `multiclass_hinge`) and
+  $\gamma$ for `multilabel_hinge`.
 - **Top-*k* exclusion:** Top-*k* hinges exclude the target class $y$ when selecting the $k$
   largest competitor margins $h_{[1]}, \dots, h_{[k]}$ [4]. At $k = 1$,
   `topk_hinge_alpha` and `topk_hinge_beta` coincide with `multiclass_hinge`.
@@ -42,14 +44,15 @@ $h_j = 1 + z_j - z_y$ ($j \neq y$) sorted as $h_{[1]} \ge h_{[2]} \ge \dots$
 
 ### Core entry points
 
-| Interface | Train classifier | Loss & gradient | Coordinate step |
+| Interface | Train a classifier | Loss and gradient | Coordinate step |
 | --- | --- | --- | --- |
-| Python (NumPy / sklearn) | `fit`, `SDCAClassifier` | `loss_and_grad` | `coordinate_update` |
-| PyTorch | — | `SDCALoss`, `sdca_loss` | — |
-| JAX | — | `libsdca.jax.sdca_loss` | — |
-| Rust | `fit` | `loss_and_grad` | `coordinate_update` |
-| C++ | `make_solver(ctx).solve()` | `loss_and_gradient` | `objective.update_dual_variables` |
-| C | `sdca_fit` | `sdca_loss_gradient` | `sdca_update_objective` |
+| NumPy | `fit(X, y, loss)` | `loss_and_grad(logits, target, loss)` | `coordinate_update(logits, target, loss)` |
+| scikit-learn | `libsdca.sklearn.SDCAClassifier` | — | — |
+| PyTorch | — | one function and module per loss (`libsdca.torch`) | — |
+| JAX | — | one function per loss (`libsdca.jax`) | — |
+| Rust | `Solver::fit` | `Loss::loss_and_grad` | `Solver::coordinate_update` |
+| C++ | `make_solver(ctx).solve()` | `loss_and_gradient`, `distillation_loss` | `update_dual_variables` |
+| C | `sdca_model_fit` | `sdca_loss_evaluate` | `sdca_dual_update` |
 | MATLAB | `matsdca_fit` | `matsdca_loss` | — |
 
 Public C++ headers: `sdca/solver.h`, `sdca/prox.h` and `sdca/loss.h`
@@ -57,51 +60,59 @@ Public C++ headers: `sdca/solver.h`, `sdca/prox.h` and `sdca/loss.h`
 
 ### Names across interfaces
 
-| Canonical name | PyTorch module, PyTorch / JAX function | Rust | C++ |
-| --- | --- | --- | --- |
-| `cross_entropy` | `CrossEntropyLoss`, `cross_entropy` | `CrossEntropy` | `l2_entropy(c)` |
-| `topk_cross_entropy` | `TopKCrossEntropyLoss`, `topk_cross_entropy` | `TopKCrossEntropy` | `l2_entropy_topk(c, k)` |
-| `multiclass_hinge` | `MulticlassHingeLoss`, `multiclass_hinge_loss` | `MulticlassHinge` | `l2_hinge_topk[_smooth]` |
-| `topk_hinge_alpha` | `TopKHingeAlphaLoss`, `topk_hinge_alpha_loss` | `TopKHingeAlpha` | `l2_hinge_topk[_smooth]` |
-| `topk_hinge_beta` | `TopKHingeLoss`, `topk_hinge_loss` (`*Beta*`) | `TopKHingeBeta` | `l2_topk_hinge[_smooth]` |
-| `multilabel_hinge` | `MultilabelHingeLoss`, `multilabel_hinge_loss` | `MultilabelHinge` | `l2_multilabel_hinge[_smooth]` |
-| `multilabel_cross_entropy` | `MultilabelCrossEntropyLoss`, `multilabel_cross_entropy` | `MultilabelCrossEntropy` | `l2_multilabel_entropy(c)` |
-| `proximal_cross_entropy` | `ProximalCrossEntropyLoss`, `proximal_cross_entropy` | `Loss::ProximalCrossEntropy` | `loss_and_gradient` |
-| `distillation` | `DistillationLoss`, `distillation_loss` | `fit_distillation` | `l2_distillation`, `distillation_loss` |
-| `proximal_distillation` | `ProximalDistillationLoss`, `proximal_distillation_loss` | `proximal_distillation_*` | `proximal_distillation_loss` |
-| `linear_cross_entropy` | `LinearCrossEntropyLoss`, `linear_cross_entropy` (PyTorch) | — | — |
+Every interface uses the canonical names and takes, for each loss, only its own parameters
+(`k`, `gamma`, `alpha`, `temperature`); a parameter of another loss is an error.
 
-- **Aliases and C ABI names:** `TopKHingeBetaLoss` / `topk_hinge_beta_loss` alias
-  `TopKHingeLoss` / `topk_hinge_loss` (`variant="beta"` default). Python and Rust evaluate
-  distillation via `distillation_loss_and_grad` and `proximal_distillation_loss_and_grad`
-  (`distillation_loss_and_gradient` and `proximal_distillation_loss_and_gradient` in C++).
-  In C, `enum sdca_loss` constants are `SDCA_<UPPER_NAME>` (e.g. `SDCA_CROSS_ENTROPY`),
-  plus `sdca_distillation_*`, `sdca_fit_distillation` and `sdca_proximal_distillation_rows`.
-- **Python targets:** Passing `objective="distillation"` to `fit` or `coordinate_update`
-  trains on a target probability matrix `(n, num_classes)`; passing label sets or a boolean
-  mask with `cross_entropy` selects `multilabel_cross_entropy`.
+| Canonical name | NumPy | PyTorch module, PyTorch / JAX function | Rust | C |
+| --- | --- | --- | --- | --- |
+| `cross_entropy` | `CrossEntropy()` | `CrossEntropyLoss`, `cross_entropy` | `Loss::CrossEntropy` | `SDCA_LOSS_CROSS_ENTROPY` |
+| `topk_cross_entropy` | `TopKCrossEntropy(k)` | `TopKCrossEntropyLoss`, `topk_cross_entropy` | `Loss::TopKCrossEntropy { k }` | `SDCA_LOSS_TOPK_CROSS_ENTROPY` |
+| `multiclass_hinge` | `MulticlassHinge(gamma)` | `MulticlassHingeLoss`, `multiclass_hinge_loss` | `Loss::MulticlassHinge { gamma }` | `SDCA_LOSS_MULTICLASS_HINGE` |
+| `topk_hinge_alpha` | `TopKHingeAlpha(k, gamma)` | `TopKHingeLoss`, `topk_hinge_loss` (`variant="alpha"`) | `Loss::TopKHingeAlpha { k, gamma }` | `SDCA_LOSS_TOPK_HINGE_ALPHA` |
+| `topk_hinge_beta` | `TopKHingeBeta(k, gamma)` | `TopKHingeLoss`, `topk_hinge_loss` (`variant="beta"`) | `Loss::TopKHingeBeta { k, gamma }` | `SDCA_LOSS_TOPK_HINGE_BETA` |
+| `multilabel_hinge` | `MultilabelHinge(gamma)` | `MultilabelHingeLoss`, `multilabel_hinge_loss` | `Loss::MultilabelHinge { gamma }` | `SDCA_LOSS_MULTILABEL_HINGE` |
+| `multilabel_cross_entropy` | `MultilabelCrossEntropy()` | `MultilabelCrossEntropyLoss`, `multilabel_cross_entropy` | `Loss::MultilabelCrossEntropy` | `SDCA_LOSS_MULTILABEL_CROSS_ENTROPY` |
+| `proximal_cross_entropy` | `ProximalCrossEntropy(alpha)` | `ProximalCrossEntropyLoss`, `proximal_cross_entropy` | `Loss::ProximalCrossEntropy { alpha }` | `SDCA_LOSS_PROXIMAL_CROSS_ENTROPY` |
+| `distillation` | `Distillation(temperature)` | `DistillationLoss`, `distillation_loss` | `Loss::Distillation { temperature }` | `SDCA_LOSS_DISTILLATION` |
+| `proximal_distillation` | `ProximalDistillation(temperature, alpha)` | `ProximalDistillationLoss`, `proximal_distillation_loss` | `Loss::ProximalDistillation { temperature, alpha }` | `SDCA_LOSS_PROXIMAL_DISTILLATION` |
+| `linear_cross_entropy` | — | `LinearCrossEntropyLoss`, `linear_cross_entropy` (PyTorch) | — | — |
+
+C++ objectives use the canonical names with an `l2_` prefix (`l2_topk_hinge_beta`;
+`*_objective(c, ...)` factories take `gamma`, default `0`), and MATLAB takes the canonical
+names as `opts.objective` / `opts.loss`.
+
+- **Targets:** The single-label losses take class labels (0-based; 1-based in MATLAB), the
+  multilabel losses label sets or a boolean mask, and the distillation losses teacher
+  logits. The training objective `cross_entropy` also takes target probabilities, rows of an
+  `(n, num_classes)` matrix such as a teacher's softmax (`libsdca.Probabilities` in NumPy,
+  `Targets::Probabilities` in Rust, `SDCA_TARGET_PROBABILITIES` in C). The proximal and
+  distillation losses are not training objectives.
 
 ## Options
 
-Python, MATLAB and Rust share the option names below:
+The solver options below have the same names and defaults in every interface (Rust: `Solver`
+setters such as `with_tol`; C: `struct sdca_fit_options`; C++: `context.criteria`; the
+scikit-learn estimator names `max_epoch` `max_iter` and `seed` `random_state`):
 
-| Option | C++ | Default | Meaning |
-| --- | --- | --- | --- |
-| `C` (`c` in Rust / C) | objective constructor | `1.0` | Loss weight in $0.5\Vert W \Vert_2^2 + C \sum_i \ell_i$ |
-| `k` | objective constructor | `1` | Integer in `[1, classes - 1]` for top-*k* losses |
-| `gamma` | `_smooth` objective | `0.0` | `0`: nonsmooth hinge; `> 0`: Moreau smoothing step |
-| `tol` | `criteria.epsilon` | `1e-3` | Relative duality-gap stopping threshold |
-| `max_epoch` | `criteria.max_epoch` | `1000` | Maximum passes over the training set |
-| `eval_epoch` | `criteria.eval_epoch` | `10` | Epochs between duality-gap evaluations |
-| `eval_on_start` | `criteria.eval_on_start` | `false` | Evaluate objective and gap before epoch 1 |
-| `recompute_primal` | `criteria.recompute_primal` | `true` | Rebuild $W = W_0 + X^\top A$ at each evaluation |
-| `shrinking` | `criteria.shrinking` | `"auto"` | Hinge shrinking and screening ([below](#shrinking)) |
-| `projection_precision` | `criteria.projection` | `"float64"` | Multilabel hinge projection solver ([below](#projection-precision)) |
-| `kernel` | `make_input_kernel` | `false` | Input $X$ is a symmetric PSD $(n, n)$ Gram matrix |
-| `center` | `context.primal_initial` | `None` | Regularize $0.5\Vert W - W_0 \Vert_2^2$ instead of $0.5\Vert W \Vert_2^2$ |
-| `initial_dual` | dual buffer | `None` | Initial dual variables $A$ for warm starts |
-| `num_threads` | `criteria.num_threads` | `auto` | Worker threads for `loss_and_grad`, `coordinate_update` and C `sdca_options` (`SDCA_NUM_THREADS` for `fit`) |
-| `precision` | `<Data, Result>` | storage dtype | Working and iterate precision ([below](#precision)) |
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `C` (`c` in Rust / C) | `1.0` | Loss weight in $0.5\Vert W \Vert_2^2 + C \sum_i \ell_i$ |
+| `tol` | `1e-3` | Relative duality-gap stopping threshold |
+| `max_epoch` | `1000` | Maximum passes over the training set |
+| `eval_epoch` | `10` | Epochs between duality-gap evaluations; `0` evaluates only at the end |
+| `eval_on_start` | `false` | Evaluate objective and gap before epoch 1 |
+| `recompute_primal` | `true` | Rebuild $W = W_0 + X^\top A$ at each evaluation |
+| `shrinking` | `"auto"` | Hinge shrinking and screening ([below](#shrinking)); the entropy objectives take only `"auto"` |
+| `seed` | `0` | The order of the examples in the epochs |
+| `num_classes` | largest label plus one | The number of classes |
+| `center` | none | Regularize $0.5\Vert W - W_0 \Vert_2^2$ instead of $0.5\Vert W \Vert_2^2$ (features only) |
+| `initial_dual` | none | Initial dual variables $A$ for warm starts; the library checks them and builds $W$ |
+
+Kernel input is explicit: `libsdca.Kernel(K)` in NumPy, `kernel="precomputed"` in
+scikit-learn, `Input::Kernel` in Rust, `SDCA_INPUT_KERNEL` in C, `make_input_kernel` in C++.
+Every call also takes the execution settings `precision` ([below](#precision)) and
+`num_threads` ([threads](#threads)); `projection_precision` belongs to `multilabel_hinge`
+([below](#projection-precision)).
 
 - **Evaluations (`eval_epoch`, `recompute_primal`):** Besides checking every
   `eval_epoch` epochs, a fit with `tol > 0` schedules up to two interpolated
@@ -109,8 +120,9 @@ Python, MATLAB and Rust share the option names below:
   `recompute_primal=True` (default), feature fits rebuild $W = W_0 + X^\top A$
   before evaluating the primal objective so incremental update drift does not
   enter the gap (not for `float32` data with `precision="float64"`, whose `double` $W$ is
-  evaluated as stored).
-- **Kernel validation (`kernel=True`):** Every interface verifies a nonnegative
+  evaluated as stored). A fit stopped by `max_epoch` reports `solved` when its last
+  evaluation meets `tol`.
+- **Kernel validation:** Every interface verifies a nonnegative
   diagonal, symmetry within $10^{-5}\sqrt{K_{ii}K_{jj}}$, and
   $\lvert K_{ij} \rvert \le (1 + 10^{-3})\sqrt{K_{ii}K_{jj}}$.
 - **Feature scaling:** Because each coordinate step scales with $1/(C\Vert x_i \Vert_2^2)$,
@@ -154,12 +166,13 @@ working precision explicitly:
 
 | Storage dtype | `None` (default), `"float32"` | `"float64"` |
 | --- | --- | --- |
-| `float16`, `bfloat16` | `float32` work (the NumPy and C APIs reject 16-bit storage: cast to `float32` first) | `float64` work (JAX: see [backends](../python/JAX.md#backends)) |
+| `float16`, `bfloat16` | `float32` work (NumPy casts 16-bit arrays to `float32`; C takes `float32` or `float64`) | `float64` work (JAX: see [backends](../python/JAX.md#backends)) |
 | `float32` | `float32` work | `float64` work |
-| `float64` | `float64` work (`"float32"` raises) | `float64` work |
+| `float64` | `float64` work (`"float32"`: NumPy casts to `float32` and returns `float32` arrays; PyTorch and JAX raise, since gradients keep the logits' dtype) | `float64` work |
 
-MATLAB differs: `precision` defaults to `'double'` for every input class
-([MATLAB.md](MATLAB.md#training)).
+MATLAB follows the class of `X` (`'single'` or `'double'`). In C the storage type is the
+`dtype` argument and the work is `struct sdca_execution`'s `precision`
+(`SDCA_PRECISION_DEFAULT`, `SDCA_PRECISION_FLOAT32` or `SDCA_PRECISION_FLOAT64`).
 
 - **Accuracy contract:** `float32` work bounds the accuracy of the results; individual
   operations may run in `float64`. Row statistics of the entropy losses are accumulated in
@@ -195,11 +208,10 @@ See [known limits](#known-limits) for accuracy bounds.
 
 ## Results
 
-Training returns a status (`none`, `solving`, `solved`, `no_progress`, `max_epoch`,
-`max_cpu_time`, `max_wall_time`, `failed`) and an evaluation `history` (`epoch`,
-`primal`, `dual`, `primal_loss`, `dual_loss`, `regularizer`, `relative_gap`,
-`accuracy` / `rank_loss`, `cpu_time`, `wall_time`; MATLAB's `model.train` has its own field
-names).
+Training returns a status (`solved`, `no_progress`, `max_epoch` or `failed`) and an
+evaluation `history` with the same fields in every interface: `epoch`, `primal`, `dual`,
+`primal_loss`, `dual_loss`, `regularizer`, `relative_gap`, `accuracy` (the rank loss for the
+multilabel losses), `cpu_time` and `wall_time`.
 
 Only `status == "solved"` guarantees convergence:
 $$P(W) - D(A) + e \le \text{tol} \cdot \max(|P(W)|, |D(A)|),$$
@@ -211,7 +223,8 @@ $D(A)$ evaluate the full centered objective directly from $W - W_0$ without canc
 $\frac{1}{2}\Vert W_0 \Vert_2^2$.
 
 Array layouts for $n$ examples, $d$ features and $m$ classes: Python returns `weights (d, m)`
-column-major and `dual (n, m)` row-major; Rust returns both row-major; MATLAB takes
+column-major and `dual (n, m)` row-major; Rust returns both row-major (`Model::weights`,
+`Model::dual`) and the history as `Evaluation` structs; MATLAB takes
 features `(d, n)` and returns `W (d, m)` and `A (m, n)`.
 
 ## Distillation losses
@@ -247,10 +260,11 @@ because the array reference solve's dynamic loop cannot be transposed.
 Loss evaluations and coordinate steps process rows independently across up to `num_threads`
 worker threads with **bitwise-identical results** for every thread count:
 
-- **Default selection:** When `num_threads` is omitted (`None` in Python/Rust,
-  `SDCA_THREADS_DEFAULT` in C), the library reads `SDCA_NUM_THREADS` once and otherwise uses
-  automatic threading (`0`), capped by the active OpenMP team (`torch.set_num_threads`) or
-  `OMP_NUM_THREADS` and divided across concurrent calls. Passing `1` runs on the calling thread.
+- **Default selection:** When `num_threads` is omitted (`None` in Python, `Threads::FromEnv`
+  in Rust, `0` in C), the library reads `SDCA_NUM_THREADS` once and
+  otherwise uses automatic threading, capped by the active
+  OpenMP team (`torch.set_num_threads`) or `OMP_NUM_THREADS` and divided across concurrent
+  calls. Passing `1` runs on the calling thread.
 - **Work threshold:** A call times its first rows on the calling thread and spawns workers only
   when remaining work is estimated at $\ge 1\text{ ms}$ ($\ge 0.2\text{ ms}$ on an OpenMP team).
 - **Training (`fit`):** Coordinate-ascent epochs are sequential; only duality-gap evaluations,

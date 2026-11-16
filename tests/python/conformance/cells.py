@@ -9,6 +9,7 @@ Known limits, with the recorded magnitudes.
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import json
 import math
@@ -419,6 +420,49 @@ def params(framework: str) -> list[object]:
     ]
 
 
+# The CI profile of the matrix (pytest --conformance ci): projections that keep every loss,
+# backend, dtype, precision, reduction and input family without their product.
+DEFAULT_BACKENDS = (
+    "numpy",
+    "torch-cpu-auto",
+    "torch-cuda-launcher",
+    "jax-cpu-auto",
+    "jax-gpu-triton",
+)
+STANDARD_LOSSES = ("cross_entropy", "multiclass_hinge[gamma=0]")
+
+
+@functools.cache
+def ci_profile(framework: str) -> frozenset[str]:
+    """The ids of the framework's cells in the CI profile: every loss on every input family
+    (default backend, float32), the standard losses on every backend and dtype and in every
+    precision, every loss in every dtype on the 10-class rows, and the cross-entropy
+    reductions. A (loss, family) pair without float32 rows runs in its first dtype."""
+    selected: dict[str, Cell] = {}
+    every = list({cell.id: cell for cell in cells(framework)}.values())
+    for cell in every:
+        default = cell.backend.name in DEFAULT_BACKENDS
+        plain = cell.precision is None and cell.reduction == "none"
+        standard = cell.loss.label in STANDARD_LOSSES
+        family = (cell.case.family, cell.case.classes)
+        if (
+            (default and plain and cell.dtype == "float32")
+            or (standard and plain)
+            or (standard and default and cell.reduction == "none")
+            or (default and plain and family == REDUCED)
+            or (default and cell.precision is None and cell.loss.name == "cross_entropy")
+        ):
+            selected[cell.id] = cell
+    covered = {(c.loss.label, c.case.family, c.case.classes) for c in selected.values()}
+    for cell in every:
+        key = (cell.loss.label, cell.case.family, cell.case.classes)
+        plain = cell.precision is None and cell.reduction == "none"
+        if cell.backend.name in DEFAULT_BACKENDS and plain and key not in covered:
+            selected[cell.id] = cell
+            covered.add(key)
+    return frozenset(selected)
+
+
 def slow(cell: Cell) -> bool:
     """The widest rows: started first under -n."""
     return cell.case.classes >= 32768 or cell.case.family == "gaussian"
@@ -427,8 +471,7 @@ def slow(cell: Cell) -> bool:
 def nonfinite_params(framework: str) -> list[object]:
     """(backend, loss) pairs whose nonfinite-logit behaviour a document states: ValueError on
     the CPU (API.md, Errors; TORCH.md, Argument parity) and from concrete JAX calls, NaN from
-    CUDA cross-entropies (TORCH.md) and traced jax.numpy, JaxRuntimeError from traced native
-    JAX losses (JAX.md, Targets and validation)."""
+    CUDA cross-entropies (TORCH.md) and from every traced JAX loss (JAX.md, Errors)."""
     cuda_nan = ("cross_entropy", "linear_cross_entropy")
     pairs = []
     for loss in LOSSES:
@@ -439,19 +482,6 @@ def nonfinite_params(framework: str) -> list[object]:
                 continue
             pairs.append(pytest.param(backend, loss, id=f"{loss.label}-{backend.name}"))
     return pairs
-
-
-def _check_auto_nonfinite(backend: Backend, loss: Loss, case: Case) -> None:
-    """CPU auto selects native validation or a NaN-producing tensor route by loss/size."""
-    from jax.errors import JaxRuntimeError
-
-    try:
-        values, _, _ = backends.run(backend, loss, "float32", None, "none", case)
-    except JaxRuntimeError as error:
-        message = str(error)
-        assert message.startswith("INVALID_ARGUMENT:") and "finite" in message, message
-    else:
-        assert math.isnan(values[0]), values
 
 
 def check_nonfinite(backend: Backend, loss: Loss, traced: bool = True) -> None:
@@ -467,16 +497,9 @@ def check_nonfinite(backend: Backend, loss: Loss, traced: bool = True) -> None:
         with pytest.raises(ValueError):
             backends.concrete_value(backend, resolved, case)
         return
-    if backend.name == "jax-cpu-auto":
-        _check_auto_nonfinite(backend, resolved, case)
-        return
-    expected: type[Exception] | tuple[type[Exception], ...] | None = ValueError
-    if (backend.cuda and not backend.native) or (backend.framework == "jax" and not backend.native):
+    expected: type[Exception] | None = ValueError
+    if (backend.cuda and not backend.native) or backend.framework == "jax":
         expected = None
-    elif backend.framework == "jax":
-        from jax.errors import JaxRuntimeError
-
-        expected = (JaxRuntimeError, ValueError)
     if expected is not None:
         with pytest.raises(expected):
             backends.run(backend, resolved, "float32", None, "none", case)

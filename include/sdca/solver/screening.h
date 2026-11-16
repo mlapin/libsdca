@@ -24,13 +24,13 @@ namespace detail {
 template <typename Objective>
 struct shrinks : std::false_type {};
 template <typename Data, typename Result>
-struct shrinks<l2_hinge_topk<Data, Result>> : std::true_type {};
+struct shrinks<l2_topk_hinge_alpha<Data, Result>> : std::true_type {};
 template <typename Data, typename Result>
-struct shrinks<l2_hinge_topk_smooth<Data, Result>> : std::true_type {};
+struct shrinks<l2_topk_hinge_alpha_smooth<Data, Result>> : std::true_type {};
 template <typename Data, typename Result>
-struct shrinks<l2_topk_hinge<Data, Result>> : std::true_type {};
+struct shrinks<l2_topk_hinge_beta<Data, Result>> : std::true_type {};
 template <typename Data, typename Result>
-struct shrinks<l2_topk_hinge_smooth<Data, Result>> : std::true_type {};
+struct shrinks<l2_topk_hinge_beta_smooth<Data, Result>> : std::true_type {};
 template <typename Data, typename Result>
 struct shrinks<l2_multilabel_hinge<Data, Result>> : std::true_type {};
 template <typename Data, typename Result>
@@ -42,13 +42,13 @@ struct shrinks<l2_multilabel_hinge_smooth<Data, Result>> : std::true_type {};
 template <typename Objective>
 struct has_part_steps : std::false_type {};
 template <typename Data, typename Result>
-struct has_part_steps<l2_hinge_topk<Data, Result>> : std::true_type {};
+struct has_part_steps<l2_topk_hinge_alpha<Data, Result>> : std::true_type {};
 template <typename Data, typename Result>
-struct has_part_steps<l2_hinge_topk_smooth<Data, Result>> : std::true_type {};
+struct has_part_steps<l2_topk_hinge_alpha_smooth<Data, Result>> : std::true_type {};
 template <typename Data, typename Result>
-struct has_part_steps<l2_topk_hinge<Data, Result>> : std::true_type {};
+struct has_part_steps<l2_topk_hinge_beta<Data, Result>> : std::true_type {};
 template <typename Data, typename Result>
-struct has_part_steps<l2_topk_hinge_smooth<Data, Result>> : std::true_type {};
+struct has_part_steps<l2_topk_hinge_beta_smooth<Data, Result>> : std::true_type {};
 
 }  // namespace detail
 
@@ -69,28 +69,28 @@ inline screening_rules screening_rules_of(const Objective&) {
   return screening_rules();
 }
 template <typename Data, typename Result>
-inline screening_rules screening_rules_of(const l2_hinge_topk<Data, Result>& obj) {
+inline screening_rules screening_rules_of(const l2_topk_hinge_alpha<Data, Result>& obj) {
   screening_rules r;
   r.examples = true;
   r.classes = r.pairs = obj.k == 1;
   return r;
 }
 template <typename Data, typename Result>
-inline screening_rules screening_rules_of(const l2_hinge_topk_smooth<Data, Result>& obj) {
+inline screening_rules screening_rules_of(const l2_topk_hinge_alpha_smooth<Data, Result>& obj) {
   screening_rules r;
   r.examples = true;
   r.classes = obj.k == 1;
   return r;
 }
 template <typename Data, typename Result>
-inline screening_rules screening_rules_of(const l2_topk_hinge<Data, Result>& obj) {
+inline screening_rules screening_rules_of(const l2_topk_hinge_beta<Data, Result>& obj) {
   screening_rules r;
   r.examples = r.classes = true;
   r.pairs = obj.k == 1;
   return r;
 }
 template <typename Data, typename Result>
-inline screening_rules screening_rules_of(const l2_topk_hinge_smooth<Data, Result>&) {
+inline screening_rules screening_rules_of(const l2_topk_hinge_beta_smooth<Data, Result>&) {
   screening_rules r;
   r.examples = r.classes = true;
   return r;

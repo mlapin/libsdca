@@ -66,7 +66,7 @@ target_link_libraries(my_program PRIVATE libsdca::libsdca)
 
 Without CMake, define one of `BLAS_BUILTIN` (default), `BLAS_DEFAULT`,
 `BLAS_DEFAULT_LOCAL_HEADER`, `BLAS_MKL`, `BLAS_ACCELERATE` or `BLAS_MATLAB`, link the matching
-CBLAS, and compile `sdca/utility/logging.cpp` in exactly one translation unit.
+CBLAS; the headers need no separate source file.
 
 ## Rust
 

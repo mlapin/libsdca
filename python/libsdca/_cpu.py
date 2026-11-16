@@ -253,10 +253,10 @@ def _native_loss(
     """Values (float64) and gradients (saved dtype, into out if given) of int64 labels or a
     positive mask by the native library, in float arithmetic for 16-bit logits or
     precision="float32"."""
-    from ._core import _loss_of_kind
+    from ._loss_options import loss_of_kind
 
     n, classes = logits.shape
-    name, nonsmooth = _loss_of_kind(objective)
+    name, nonsmooth = loss_of_kind(objective)
     values = torch.empty(n, dtype=torch.float64)
     gradient = torch.empty(logits.shape, dtype=saved_dtype(logits)) if out is None else out
     labels = target.data_ptr() if target.dtype == torch.int64 else None

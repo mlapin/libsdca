@@ -13,14 +13,14 @@ if [[ "$blas" == /* ]]; then
   export LD_LIBRARY_PATH="$(dirname "$blas")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 compiler_flags=(-std=c++11 -DBLAS_DEFAULT_LOCAL_HEADER -DSDCA_VERSION='"test"'
-  -Iinclude -Itests/cpp -Ivendor/googletest/googletest/include -Ivendor/googletest/googletest)
+  -Iinclude -Isrc -Itests/cpp -Ivendor/googletest/googletest/include -Ivendor/googletest/googletest)
 if [[ "${1:-}" == "--sanitize" ]]; then
   g++ "${compiler_flags[@]}" -O1 -g -fno-omit-frame-pointer \
     -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all \
     tests/cpp/test_main.cpp tests/cpp/regression.cpp vendor/googletest/googletest/src/gtest-all.cc \
     -pthread "$blas" -o build/cpp-tests/test_sanitize
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" OPENBLAS_NUM_THREADS=1 build/cpp-tests/test_sanitize
-  gcc -std=c99 -Iinclude -fsanitize=address,undefined -fno-sanitize-recover=all \
+  gcc -std=c99 -Iinclude -Isrc -fsanitize=address,undefined -fno-sanitize-recover=all \
     -c tests/cpp/c_api_validation.c -o build/cpp-tests/c_api_validation.o
   g++ "${compiler_flags[@]}" -O1 -g -fno-omit-frame-pointer \
     -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all \

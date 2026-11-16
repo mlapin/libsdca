@@ -6,24 +6,30 @@ import libsdca
 import numpy as np
 import pytest
 import torch
-from libsdca._core import Solver
-from libsdca.torch import DistillationLoss, SDCALoss, distillation_loss, sdca_loss
+from libsdca.torch import (
+    DistillationLoss,
+    MultilabelCrossEntropyLoss,
+    TopKHingeLoss,
+    cross_entropy,
+    distillation_loss,
+    multilabel_cross_entropy,
+    topk_cross_entropy,
+    topk_hinge_loss,
+)
+from numpy_api import Solver
 
 
 class TorchReferenceTests:
-    def test_top_level_names_and_module_options(self):
-        assert libsdca.SDCALoss is SDCALoss
-        assert libsdca.sdca_loss is sdca_loss
-        assert libsdca.DistillationLoss is DistillationLoss
-        criterion = SDCALoss("topk_hinge_beta", k=2, gamma=0.5, reduction="sum")
+    def test_module_options(self):
+        criterion = TopKHingeLoss(k=2, gamma=0.5, reduction="sum")
         z = torch.randn(4, 5, dtype=torch.float64)
         target = torch.tensor([0, 1, 4, 2])
-        expected = sdca_loss(z, target, "topk_hinge_beta", k=2, gamma=0.5, reduction="sum")
+        expected = topk_hinge_loss(z, target, k=2, gamma=0.5, reduction="sum")
         torch.testing.assert_close(criterion(z, target), expected)
-        assert "k=2, gamma=0.5" in repr(criterion)
+        assert "k=2, variant='beta', gamma=0.5" in repr(criterion)
         assert "temperature=2.0" in repr(DistillationLoss(temperature=2.0))
         with pytest.raises(TypeError):  # options are keyword-only
-            SDCALoss("cross_entropy", "native")  # pyright: ignore[reportCallIssue]
+            TopKHingeLoss(2, "native")  # pyright: ignore[reportCallIssue]
 
     def test_paper_collapse_and_cancellation_low_precision(self):
         # The tensor path promotes half/bfloat16 work, then stores gradients
@@ -35,7 +41,7 @@ class TorchReferenceTests:
             (torch.float64, 50.0),
         ]:
             z = torch.tensor([[margin, 0.0, 0.0]], dtype=dtype, requires_grad=True)
-            value = sdca_loss(z, torch.tensor([0]), backend="torch")
+            value = cross_entropy(z, torch.tensor([0]), backend="torch")
             value.backward()
             expected = 2 * np.exp(-margin) / (1 + 2 * np.exp(-margin))
             assert value.item() > 0
@@ -66,14 +72,14 @@ class TorchReferenceTests:
                 np.testing.assert_allclose(actual, value, rtol=2e-6, atol=0)
                 np.testing.assert_allclose(g, gradient, rtol=2e-6, atol=0)
                 t = torch.tensor(z, dtype=torch.float64, requires_grad=True)
-                sdca_loss(t, torch.tensor([0]), loss="topk_cross_entropy", k=3).backward()
+                topk_cross_entropy(t, torch.tensor([0]), k=3).backward()
                 assert t.grad is not None
                 np.testing.assert_allclose(t.grad.numpy(), gradient, rtol=2e-6, atol=0)
 
     def test_smoothed_hinge_backward_with_tiny_gamma(self):
         for dtype in [torch.float32, torch.float64]:
             z = torch.zeros((1, 4), dtype=dtype, requires_grad=True)
-            value = sdca_loss(z, torch.tensor([0]), "topk_hinge_alpha", k=3, gamma=1e-20)
+            value = topk_hinge_loss(z, torch.tensor([0]), k=3, variant="alpha", gamma=1e-20)
             value.backward()
             torch.testing.assert_close(
                 z.grad,
@@ -90,9 +96,7 @@ class TorchReferenceTests:
                 z = torch.tensor(
                     [[0.0, 2.0, 1.0, -2.0], [3.0, 0.0, 0.0, 0.0]], dtype=dtype, requires_grad=True
                 )
-                value = sdca_loss(
-                    z, torch.tensor([0, 0]), "topk_hinge_beta", k=2, gamma=gamma, reduction="sum"
-                )
+                value = topk_hinge_loss(z, torch.tensor([0, 0]), k=2, gamma=gamma, reduction="sum")
                 value.backward()
                 tolerance = 3e-15 if dtype == torch.float64 else 2e-7
                 torch.testing.assert_close(
@@ -104,26 +108,21 @@ class TorchReferenceTests:
                 expected = torch.tensor([[-1.0, 0.5, 0.5, 0.0], [0.0, 0.0, 0.0, 0.0]], dtype=dtype)
                 torch.testing.assert_close(z.grad, expected, rtol=tolerance, atol=0)
 
-    def test_multilabel_entropy_alias_and_boolean_k_parity(self):
+    def test_multilabel_entropy_module_and_boolean_k_parity(self):
         z = torch.tensor(
             [[0.3, -0.2, 0.7], [0.1, 0.2, -0.4]], dtype=torch.float64, requires_grad=True
         )
         mask = torch.tensor([[True, False, True], [False, True, False]])
         for backend in ["native", "torch"]:
-            actual = SDCALoss("multilabel_cross_entropy", backend=backend)(z, mask)
-            expected = sdca_loss(z, mask, backend=backend)
+            actual = MultilabelCrossEntropyLoss(backend=backend)(z, mask)
+            expected = multilabel_cross_entropy(z, mask, backend=backend)
             torch.testing.assert_close(actual, expected, rtol=0, atol=0)
             ga = torch.autograd.grad(actual, z, retain_graph=True)[0]
             ge = torch.autograd.grad(expected, z)[0]
             torch.testing.assert_close(ga, ge, rtol=0, atol=0)
-        solver = Solver()
         for k in [True, np.bool_(True), False, np.bool_(False)]:
-            with pytest.raises(ValueError):
-                solver.loss_and_grad(z.detach().numpy(), mask, k=k)
-            with pytest.raises(ValueError):
-                solver.coordinate_update(z.detach().numpy(), mask, k=k)
-            with pytest.raises(ValueError):
-                solver.fit(np.eye(2), mask, k=k)
+            with pytest.raises(TypeError):
+                libsdca.TopKCrossEntropy(k=k)
 
     def test_label_sets_and_tensors(self, subtests: pytest.Subtests):
         solver = Solver()
@@ -156,5 +155,5 @@ class TorchReferenceTests:
             [[-1], [1], [0, 1], [2]],
             [[0, "x"], [1], [0, 1], [2]],
         ]:
-            with subtests.test(bad=bad), pytest.raises(ValueError):
-                solver.fit(x, bad)
+            with subtests.test(bad=bad), pytest.raises((ValueError, TypeError)):
+                solver.fit(x, bad, objective="multilabel_cross_entropy")

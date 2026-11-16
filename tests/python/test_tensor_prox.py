@@ -3,13 +3,14 @@
 import math
 import textwrap
 import types
+from typing import Any
 
 import interpreter
 import pytest
 import torch
 from libsdca import _tensor_prox
 from libsdca import torch as sdca_torch
-from libsdca.torch import SDCALoss, sdca_loss
+from named_losses import proximal_mask_loss, torch_loss, torch_module
 from torch.autograd import gradcheck
 
 DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
@@ -52,12 +53,21 @@ def labels_and_masks(examples: int, classes: int, generator: torch.Generator):
     return [labels, mask]
 
 
+def prox_loss(
+    logits: torch.Tensor, target: torch.Tensor, name: str, **options: Any
+) -> torch.Tensor:
+    """proximal_cross_entropy of class labels, or of a positive mask (proximal_mask_loss)."""
+    if target.dtype == torch.bool:
+        return proximal_mask_loss(logits, target, **options)
+    return torch_loss(logits, target, name, **options)
+
+
 class TensorProximalEntropyTests:
     def check(self, z: torch.Tensor, target: torch.Tensor, alpha: float, rtol: float, atol: float):
         """Values and weighted gradients of the tensor backend against the native backend."""
         reference = z.detach().clone().requires_grad_()
         weights = torch.linspace(0.5, 2.0, z.shape[0], dtype=z.dtype)
-        expected = sdca_loss(
+        expected = prox_loss(
             reference,
             target,
             "proximal_cross_entropy",
@@ -68,7 +78,7 @@ class TensorProximalEntropyTests:
         expected.backward(weights)
         for device in DEVICES:
             x = z.detach().to(device).requires_grad_()
-            actual = sdca_loss(
+            actual = prox_loss(
                 x,
                 target.to(device),
                 "proximal_cross_entropy",
@@ -127,7 +137,7 @@ class TensorProximalEntropyTests:
                 (z, mask, 1e50, math.log(2)),
                 (zero, label, 1e300, 1.1762794618348152e-295),
             ]:
-                value = sdca_loss(
+                value = prox_loss(
                     logits, target, "proximal_cross_entropy", alpha=alpha, backend=backend
                 ).item()
                 assert abs(value / expected - 1.0) <= 1e-13, backend
@@ -141,7 +151,7 @@ class TensorProximalEntropyTests:
             q = mask.double() / mask.sum(-1, keepdim=True)
             for alpha in [1e-3, 0.5, 20.0]:
                 x = z.clone().requires_grad_()
-                value = sdca_loss(
+                value = prox_loss(
                     x,
                     target,
                     "proximal_cross_entropy",
@@ -159,14 +169,16 @@ class TensorProximalEntropyTests:
         generator = torch.Generator().manual_seed(5)
         z = torch.randn(2, 5, 3, dtype=torch.float64, generator=generator)
         labels = torch.tensor([[0, 4, 2], [1, 1, 3]])
-        expected = SDCALoss("proximal_cross_entropy", alpha=0.7, backend="native", dim=1)(z, labels)
+        expected = torch_module("proximal_cross_entropy", alpha=0.7, backend="native", dim=1)(
+            z, labels
+        )
         for device in DEVICES:
             x = z.to(device).requires_grad_()
-            criterion = SDCALoss("proximal_cross_entropy", alpha=0.7, backend="torch", dim=1)
+            criterion = torch_module("proximal_cross_entropy", alpha=0.7, backend="torch", dim=1)
             torch.testing.assert_close(criterion(x, labels.to(device)).cpu(), expected)
             assert gradcheck(lambda v: criterion(v, labels.to(device)), (x,))
             if device == "cuda":
-                auto = sdca_loss(x, labels.cuda(), "proximal_cross_entropy", alpha=0.7, dim=1)
+                auto = prox_loss(x, labels.cuda(), "proximal_cross_entropy", alpha=0.7, dim=1)
                 torch.testing.assert_close(auto.cpu(), expected)
 
     def test_wide_rows(self):
@@ -211,7 +223,7 @@ class TensorProximalEntropyTests:
                 for dtype in [torch.float32, torch.bfloat16, torch.float16]:
                     for backend in ["native", "torch"] if dtype == torch.float32 else ["torch"]:
                         x = z.detach().to(dtype).clone().requires_grad_()
-                        value = sdca_loss(
+                        value = prox_loss(
                             x,
                             mask,
                             "proximal_cross_entropy",
@@ -244,7 +256,7 @@ class TensorProximalEntropyTests:
             z = torch.zeros(2, 3, device=device)
             if device == "cpu":
                 with pytest.raises(ValueError, match="negative label"):
-                    sdca_loss(
+                    prox_loss(
                         z,
                         torch.ones_like(z, dtype=torch.bool),
                         "proximal_cross_entropy",
@@ -252,7 +264,7 @@ class TensorProximalEntropyTests:
                     )
             else:
                 assert bool(
-                    sdca_loss(
+                    prox_loss(
                         z,
                         torch.ones_like(z, dtype=torch.bool),
                         "proximal_cross_entropy",
@@ -262,7 +274,7 @@ class TensorProximalEntropyTests:
                     .all()
                 )
             with pytest.raises(ValueError):
-                sdca_loss(
+                prox_loss(
                     z, torch.tensor([0, 1], device=device), "proximal_cross_entropy", alpha=0.0
                 )
 

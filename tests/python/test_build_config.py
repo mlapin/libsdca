@@ -125,7 +125,7 @@ class BuildConfigTests:
         files = [
             "VERSION", "CHANGELOG.md", "pyproject.toml", "python/libsdca/__init__.py",
             "rust/Cargo.toml", "CITATION.cff", "python/README.md", "rust/README.md",
-            "include/sdca/c_api.h", "CMakeLists.txt", "python/libsdca/_core.py", "rust/src/solver.rs",
+            "include/sdca/c_api.h", "CMakeLists.txt", "python/libsdca/_core.py", "rust/src/ffi.rs",
         ]  # fmt: skip
         version = (root / "VERSION").read_text().strip()
         heading = tool._version(rf"^(## {re.escape(version)} \(.*\))$", "CHANGELOG.md")
@@ -139,7 +139,11 @@ class BuildConfigTests:
             ("CITATION.cff", "date-released: ", "date-released: 1999-01-01 # "),
             ("python/README.md", f"libsdca/blob/v{version}/", "libsdca/blob/v9.9.9/"),
             ("rust/README.md", f"--tag v{version}", "--tag v9.9.9"),
-            ("rust/src/solver.rs", "const ABI_VERSION: c_int = ", "const ABI_VERSION: c_int = 9"),
+            (
+                "rust/src/ffi.rs",
+                "pub const ABI_VERSION: c_int = ",
+                "pub const ABI_VERSION: c_int = 9",
+            ),
             ("CHANGELOG.md", heading, "## Unreleased"),
         ]:
             with subtests.test(path=path, new=new), tempfile.TemporaryDirectory() as directory:
@@ -266,6 +270,7 @@ class BuildConfigTests:
         not importlib.util.find_spec("torch") or shutil.which("c++") is None,
         reason="PyTorch or a C++ compiler is not installed",
     )
+    @pytest.mark.long
     def test_cpu_extension_compiles_for_generic_cpus(self):
         # The flags of arm64 and x86 without AVX2: no CI runner builds the extension there.
         tool = load_module(

@@ -54,7 +54,7 @@ ENV = "SDCA_JAX_CUDA"
 TARGET = "libsdca_cuda_kernels"
 LIBRARY = "libsdca_jax_cuda.so"
 REDUCTIONS = {"none": 0, "mean": 1, "sum": 2}
-FIRST_ORDER = "sdca_loss has no JVP: its derivatives are first-order reverse mode"
+FIRST_ORDER = "This loss has no JVP: its derivatives are first-order reverse mode"
 # The handler's argument kinds (_jax_cuda.cpp) and Triton's scratch pointers after them.
 _BUFFER, _INT32, _INT64, _NULL = 0, 1, 2, 3
 _SCRATCH = 2
@@ -1049,22 +1049,35 @@ def _fallback(*args: Any, spec: Spec, batch: int) -> list[jax.Array]:
         options: dict[str, Any] = {"backend": "native", "reduction": spec.reduction}
         if spec.family == "hinge":
             smooth, gamma, _ = spec.options
-            objective = "multiclass_hinge"
-            options["gamma"] = gamma if smooth else 0.0
-        elif spec.family == "topk":
-            objective, k, gamma, _ = spec.options
-            options.update(k=k, gamma=gamma if objective.endswith("_smooth") else 0.0)
-        elif spec.family == "multilabel":
-            objective, _, gamma = spec.options
-            options["gamma"] = gamma if objective.endswith("_smooth") else 0.0
-        else:
-            assert spec.family == "prox"
-            alpha, fp32 = spec.options
-            objective = "proximal_cross_entropy"
-            options.update(
-                alpha=alpha, precision="float32" if fp32 else "float64", reduction="none"
+            return losses.multiclass_hinge_loss(
+                z, target, gamma=gamma if smooth else 0.0, **options
             )
-        return losses.sdca_loss(z, target, objective.removesuffix("_smooth"), **options)
+        if spec.family == "topk":
+            objective, k, gamma, _ = spec.options
+            name = objective.removesuffix("_smooth")
+            if name == "topk_cross_entropy":
+                return losses.topk_cross_entropy(z, target, k=k, **options)
+            smoothing = gamma if objective.endswith("_smooth") else 0.0
+            variant = name.removeprefix("topk_hinge_")
+            return losses.topk_hinge_loss(
+                z, target, k=k, variant=variant, gamma=smoothing, **options
+            )
+        if spec.family == "multilabel":
+            objective, _, gamma = spec.options
+            smoothing = gamma if objective.endswith("_smooth") else 0.0
+            return losses.multilabel_hinge_loss(z, target, gamma=smoothing, **options)
+        assert spec.family == "prox"
+        alpha, fp32 = spec.options
+        # The kernel's one-hot rows of the labels (none: a label out of range).
+        labels = jnp.where(target.any(-1), jnp.argmax(target, -1), -1)
+        return losses.proximal_cross_entropy(
+            z,
+            labels,
+            alpha=alpha,
+            backend="native",
+            precision="float32" if fp32 else "float64",
+            reduction="none",
+        )
 
     def one(*operands: Any) -> list[jax.Array]:
         z, target = operands[0], _reference_target(operands[1], spec)
@@ -1353,7 +1366,7 @@ def loss(
     reference: Callable[..., jax.Array] | None,
     reference_args: tuple[Any, ...] = (),
 ) -> jax.Array | None:
-    """sdca_loss of class-last z on the fused kernels, or None where jax.numpy computes it.
+    """A loss of class-last z on the fused kernels, or None where jax.numpy computes it.
 
     target: integer labels (z.shape[:-1]) or a boolean mask (z.shape); reference: the
     jax.numpy entropy (for its higher derivatives)."""

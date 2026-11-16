@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest import mock
 
 import numpy as np
@@ -59,7 +59,11 @@ def evaluate_hinge(
     if profile in ("numpy", "sklearn"):
         import libsdca
 
-        value, gradient = libsdca.loss_and_grad(z.astype(dtype), labels, loss, precision=precision)
+        cls: Any = libsdca.LOSSES[loss]
+        instance = cls(k=1) if loss in libsdca.TOPK else cls()
+        value, gradient = libsdca.loss_and_grad(
+            z.astype(dtype), labels, instance, precision=precision
+        )
         return value, gradient, "native C ABI"
     if profile == "torch":
         import libsdca.torch as api
@@ -68,8 +72,12 @@ def evaluate_hinge(
 
         x = torch.tensor(z, dtype=getattr(torch, dtype), device=device, requires_grad=True)
         y = torch.tensor(labels, device=device)
+        options: dict[str, Any] = dict(precision=precision, reduction="sum")
+        if loss != "multiclass_hinge":
+            options.update(k=1, variant=loss.removeprefix("topk_hinge_"))
+        function = api.multiclass_hinge_loss if loss == "multiclass_hinge" else api.topk_hinge_loss
         with mock.patch.object(_hinge, "hinge", wraps=_hinge.hinge) as fused:
-            value = api.sdca_loss(x, y, loss, precision=precision, reduction="sum")
+            value = function(x, y, **options)
             (gradient,) = torch.autograd.grad(value, x)
         if device == "cuda":
             assert fused.call_count > 0, "hinge did not execute shared CUDA kernels"
@@ -84,11 +92,11 @@ def evaluate_hinge(
     from libsdca import _jax_cuda
 
     x, y = jnp.asarray(z, dtype=getattr(jnp, dtype)), jnp.asarray(labels)
-    operation = jax.jit(
-        jax.value_and_grad(
-            lambda a: api.sdca_loss(a, y, loss, precision=precision, reduction="sum")
-        )
-    )
+    hinge: dict[str, Any] = dict(precision=precision, reduction="sum")
+    if loss != "multiclass_hinge":
+        hinge.update(k=1, variant=loss.removeprefix("topk_hinge_"))
+    loss_of = api.multiclass_hinge_loss if loss == "multiclass_hinge" else api.topk_hinge_loss
+    operation = jax.jit(jax.value_and_grad(lambda a: loss_of(a, y, **hinge)))
     lowered = operation.lower(x).as_text()
     if device == "cuda":
         assert _jax_cuda.TARGET in lowered, "hinge did not lower to shared CUDA kernels"
@@ -111,8 +119,8 @@ def proximal_case(dtype: str, backend: str, precision: str | None, device: str) 
     y = jnp.arange(7)
     operation = jax.jit(
         jax.value_and_grad(
-            lambda a: api.sdca_loss(
-                a, y, "proximal_cross_entropy", backend=backend, precision=precision
+            lambda a: api.proximal_cross_entropy(
+                a, y, backend=cast("Any", backend), precision=precision
             )
         )
     )

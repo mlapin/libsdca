@@ -10,6 +10,7 @@ eagerly. Reductions take an upstream derivative of one (all ones for "none").
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import importlib.util
 import os
@@ -139,6 +140,7 @@ def run(
 def concrete_value(backend: Backend, loss: Loss, case: Case) -> np.ndarray:
     """A JAX loss of concrete (untraced) float32 arrays: the call that validates its inputs."""
     import jax
+    import named_losses
     from libsdca import jax as J
 
     data = arrays(case)
@@ -148,15 +150,18 @@ def concrete_value(backend: Backend, loss: Loss, case: Case) -> np.ndarray:
         if loss.name in DISTILLATION:
             teacher = jax.device_put(data["teacher"].astype(np.float32), device)
             if loss.name == "distillation":
-                return np.asarray(J.distillation_loss(z, teacher, loss.temperature))
+                return np.asarray(J.distillation_loss(z, teacher, temperature=loss.temperature))
             return np.asarray(
-                J.proximal_distillation_loss(z, teacher, loss.temperature, loss.alpha)
+                J.proximal_distillation_loss(
+                    z, teacher, temperature=loss.temperature, alpha=loss.alpha
+                )
             )
         target = jax.device_put(data["mask"] if loss.name in MASKS else data["labels"], device)
-        value = J.sdca_loss(
+        value = named_losses.loss(
+            J,
+            loss.name,
             z,
             target,
-            loss.name,
             backend=backend.option or "auto",
             k=loss.k,
             gamma=loss.gamma,
@@ -172,16 +177,17 @@ def _numpy(
 
     z = data["logits"].astype(dtype)
     if loss.name in DISTILLATION:
-        alpha = loss.alpha if loss.name == "proximal_distillation" else 0.0
-        teacher = data["teacher"].astype(dtype)
-        values, gradient = libsdca.distillation_loss_and_grad(
-            z, teacher, temperature=loss.temperature, alpha=alpha, precision=precision
-        )
+        target = data["teacher"].astype(dtype)
+        params = dict(temperature=loss.temperature)
+        if loss.name == "proximal_distillation":
+            params["alpha"] = loss.alpha
     else:
         target = data["mask"] if loss.name in MASKS else data["labels"]
-        values, gradient = libsdca.loss_and_grad(
-            z, target, loss.name, k=loss.k, gamma=loss.gamma, alpha=loss.alpha, precision=precision
-        )
+        params = dict(k=loss.k, gamma=loss.gamma, alpha=loss.alpha)
+    cls = libsdca.LOSSES[loss.name]
+    taken = {field.name for field in dataclasses.fields(cls)}  # pyright: ignore[reportArgumentType]
+    instance = cls(**{key: value for key, value in params.items() if key in taken})
+    values, gradient = libsdca.loss_and_grad(z, target, instance, precision=precision)
     return np.asarray(values, np.float64), np.asarray(gradient, np.float64), "native"
 
 
@@ -219,25 +225,23 @@ def _torch(
         if loss.name in DISTILLATION:
             teacher = tensor(data["teacher"])
             if loss.name == "distillation":
-                value = L.distillation_loss(leaf, teacher, loss.temperature, **common)
+                value = L.distillation_loss(leaf, teacher, temperature=loss.temperature, **common)
             else:
                 value = L.proximal_distillation_loss(
-                    leaf, teacher, loss.temperature, loss.alpha, **common
+                    leaf, teacher, temperature=loss.temperature, alpha=loss.alpha, **common
                 )
         else:
+            from named_losses import function, parameters
+
             target = torch.tensor(
                 data["mask"] if loss.name in MASKS else data["labels"], device=device
             )
-            options: dict[str, Any] = dict(k=loss.k, gamma=loss.gamma, **common)
-            route = L.explain_backend(leaf, target, loss.name, backend=route, **options)[0]
-            value = L.sdca_loss(
-                leaf,
-                target,
-                loss.name,
-                backend=backend.option or "auto",
-                alpha=loss.alpha,
-                **options,
+            options: dict[str, Any] = dict(
+                **parameters(loss.name, loss.k, loss.gamma, loss.alpha), backend=route, **common
             )
+            fn = function(L, loss.name)
+            route = L.explain_backend(fn, leaf, target, **options)[0]
+            value = fn(leaf, target, **options)
     value.backward(torch.ones_like(value))
     assert leaf.grad is not None
     gradient = leaf.grad.T if loss.name == "linear_cross_entropy" else leaf.grad
@@ -258,6 +262,7 @@ def _jax(
 ) -> tuple[np.ndarray, np.ndarray, str]:
     import jax
     import jax.numpy as jnp
+    import named_losses
     from libsdca import jax as J
 
     device = next(d for d in jax.devices("gpu" if backend.cuda else "cpu"))
@@ -273,12 +278,12 @@ def _jax(
             if loss.name == "distillation":
 
                 def f(z: jax.Array) -> jax.Array:
-                    return J.distillation_loss(z, teacher, loss.temperature, **common)
+                    return J.distillation_loss(z, teacher, temperature=loss.temperature, **common)
             else:
 
                 def f(z: jax.Array) -> jax.Array:
                     return J.proximal_distillation_loss(
-                        z, teacher, loss.temperature, loss.alpha, **common
+                        z, teacher, temperature=loss.temperature, alpha=loss.alpha, **common
                     )
         else:
             target = (
@@ -286,10 +291,11 @@ def _jax(
             )
 
             def f(z: jax.Array) -> jax.Array:
-                return J.sdca_loss(
+                return named_losses.loss(
+                    J,
+                    loss.name,
                     z,
                     target,
-                    loss.name,
                     backend=backend.option or "auto",
                     k=loss.k,
                     gamma=loss.gamma,

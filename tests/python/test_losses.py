@@ -2,11 +2,22 @@ from fractions import Fraction
 from typing import Any
 
 import numpy as np
-from libsdca import LOSSES
-from libsdca._core import Solver
+import pytest
+from numpy_api import Solver, mask_loss_and_grad
 from scipy.optimize import minimize
 from scipy.special import logsumexp, softmax
 
+# The losses of label targets.
+LABEL_LOSSES = (
+    "cross_entropy",
+    "topk_cross_entropy",
+    "multiclass_hinge",
+    "topk_hinge_alpha",
+    "topk_hinge_beta",
+    "multilabel_hinge",
+    "multilabel_cross_entropy",
+    "proximal_cross_entropy",
+)
 # (hinge, smoothed by gamma)
 HINGES = [
     (name, smooth)
@@ -51,7 +62,7 @@ class LossTests:
     def test_all_gradients_by_finite_differences(self):
         solver = Solver()
         z = np.random.default_rng(9).normal(size=(3, 5))
-        for objective in LOSSES:
+        for objective in LABEL_LOSSES:
             target = np.array([0, 2, 4])
             if objective.startswith("multilabel"):
                 target = np.array([[1, 0, 1, 0, 0], [0, 1, 0, 0, 1], [1, 1, 1, 0, 0]], bool)
@@ -88,13 +99,17 @@ class LossTests:
         s = Solver("float64", dtype=np.float32)
         z = np.array([[20.0, 20.0, -20.0]])
         target = np.array([[True, True, False]])
-        _, g = s.loss_and_grad(z, target)
+        _, g = s.loss_and_grad(z, target, "multilabel_cross_entropy")
         assert g[0, 0] < 0
         np.testing.assert_array_equal(g[0, :2], [g[0, 0], g[0, 0]])
         np.testing.assert_allclose(g[0, 0], -np.exp(-40) / 4, rtol=2.4e-7, atol=0)
         z = np.array([[1.0, 2.0, 3.0]])
         target = np.ones(z.shape, bool)
-        _, g = Solver().loss_and_grad(z, target)
+        # Every class: the public losses need a class outside the set; the internal rows of
+        # the tensor layers take the uniform target.
+        with pytest.raises(ValueError, match="class outside"):
+            Solver().loss_and_grad(z, target, "multilabel_cross_entropy")
+        _, g = mask_loss_and_grad(z, target, "cross_entropy")
         np.testing.assert_allclose(g, softmax(z, axis=1) - 1 / 3, atol=2e-16)
 
     def test_large_regularization_and_scale_invariance(self):

@@ -7,8 +7,8 @@
 #include <iterator>
 
 #include "sdca/solver/data/output.h"
-#include "sdca/solver/objective/l2_entropy.h"
-#include "sdca/solver/objective/l2_multilabel_entropy.h"
+#include "sdca/solver/objective/l2_cross_entropy.h"
+#include "sdca/solver/objective/l2_multilabel_cross_entropy.h"
 
 namespace sdca {
 
@@ -21,13 +21,13 @@ inline Work loss_slope(const Objective& obj, const Work, const size_type) {
 
 // Softmax: 2 (1 - p_y) <= 2 min(1, loss).
 template <typename Work>
-inline Work loss_slope(const l2_entropy<Work, Work>& obj, const Work loss, const size_type) {
+inline Work loss_slope(const l2_cross_entropy<Work, Work>& obj, const Work loss, const size_type) {
   return 2 * obj.c * std::min(Work(1), loss);
 }
 
 // Pinsker: |softmax - q|_1 <= sqrt(2 KL(q, softmax)), and KL = loss - log p.
 template <typename Work>
-inline Work loss_slope(const l2_multilabel_entropy<Work, Work>& obj, const Work loss,
+inline Work loss_slope(const l2_multilabel_cross_entropy<Work, Work>& obj, const Work loss,
                        const size_type p) {
   const Work kl = std::max(Work(0), loss - std::log(static_cast<Work>(p)));
   return obj.c * std::min(Work(2), std::sqrt(2 * kl));

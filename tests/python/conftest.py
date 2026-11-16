@@ -10,6 +10,10 @@ Under pytest-xdist (-n) each worker gets an equal share of the CPUs as OMP_NUM_T
 or long start first (one per worker under --dist worksteal), and tests marked serial are
 deselected: run them in a second pass, -m serial without -n. CI passes -m "not long".
 SDCA_JAX_CPU_FUSION is "fenced" unless set.
+
+--conformance ci runs the CI profile of the conformance matrix (test_conformance in
+test_conformance_*.py; conformance/cells.py, ci_profile), about a tenth of its cells; the
+default, full, runs them all.
 """
 
 from __future__ import annotations
@@ -49,6 +53,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="core, torch, jax or all (default: core and the installed optional groups)",
     )
     parser.addoption("--installed", action="store_true", help="test the installed package")
+    parser.addoption(
+        "--conformance",
+        choices=["full", "ci"],
+        default="full",
+        help="the conformance cells to run: all (default) or the CI profile",
+    )
 
 
 def group(path: Path) -> str:
@@ -82,6 +92,15 @@ def tested_libsdca(installed: bool) -> Path:
     location = Path(libsdca.__file__).resolve()
     if installed and location.is_relative_to(SOURCE):
         raise pytest.UsageError(f"--installed imported libsdca from the source tree: {location}")
+    from libsdca._core import _library_path, stale_build
+
+    library = Path(_library_path(None))
+    reason = stale_build(library) if library.exists() else None
+    if reason:
+        raise pytest.UsageError(
+            f"{library} is older than its sources ({reason}): rebuild it "
+            "('python python/build.py' or 'pip install -e .') or delete it"
+        )
     return location
 
 
@@ -156,7 +175,25 @@ def slow_first(items: list[pytest.Item], workers: int) -> list[pytest.Item]:
     return ordered + list(rest)
 
 
+def outside_ci_profile(item: pytest.Item) -> bool:
+    """Whether item is a conformance cell outside the CI profile."""
+    if not isinstance(item, pytest.Function) or item.originalname != "test_conformance":
+        return False
+    if not item.path.name.startswith("test_conformance_"):
+        return False
+    from conformance.cells import Cell, ci_profile
+
+    cell = item.callspec.params["cell"]
+    assert isinstance(cell, Cell)
+    return cell.id not in ci_profile(cell.backend.framework)
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if config.getoption("conformance") == "ci":
+        outside = [item for item in items if outside_ci_profile(item)]
+        if outside:
+            config.hook.pytest_deselected(items=outside)
+            items[:] = [item for item in items if not outside_ci_profile(item)]
     if not distributed(config):
         return
     serial = [item for item in items if item.get_closest_marker("serial")]

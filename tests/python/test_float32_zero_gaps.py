@@ -17,8 +17,8 @@ import mpmath as mp
 import pytest
 import torch
 from libsdca import _cpu_entropy
-from libsdca.torch import sdca_loss
 from mpmath_types import MPReal
+from named_losses import torch_loss
 
 PATHS = {"cpu-native": "off", **({"cpu-kernel": "on"} if _cpu_entropy.buildable() else {})}
 # name -> (loss, mask target, k); the float32-exponential rows of the extension and theirs.
@@ -45,7 +45,7 @@ def _evaluate(
         target = torch.zeros(len(gaps), classes, dtype=torch.bool)
         target[:, 0] = True
     with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": PATHS[path]}):
-        value = sdca_loss(x, target, loss, k=k, reduction=reduction)
+        value = torch_loss(x, target, loss, k=k, reduction=reduction)
         (gradient,) = torch.autograd.grad(value.sum(), x)
     assert value.dtype == gradient.dtype == torch.float32
     return value.tolist() if value.dim() else [], gradient[:, 0].tolist(), gradient[:, -1].tolist()

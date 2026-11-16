@@ -231,10 +231,12 @@ def _step(family: str, variant: str, args: list[Any]) -> Callable[..., Any]:
 
     def loss(z: Any, target: Any) -> Any:
         if family.startswith("distillation"):
-            return sdca_jax.distillation_loss(z, target, 2.0)
+            return sdca_jax.distillation_loss(z, target, temperature=2.0)
         if family == "proximal_distillation":
-            return sdca_jax.proximal_distillation_loss(z, target, 2.0, 1.0)
-        return sdca_jax.sdca_loss(z, target, family)
+            return sdca_jax.proximal_distillation_loss(z, target, temperature=2.0, alpha=1.0)
+        if family == "multilabel_cross_entropy":
+            return sdca_jax.multilabel_cross_entropy(z, target)
+        return sdca_jax.cross_entropy(z, target)
 
     _local.forced = variant
     try:

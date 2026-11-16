@@ -3,7 +3,7 @@
 import pytest
 import torch
 from libsdca import _cuda_launch
-from libsdca.torch import sdca_loss
+from named_losses import torch_loss
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
@@ -22,10 +22,10 @@ def test_cuda_hinge_fp32_extreme_rows(
     z[1, 2] = maximum
     y = torch.ones(19, dtype=torch.long, device="cuda")
     x = z.clone().requires_grad_()
-    value = sdca_loss(x, y, "topk_hinge_alpha", gamma=gamma, reduction="none")
+    value = torch_loss(x, y, "topk_hinge_alpha", gamma=gamma, reduction="none")
     gradient = torch.autograd.grad(value.sum(), x)[0]
     ref = z.double().requires_grad_()
-    exact = sdca_loss(
+    exact = torch_loss(
         ref, y, "topk_hinge_alpha", gamma=gamma, reduction="none", precision="float64"
     )
     expected = torch.autograd.grad(exact.sum(), ref)[0]
@@ -54,7 +54,7 @@ def test_cuda_hinge_distinct_scores_survive_margin_rounding(
     x[:, 0], x[:, 1], x[:, -1] = 0.0, 2.0**power, 2.0 ** (power + 1)
     x.requires_grad_()
     y = torch.zeros(19, dtype=torch.long, device="cuda")
-    value = sdca_loss(x, y, "multiclass_hinge", reduction="none", precision=precision)
+    value = torch_loss(x, y, "multiclass_hinge", reduction="none", precision=precision)
     gradient = torch.autograd.grad(value.sum(), x)[0]
     expected = torch.zeros_like(x)
     expected[:, 0], expected[:, -1] = -1.0, 1.0
@@ -76,13 +76,13 @@ def test_cuda_nonsmooth_hinge_scalar_double_matches_explicit_work(classes: int, 
     results = []
     for precision in (None, "float32", "float64"):
         x = z.clone().requires_grad_()
-        value = sdca_loss(x, y, "multiclass_hinge", precision=precision, reduction="none")
+        value = torch_loss(x, y, "multiclass_hinge", precision=precision, reduction="none")
         results.append((value, torch.autograd.grad(value.sum(), x)[0]))
     for value, gradient in results[1:]:
         torch.testing.assert_close(value, results[0][0], rtol=0, atol=0)
         torch.testing.assert_close(gradient, results[0][1], rtol=0, atol=0)
     reference = z.double().requires_grad_()
-    value = sdca_loss(reference, y, "multiclass_hinge", reduction="none")
+    value = torch_loss(reference, y, "multiclass_hinge", reduction="none")
     gradient = torch.autograd.grad(value.sum(), reference)[0]
     torch.testing.assert_close(results[0][0], value.float(), rtol=0, atol=0)
     torch.testing.assert_close(results[0][1], gradient.to(dtype), rtol=0, atol=0)
@@ -95,10 +95,10 @@ def test_cuda_smooth_hinge_large_gamma_times_classes_promotes():
     z[:, 11:] = -2e37
     y = torch.zeros(2, dtype=torch.long, device="cuda")
     x = z.clone().requires_grad_()
-    value = sdca_loss(x, y, "topk_hinge_beta", gamma=5e37, reduction="none")
+    value = torch_loss(x, y, "topk_hinge_beta", gamma=5e37, reduction="none")
     gradient = torch.autograd.grad(value.sum(), x)[0]
     ref = z.double().requires_grad_()
-    exact = sdca_loss(ref, y, "topk_hinge_beta", gamma=5e37, reduction="none", precision="float64")
+    exact = torch_loss(ref, y, "topk_hinge_beta", gamma=5e37, reduction="none", precision="float64")
     expected = torch.autograd.grad(exact.sum(), ref)[0]
     torch.testing.assert_close(value, exact.float(), rtol=1e-6, atol=0)
     torch.testing.assert_close(gradient, expected.float(), rtol=1e-6, atol=0)

@@ -905,10 +905,13 @@ struct entropy_block_solver {
       dt = next;
     }
     const T eps = std::numeric_limits<T>::epsilon();
-    // The resolution of t and of f is eps relative to at least tiny: they can underflow.
+    // The resolution of f is eps relative to at least tiny (it can underflow). An error d in
+    // t moves every probability by the relative factor exp(-d): a bracket within 64 eps, in
+    // absolute terms near t = 0, holds the probabilities to the 64 eps of the contract (a
+    // root at the bracket's end 0 is otherwise out of reach of the bisection).
     if (!std::isfinite(f) ||
         (std::abs(f) > T(256) * eps * std::max(magnitude, tiny) &&
-         hi - lo > T(64) * eps * std::max({std::abs(lo), std::abs(hi), tiny}))) {
+         hi - lo > T(64) * eps * std::max({std::abs(lo), std::abs(hi), T(1)}))) {
       throw std::runtime_error("Entropy normalization did not converge");
     }
     return dt;

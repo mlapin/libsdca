@@ -7,9 +7,9 @@ import mpmath as mp
 import numpy as np
 import pytest
 from libsdca import HINGES, MULTILABEL, OBJECTIVES
-from libsdca._core import Solver
 from mpmath.matrices.matrices import _matrix
 from mpmath_types import MPReal
+from numpy_api import Solver
 
 
 def _rsum(terms: Iterable[Any]) -> MPReal | int | float:

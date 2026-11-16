@@ -4,7 +4,15 @@ on:
   push:
     branches: [main, master, integration]
   pull_request:
+  # Manual runs choose the conformance cells: the CI profile or the full matrix (to record
+  # the expected failures of the runner's hardware; see tests/python/conformance/known.py).
   workflow_dispatch:
+    inputs:
+      conformance:
+        description: Conformance cells to run
+        type: choice
+        options: [ci, full]
+        default: ci
 permissions:
   contents: read
 concurrency:
@@ -119,6 +127,9 @@ jobs:
       OPENBLAS_NUM_THREADS: '1'
       OMP_NUM_THREADS: '1'
       CXX: clang++-18
+      CONFORMANCE: ${{ inputs.conformance || 'ci' }}
+      # Each conformance cell with failures appends a record here, uploaded when a step fails.
+      SDCA_CONFORMANCE_RECORD: ${{ github.workspace }}/build/conformance
     steps:
       # Check out repository sources for Python, PyTorch, JAX, and scikit-learn test suites.
       - uses: actions/checkout@v7.0.1
@@ -136,14 +147,24 @@ jobs:
       - run: python tools/check_extension_builds.py --compiler g++ --compiler clang++-18
       # Build the native C ABI shared library against the external BLAS backend.
       - run: python python/build.py --blas-backend EXTERNAL
-      # Run all parallel Python test groups (core, torch, jax), skipping multi-minute stress tests.
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group all -m 'not long'
+      # Run all parallel Python test groups (core, torch, jax), skipping multi-minute stress tests,
+      # with the CI profile of the conformance matrix unless a manual run asks for the full one.
+      - run: >-
+          PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python
+          --group all -m 'not long' --conformance "$CONFORMANCE"
       # Run thread-scaling and timing tests that require an unloaded machine serially.
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group all -m serial
       # Compile and test the JIT-built PyTorch CPU C++ extension (SDCA_CPU_EXTENSION=on) with GCC.
       - run: >-
           CXX=g++ SDCA_CPU_EXTENSION=on PYTHONPATH=python python -m pytest -p no:cacheprovider
           tests/python/test_softmax_limits.py::SoftmaxLimitTests tests/python/test_torch.py::TorchTests
+      # The conformance records of a failed run, for review against the known-failure manifest.
+      - uses: actions/upload-artifact@v7.0.2
+        if: failure()
+        with:
+          name: conformance-linux-${{ github.sha }}
+          path: build/conformance
+          if-no-files-found: ignore
 
   python-versions:
     name: Python ${{ matrix.python }} (core)
@@ -168,11 +189,14 @@ jobs:
       # Build the native C ABI library with the built-in BLAS, as in the wheels.
       - run: python python/build.py --blas-backend BUILTIN
       # Run the core test group in parallel, skipping multi-minute stress tests.
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core -m 'not long'
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core -m 'not long' --conformance ci
 
   macos:
     name: macOS (arm64)
     runs-on: macos-15
+    env:
+      CONFORMANCE: ${{ inputs.conformance || 'ci' }}
+      SDCA_CONFORMANCE_RECORD: ${{ github.workspace }}/build/conformance
     steps:
       # Check out repository sources to test Apple Silicon (arm64), Apple Clang, and Accelerate BLAS.
       - uses: actions/checkout@v7.0.1
@@ -193,9 +217,16 @@ jobs:
       # Build the Python C ABI library linked against macOS Accelerate.
       - run: CXX=c++ python python/build.py --blas-backend EXTERNAL
       # Run the core NumPy and scikit-learn test suite in parallel across workers.
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core --conformance "$CONFORMANCE"
       # Run the PyTorch CPU test suite (including the Apple Clang CPU extension) in parallel.
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group torch -m 'not long'
+      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group torch -m 'not long' --conformance "$CONFORMANCE"
+      # The conformance records of a failed run, for review against the known-failure manifest.
+      - uses: actions/upload-artifact@v7.0.2
+        if: failure()
+        with:
+          name: conformance-macos-${{ github.sha }}
+          path: build/conformance
+          if-no-files-found: ignore
 
   rust:
     name: Rust
@@ -278,4 +309,4 @@ jobs:
           py="$RUNNER_TEMP/env/bin/python" src="$RUNNER_TEMP/sdist"
           SDCA_BLAS_BACKEND=BUILTIN "$py" -m pip install dist/*.tar.gz pytest scipy mpmath scikit-learn
           mkdir "$src" && tar -xzf dist/*.tar.gz -C "$src" --strip-components=1
-          cd "$RUNNER_TEMP" && "$py" -m pytest -p no:cacheprovider "$src/tests/python" --group core --installed
+          cd "$RUNNER_TEMP" && "$py" -m pytest -p no:cacheprovider "$src/tests/python" --group core --installed --conformance ci

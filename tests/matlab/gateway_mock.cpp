@@ -1,94 +1,9 @@
-// Runs the MATLAB training gateway's setup helpers on an in-memory mxArray mock
-// (no MATLAB needed): warm starts and sparse targets, the k domain of every objective, and
-// nonfinite data.
+// Runs the MATLAB training gateway (matsdca_fit) end to end on the in-memory mx
+// mock of mx_mock.h (no MATLAB needed): options and loss names, 1-based labels,
+// label sets, warm starts, precision, the model struct, and errors.
 // Built and run by tests/matlab/run_gateway_mock.sh.
-#include <mex.h>
-#include <cmath>
-#include <cstdarg>
-#include <cstdio>
-#include <cstring>
-#include <iostream>
-#include <map>
-#include <stdexcept>
-#include <string>
-#include <vector>
-
-struct mxArray_tag {
-  mwSize m = 0, n = 0;
-  mxClassID type = mxDOUBLE_CLASS;
-  bool sparse = false;
-  std::vector<double> data;
-  std::vector<mwIndex> ir, jc;
-  std::map<std::string, mxArray*> fields;
-};
-
 #include "mex_solve.cpp"
-
-// MATLAB's mexErrMsgIdAndTxt leaves without unwinding, so std::cout must be restored before.
-std::streambuf* original_cout = nullptr;
-int errors_with_cout_redirected = 0;
-
-extern "C" {
-void mexErrMsgIdAndTxt(const char*, const char* fmt, ...) {
-  if (std::cout.rdbuf() != original_cout) ++errors_with_cout_redirected;
-  char buffer[512];
-  va_list args;
-  va_start(args, fmt);
-  vsnprintf(buffer, sizeof buffer, fmt, args);
-  va_end(args);
-  throw std::runtime_error(buffer);
-}
-void mexErrMsgTxt(const char* text) { throw std::runtime_error(text); }
-int mexPrintf(const char*, ...) { return 0; }
-int mexEvalString(const char*) { return 0; }
-mwSize mxGetM(const mxArray* a) { return a->m; }
-mwSize mxGetN(const mxArray* a) { return a->n; }
-mwSize mxGetNumberOfElements(const mxArray* a) { return a->m * a->n; }
-mwSize mxGetNzmax(const mxArray* a) { return a->ir.size(); }
-mwSize mxGetNumberOfDimensions(const mxArray*) { return 2; }
-mxClassID mxGetClassID(const mxArray* a) { return a->type; }
-bool mxIsDouble(const mxArray* a) { return a->type == mxDOUBLE_CLASS; }
-bool mxIsSingle(const mxArray* a) { return a->type == mxSINGLE_CLASS; }
-bool mxIsLogical(const mxArray* a) { return a->type == mxLOGICAL_CLASS; }
-bool mxIsNumeric(const mxArray* a) { return mxIsDouble(a) || mxIsSingle(a); }
-bool mxIsStruct(const mxArray* a) { return a->type == mxSTRUCT_CLASS; }
-bool mxIsCell(const mxArray*) { return false; }
-bool mxIsChar(const mxArray*) { return false; }
-bool mxIsComplex(const mxArray*) { return false; }
-bool mxIsSparse(const mxArray* a) { return a->sparse; }
-bool mxIsEmpty(const mxArray* a) { return a->m * a->n == 0; }
-bool mxIsScalar(const mxArray* a) { return a->m * a->n == 1; }
-void* mxGetData(const mxArray* a) { return const_cast<double*>(a->data.data()); }
-double* mxGetPr(const mxArray* a) { return static_cast<double*>(mxGetData(a)); }
-double mxGetScalar(const mxArray* a) { return a->data.empty() ? 0 : a->data[0]; }
-mwIndex* mxGetIr(const mxArray* a) { return const_cast<mwIndex*>(a->ir.data()); }
-mwIndex* mxGetJc(const mxArray* a) { return const_cast<mwIndex*>(a->jc.data()); }
-mxArray* mxGetField(const mxArray* a, mwIndex, const char* name) {
-  auto it = a->fields.find(name);
-  return it == a->fields.end() ? nullptr : it->second;
-}
-int mxGetFieldNumber(const mxArray* a, const char* name) {
-  int i = 0;
-  for (const auto& f : a->fields) {
-    if (f.first == name) return i;
-    ++i;
-  }
-  return -1;
-}
-mxArray* mxDuplicateArray(const mxArray* a) { return new mxArray(*a); }
-void mxDestroyArray(mxArray* a) { delete a; }
-mxArray* mxCreateNumericMatrix(mwSize m, mwSize n, mxClassID type, mxComplexity) {
-  auto a = new mxArray;
-  a->m = m;
-  a->n = n;
-  a->type = type;
-  a->data.resize(m * n);
-  return a;
-}
-mxArray* mxCreateDoubleMatrix(mwSize m, mwSize n, mxComplexity c) {
-  return mxCreateNumericMatrix(m, n, mxDOUBLE_CLASS, c);
-}
-}
+#include "mx_mock.h"
 
 namespace {
 
@@ -99,157 +14,293 @@ void check(const bool ok, const std::string& what) {
   if (!ok) ++failures;
 }
 
-mxArray matrix(const mwSize m, const mwSize n, const std::vector<double>& data) {
-  mxArray a;
-  a.m = m;
-  a.n = n;
-  a.data = data;
-  return a;
+mxArray* fit(mxArray* x, mxArray* y, mxArray* opts) {
+  const mxArray* prhs[] = {x, y, opts};
+  mxArray* plhs[1] = {nullptr};
+  mexFunction(1, plhs, opts ? 3 : 2, prhs);
+  return plhs[0];
 }
 
-// Warm start: training from initial_dual (opts.A) starts at W = W0 + X A'; a given W is ignored.
-void warm_starts() {
-  double x[] = {1, 0, 0, 1, -1, -1};  // d = 2, n = 3, column-major
-  mxArray a = matrix(3, 3, {.6, -.3, -.3, -.3, .6, -.3, -.3, -.3, .6});
-  mxArray center = matrix(2, 3, {.5, .3, -1, .1, .2, -.4});
-  mxArray bogus = matrix(2, 3, {99, 99, 99, 99, 99, 99});
-  for (bool warm : {false, true})
-    for (bool centered : {false, true})
-      for (bool given_w : {false, true}) {
-        auto in = sdca::make_input_feature(2, 3, x);
-        std::vector<sdca::size_type> y = {0, 1, 2};
-        sdca::multiclass_output out(3, y);
-        mxArray opts;
-        opts.type = mxSTRUCT_CLASS;
-        if (warm) opts.fields["A"] = &a;
-        if (centered) opts.fields["W0"] = &center;
-        if (given_w) opts.fields["W"] = &bogus;
-        sdca::model_info<mxArray*> info;
-        double *A = nullptr, *W = nullptr, *W0 = nullptr;
-        std::string what = "warm=" + std::to_string(warm) + " center=" + std::to_string(centered) +
-                           " W=" + std::to_string(given_w);
-        try {
-          set_variables(&opts, in, out, info, A, W, W0);
-        } catch (const std::exception& e) {
-          check(false, "warm start " + what + ": " + e.what());
-          continue;
-        }
-        double error = 0;
-        for (int j = 0; j < 3; ++j)
-          for (int l = 0; l < 2; ++l) {
-            double expected = centered ? center.data[l + 2 * j] : 0;
-            for (int i = 0; i < 3; ++i) expected += x[l + 2 * i] * (warm ? a.data[j + 3 * i] : 0);
-            error = std::max(error, std::abs(W[l + 2 * j] - expected));
-          }
-        check(error <= 1e-15, "warm start W = W0 + X A' " + what);
-      }
+// The error message of a fit, or "" if it succeeds.
+std::string fit_error(mxArray* x, mxArray* y, mxArray* opts) {
+  try {
+    fit(x, y, opts);
+  } catch (const std::exception& e) {
+    return e.what();
+  }
+  return "";
 }
 
-// Sparse target: a 4-class sparse target with spare capacity (nzmax 6 > nnz 2) and classes
-// {1, 2} keeps 4 classes and zero-based labels [1, 2], double or logical.
-void sparse_targets() {
-  for (mxClassID type : {mxDOUBLE_CLASS, mxLOGICAL_CLASS}) {
-    mxArray labels;
-    labels.m = 4;
-    labels.n = 2;
-    labels.sparse = true;
-    labels.type = type;
-    labels.data = {1, 1, 0, 0, 0, 0};
-    labels.ir = {1, 2, 0, 0, 0, 0};
-    labels.jc = {0, 1, 2};
-    const std::string what = type == mxLOGICAL_CLASS ? "logical" : "double";
+bool has(const std::string& text, const std::string& part) {
+  return text.find(part) != std::string::npos;
+}
+
+double number(const mxArray* model, const char* name) {
+  const mxArray* field = mxGetField(model, 0, name);
+  return field ? mxGetScalar(field) : std::nan("");
+}
+
+std::string text(const mxArray* model, const char* name) {
+  const mxArray* field = mxGetField(model, 0, name);
+  return field && mxIsChar(field) ? field->text : "";
+}
+
+// X: d = 2 features, n = 3 examples (column-major); Y: 1-based labels.
+mxArray* features(const mxClassID type = mxDOUBLE_CLASS) {
+  return mock::array(2, 3, {1, 0, 0, 1, -1, -1}, type);
+}
+mxArray* labels() { return mock::array(1, 3, {1, 2, 3}); }
+
+void losses_and_model() {
+  const std::string statuses = " solved no_progress max_epoch failed ";
+  struct named {
+    const char* loss;
+    std::map<std::string, mxArray*> extra;
+  };
+  const std::vector<named> cases = {
+      {"cross_entropy", {}},
+      {"topk_cross_entropy", {{"k", mock::scalar(2)}}},
+      {"multiclass_hinge", {}},
+      {"multiclass_hinge", {{"gamma", mock::scalar(.5)}}},
+      {"topk_hinge_alpha", {{"k", mock::scalar(2)}}},
+      {"topk_hinge_beta", {{"k", mock::scalar(2)}, {"gamma", mock::scalar(.7)}}},
+      {"multilabel_hinge", {{"projection_precision", mock::string("extended")}}},
+      {"multilabel_cross_entropy", {}}};
+  for (const auto& c : cases) {
+    std::map<std::string, mxArray*> fields = c.extra;
+    fields["loss"] = mock::string(c.loss);
+    fields["tol"] = mock::scalar(1e-8);
+    const bool multilabel = has(c.loss, "multilabel");
+    mxArray* y = multilabel ? mock::sparse(3, 3, {{0, 0}, {1, 0}, {1, 1}, {2, 2}}) : labels();
     try {
-      validate_labels(&labels, 2);
-      auto out = make_output<sdca::multilabel_output>(&labels, 2);
-      check(out.num_classes == 4 && out.labels == std::vector<sdca::size_type>({1, 2}),
-            "sparse " + what + " keeps classes 4 and labels 1, 2");
+      const mxArray* model = fit(features(), y, mock::options(fields));
+      const mxArray* W = mxGetField(model, 0, "W");
+      const mxArray* A = mxGetField(model, 0, "A");
+      const mxArray* history = mxGetField(model, 0, "history");
+      // W = X A' and every dual column sums to zero.
+      double error = 0;
+      const double* w = mock::data<double>(W);
+      const double* a = mock::data<double>(A);
+      const double x[] = {1, 0, 0, 1, -1, -1};
+      for (int j = 0; j < 3; ++j) {
+        double sum = 0;
+        for (int l = 0; l < 3; ++l) sum += a[l + 3 * j];
+        error = std::max(error, std::abs(sum));
+        for (int l = 0; l < 2; ++l) {
+          double expected = 0;
+          for (int i = 0; i < 3; ++i) expected += x[l + 2 * i] * a[j + 3 * i];
+          error = std::max(error, std::abs(w[l + 2 * j] - expected));
+        }
+      }
+      std::string what = std::string(c.loss) + (c.extra.count("gamma") ? " smooth" : "");
+      check(text(model, "loss") == c.loss && text(model, "status") == "solved" &&
+                number(model, "C") == 1 && number(model, "num_classes") == 3 &&
+                number(model, "num_features") == 2 && number(model, "epochs") >= 1 &&
+                number(model, "seed") == 0 && text(model, "precision") == "float64" &&
+                (mxGetField(model, 0, "k") != nullptr) == (c.extra.count("k") > 0) &&
+                (mxGetField(model, 0, "gamma") != nullptr) == has(c.loss, "hinge") &&
+                (mxGetField(model, 0, "shrinking") != nullptr) == has(c.loss, "hinge") &&
+                (mxGetField(model, 0, "projection_precision") != nullptr) ==
+                    (std::string(c.loss) == "multilabel_hinge") &&
+                mxGetField(model, 0, "num_threads") == nullptr && error < 1e-14 &&
+                history->m >= 1 && mxGetField(history, history->m - 1, "accuracy") &&
+                mxGetField(history, 0, "regularizer") && mxGetField(history, 0, "cpu_time"),
+            "fit " + what + " model");
+      check(has(statuses, " " + text(model, "status") + " "), "status of " + what);
     } catch (const std::exception& e) {
-      check(false, "sparse " + what + ": " + e.what());
+      check(false, std::string("fit ") + c.loss + ": " + e.what());
     }
   }
 }
 
-// matsdca_fit rejects k outside [1, classes - 1] for every objective, also the multilabel
-// objectives that do not use k, before it trains.
-void k_domain() {
-  double x[] = {1, 0, 0, 1, -1, -1};  // d = 2, n = 3, column-major
-  for (double k : {0.0, 3.0, 10.0}) {
-    mxArray value = matrix(1, 1, {k});
-    mxArray opts;
-    opts.type = mxSTRUCT_CLASS;
-    opts.fields["k"] = &value;
-    const std::string what = " k=" + std::to_string(static_cast<int>(k));
-    for (const char* obj : {"cross_entropy", "softmax", "l2_entropy_topk", "multiclass_hinge",
-                            "topk_hinge_alpha", "topk_hinge_beta"}) {
-      std::vector<sdca::size_type> y = {0, 1, 2};
-      try {
-        set_objective<double, double>(nullptr, nullptr, &opts, obj,
-                                      sdca::make_input_feature(2, 3, x),
-                                      sdca::multiclass_output(3, y));
-        check(false, std::string("k ") + obj + what + " accepted");
-      } catch (const std::exception& e) {
-        check(std::string(e.what()).find("'k'") != std::string::npos,
-              std::string("k ") + obj + what + ": " + e.what());
-      }
-    }
-    for (const char* obj : {"multilabel_hinge", "mlsoftmax", "mlsvm", "mlsvm_smooth"}) {
-      std::vector<sdca::size_type> labels = {0, 1, 2}, offsets = {0, 1, 2, 3};
-      try {
-        set_objective<double, double>(nullptr, nullptr, &opts, obj,
-                                      sdca::make_input_feature(2, 3, x),
-                                      sdca::multilabel_output(3, labels, offsets));
-        check(false, std::string("k ") + obj + what + " accepted");
-      } catch (const std::exception& e) {
-        check(std::string(e.what()).find("'k'") != std::string::npos,
-              std::string("k ") + obj + what + ": " + e.what());
-      }
-    }
+// Only the shared loss and option names, each loss with only its own parameters.
+void names_and_options() {
+  const std::vector<std::pair<std::map<std::string, mxArray*>, std::string>> bad = {
+      {{{"loss", mock::string("softmax")}}, "Unknown loss"},
+      {{{"loss", mock::string("msvm")}}, "Unknown loss"},
+      {{{"loss", mock::string("l2_topk_hinge")}}, "Unknown loss"},
+      {{{"loss", mock::string("topk_hinge")}}, "Unknown loss"},
+      {{{"loss", mock::string("mlsoftmax")}}, "Unknown loss"},
+      {{{"loss", mock::string("proximal_cross_entropy")}}, "Unknown loss"},
+      {{{"objective", mock::string("cross_entropy")}}, "Unknown option 'objective'"},
+      {{{"c", mock::scalar(1)}}, "Unknown option 'c'"},
+      {{{"epsilon", mock::scalar(1e-3)}}, "Unknown option 'epsilon'"},
+      {{{"is_dual", mock::scalar(0)}}, "Unknown option 'is_dual'"},
+      {{{"W0", mock::array(2, 3, {})}}, "Unknown option 'W0'"},
+      {{{"A", mock::array(3, 3, {})}}, "Unknown option 'A'"},
+      {{{"W", mock::array(2, 3, {})}}, "Unknown option 'W'"},
+      {{{"max_cpu_time", mock::scalar(1)}}, "Unknown option 'max_cpu_time'"},
+      {{{"k", mock::scalar(1)}}, "takes no option 'k'"},
+      {{{"gamma", mock::scalar(0)}}, "takes no option 'gamma'"},
+      {{{"shrinking", mock::string("off")}}, "takes no option 'shrinking'"},
+      {{{"loss", mock::string("multiclass_hinge")}, {"k", mock::scalar(1)}}, "takes no option 'k'"},
+      {{{"loss", mock::string("multiclass_hinge")},
+        {"projection_precision", mock::string("extended")}},
+       "takes no option 'projection_precision'"},
+      {{{"loss", mock::string("topk_hinge_beta")}}, "needs opts.k"},
+      {{{"loss", mock::string("topk_hinge_beta")}, {"k", mock::scalar(3)}}, "k must be"},
+      {{{"loss", mock::string("topk_hinge_beta")}, {"k", mock::scalar(0)}}, "k must be"},
+      {{{"loss", mock::string("topk_hinge_beta")}, {"k", mock::scalar(1.5)}}, "k is outside"},
+      {{{"loss", mock::string("multiclass_hinge")}, {"gamma", mock::scalar(-1)}}, "gamma"},
+      {{{"C", mock::scalar(0)}}, "C must be"},
+      {{{"tol", mock::scalar(-1)}}, "tol must be"},
+      {{{"precision", mock::string("single")}}, "Unknown precision"},
+      {{{"precision", mock::string("double")}}, "Unknown precision"},
+      {{{"precision", mock::string("float32")}}, "double data computes in float64"},
+      {{{"num_threads", mock::scalar(0)}}, "num_threads"},
+      {{{"seed", mock::scalar(-1)}}, "seed is outside"},
+      {{{"num_classes", mock::scalar(1)}}, "num_classes"},
+      {{{"num_classes", mock::scalar(2)}}, "Labels must be integers"},
+      {{{"log_level", mock::string("loud")}}, "log_level"},
+      {{{"shrinking", mock::string("on")}, {"loss", mock::string("multiclass_hinge")}},
+       "Unknown shrinking"}};
+  for (const auto& b : bad) {
+    const std::string error = fit_error(features(), labels(), mock::options(b.first));
+    check(has(error, b.second), "rejects " + b.second + ": " + error);
   }
 }
 
-// matsdca_fit rejects nonfinite training data before it trains.
+// Labels are 1-based integers; num_classes keeps classes without examples.
+void labels_and_classes() {
+  for (const std::vector<double>& y :
+       {std::vector<double>{0, 1, 2}, {1, 2, 2.5}, {1, 2, -1}, {1, 2, NAN}}) {
+    const std::string error = fit_error(features(), mock::array(1, 3, y), mock::options({}));
+    check(has(error, "Labels must be integers in 1:num_classes"), "label rejected: " + error);
+  }
+  const std::string single = fit_error(features(), mock::array(1, 3, {1, 1, 1}), nullptr);
+  check(has(single, "num_classes >= 2"), "one class rejected: " + single);
+  const std::string sets =
+      fit_error(features(), mock::sparse(3, 3, {{0, 0}, {1, 1}, {2, 2}}), nullptr);
+  check(has(sets, "double vector"), "label sets for cross_entropy rejected: " + sets);
+  const std::string vector =
+      fit_error(features(), labels(), mock::options({{"loss", mock::string("multilabel_hinge")}}));
+  check(has(vector, "sparse or logical"), "labels for multilabel_hinge rejected: " + vector);
+  const mxArray* model =
+      fit(features(), labels(), mock::options({{"num_classes", mock::scalar(5)}}));
+  check(number(model, "num_classes") == 5 && mxGetField(model, 0, "W")->n == 5 &&
+            mxGetField(model, 0, "A")->m == 5,
+        "num_classes 5 keeps 5 classes");
+}
+
+// Label sets: sparse double or logical with spare capacity, or full logical; the rows
+// are the classes, so classes without positives stay.
+void label_sets() {
+  const std::vector<std::pair<mwIndex, mwIndex>> entries = {{1, 0}, {2, 1}, {1, 2}};
+  mxArray* full = mock::array(4, 3, {0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0}, mxLOGICAL_CLASS);
+  std::vector<std::vector<double>> weights;
+  for (mxArray* y :
+       {mock::sparse(4, 3, entries), mock::sparse(4, 3, entries, mxLOGICAL_CLASS), full}) {
+    const mxArray* model =
+        fit(features(), y, mock::options({{"loss", mock::string("multilabel_cross_entropy")}}));
+    const double* w = mock::data<double>(mxGetField(model, 0, "W"));
+    weights.emplace_back(w, w + 8);
+    check(number(model, "num_classes") == 4, "label sets keep 4 classes");
+  }
+  check(weights[0] == weights[1] && weights[0] == weights[2], "label set formats train alike");
+  const std::string rows = fit_error(features(), mock::sparse(4, 3, entries),
+                                     mock::options({{"loss", mock::string("multilabel_hinge")},
+                                                    {"num_classes", mock::scalar(3)}}));
+  check(has(rows, "num_classes rows"), "num_classes must match the rows: " + rows);
+}
+
+// Warm start: W = center + X A' from feasible duals; infeasible duals are rejected.
+void warm_starts() {
+  const double x[] = {1, 0, 0, 1, -1, -1};
+  const std::vector<double> center = {.5, .3, -1, .1, .2, -.4};
+  for (bool centered : {false, true}) {
+    std::map<std::string, mxArray*> cold = {{"tol", mock::scalar(1e-10)},
+                                            {"eval_epoch", mock::scalar(1)}};
+    if (centered) cold["center"] = mock::array(2, 3, center);
+    const mxArray* first = fit(features(), labels(), mock::options(cold));
+    std::map<std::string, mxArray*> warm = cold;
+    warm["initial_dual"] = mxDuplicateArray(mxGetField(first, 0, "A"));
+    warm["max_epoch"] = mock::scalar(0);
+    warm["eval_on_start"] = mock::scalar(1);
+    const mxArray* model = fit(features(), labels(), mock::options(warm));
+    const double* w = mock::data<double>(mxGetField(model, 0, "W"));
+    const double* a = mock::data<double>(mxGetField(first, 0, "A"));
+    double error = 0;
+    for (int j = 0; j < 3; ++j)
+      for (int l = 0; l < 2; ++l) {
+        double expected = centered ? center[l + 2 * j] : 0;
+        for (int i = 0; i < 3; ++i) expected += x[l + 2 * i] * a[j + 3 * i];
+        error = std::max(error, std::abs(w[l + 2 * j] - expected));
+      }
+    const std::string what = centered ? " (centered)" : "";
+    // The duals of a solved fit start at a gap within its tolerance.
+    const double gap = number(mxGetField(model, 0, "history"), "relative_gap");
+    check(error <= 1e-15 && gap <= 1e-10 && number(model, "epochs") == 0,
+          "warm start W = center + X A' at the solved gap" + what);
+  }
+  const std::vector<std::pair<std::vector<double>, std::string>> bad = {
+      {{-1, .5, .5, 0, 0, 0, 0, 0, 0}, "non-label entries must be nonpositive"},
+      {{-.5, .5, .1, 0, 0, 0, 0, 0, 0}, "sum to zero"},
+      {{NAN, 0, 0, 0, 0, 0, 0, 0, 0}, "finite"}};
+  for (const auto& b : bad) {
+    const std::string error = fit_error(
+        features(), labels(), mock::options({{"initial_dual", mock::array(3, 3, b.first)}}));
+    check(has(error, b.second), "initial_dual rejected: " + error);
+  }
+  const std::string shape =
+      fit_error(features(), labels(), mock::options({{"initial_dual", mock::array(2, 3, {})}}));
+  check(!shape.empty(), "initial_dual of the wrong shape rejected: " + shape);
+}
+
+// precision follows the class of X; single X may take float64 work; eval_epoch 0, seed.
+void precision_and_schedule() {
+  const mxArray* single = fit(features(mxSINGLE_CLASS), labels(), nullptr);
+  check(text(single, "precision") == "float32" && mxIsSingle(mxGetField(single, 0, "W")),
+        "single X computes in float32");
+  const mxArray* wide = fit(features(mxSINGLE_CLASS), labels(),
+                            mock::options({{"precision", mock::string("float64")}}));
+  check(text(wide, "precision") == "float64" && mxIsSingle(mxGetField(wide, 0, "A")),
+        "single X with precision float64 keeps single outputs");
+  const mxArray* end = fit(features(), labels(),
+                           mock::options({{"eval_epoch", mock::scalar(0)},
+                                          {"max_epoch", mock::scalar(5)},
+                                          {"tol", mock::scalar(0)}}));
+  check(number(end, "epochs") == 5 && mxGetField(end, 0, "history")->m == 1 &&
+            text(end, "status") == "max_epoch",
+        "eval_epoch 0 evaluates once, at the end");
+  const mxArray* seeded =
+      fit(features(), labels(),
+          mock::options({{"seed", mock::scalar(7)}, {"num_threads", mock::scalar(2)}}));
+  check(number(seeded, "seed") == 7 && number(seeded, "num_threads") == 2 &&
+            text(seeded, "status") == "solved",
+        "seed and num_threads are echoed");
+  const mxArray* kernel = fit(mock::array(3, 3, {1, 0, -1, 0, 1, -1, -1, -1, 2}), labels(),
+                              mock::options({{"kernel", mock::scalar(1)}}));
+  check(mxGetField(kernel, 0, "W") == nullptr && mxGetField(kernel, 0, "num_features") == nullptr &&
+            mxGetScalar(mxGetField(kernel, 0, "kernel")) == 1 && text(kernel, "status") == "solved",
+        "Gram matrix input: A only");
+  const std::string centered =
+      fit_error(mock::array(3, 3, {1, 0, -1, 0, 1, -1, -1, -1, 2}), labels(),
+                mock::options({{"kernel", mock::scalar(1)}, {"center", mock::array(3, 3, {})}}));
+  check(has(centered, "center"), "center rejected for a Gram matrix: " + centered);
+}
+
+// matsdca_fit rejects nonfinite data before it trains.
 void nonfinite_data() {
   for (double bad : {NAN, INFINITY}) {
-    mxArray data = matrix(2, 3, {1, 0, 0, bad, -1, -1});
-    mxArray labels = matrix(1, 3, {1, 2, 3});
-    mxArray opts;
-    opts.type = mxSTRUCT_CLASS;
-    const mxArray* prhs[] = {&data, &labels};
-    mxArray* plhs[2] = {nullptr, nullptr};
-    const std::string what = std::isnan(bad) ? "NaN" : "inf";
-    try {
-      set_input<double, double>(plhs, prhs, &opts);
-      check(false, "data with " + what + " accepted");
-    } catch (const std::exception& e) {
-      check(std::string(e.what()) == "data must be finite", "data with " + what + ": " + e.what());
-    }
+    const std::string error =
+        fit_error(mock::array(2, 3, {1, 0, 0, bad, -1, -1}), labels(), nullptr);
+    check(has(error, "X must be finite"), "data with nonfinite entries: " + error);
   }
 }
 
 // matsdca_fit restores std::cout (buffer and format) before it raises an error, for an
 // unsupported data type and for an exception from training.
 void cout_restored_on_error() {
-  mxArray ints = matrix(2, 3, {1, 0, 0, 1, -1, -1});
-  ints.type = mxINT32_CLASS;
-  mxArray nonfinite = matrix(2, 3, {1, 0, 0, NAN, -1, -1});
-  mxArray labels = matrix(1, 3, {1, 2, 3});
-  mxArray opts;
-  opts.type = mxSTRUCT_CLASS;
-  for (const mxArray* data : {&ints, &nonfinite}) {
-    const std::string what = data == &ints ? "int32 data" : "nonfinite data";
+  for (mxArray* data : {mock::array(2, 3, {1, 0, 0, 1, -1, -1}, mxINT32_CLASS),
+                        mock::array(2, 3, {1, 0, 0, NAN, -1, -1})}) {
+    const std::string what = mxIsDouble(data) ? "nonfinite data" : "int32 data";
     const std::ios::fmtflags flags = std::cout.flags();
     const std::streamsize precision = std::cout.precision();
-    const int before = errors_with_cout_redirected;
-    const mxArray* prhs[] = {data, &labels, &opts};
-    mxArray* plhs[1] = {nullptr};
-    bool raised = false;
-    try {
-      mexFunction(1, plhs, 3, prhs);
-    } catch (const std::exception&) {
-      raised = true;
-    }
-    check(raised && errors_with_cout_redirected == before && std::cout.rdbuf() == original_cout &&
-              std::cout.flags() == flags && std::cout.precision() == precision,
+    const int before = mock::errors_with_cout_redirected();
+    const bool raised = !fit_error(data, labels(), mock::options({})).empty();
+    check(raised && mock::errors_with_cout_redirected() == before &&
+              std::cout.rdbuf() == mock::original_cout() && std::cout.flags() == flags &&
+              std::cout.precision() == precision,
           "std::cout restored before the " + what + " error");
   }
 }
@@ -257,11 +308,15 @@ void cout_restored_on_error() {
 }  // namespace
 
 int main() {
-  original_cout = std::cout.rdbuf();
+  mock::original_cout() = std::cout.rdbuf();
+  losses_and_model();
+  names_and_options();
+  labels_and_classes();
+  label_sets();
   warm_starts();
-  sparse_targets();
-  k_domain();
+  precision_and_schedule();
   nonfinite_data();
   cout_restored_on_error();
+  std::cout << (failures == 0 ? "gateway mock: ok" : "gateway mock: FAILED") << '\n';
   return failures == 0 ? 0 : 1;
 }

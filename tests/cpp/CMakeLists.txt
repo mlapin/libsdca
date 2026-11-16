@@ -43,6 +43,7 @@ add_executable(
   solver/parallel.cpp
   solver/reporting.cpp
   solver/solver.cpp
+  solver/surface.cpp
   solver/validation.cpp
   regression.cpp
   stress.cpp
@@ -82,12 +83,15 @@ if(SDCA_BUILD_C_API)
   # A C caller with flush-to-zero set.
   add_executable(test_c_api_fpenv c_api_fpenv.c)
   target_link_libraries(test_c_api_fpenv PRIVATE sdca_c $<$<BOOL:${UNIX}>:m>)
+  target_include_directories(test_c_api_fpenv PRIVATE ${PROJECT_SOURCE_DIR}/src)
   add_test(NAME test_c_api_fpenv COMMAND test_c_api_fpenv)
   add_executable(test_c_api_validation c_api_validation.c)
   target_link_libraries(test_c_api_validation PRIVATE sdca_c)
+  target_include_directories(test_c_api_validation PRIVATE ${PROJECT_SOURCE_DIR}/src)
   add_test(NAME test_c_api_validation COMMAND test_c_api_validation)
   # The entry points on threads; built from the source, whose thread settings it sets.
   add_executable(test_c_api_threads c_api_threads.cpp ${PROJECT_SOURCE_DIR}/src/c_api.cpp)
   target_link_libraries(test_c_api_threads PRIVATE libsdca Threads::Threads)
+  target_include_directories(test_c_api_threads PRIVATE ${PROJECT_SOURCE_DIR}/src)
   add_test(NAME test_c_api_threads COMMAND test_c_api_threads)
 endif()

@@ -39,8 +39,9 @@ inline void printHelp(const mxArray* opts) {
         "    alpha [1] - the alpha parameter in entropic projections;\n"
         "    k     [1] - the k in the top-k cone and the top-k simplex;\n"
         "    p     [1] - the length of x in two_simplex and two_simplex_sort;\n"
-        "    precision ['double'] - working arithmetic: float32/fp32/single,\n"
-        "                           float64/fp64/double, or long_double.\n"
+        "    precision [class of A] - working arithmetic: 'float32', 'float64' or\n"
+        "                           'long_double' (the output keeps the class of A).\n"
+        "  An unknown field is an error.\n"
         "\n"
         "  See %s('help', 'prox') for more information on possible operators.\n",
         MEX_PROX, MEX_PROX);
@@ -182,12 +183,15 @@ template <typename Data>
 inline void mex_main(const int nlhs, mxArray* plhs[], const int nrhs, const mxArray* prhs[]) {
   const mxArray* opts = (nrhs > 1) ? prhs[1] : nullptr;
   mxCheckStruct(opts, "opts");
-  std::string precision = mxGetFieldValueOrDefault(opts, "precision", std::string("double"));
-  if (precision == "double" || precision == "float64" || precision == "fp64") {
+  check_option_names(opts, {"prox", "lo", "hi", "rhs", "rho", "alpha", "k", "p", "precision"},
+                     MEX_PROX);
+  const std::string precision = mxGetFieldValueOrDefault(
+      opts, "precision", std::string(std::is_same<Data, float>::value ? "float32" : "float64"));
+  if (precision == "float64") {
     mex_main<Data, double>(nlhs, plhs, prhs, opts);
-  } else if (precision == "single" || precision == "float32" || precision == "fp32") {
+  } else if (precision == "float32") {
     mex_main<Data, float>(nlhs, plhs, prhs, opts);
-  } else if (precision == "long double" || precision == "long_double") {
+  } else if (precision == "long_double") {
     mex_main<Data, long double>(nlhs, plhs, prhs, opts);
   } else {
     mex_error(err_id[err_precision], err_msg[err_precision], precision.c_str());

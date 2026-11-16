@@ -146,10 +146,12 @@ def _cuda_fused(
     """Unreduced values and the gradient of their sum through the public loss on CUDA."""
     precision = "float64" if double else None
     x, y = s.cuda().requires_grad_(), t.cuda()
-    value = distillation_loss(x, y, temperature, reduction="none", precision=precision)
+    value = distillation_loss(x, y, temperature=temperature, reduction="none", precision=precision)
     (gradient,) = torch.autograd.grad(value.sum(), x)
     with torch.no_grad():
-        only = distillation_loss(x, y, temperature, reduction="none", precision=precision)
+        only = distillation_loss(
+            x, y, temperature=temperature, reduction="none", precision=precision
+        )
     torch.testing.assert_close(only, value.detach(), rtol=4 * EPS32, atol=4 * TINY)
     return value.detach(), gradient
 
@@ -173,7 +175,7 @@ def _cuda_proximal(
         precision = "float64" if double else None
         x = s.cuda().requires_grad_()
         value = proximal_distillation_loss(
-            x, t.cuda(), temperature, alpha, reduction="none", precision=precision
+            x, t.cuda(), temperature=temperature, alpha=alpha, reduction="none", precision=precision
         )
         (gradient,) = torch.autograd.grad(value.sum(), x)
         return value.detach(), gradient
@@ -198,6 +200,6 @@ def test_far_tail_in_the_interpreter():
     interpreter.run("import test_distillation_far_tail as t\nt.interpreter_far_tail_check()\n")
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_proximal_far_tail_in_the_interpreter():
     interpreter.run("import test_distillation_far_tail as t\nt.interpreter_prox_far_tail_check()\n")

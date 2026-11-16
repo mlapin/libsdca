@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from hinge_order_cases import rows
-from libsdca import loss_and_grad
+from numpy_api import loss_and_grad
 
 
 @pytest.mark.parametrize("classes", [3, 17, 1000])

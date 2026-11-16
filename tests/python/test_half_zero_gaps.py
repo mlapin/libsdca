@@ -17,8 +17,8 @@ import mpmath as mp
 import pytest
 import torch
 from libsdca import _cpu_entropy
-from libsdca.torch import sdca_loss
 from mpmath_types import MPReal
+from named_losses import torch_loss
 
 # The default CPU paths (the tensor path of 16-bit logits works in float32: its float32 losses
 # keep less than the subnormal resolution).
@@ -50,7 +50,7 @@ def _at(dtype: torch.dtype, classes: int, gap: float, name: str, path: str) -> t
         target = torch.zeros(1, classes, dtype=torch.bool)
         target[0, 0] = True
     with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": PATHS[path]}):
-        value = sdca_loss(x, target, loss, k=k)
+        value = torch_loss(x, target, loss, k=k)
         (gradient,) = torch.autograd.grad(value, x)
     assert value.dtype == torch.float32 and gradient.dtype == dtype
     return value.item(), gradient[0, 0].item()

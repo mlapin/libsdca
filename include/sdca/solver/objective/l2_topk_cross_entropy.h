@@ -1,5 +1,5 @@
-#ifndef SDCA_SOLVER_OBJECTIVE_L2_ENTROPY_TOPK_H
-#define SDCA_SOLVER_OBJECTIVE_L2_ENTROPY_TOPK_H
+#ifndef SDCA_SOLVER_OBJECTIVE_L2_TOPK_CROSS_ENTROPY_H
+#define SDCA_SOLVER_OBJECTIVE_L2_TOPK_CROSS_ENTROPY_H
 
 #include "sdca/math/entropy.h"
 #include "sdca/prox/topk_entropy.h"
@@ -10,7 +10,7 @@
 namespace sdca {
 
 template <typename Data, typename Result>
-struct l2_entropy_topk : public objective_base<Data, Result> {
+struct l2_topk_cross_entropy : public objective_base<Data, Result> {
   typedef Data data_type;
   typedef Result result_type;
 
@@ -19,20 +19,21 @@ struct l2_entropy_topk : public objective_base<Data, Result> {
   const Result c;
   const size_type k;
 
-  l2_entropy_topk(const Result c_, const size_type k_) : base::objective_base(c_), c(c_), k(k_) {
+  l2_topk_cross_entropy(const Result c_, const size_type k_)
+      : base::objective_base(c_), c(c_), k(k_) {
     if (!(c > 0) || !std::isfinite(c)) throw std::invalid_argument("C must be finite and positive");
     if (k < 1) throw std::invalid_argument("k must be positive");
   }
 
   // The same objective in another precision, for the evaluation.
   template <typename D, typename R>
-  explicit l2_entropy_topk(const l2_entropy_topk<D, R>& other)
-      : l2_entropy_topk(static_cast<Result>(other.c), other.k) {}
+  explicit l2_topk_cross_entropy(const l2_topk_cross_entropy<D, R>& other)
+      : l2_topk_cross_entropy(static_cast<Result>(other.c), other.k) {}
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_entropy_topk (c: " << c << ", k: " << k << ", precision: " << type_name<Result>()
-        << ")";
+    str << "l2_topk_cross_entropy (c: " << c << ", k: " << k
+        << ", precision: " << type_name<Result>() << ")";
     return str.str();
   }
 

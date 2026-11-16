@@ -1,5 +1,5 @@
-#ifndef SDCA_SOLVER_OBJECTIVE_L2_MULTILABEL_ENTROPY_H
-#define SDCA_SOLVER_OBJECTIVE_L2_MULTILABEL_ENTROPY_H
+#ifndef SDCA_SOLVER_OBJECTIVE_L2_MULTILABEL_CROSS_ENTROPY_H
+#define SDCA_SOLVER_OBJECTIVE_L2_MULTILABEL_CROSS_ENTROPY_H
 
 #include "sdca/math/entropy.h"
 #include "sdca/prox/two_entropy.h"
@@ -8,7 +8,7 @@
 namespace sdca {
 
 template <typename Data, typename Result>
-struct l2_multilabel_entropy : public objective_base<Data, Result> {
+struct l2_multilabel_cross_entropy : public objective_base<Data, Result> {
   typedef Data data_type;
   typedef Result result_type;
 
@@ -16,18 +16,18 @@ struct l2_multilabel_entropy : public objective_base<Data, Result> {
 
   const Result c;
 
-  l2_multilabel_entropy(const Result c_) : base::objective_base(c_), c(c_) {
+  l2_multilabel_cross_entropy(const Result c_) : base::objective_base(c_), c(c_) {
     if (!(c > 0) || !std::isfinite(c)) throw std::invalid_argument("C must be finite and positive");
   }
 
   // The same objective in another precision, for the evaluation.
   template <typename D, typename R>
-  explicit l2_multilabel_entropy(const l2_multilabel_entropy<D, R>& other)
-      : l2_multilabel_entropy(static_cast<Result>(other.c)) {}
+  explicit l2_multilabel_cross_entropy(const l2_multilabel_cross_entropy<D, R>& other)
+      : l2_multilabel_cross_entropy(static_cast<Result>(other.c)) {}
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_multilabel_entropy (c: " << c << ", precision: " << type_name<Result>() << ")";
+    str << "l2_multilabel_cross_entropy (c: " << c << ", precision: " << type_name<Result>() << ")";
     return str.str();
   }
 

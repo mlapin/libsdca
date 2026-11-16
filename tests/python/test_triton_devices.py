@@ -6,7 +6,7 @@ from unittest import mock
 import pytest
 import torch
 from libsdca import _cuda_launch
-from libsdca.torch import sdca_loss
+from named_losses import torch_loss
 
 
 class DeviceGuardTests:
@@ -30,7 +30,11 @@ class TritonDeviceTests:
         labels = torch.arange(7) % 5
         mask = torch.zeros(7, 5, dtype=torch.bool)
         mask[:, 0] = mask[:, 2] = True
-        self.cases = [("cross_entropy", 1, labels), ("topk_hinge_beta", 1, labels)]
+        self.cases = [
+            ("cross_entropy", 1, labels),
+            ("topk_hinge_beta", 1, labels),
+            ("proximal_cross_entropy", 1, labels),
+        ]
         self.cases += [
             (loss, 2, labels)
             for loss in (
@@ -44,7 +48,6 @@ class TritonDeviceTests:
             for loss in (
                 "cross_entropy",
                 "multilabel_hinge",
-                "proximal_cross_entropy",
             )
         ]
 
@@ -67,7 +70,7 @@ class TritonDeviceTests:
                             mask=target.dtype == torch.bool,
                         ):
                             reference = self.scores.to(dtype).requires_grad_()
-                            expected = sdca_loss(
+                            expected = torch_loss(
                                 reference,
                                 target,
                                 loss,
@@ -82,7 +85,7 @@ class TritonDeviceTests:
                                 0
                             ]
                             z = reference.detach().to("cuda:1").requires_grad_()
-                            actual = sdca_loss(
+                            actual = torch_loss(
                                 z,
                                 target.to(z.device),
                                 loss,
@@ -105,7 +108,7 @@ class TritonDeviceTests:
             with subtests.test(loss=loss, k=k, mask=target.dtype == torch.bool):
                 z = self.scores.to("cuda:1")
                 z[0, 0] = torch.nan
-                out = sdca_loss(z, target.to(z.device), loss, k=k, gamma=0.7, alpha=0.4)
+                out = torch_loss(z, target.to(z.device), loss, k=k, gamma=0.7, alpha=0.4)
                 assert bool(out.isnan().all())
                 assert torch.cuda.current_device() == 0
 

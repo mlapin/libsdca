@@ -11,8 +11,8 @@
 namespace sdca {
 namespace tensor {
 
-// Distillation rows (sdca_distillation_forward, sdca_distillation_backward and
-// sdca_proximal_distillation_rows) of student and teacher logits zs, zt at the
+// Distillation rows (the distillation losses of sdca_loss_evaluate and the
+// sdca_internal_*distillation* entry points) of student and teacher logits zs, zt at the
 // temperature T: q = softmax(zs / T), p = softmax(zt / T), the loss H(p, q)
 // and the gradient (q - p) / T, with u = q - p taken as p expm1(log(q / p))
 // where student and teacher agree: equal logits give a zero gradient.

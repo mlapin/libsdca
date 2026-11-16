@@ -4,8 +4,7 @@ import mpmath as mp
 import numpy as np
 import pytest
 import torch
-from libsdca._core import Solver
-from libsdca.torch import sdca_loss
+from numpy_api import Solver
 
 
 class ConvergenceTests:
@@ -50,10 +49,13 @@ class ConvergenceTests:
             permutation = rng.permutation(classes)
             for dtype in [np.float32, np.float64]:
                 solver = Solver("float64", dtype=dtype)
-                a = solver.coordinate_update(scores, target, C=0.7)
-                b = solver.coordinate_update(scores[:, permutation], target[:, permutation], C=0.7)
+                ml = "multilabel_cross_entropy"
+                a = solver.coordinate_update(scores, target, ml, C=0.7)
+                b = solver.coordinate_update(
+                    scores[:, permutation], target[:, permutation], ml, C=0.7
+                )
                 np.testing.assert_allclose(a[:, permutation], b, rtol=2e-6, atol=2e-8)
-                _, gradient = solver.loss_and_grad(scores + a, target)
+                _, gradient = solver.loss_and_grad(scores + a, target, ml)
                 np.testing.assert_allclose(a, -0.7 * gradient, rtol=3e-6, atol=2e-8)
 
     def test_cold_initialization_and_zero_epoch_center(self):
@@ -71,20 +73,23 @@ class ConvergenceTests:
                 )
 
     def test_torch_backend_validation_parity(self, subtests: pytest.Subtests):
+        import libsdca.torch as L
+
         scores = torch.zeros(2, 3)
         targets = torch.tensor([0, 1])
+        nan = float("nan")
         for backend in ["native", "torch"]:
-            for options in [
-                dict(k=0),
-                dict(k=3),
-                dict(k=1.5),
-                dict(k=True),
-                dict(alpha=0),
-                dict(gamma=float("nan")),
+            for fn, options, error in [
+                (L.topk_cross_entropy, dict(k=0), ValueError),
+                (L.topk_cross_entropy, dict(k=3), ValueError),
+                (L.topk_cross_entropy, dict(k=1.5), TypeError),
+                (L.topk_cross_entropy, dict(k=True), TypeError),
+                (L.proximal_cross_entropy, dict(alpha=0), ValueError),
+                (L.multiclass_hinge_loss, dict(gamma=nan), ValueError),
             ]:
-                with subtests.test(backend=backend, options=options):
-                    with pytest.raises(ValueError):
-                        sdca_loss(scores, targets, backend=backend, **options)
-            with pytest.raises(ValueError):
+                with subtests.test(backend=backend, loss=fn.__name__, options=options):
+                    with pytest.raises(error):
+                        fn(scores, targets, backend=backend, **options)
+            with pytest.raises(TypeError):
                 # Deliberately not a tensor target.
-                sdca_loss(scores, [0, 1], backend=backend)  # pyright: ignore[reportArgumentType]
+                L.cross_entropy(scores, [0, 1], backend=backend)  # pyright: ignore[reportArgumentType]

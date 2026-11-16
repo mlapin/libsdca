@@ -126,7 +126,7 @@ class DistillationReferenceTests:
                 with subtests.test(device=device, dtype=dtype, temperature=temperature):
                     x = torch.tensor(students, device=device, requires_grad=True)
                     t = torch.tensor(teachers, device=device)
-                    value = distillation_loss(x, t, temperature, reduction="none")
+                    value = distillation_loss(x, t, temperature=temperature, reduction="none")
                     (gradient,) = torch.autograd.grad(value.sum(), x)
                     expected_value, expected_gradient = reference(students, teachers, temperature)
                     info = _finfo(dtype)
@@ -168,7 +168,7 @@ class DistillationReferenceTests:
                         z = torch.tensor(student, device=device, requires_grad=True)
                         t = torch.tensor(teacher, device=device)
                         value = distillation_loss(
-                            z, t, temperature, reduction="none", precision=precision
+                            z, t, temperature=temperature, reduction="none", precision=precision
                         )
                         (gradient,) = torch.autograd.grad(value.sum(), z)
                         check_reference(

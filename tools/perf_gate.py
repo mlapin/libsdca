@@ -18,7 +18,7 @@ import statistics
 import sys
 from collections.abc import Callable
 
-import libsdca
+import libsdca.torch
 import torch
 import torch.nn.functional as F
 
@@ -62,16 +62,16 @@ def ref_distillation(s: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
 
 # name: (libsdca, reference, target kind, speedup floor)
 CASES: dict[str, tuple[Loss, Loss, str, float]] = {
-    "cross_entropy": (libsdca.cross_entropy, F.cross_entropy, "labels", 0.95),
+    "cross_entropy": (libsdca.torch.cross_entropy, F.cross_entropy, "labels", 0.95),
     "topk_cross_entropy": (
-        lambda z, y: libsdca.topk_cross_entropy(z, y, k=K),
+        lambda z, y: libsdca.torch.topk_cross_entropy(z, y, k=K),
         ref_topk_cross_entropy,
         "labels",
         3.5,
     ),
-    "multiclass_hinge": (libsdca.multiclass_hinge_loss, ref_hinge, "labels", 3.0),
+    "multiclass_hinge": (libsdca.torch.multiclass_hinge_loss, ref_hinge, "labels", 3.0),
     "distillation": (
-        lambda s, t: libsdca.distillation_loss(s, t, temperature=T),
+        lambda s, t: libsdca.torch.distillation_loss(s, t, temperature=T),
         ref_distillation,
         "teacher",
         1.1,

@@ -6,7 +6,7 @@ import math
 import mpmath as mp
 import pytest
 import torch
-from libsdca.torch import multilabel_cross_entropy
+from libsdca.torch import Reduction, multilabel_cross_entropy
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 PATTERNS = (
@@ -48,7 +48,7 @@ def reference(dtype: torch.dtype, classes: int, case: int):
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
 @pytest.mark.parametrize("classes", [62501, 65537])
 @pytest.mark.parametrize("reduction", ["none", "mean", "sum"])
-def test_split_mask_oracle(dtype: torch.dtype, classes: int, reduction: str):
+def test_split_mask_oracle(dtype: torch.dtype, classes: int, reduction: Reduction):
     n = 2048
     cases = [i % len(PATTERNS) for i in range(n)]
     scores = torch.tensor([PATTERNS[i][0] for i in cases], dtype=dtype, device="cuda")

@@ -7,6 +7,7 @@ import math
 import libsdca
 import numpy as np
 import pytest
+from numpy_api import fit
 
 # objective: (options, fewest and most epochs recorded)
 EPOCHS = {
@@ -42,7 +43,7 @@ def test_epochs_to_tolerance(objective: str, precision: str):
     X, y, mask = _problem()
     options, low, high = EPOCHS[objective]
     target = mask if objective.startswith("multilabel") else y
-    model = libsdca.fit(
+    model = fit(
         X.astype(precision),
         target,
         objective,
@@ -58,7 +59,7 @@ def test_epochs_to_tolerance(objective: str, precision: str):
 @pytest.mark.parametrize("precision", ["float64", "float32"])
 def test_kernel_epochs_to_tolerance(precision: str):
     X, y, _ = _problem()
-    model = libsdca.fit(
+    model = fit(
         (X @ X.T).astype(precision),
         y,
         kernel=True,

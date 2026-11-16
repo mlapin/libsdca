@@ -1,11 +1,13 @@
-"""Integer-target fast paths at k = 1 against the boolean-mask (generic) path of the same loss."""
+"""Integer-target fast paths at k = 1 against the generic path of the same loss (the native
+library's generic kernel on the CPU, tensor operations on CUDA)."""
 
 from typing import Any
 
 import interpreter
+import libsdca.torch
 import pytest
 import torch
-from libsdca.torch import sdca_loss
+from named_losses import loss as named_loss
 
 # (loss, gamma): each hinge nonsmooth and smoothed.
 K1 = (
@@ -15,6 +17,10 @@ K1 = (
     ("topk_hinge_alpha", 0.5),
     ("topk_hinge_beta", 0.5),
 )
+
+
+def sdca_loss(z: torch.Tensor, target: torch.Tensor, loss: str, **options: Any) -> torch.Tensor:
+    return named_loss(libsdca.torch, loss, z, target, **options)
 
 
 def _case(loss: str | tuple[str, float], gamma: float | None = None) -> tuple[str, float]:
@@ -37,12 +43,13 @@ def _pair(
     gamma: float | None = None,
     upstream: torch.Tensor | None = None,
 ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-    """Values and gradients from int64 targets and from the one-hot mask."""
+    """Values and gradients of the fast path ("auto") and of the generic one."""
     loss, gamma = _case(loss, gamma)
     out = []
-    for target in (y, torch.nn.functional.one_hot(y, z.shape[1]).bool()):
+    generic = "native" if z.device.type == "cpu" else "torch"
+    for backend in ("auto", generic):
         x = z.clone().requires_grad_()
-        value = sdca_loss(x, target, loss, k=1, gamma=gamma, reduction=reduction)
+        value = sdca_loss(x, y, loss, k=1, gamma=gamma, reduction=reduction, backend=backend)
         value.backward(torch.ones_like(value) if upstream is None else upstream)
         assert x.grad is not None
         out.append((value.detach(), x.grad))
@@ -262,11 +269,10 @@ def check_packed_hinge(device: str) -> None:
                     ).to(device)
                     val, stats = H.forward(z, y, reduction, smooth, gamma)
                     grad = H.backward(z, y, stats, u, reduction, smooth, gamma)
-                    mask = torch.nn.functional.one_hot(y0, c).bool()
                     ref_x = z0.clone().requires_grad_()
                     ref_val = sdca_loss(
                         ref_x,
-                        mask,
+                        y0,
                         loss_name,
                         k=1,
                         gamma=gamma,
@@ -316,7 +322,6 @@ def check_packed_hinge(device: str) -> None:
     assert torch.equal(tg, expected_tie_row.expand(19, 10))
     base_z = torch.randn(19, 10, dtype=torch.float64, generator=gen)
     base_y = torch.randint(0, 10, (19,), generator=gen)
-    mask10 = torch.nn.functional.one_hot(base_y, 10).bool()
     for exp in (-30, -10, 0, 10, 30):
         scale = 10.0**exp
         zs = (base_z * scale).to(device)
@@ -327,7 +332,7 @@ def check_packed_hinge(device: str) -> None:
         grad = H.backward(zs, ys, stats, u, "none", True, gamma)
         rx = (base_z * scale).requires_grad_()
         rv = sdca_loss(
-            rx, mask10, "topk_hinge_alpha", k=1, gamma=gamma, reduction="none", backend="torch"
+            rx, base_y, "topk_hinge_alpha", k=1, gamma=gamma, reduction="none", backend="torch"
         )
         rv.sum().backward()
         assert rx.grad is not None

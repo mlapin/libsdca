@@ -168,7 +168,7 @@ class solver {
 
     // Within max_epoch / eval_epoch + 2 evaluations, the start and the end included.
     const auto& criteria = ctx_.criteria;
-    const size_type spare = criteria.eval_epoch > 0 && criteria.epsilon > 0
+    const size_type spare = criteria.eval_epoch > 0 && criteria.tol > 0
                                 ? (criteria.max_epoch % criteria.eval_epoch == 0 ? 2 : 1)
                                 : 0;
     early_evals_ = spare > size_type(criteria.eval_on_start) ? spare - criteria.eval_on_start : 0;
@@ -186,7 +186,9 @@ class solver {
     }
 
     if (ctx_.status == solver_status::solving) {
-      generator_.seed();
+      // minstd_rand's states are 1 .. 2^31 - 2; seed 0 is its default seed (1).
+      generator_.seed(static_cast<std::minstd_rand::result_type>(
+          ctx_.criteria.seed % (std::minstd_rand::modulus - 1) + 1));
       examples_.resize(ctx_.train.num_examples());
       std::iota(examples_.begin(), examples_.end(), 0);
       first_epoch_ = ctx_.epoch;
@@ -201,6 +203,15 @@ class solver {
     if (!is_evaluated_) {
       try {
         evaluate_solution();
+        // A solve stopped by a limit (eval_epoch 0, or a time limit between evaluations)
+        // reports what its last evaluation shows, as a scheduled one would.
+        const solver_status limit = ctx_.status;
+        if (limit == solver_status::max_epoch || limit == solver_status::max_cpu_time ||
+            limit == solver_status::max_wall_time) {
+          ctx_.status = solver_status::solving;
+          check_stopping_criteria<Data, Result>(ctx_);
+          if (ctx_.status == solver_status::solving) ctx_.status = limit;
+        }
       } catch (const std::exception& e) {
         ctx_.eval_time.stop();
         if (ctx_.status != solver_status::failed) reporting::solver_stop_step_failed(e);
@@ -305,7 +316,7 @@ class solver {
   }
 
   // Whether the certified relative gap, decreasing at the rate between the
-  // last two evaluations, meets epsilon by this epoch. With one evaluation of
+  // last two evaluations, meets tol by this epoch. With one evaluation of
   // a zero dual start, the start counts as relative gap one: an assumption
   // (it holds where the primal there is positive), used only for the trend.
   bool predicts_solved() const {
@@ -321,8 +332,7 @@ class solver {
     const size_type from = evals.size() > 1 ? evals.rbegin()[1].epoch : zero_epoch_;
     if (!(now > 0 && now < before) || !(last.epoch > from) || !std::isfinite(before)) return false;
     const double rate = std::log(now / before) / double(last.epoch - from);
-    return std::log(now) + rate * double(ctx_.epoch - last.epoch) <=
-           std::log(ctx_.criteria.epsilon);
+    return std::log(now) + rate * double(ctx_.epoch - last.epoch) <= std::log(ctx_.criteria.tol);
   }
 
   // Stores the iterate to the caller's buffers and evaluates them: the values

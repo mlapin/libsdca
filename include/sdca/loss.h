@@ -7,7 +7,9 @@
 #include <limits>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
+#include "sdca/loss_kind.h"
 #include "sdca/math/compensated.h"
 #include "sdca/math/distillation.h"
 #include "sdca/math/distillation_rows.h"
@@ -16,23 +18,10 @@
 #include "sdca/prox/topk_simplex.h"
 #include "sdca/prox/knapsack_le.h"
 #include "sdca/prox/two_simplex.h"
-#include "sdca/solver/objective/l2_entropy_topk.h"
+#include "sdca/solver/objective/l2_topk_cross_entropy.h"
 #include "sdca/utility/scratch.h"
 
 namespace sdca {
-
-// The ids of the C ABI (sdca_loss); the hinges are smoothed by gamma > 0.
-enum class loss_kind {
-  cross_entropy = 0,
-  topk_cross_entropy = 1,
-  multiclass_hinge = 2,
-  topk_hinge_alpha = 3,
-  topk_hinge_beta = 4,
-  topk_hinge = topk_hinge_beta,
-  multilabel_hinge = 5,
-  multilabel_cross_entropy = 6,
-  proximal_cross_entropy = 7
-};
 
 namespace detail {
 
@@ -113,7 +102,7 @@ double topk_entropy_loss(std::size_t n, const Data* z, std::size_t k, T* a, T* t
   // their differences beside a far larger capped score.
   for (std::size_t j = 0; j < m; ++j) v[j] = a[j] = T(z[j + 1]);
   auto th = thresholds_topk_entropy_offset<T>(v, v + m, static_cast<std::ptrdiff_t>(k), -T(z[0]));
-  // As l2_entropy_topk::primal_loss: the u capped scores relative to the
+  // As l2_topk_cross_entropy::primal_loss: the u capped scores relative to the
   // maximum and the free ones' log-sum-exp relative to t.
   const T u = static_cast<T>(std::distance(v, th.first)), K = static_cast<T>(k), t = T(th.t);
   compensated_sum<T> head, rest;
@@ -512,10 +501,23 @@ inline bool smooth_hinge(loss_kind kind, double gamma) {
   return gamma > 0 && (kind == loss_kind::multiclass_hinge || kind == loss_kind::topk_hinge_alpha ||
                        kind == loss_kind::topk_hinge_beta || kind == loss_kind::multilabel_hinge);
 }
-}  // namespace detail
-
-// Unregularized loss of the scores z and its gradient (a subgradient for the
-// nonsmooth hinge losses) at z, not at an SDCA block's updated scores. The
+// The single-target losses of permuted_loss_and_gradient (topk_cross_entropy and the
+// hinges but multilabel_hinge) of the scores z whose first p entries are the labels.
+template <typename Data, typename T>
+double label_target_loss(loss_kind kind, std::size_t n, std::size_t p, const Data* z,
+                         Data* gradient, std::size_t k, double gamma) {
+  if (p != 1) throw std::invalid_argument("This loss needs exactly one target");
+  // At k = 1 no cap binds: top-1 entropy is entropy; k < n - 1 has a closed form.
+  if (kind == loss_kind::topk_cross_entropy && k == 1)
+    return double(detail::entropy_loss_gradient<T>(n, p, z, gradient));
+  if (kind == loss_kind::topk_cross_entropy && k + 1 < n) {
+    detail::entropy_buffer<T> terms(n);
+    return detail::topk_entropy_label<T>(n, 0, z, k, gradient, terms.data());
+  }
+  return detail::single_target_loss<Data, T>(kind, n, z, gradient, k, gamma);
+}
+// The unregularized loss of the scores z whose first p entries are the
+// positive labels, and its gradient (a subgradient for the nonsmooth hinge losses) at z, not at an SDCA block's updated scores. The
 // first p of the n scores are the labels; k is the top-k parameter (ignored
 // by the losses without topk in the name), gamma >= 0 the smoothing of the hinges (0: nonsmooth) and
 // alpha the proximal step of proximal_cross_entropy. The arithmetic is common_type<Data, Result>; float
@@ -525,16 +527,17 @@ inline bool smooth_hinge(loss_kind kind, double gamma) {
 // threshold). mode selects how the smoothed multilabel hinge projects.
 // Throws std::invalid_argument for invalid sizes or parameters.
 template <typename Data, typename Result = Data>
-double loss_and_gradient(loss_kind kind, std::size_t n, std::size_t p, const Data* z,
-                         Data* gradient, std::size_t k = 1, double gamma = 0, double alpha = 1,
-                         const projection_precision mode = projection_precision::float64) {
+double permuted_loss_and_gradient(loss_kind kind, std::size_t n, std::size_t p, const Data* z,
+                                  Data* gradient, std::size_t k = 1, double gamma = 0,
+                                  double alpha = 1,
+                                  const projection_precision mode = projection_precision::float64) {
   if (!detail::valid_loss_arguments(n, p, k, gamma, alpha))
     throw std::invalid_argument("Invalid loss dimensions or parameters");
   if (kind == loss_kind::multiclass_hinge) k = 1;  // as cross_entropy, it has no top-k
   using T = typename std::common_type<Data, Result>::type;
   const bool narrow = std::numeric_limits<T>::digits < std::numeric_limits<double>::digits;
   if ((narrow && detail::smooth_hinge(kind, gamma)) || !detail::loss_fits<T>(n, z, gamma, alpha))
-    return loss_and_gradient<Data, double>(kind, n, p, z, gradient, k, gamma, alpha, mode);
+    return permuted_loss_and_gradient<Data, double>(kind, n, p, z, gradient, k, gamma, alpha, mode);
   std::fill(gradient, gradient + n, Data(0));
   switch (kind) {
     case loss_kind::cross_entropy:
@@ -548,17 +551,163 @@ double loss_and_gradient(loss_kind kind, std::size_t n, std::size_t p, const Dat
     case loss_kind::multiclass_hinge:
     case loss_kind::topk_hinge_alpha:
     case loss_kind::topk_hinge_beta:
-      if (p != 1) throw std::invalid_argument("This loss needs exactly one target");
-      // At k = 1 no cap binds: top-1 entropy is entropy; k < n - 1 has a closed form.
-      if (kind == loss_kind::topk_cross_entropy && k == 1)
-        return double(detail::entropy_loss_gradient<T>(n, p, z, gradient));
-      if (kind == loss_kind::topk_cross_entropy && k + 1 < n) {
-        detail::entropy_buffer<T> terms(n);
-        return detail::topk_entropy_label<T>(n, 0, z, k, gradient, terms.data());
-      }
-      return detail::single_target_loss<Data, T>(kind, n, z, gradient, k, gamma);
+      return detail::label_target_loss<Data, T>(kind, n, p, z, gradient, k, gamma);
+    case loss_kind::distillation:
+    case loss_kind::proximal_distillation:
+      break;
   }
-  throw std::invalid_argument("Unknown loss kind");
+  throw std::invalid_argument("This loss takes no label targets");
+}
+
+}  // namespace detail
+
+// The parameters of the losses of loss_and_gradient. A loss takes only its
+// own: the fields of the other losses must keep their defaults.
+struct loss_parameters {
+  // The top-k losses (topk_cross_entropy, topk_hinge_alpha, topk_hinge_beta):
+  // 1 <= k < num_classes, required (0: unset).
+  std::size_t k = 0;
+  // The hinges (multiclass_hinge, topk_hinge_*, multilabel_hinge): finite,
+  // >= 0; 0 is the nonsmooth hinge, gamma > 0 its Moreau smoothing.
+  double gamma = 0;
+  // proximal_cross_entropy: the proximal step, finite and > 0.
+  double alpha = 1;
+  // multilabel_hinge: how its projections solve (projection_precision).
+  projection_precision projection = projection_precision::float64;
+};
+
+namespace detail {
+// Throws unless kind is a label loss of loss_and_gradient.
+inline void check_label_loss(const loss_kind kind) {
+  switch (kind) {
+    case loss_kind::cross_entropy:
+    case loss_kind::topk_cross_entropy:
+    case loss_kind::multiclass_hinge:
+    case loss_kind::topk_hinge_alpha:
+    case loss_kind::topk_hinge_beta:
+    case loss_kind::proximal_cross_entropy:
+    case loss_kind::multilabel_hinge:
+    case loss_kind::multilabel_cross_entropy:
+      break;
+    case loss_kind::distillation:
+    case loss_kind::proximal_distillation:
+    default:
+      throw std::invalid_argument(
+          "loss_and_gradient takes the label losses; see distillation_loss and "
+          "proximal_distillation_loss");
+  }
+}
+
+// The parameter checks of check_loss_row: the kind takes these parameters.
+inline void check_loss_parameters(const loss_kind kind, const std::size_t num_classes,
+                                  const loss_parameters& p) {
+  const bool topk = kind == loss_kind::topk_cross_entropy || kind == loss_kind::topk_hinge_alpha ||
+                    kind == loss_kind::topk_hinge_beta;
+  const bool hinge = topk && kind != loss_kind::topk_cross_entropy;
+  if (topk ? !(p.k >= 1 && p.k < num_classes) : p.k != 0)
+    throw std::invalid_argument(topk ? "k must be an integer in [1, num_classes - 1]"
+                                     : "k applies to the top-k losses only");
+  const bool smooths =
+      hinge || kind == loss_kind::multiclass_hinge || kind == loss_kind::multilabel_hinge;
+  if (smooths ? !(p.gamma >= 0 && std::isfinite(p.gamma)) : p.gamma != 0)
+    throw std::invalid_argument(smooths ? "gamma must be finite and nonnegative"
+                                        : "gamma applies to the hinges only");
+  if (kind == loss_kind::proximal_cross_entropy ? !(p.alpha > 0 && std::isfinite(p.alpha))
+                                                : p.alpha != 1)
+    throw std::invalid_argument(kind == loss_kind::proximal_cross_entropy
+                                    ? "alpha must be finite and positive"
+                                    : "alpha applies to proximal_cross_entropy only");
+  if (kind != loss_kind::multilabel_hinge && p.projection != projection_precision::float64)
+    throw std::invalid_argument("projection_precision applies to multilabel_hinge only");
+}
+
+// The checks of loss_and_gradient: the kind takes this target and these parameters.
+inline void check_loss_row(const loss_kind kind, const std::size_t num_classes, const bool sets,
+                           const loss_parameters& p) {
+  if (num_classes < 2) throw std::invalid_argument("A loss needs num_classes >= 2");
+  check_label_loss(kind);
+  const bool multilabel =
+      kind == loss_kind::multilabel_hinge || kind == loss_kind::multilabel_cross_entropy;
+  if (multilabel != sets)
+    throw std::invalid_argument(std::string(loss_name(kind)) +
+                                (multilabel ? " takes a label set" : " takes one label"));
+  check_loss_parameters(kind, num_classes, p);
+}
+
+// permuted_loss_and_gradient of the row z with the classes order[0, n) (the p
+// positive ones first); the gradient scattered back into class order.
+template <typename Data, typename Result>
+double ordered_loss_row(const loss_kind kind, const std::size_t n, const std::size_t p,
+                        const Data* z, const std::size_t* order, Data* gradient,
+                        const loss_parameters& params) {
+  entropy_buffer<Data> scores(n), grad(n);
+  for (std::size_t j = 0; j < n; ++j) scores.data()[j] = z[order[j]];
+  // k = 0 (unset) is 1 for the losses without top-k (check_loss_row ruled out the rest).
+  const std::size_t k = params.k > 0 ? params.k : 1;
+  const double value = permuted_loss_and_gradient<Data, Result>(
+      kind, n, p, scores.data(), grad.data(), k, params.gamma, params.alpha, params.projection);
+  if (gradient)
+    for (std::size_t j = 0; j < n; ++j) gradient[order[j]] = grad.data()[j];
+  return value;
+}
+}  // namespace detail
+
+// The unregularized loss of the scores z (num_classes, in class order) at the
+// label of a single-label loss (cross_entropy, topk_cross_entropy,
+// multiclass_hinge, topk_hinge_alpha, topk_hinge_beta, proximal_cross_entropy)
+// and, unless gradient is null, its gradient (num_classes; a subgradient at the
+// kinks of the nonsmooth hinges). The arithmetic is common_type<Data, Result>;
+// float falls back to double where float cannot hold gamma, alpha or the score
+// spread, and the smoothed hinges form their margins and gradient entries in
+// double. Throws std::invalid_argument for invalid sizes, labels or parameters
+// (see loss_parameters) and std::runtime_error for a failed computation.
+template <typename Data, typename Result = Data>
+double loss_and_gradient(const loss_kind kind, const std::size_t num_classes, const Data* z,
+                         const std::size_t label, Data* gradient,
+                         const loss_parameters& params = loss_parameters()) {
+  detail::check_loss_row(kind, num_classes, false, params);
+  if (!z) throw std::invalid_argument("The scores must not be null");
+  if (label >= num_classes) throw std::invalid_argument("Labels must lie in [0, num_classes)");
+  detail::entropy_buffer<std::size_t> order(num_classes);
+  order.data()[0] = label;
+  for (std::size_t j = 0, i = 1; j < num_classes; ++j)
+    if (j != label) order.data()[i++] = j;
+  return detail::ordered_loss_row<Data, Result>(kind, num_classes, 1, z, order.data(), gradient,
+                                                params);
+}
+
+// The loss of a multilabel loss (multilabel_hinge, multilabel_cross_entropy)
+// at the label set labels[0, num_labels), sorted without duplicates, as
+// loss_and_gradient of one label. multilabel_cross_entropy takes up to every
+// class (its target is uniform on the set); multilabel_hinge needs a class
+// outside the set.
+template <typename Data, typename Result = Data>
+double loss_and_gradient(const loss_kind kind, const std::size_t num_classes, const Data* z,
+                         const std::size_t* labels, const std::size_t num_labels, Data* gradient,
+                         const loss_parameters& params = loss_parameters()) {
+  detail::check_loss_row(kind, num_classes, true, params);
+  if (!z || !labels) throw std::invalid_argument("The scores and labels must not be null");
+  if (num_labels < 1 || num_labels > num_classes)
+    throw std::invalid_argument("A label set needs between 1 and num_classes labels");
+  if (kind == loss_kind::multilabel_hinge && num_labels == num_classes)
+    throw std::invalid_argument("multilabel_hinge needs a class outside the label set");
+  for (std::size_t i = 0; i < num_labels; ++i) {
+    if (labels[i] >= num_classes)
+      throw std::invalid_argument("Labels must lie in [0, num_classes)");
+    if (i > 0 && labels[i] <= labels[i - 1])
+      throw std::invalid_argument("Label sets must be sorted without duplicates");
+  }
+  detail::entropy_buffer<std::size_t> order(num_classes);
+  std::size_t* o = order.data();
+  std::size_t q = num_labels;
+  for (std::size_t j = 0, i = 0; j < num_classes; ++j) {
+    if (i < num_labels && labels[i] == j)
+      o[i++] = j;
+    else
+      o[q++] = j;
+  }
+  return detail::ordered_loss_row<Data, Result>(kind, num_classes, num_labels, z, o, gradient,
+                                                params);
 }
 
 namespace detail {

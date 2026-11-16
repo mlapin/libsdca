@@ -129,7 +129,13 @@ fn main() {
         "stdc++"
     };
     println!("cargo:rustc-link-lib=dylib={std}");
-    for path in ["include", "src/c_api.cpp", "src/tensor_losses.h"] {
+    for path in [
+        "include",
+        "src/c_api.cpp",
+        "src/c_api_internal.h",
+        "src/c_api_baseline.h",
+        "src/tensor_losses.h",
+    ] {
         println!("cargo:rerun-if-changed={}", root.join(path).display());
     }
     for var in [

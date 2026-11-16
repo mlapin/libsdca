@@ -16,8 +16,8 @@ import mpmath as mp
 import pytest
 import torch
 from libsdca import _cpu_entropy
-from libsdca.torch import sdca_loss
 from mpmath_types import MPReal
+from named_losses import torch_loss
 
 PATHS = {"cpu-native": "off", **({"cpu-kernel": "on"} if _cpu_entropy.buildable() else {})}
 # name -> (loss, mask target)
@@ -43,7 +43,7 @@ def _evaluate(
         target = torch.zeros(len(GAPS), classes, dtype=torch.bool)
         target[:, :positives] = True
     with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": PATHS[path]}):
-        value = sdca_loss(x, target, loss, reduction="none")
+        value = torch_loss(x, target, loss, reduction="none")
         (gradient,) = torch.autograd.grad(value.sum(), x)
     return value.tolist(), gradient[:, 0].tolist(), gradient[:, -1].tolist()
 

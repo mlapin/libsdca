@@ -11,7 +11,7 @@ from unittest import mock
 import mpmath as mp
 import pytest
 import torch
-from libsdca.torch import proximal_cross_entropy
+from libsdca.torch import Backend, proximal_cross_entropy
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -27,7 +27,7 @@ from libsdca.torch import proximal_cross_entropy
 )
 @pytest.mark.parametrize("classes", [2, 4097])
 def test_one_tiny_competitor(
-    device: str, backend: str, dtype: torch.dtype, gap: float, classes: int
+    device: str, backend: Backend, dtype: torch.dtype, gap: float, classes: int
 ):
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA unavailable")
@@ -73,7 +73,7 @@ def test_one_tiny_competitor(
 @pytest.mark.parametrize("alpha", [1.0, 1e10])
 def test_many_underflowed_competitors(
     device: str,
-    backend: str,
+    backend: Backend,
     extension: str,
     dtype: torch.dtype,
     gap: float,
@@ -114,7 +114,7 @@ def test_many_underflowed_competitors(
     ],
 )
 @pytest.mark.parametrize("classes", [1000, 4097])
-def test_explicit_float32_aggregate(device: str, backend: str, extension: str, classes: int):
+def test_explicit_float32_aggregate(device: str, backend: Backend, extension: str, classes: int):
     test_many_underflowed_competitors(
         device, backend, extension, torch.float32, 110.0, classes, 1.0, "float32"
     )
@@ -128,6 +128,11 @@ def test_explicit_float32_aggregate(device: str, backend: str, extension: str, c
     [(torch.float64, 750.0, 1e308, None), (torch.float32, 110.0, 1e37, "float32")],
 )
 def test_subnormal_quantum_bounds_proximal_correction(
-    device: str, backend: str, dtype: torch.dtype, gap: float, alpha: float, precision: str | None
+    device: str,
+    backend: Backend,
+    dtype: torch.dtype,
+    gap: float,
+    alpha: float,
+    precision: str | None,
 ):
     test_many_underflowed_competitors(device, backend, "on", dtype, gap, 4097, alpha, precision)

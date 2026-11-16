@@ -1,6 +1,6 @@
-"""Swap torch.nn.CrossEntropyLoss for libsdca.CrossEntropyLoss in a training loop."""
+"""Swap torch.nn.CrossEntropyLoss for libsdca.torch.CrossEntropyLoss in a training loop."""
 
-import libsdca
+import libsdca.torch
 import torch
 
 torch.manual_seed(0)
@@ -14,7 +14,7 @@ net = torch.nn.Sequential(torch.nn.Linear(20, 64), torch.nn.ReLU(), torch.nn.Lin
 )
 
 # Before: criterion = torch.nn.CrossEntropyLoss()
-criterion = libsdca.CrossEntropyLoss()
+criterion = libsdca.torch.CrossEntropyLoss()
 
 # Same value and gradient as PyTorch at initialization (float32 tolerance).
 logits = net(X)
@@ -24,14 +24,24 @@ g_ref = torch.autograd.grad(ref, logits)[0]
 torch.testing.assert_close(ours, ref, rtol=1e-5, atol=1e-6)
 torch.testing.assert_close(g_ours, g_ref, rtol=1e-4, atol=1e-7)
 
-# Class weights, ignore_index and (N, C, d1, ...) inputs match too.
+# Class weights, ignore_index, label smoothing, probability targets and (N, C, d1, ...)
+# inputs match too.
 w = torch.tensor([1.0, 2.0, 0.5, 1.0, 3.0], device=device)
 z = torch.randn(4, 5, 3, 2, device=device)
 t = torch.randint(5, (4, 3, 2), device=device)
 t[0, 0, 0] = -1
+p = torch.softmax(torch.randn(4, 5, 3, 2, device=device), dim=1)
 for reduction in ("none", "sum", "mean"):
-    a = libsdca.CrossEntropyLoss(w, ignore_index=-1, reduction=reduction)(z, t)
-    b = torch.nn.CrossEntropyLoss(w, ignore_index=-1, reduction=reduction)(z, t)
+    for eps in (0.0, 0.1):
+        a = libsdca.torch.CrossEntropyLoss(
+            w, ignore_index=-1, reduction=reduction, label_smoothing=eps
+        )(z, t)
+        b = torch.nn.CrossEntropyLoss(w, ignore_index=-1, reduction=reduction, label_smoothing=eps)(
+            z, t
+        )
+        torch.testing.assert_close(a, b, rtol=1e-5, atol=1e-6)
+    a = libsdca.torch.CrossEntropyLoss(w, reduction=reduction)(z, p)
+    b = torch.nn.CrossEntropyLoss(w, reduction=reduction)(z, p)
     torch.testing.assert_close(a, b, rtol=1e-5, atol=1e-6)
 
 # The training loop is unchanged.
@@ -48,5 +58,5 @@ print(f"train accuracy {accuracy:.3f}")
 assert accuracy > 0.9
 
 # One-line switch to a top-k loss.
-criterion = libsdca.TopKCrossEntropyLoss(k=2)
+criterion = libsdca.torch.TopKCrossEntropyLoss(k=2)
 print("top-2 entropy:", criterion(net(X), y).item())

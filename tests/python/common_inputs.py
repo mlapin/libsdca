@@ -35,6 +35,7 @@ from typing import Any
 import libsdca.torch as L
 import torch
 import torch.nn.functional as F
+from named_losses import torch_loss
 
 SMALL = 48  # widest rows of the mpmath references
 SDCA_LOSSES = (
@@ -144,14 +145,16 @@ def _loss_options(case: Case, rng: random.Random) -> None:
         case.alpha = rng.choice((1e-3, 0.1, 1.0, 1.0, 10.0, 100.0))
     if loss in ("distillation", "proximal_distillation"):
         case.temperature = rng.choice((0.5, 1.0, 1.0, 2.0, 4.0, 10.0))
-    if loss in ("cross_entropy", "multilabel_cross_entropy", "multilabel_hinge"):
+    # Multilabel losses take boolean masks, the others class labels ("cross_entropy" of a
+    # mask is multilabel_cross_entropy, as torch_loss calls it).
+    if loss in ("multilabel_cross_entropy", "multilabel_hinge"):
+        case.mask = True
+    elif loss == "cross_entropy":
         case.mask = rng.random() < 0.6
-    elif loss in SDCA_LOSSES:
-        case.mask = rng.random() < 0.15
     if case.mask:
         if loss in ("cross_entropy", "multilabel_cross_entropy"):
             case.positives = rng.randint(1, c)
-        elif loss in ("multilabel_hinge", "proximal_cross_entropy"):
+        elif loss == "multilabel_hinge":
             case.positives = rng.randint(1, c - 1)
     if loss == "ce":
         case.weight = rng.random() < 0.3
@@ -406,24 +409,26 @@ def call(case: Case, logits: torch.Tensor, data: dict[str, Any], backend: str) -
             return L.CrossEntropyLoss(data["weight"], **options)(logits, target)
         return L.cross_entropy(logits, target, data["weight"], **options)
     if loss in ("distillation", "proximal_distillation"):
-        options = dict(common, dim=dim)
-        args: tuple[float, ...] = (case.temperature,)
+        options = dict(common, dim=dim, temperature=case.temperature)
         if loss == "proximal_distillation":
-            args = (case.temperature, case.alpha)
+            options["alpha"] = case.alpha
         if form == "module":
             module = L.DistillationLoss if loss == "distillation" else L.ProximalDistillationLoss
-            return module(*args, **options)(logits, data["teacher"])
+            return module(**options)(logits, data["teacher"])
         function = L.distillation_loss if loss == "distillation" else L.proximal_distillation_loss
-        return function(logits, data["teacher"], *args, **options)
+        return function(logits, data["teacher"], **options)
     options = dict(common, dim=dim, backend=backend)
     if form == "function":
-        return L.sdca_loss(
+        return torch_loss(
             logits, target, loss, k=case.k, gamma=case.gamma, alpha=case.alpha, **options
         )
-    if form == "module" and loss == "cross_entropy":
-        return L.SDCALoss(loss, **options)(logits, target)
+    entropy = (
+        (L.multilabel_cross_entropy, L.MultilabelCrossEntropyLoss, {})
+        if case.mask
+        else (L.topk_cross_entropy, L.TopKCrossEntropyLoss, {"k": 1})
+    )
     named: dict[str, tuple[Callable[..., Any], Callable[..., Any], dict[str, Any]]] = {
-        "cross_entropy": (L.multilabel_cross_entropy, L.MultilabelCrossEntropyLoss, {}),
+        "cross_entropy": entropy,
         "multilabel_cross_entropy": (
             L.multilabel_cross_entropy,
             L.MultilabelCrossEntropyLoss,
@@ -436,9 +441,9 @@ def call(case: Case, logits: torch.Tensor, data: dict[str, Any], backend: str) -
             {"gamma": case.gamma},
         ),
         "topk_hinge_alpha": (
-            L.topk_hinge_alpha_loss,
-            L.TopKHingeAlphaLoss,
-            {"k": case.k, "gamma": case.gamma},
+            L.topk_hinge_loss,
+            L.TopKHingeLoss,
+            {"k": case.k, "variant": "alpha", "gamma": case.gamma},
         ),
         "topk_hinge_beta": (L.topk_hinge_loss, L.TopKHingeLoss, {"k": case.k, "gamma": case.gamma}),
         "multilabel_hinge": (

@@ -216,28 +216,26 @@ def _register(library: Path) -> ctypes.CDLL:
         handlers = ctypes.CDLL(str(library))
     except OSError as error:
         raise OSError(f"{error}; delete {library.parent} to build the handlers again") from error
-    native, rows = _core._tensor_entry("sdca_loss_gradient_rows")
+    native, rows = _core._tensor_entry("sdca_internal_loss_rows")
     handlers.sdca_jax_bind.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
     bound = handlers.sdca_jax_bind(
         ctypes.cast(rows, ctypes.c_void_p),
         ctypes.cast(native.sdca_last_error, ctypes.c_void_p),
-        ctypes.sizeof(_core._Options),
+        ctypes.sizeof(_core._InternalOptions),
     )
     if bound != 0:
-        raise RuntimeError("the handlers' struct sdca_options is not the native library's")
-    if not hasattr(native, "sdca_run_rows"):
-        raise RuntimeError("the native library lacks sdca_run_rows; rebuild the native library")
+        raise RuntimeError("the handlers' struct sdca_internal_options is not the native library's")
     handlers.sdca_jax_bind_shared.argtypes = [ctypes.c_void_p] * 3
     handlers.sdca_jax_bind_shared.restype = None
     handlers.sdca_jax_bind_shared(
-        ctypes.cast(native.sdca_run_rows, ctypes.c_void_p),
-        ctypes.cast(native.sdca_distillation_forward, ctypes.c_void_p),
-        ctypes.cast(native.sdca_distillation_backward, ctypes.c_void_p),
+        ctypes.cast(native.sdca_internal_run_rows, ctypes.c_void_p),
+        ctypes.cast(native.sdca_internal_distillation_forward, ctypes.c_void_p),
+        ctypes.cast(native.sdca_internal_distillation_backward, ctypes.c_void_p),
     )
     handlers.sdca_jax_bind_prox.argtypes = [ctypes.c_void_p]
     handlers.sdca_jax_bind_prox.restype = None
     handlers.sdca_jax_bind_prox(
-        ctypes.cast(native.sdca_proximal_distillation_rows, ctypes.c_void_p)
+        ctypes.cast(native.sdca_internal_proximal_distillation_rows, ctypes.c_void_p)
     )
     targets = {
         PROXIMAL_DISTILLATION: handlers.sdca_jax_proximal_distillation,

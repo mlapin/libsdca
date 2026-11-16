@@ -1,9 +1,9 @@
 #ifndef SDCA_SRC_TENSOR_LOSSES_H
 #define SDCA_SRC_TENSOR_LOSSES_H
 
-// Rows of the tensor entry points of c_api.h (sdca_cross_entropy_forward,
-// sdca_cross_entropy_backward, sdca_loss_gradient_rows and the distillation
-// losses): IEEE binary16 and bfloat16 storage, float32 exponentials with
+// Rows of the loss entry points (sdca_loss_evaluate of c_api.h and the
+// sdca_internal_* ones of c_api_internal.h: cross-entropy forward and
+// backward, loss rows and the distillation losses): IEEE binary16 and bfloat16 storage, float32 exponentials with
 // double row statistics, ignored rows and class weights. The kernels use separate IEEE operations over fixed
 // lanes, as those of sdca/math/exp_rows.h: every ISA clone gives the same bits.
 
@@ -255,7 +255,7 @@ inline bool row_tiny(const entropy_row<double>& row) {
 }
 
 // Columns of the row statistics: maximum, lowest, sum, mass, tiny (as
-// sdca_entropy_forward).
+// sdca_internal_cross_entropy_forward).
 const std::size_t entropy_stats = 5;
 
 // Row scratch of a range of rows.
@@ -279,7 +279,7 @@ inline bool widen_row(bfloat16 f, std::size_t n, const std::uint16_t* z, double*
   return widen_kernel(f, n, z, out);
 }
 
-// The statistics of a row as sdca_entropy_forward (double exponentials);
+// The statistics of a row in double exponentials;
 // 16-bit rows pass through float scratch. finite: whether every score is.
 template <typename Format>
 entropy_row<double> double_row(Format, std::size_t k, std::size_t label,
@@ -336,8 +336,8 @@ entropy_row<double> short_double_row(std::size_t n, std::size_t label,
   return entropy_statistics(high, low, sum, target);
 }
 
-// The gradient of a row times scale, rounded once into the format, as
-// sdca_entropy_gradient; 16-bit rows pass through double scratch.
+// The gradient of a row times scale, rounded once into the format, in
+// double; 16-bit rows pass through double scratch.
 template <typename Format>
 void double_gradient(Format, std::size_t k, std::size_t label, const typename Format::type* z,
                      const entropy_row<double>& r, double scale, row_buffer<double>&,
@@ -475,7 +475,7 @@ struct cross_entropy_backward_rows {
   }
 };
 
-// Mask rows of cross-entropy (sdca_loss_gradient and sdca_loss_gradient_rows): the
+// Mask rows of cross-entropy (sdca_loss_evaluate and sdca_internal_loss_rows): the
 // uniform target on the positives of a 0/1 mask, in place (no permutation of the row).
 
 // The positions of the nonzero entries of m[0, k) into index, skipping zero words of the
@@ -595,7 +595,7 @@ double mask_entropy_row(std::size_t k, const std::uint8_t* m, const Data* z, std
   return gap + std::log1p(rest);
 }
 
-// The rows [begin, end) of sdca_loss_gradient from any storage: one label per
+// The rows [begin, end) of the label losses from any storage: one label per
 // row or a 0/1 mask (positive), each row checked before its loss; values and
 // gradients (Data: float for 16-bit storage) out.
 template <typename Format, typename Data, typename Result>
@@ -686,8 +686,8 @@ struct loss_gradient_rows {
         continue;
       }
       for (std::size_t j = 0; j < k; ++j) scores.data()[j] = row[order[j]];
-      values[i] = loss_and_gradient<Data, Result>(kind, k, p, scores.data(), grad.data(), topk,
-                                                  gamma, alpha, mode);
+      values[i] = detail::permuted_loss_and_gradient<Data, Result>(
+          kind, k, p, scores.data(), grad.data(), topk, gamma, alpha, mode);
       if (gradients)
         for (std::size_t j = 0; j < k; ++j) g[order[j]] = grad.data()[j];
     }

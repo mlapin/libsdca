@@ -34,7 +34,11 @@ class JaxDistillationReferenceTests:
 
                             def loss(z: jax.Array, t: jax.Array) -> tuple[jax.Array, jax.Array]:
                                 values = distillation_loss(
-                                    z, t, temperature, reduction="none", precision=precision
+                                    z,
+                                    t,
+                                    temperature=temperature,
+                                    reduction="none",
+                                    precision=precision,
                                 )
                                 return values.sum(), values
 
@@ -123,7 +127,7 @@ class JaxDistillationReferenceTests:
                             z: jax.Array, t: jax.Array, temperature: float = temperature
                         ) -> jax.Array:
                             return sdca_jax.distillation_loss(
-                                z, t, temperature, reduction="none", precision=precision
+                                z, t, temperature=temperature, reduction="none", precision=precision
                             )
 
                         def total(z: jax.Array, t: jax.Array) -> tuple[jax.Array, jax.Array]:
@@ -198,7 +202,7 @@ class JaxDistillationReferenceTests:
                                 alpha: float = alpha,
                             ) -> tuple[jax.Array, jax.Array]:
                                 values = proximal_distillation_loss(
-                                    z, t, temperature, alpha, reduction="none"
+                                    z, t, temperature=temperature, alpha=alpha, reduction="none"
                                 )
                                 return values.sum(), values
 
@@ -233,7 +237,9 @@ class JaxDistillationReferenceTests:
             for temperature in (0.5, 1.0):
 
                 def loss(z: jax.Array, t: jax.Array, temperature: float = temperature) -> jax.Array:
-                    return proximal_distillation_loss(z, t, temperature, 1.0, reduction="sum")
+                    return proximal_distillation_loss(
+                        z, t, temperature=temperature, alpha=1.0, reduction="sum"
+                    )
 
                 step = jax.jit(jax.value_and_grad(loss))
                 value, gradient = step(student, teacher)

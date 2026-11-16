@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import warnings
 from collections.abc import Callable
 from typing import Any
@@ -10,108 +11,141 @@ import numpy as np
 import numpy.typing as npt
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
+from sklearn.utils import check_random_state
 from sklearn.utils.metaestimators import available_if
 from sklearn.utils.multiclass import check_classification_targets
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.validation import validate_data as _validate_data
 
-from ._core import (
-    MULTILABEL,
-    OBJECTIVES,
-    FloatArray,
-    Model,
-    _log_softmax,
-    _solver,
-)
+from ._core import MULTILABEL, OBJECTIVES
+from ._numpy import LOSSES, FloatArray, Kernel, Loss, Model, _log_softmax, fit
 
 __all__ = ["ConvergenceWarning", "SDCAClassifier"]
 
 # Untyped in scikit-learn; inference would type X and y as str from their defaults.
 validate_data: Callable[..., Any] = _validate_data
 
+# The single-label training objectives the classifier takes.
+_SINGLE_LABEL = tuple(name for name in OBJECTIVES if name not in MULTILABEL)
+
 
 class SDCAClassifier(ClassifierMixin, BaseEstimator):
-    """Linear or kernel classifier trained by SDCA.
+    """Linear or kernel classifier trained by SDCA (libsdca.fit).
 
-    Minimizes 0.5*||W||^2 + C*sum_i loss(W.T x_i, y_i) for a single-label
-    objective; the multilabel objectives take label sets through libsdca.fit.
-    There is no sample_weight or class_weight.
+    Minimizes 0.5 * ||W||^2 + C * sum_i loss(W.T x_i, y_i) over W for a single-label loss.
+    There is no intercept: append a constant feature to X for a regularized one. There is no
+    sample_weight or class_weight; the multilabel losses take label sets through libsdca.fit.
 
     Args:
-        objective: A single-label name of libsdca.OBJECTIVES.
+        loss: A single-label loss name: "cross_entropy", "topk_cross_entropy",
+            "multiclass_hinge", "topk_hinge_alpha" or "topk_hinge_beta".
         C: Loss weight, finite and positive.
-        k: Top-k parameter in [1, n_classes-1].
-        gamma: Hinge smoothing, finite and >= 0 (0: nonsmooth).
-        tol: Relative duality gap to stop at.
-        max_epoch: Epoch limit.
-        eval_epoch: Epochs between evaluations of the gap (up to two more
-            fall between where its trend reaches tol).
-        recompute_primal: Rebuild W = X.T @ A at each evaluation (features).
-        projection_precision: "float64" or "extended", as in libsdca.fit; the
-            single-label objectives currently solve alike in both.
-        shrinking: "auto", "off", "heuristic", "safe" or "both", as in
-            libsdca.fit.
-        kernel: "linear" for features, or "precomputed" for Gram matrices
-            (fit takes K(train, train), predict K(test, train)).
-        precision: One of libsdca.PRECISIONS, or None for the default of the
-            data dtype.
-        warm_start: Start a refit from the previous solution, its duals scaled
-            by C / previous C (the feasible sets scale with C); the data must be
-            the same (only the shapes and classes are checked). A changed
-            objective or k starts cold.
+        k: The top-k parameter of the top-k losses, an integer in [1, n_classes - 1]; None
+            for the other losses (giving it to one of them raises ValueError).
+        gamma: The smoothing of the hinges, finite and >= 0 (None: 0, nonsmooth); None for
+            the other losses.
+        tol: Relative duality gap of status "solved".
+        max_iter: Epoch limit (n_iter_ gives the epochs run).
+        eval_epoch: Epochs between evaluations of the gap (0: only at the end).
+        shrinking: "auto", "off", "heuristic", "safe" or "both", as in libsdca.fit (the
+            hinge losses; the entropy losses take "auto" only).
+        kernel: "linear" for features, or "precomputed" for Gram matrices (fit takes
+            K(train, train), predict K(test, train)).
+        precision: None, "float32" or "float64", as in libsdca.fit.
+        n_jobs: Threads of the evaluations: None for the default (SDCA_NUM_THREADS, else
+            the available CPUs), a positive count, or -1 for all CPUs (-2 all but one, ...).
+        random_state: The order of the examples in the epochs (an int, a RandomState or
+            None, as in scikit-learn).
+        warm_start: Start a refit from the previous solution, its duals scaled by C /
+            previous C (the feasible sets scale with C); the data must be the same (only
+            the shapes, classes and loss are checked).
 
     Attributes:
         classes_: The class labels (n_classes,).
-        coef_: Weights (n_classes, n_features); None for precomputed kernels.
+        coef_: Weights (n_classes, n_features), or (1, n_features) for two classes (the
+            weights of the margin of decision_function); absent for precomputed kernels.
         dual_coef_: Dual variables (n_classes, n_samples).
         n_features_in_: Number of features (training samples for kernels).
         n_iter_: Epochs run.
-        status_: Solver status; "solved" certifies the duality gap.
-        history_: The evaluation history (see libsdca.HISTORY).
+        status_: Solver status; only "solved" guarantees the duality gap.
+        history_: The evaluation history (libsdca.HISTORY keys).
         model_: The libsdca.Model of the last fit.
     """
 
     def __init__(
         self,
-        objective: str = "cross_entropy",
+        loss: str = "cross_entropy",
         *,
         C: float = 1.0,
-        k: int = 1,
-        gamma: float = 0.0,
+        k: int | None = None,
+        gamma: float | None = None,
         tol: float = 1e-3,
-        max_epoch: int = 1000,
+        max_iter: int = 1000,
         eval_epoch: int = 10,
-        recompute_primal: bool = True,
-        projection_precision: str = "float64",
-        kernel: str = "linear",
-        precision: object = None,
-        warm_start: bool = False,
         shrinking: str = "auto",
+        kernel: str = "linear",
+        precision: str | None = None,
+        n_jobs: int | None = None,
+        random_state: Any = None,
+        warm_start: bool = False,
     ) -> None:
-        self.objective = objective
+        self.loss = loss
         self.C = C
         self.k = k
         self.gamma = gamma
         self.tol = tol
-        self.max_epoch = max_epoch
+        self.max_iter = max_iter
         self.eval_epoch = eval_epoch
-        self.recompute_primal = recompute_primal
-        self.projection_precision = projection_precision
+        self.shrinking = shrinking
         self.kernel = kernel
         self.precision = precision
+        self.n_jobs = n_jobs
+        self.random_state = random_state
         self.warm_start = warm_start
-        self.shrinking = shrinking
 
     def __sklearn_tags__(self) -> Any:
         tags = super().__sklearn_tags__()
         tags.input_tags.pairwise = self.kernel == "precomputed"
         return tags
 
+    def _loss(self) -> Loss:
+        """The loss object of the parameters loss, k and gamma."""
+        if not isinstance(self.loss, str):
+            raise TypeError(f"loss must be a string, not {type(self.loss).__name__}")
+        if self.loss not in _SINGLE_LABEL:
+            raise ValueError(f"loss must be one of {', '.join(_SINGLE_LABEL)}, not {self.loss!r}")
+        cls = LOSSES[self.loss]
+        fields = cls.__dataclass_fields__  # pyright: ignore[reportAttributeAccessIssue]
+        params: dict[str, Any] = {}
+        for name in ("k", "gamma"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if name not in fields:
+                raise ValueError(f"loss {self.loss!r} takes no {name}; leave {name}=None")
+            params[name] = value
+        if "k" in fields and "k" not in params:
+            raise ValueError(f"loss {self.loss!r} needs k")
+        return cls(**params)
+
+    def _threads(self) -> int | None:
+        """num_threads of n_jobs, as in joblib: -1 all CPUs, -2 all but one, ..."""
+        jobs = self.n_jobs
+        if jobs is None:
+            return None
+        if isinstance(jobs, bool) or not isinstance(jobs, int | np.integer):
+            raise TypeError(f"n_jobs must be None or an integer, not {type(jobs).__name__}")
+        if jobs == 0:
+            raise ValueError("n_jobs must not be 0")
+        if jobs > 0:
+            return int(jobs)
+        affinity = getattr(os, "sched_getaffinity", None)
+        cpus = len(affinity(0)) if affinity else os.cpu_count() or 1
+        return max(1, cpus + 1 + int(jobs))
+
     def fit(self, X: npt.ArrayLike, y: npt.ArrayLike) -> SDCAClassifier:
         """Train on X (n_samples, n_features), or a Gram matrix, and labels y."""
-        objective = "topk_hinge_beta" if self.objective == "topk_hinge" else self.objective
-        if objective not in OBJECTIVES or objective in MULTILABEL:
-            raise ValueError(f"objective must be a single-label objective, not {self.objective!r}")
+        loss = self._loss()
         if self.kernel not in ("linear", "precomputed"):
             raise ValueError("kernel must be 'linear' or 'precomputed'")
         features = getattr(self, "n_features_in_", None)
@@ -126,38 +160,41 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
         initial = None
         previous: Model | None = getattr(self, "model_", None)
         known = np.asarray(getattr(self, "classes_", ()))
-        k = 1 if objective == "multiclass_hinge" else self.k
         if (
             self.warm_start
             and previous is not None
             and np.array_equal(known, classes)
-            and previous.objective == objective
-            and previous.params["k"] == k
+            and previous.loss == loss
+            and previous.kernel == precomputed
             and features == x.shape[1]
             and previous.dual.shape == (len(x), len(classes))
         ):
             # The feasible set of every objective is C times a fixed set.
-            initial = previous.dual * (float(self.C) / float(previous.params["C"]))
-        model = _solver(x, self.precision).fit(
-            x,
+            initial = previous.dual * (float(self.C) / previous.C)
+        seed = int(check_random_state(self.random_state).randint(np.iinfo(np.int32).max))
+        model = fit(
+            Kernel(x) if precomputed else x,
             encoded,
-            objective,
+            loss,
             C=self.C,
-            k=self.k,
-            gamma=self.gamma,
-            num_classes=len(classes),
-            max_epoch=self.max_epoch,
-            eval_epoch=self.eval_epoch,
             tol=self.tol,
-            recompute_primal=self.recompute_primal,
-            projection_precision=self.projection_precision,
-            kernel=precomputed,
-            initial_dual=initial,
+            max_epoch=self.max_iter,
+            eval_epoch=self.eval_epoch,
             shrinking=self.shrinking,
+            seed=seed,
+            num_classes=len(classes),
+            initial_dual=initial,
+            precision=self.precision,
+            num_threads=self._threads(),
         )
         self.model_ = model
         self.classes_ = classes
-        self.coef_ = None if model.weights is None else model.weights.T
+        if model.weights is None:
+            if hasattr(self, "coef_"):
+                del self.coef_
+        else:
+            weights = model.weights.T
+            self.coef_ = weights[1:] - weights[:1] if len(classes) == 2 else weights
         self.dual_coef_ = model.dual.T
         self.n_iter_ = model.epochs
         self.status_ = model.status
@@ -165,7 +202,7 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
         if model.status != "solved":
             warnings.warn(
                 f"Training stopped with status {model.status!r} before reaching tol; "
-                "increase max_epoch or tol",
+                "increase max_iter or tol",
                 ConvergenceWarning,
                 stacklevel=2,
             )
@@ -174,9 +211,7 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
     def _scores(self, X: npt.ArrayLike) -> FloatArray:
         check_is_fitted(self)
         x = validate_data(self, X, reset=False, dtype=[np.float64, np.float32])
-        if self.coef_ is None:
-            return x @ self.dual_coef_.T
-        return x @ self.coef_.T
+        return self.model_.decision_function(x)
 
     def decision_function(self, X: npt.ArrayLike) -> FloatArray:
         """Class scores (n_samples, n_classes); for two classes the margins
@@ -190,16 +225,14 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
         return self.classes_[scores.argmax(axis=1)]
 
     def _has_proba(self) -> bool:
-        return self.objective == "cross_entropy"
-
-    @available_if(_has_proba)
-    def predict_proba(self, X: npt.ArrayLike) -> FloatArray:
-        """Class probabilities, the softmax of the scores (objective="cross_entropy")."""
-        scores = self._scores(X).astype(np.float64)
-        e = np.exp(scores - scores.max(axis=1, keepdims=True))
-        return e / e.sum(axis=1, keepdims=True)
+        return self.loss == "cross_entropy"
 
     @available_if(_has_proba)
     def predict_log_proba(self, X: npt.ArrayLike) -> FloatArray:
-        """Logarithms of predict_proba, without rounding the largest class to 0."""
+        """Log-probabilities: the log-softmax of the scores (loss="cross_entropy")."""
         return _log_softmax(self._scores(X).astype(np.float64))
+
+    @available_if(_has_proba)
+    def predict_proba(self, X: npt.ArrayLike) -> FloatArray:
+        """Class probabilities: the softmax of the scores (loss="cross_entropy")."""
+        return np.exp(self.predict_log_proba(X))

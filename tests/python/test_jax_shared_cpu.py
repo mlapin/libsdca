@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from libsdca import _jax_cpu, _jax_ffi
 from libsdca import jax as losses
+from libsdca.jax import Reduction
 from test_jax import x64
 
 pytestmark = pytest.mark.skipif(
@@ -21,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 @pytest.mark.parametrize("reduction", ["none", "sum", "mean"])
 def test_shared_cpu_dispatch_and_derivatives(
-    dtype: type[np.float32] | type[np.float64], reduction: str
+    dtype: type[np.float32] | type[np.float64], reduction: Reduction
 ):
     rng = np.random.default_rng(3)
     s, t = (rng.normal(size=(3, 7)).astype(dtype) for _ in range(2))
@@ -29,7 +30,7 @@ def test_shared_cpu_dispatch_and_derivatives(
         z, teacher = jnp.asarray(s), jnp.asarray(t)
 
         def loss(a: jax.Array):
-            return losses.distillation_loss(a, teacher, 2.0, reduction=reduction)
+            return losses.distillation_loss(a, teacher, temperature=2.0, reduction=reduction)
 
         compiled = jax.jit(loss)
         assert _jax_ffi.DISTILLATION in compiled.lower(z).as_text()
@@ -42,7 +43,7 @@ def test_shared_cpu_dispatch_and_derivatives(
         hessian = jax.jit(jax.jacfwd(jax.grad(total)))(z)
         with mock.patch.object(_jax_cpu, "distillation", return_value=None):
             expected = jax.jit(
-                lambda a: losses.distillation_loss(a, teacher, 2.0, reduction=reduction)
+                lambda a: losses.distillation_loss(a, teacher, temperature=2.0, reduction=reduction)
             )(z)
 
             def reference(a: jax.Array):
@@ -80,8 +81,13 @@ def test_shared_cpu_float64_reduction():
     with x64(True), mock.patch.dict(os.environ, {"SDCA_JAX_FFI": "on"}):
         rows = jax.jit(lambda a, b: losses.distillation_loss(a, b, reduction="none"))(s, t)
         expected = math.fsum(np.asarray(rows))
-        for reduction, divisor in (("sum", 1), ("mean", len(s))):
-            actual = jax.jit(lambda a, b: losses.distillation_loss(a, b, reduction=reduction))(s, t)
+        cases: tuple[tuple[Reduction, int], ...] = (("sum", 1), ("mean", len(s)))
+        for reduction, divisor in cases:
+
+            def loss(a: jax.Array, b: jax.Array, reduction: Reduction = reduction) -> jax.Array:
+                return losses.distillation_loss(a, b, reduction=reduction)
+
+            actual = jax.jit(loss)(s, t)
             assert float(actual) == pytest.approx(expected / divisor, rel=4 * np.finfo(float).eps)
 
 
@@ -89,7 +95,7 @@ def test_shared_cpu_float64_reduction():
 @pytest.mark.parametrize("precision", ["float32", "float64"])
 @pytest.mark.parametrize("reduction", ["none", "sum", "mean"])
 def test_shared_statistics_match_torch(
-    dtype: str, precision: str, reduction: str, monkeypatch: pytest.MonkeyPatch
+    dtype: str, precision: str, reduction: Reduction, monkeypatch: pytest.MonkeyPatch
 ):
     # This checks identical shared SIMD arithmetic, not the separate portable
     # fallback selected by the coverage harness's extension-off pass.
@@ -102,7 +108,9 @@ def test_shared_statistics_match_torch(
     t[1] = s[1]
     s[2, 1:], t[2, 1:] = -30, -32
     s.requires_grad_()
-    expected = losses_torch.distillation_loss(s, t, 2.0, reduction=reduction, precision=precision)
+    expected = losses_torch.distillation_loss(
+        s, t, temperature=2.0, reduction=reduction, precision=precision
+    )
     up = torch.linspace(0.3, 1.7, 4) if reduction == "none" else torch.tensor(1.7)
     (gradient,) = torch.autograd.grad(expected, s, up)
     with x64(precision == "float64"), mock.patch.dict(os.environ, {"SDCA_JAX_FFI": "on"}):
@@ -111,7 +119,7 @@ def test_shared_statistics_match_torch(
 
         def loss(a: jax.Array):
             return losses.distillation_loss(
-                a, teacher, 2.0, reduction=reduction, precision=precision
+                a, teacher, temperature=2.0, reduction=reduction, precision=precision
             )
 
         def run(a: jax.Array):
@@ -139,12 +147,17 @@ def test_shared_cpu_extreme_temperature_backward(monkeypatch: pytest.MonkeyPatch
     s = np.tile(np.array([[-8e37, 8e37]], dtype=np.float32), (8, 1))
     t = -s
     st = torch.tensor(s, requires_grad=True)
-    expected = losses_torch.distillation_loss(st, torch.tensor(t), 8e37, reduction="mean")
+    expected = losses_torch.distillation_loss(
+        st, torch.tensor(t), temperature=8e37, reduction="mean"
+    )
     (expected_grad,) = torch.autograd.grad(expected, st, torch.tensor(8e37, dtype=torch.float32))
     with x64(False), mock.patch.dict(os.environ, {"SDCA_JAX_FFI": "on"}):
         _, pullback = jax.jit(
             lambda a: jax.vjp(
-                lambda x: losses.distillation_loss(x, jnp.asarray(t), 8e37, reduction="mean"), a
+                lambda x: losses.distillation_loss(
+                    x, jnp.asarray(t), temperature=8e37, reduction="mean"
+                ),
+                a,
             )
         )(jnp.asarray(s))
         (actual_grad,) = pullback(jnp.asarray(8e37, dtype=jnp.float32))

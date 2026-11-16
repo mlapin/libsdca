@@ -6,7 +6,7 @@ import math
 import mpmath as mp
 import pytest
 import torch
-from libsdca.torch import sdca_loss
+from named_losses import torch_loss
 from torch.autograd import gradcheck, gradgradcheck
 
 
@@ -31,7 +31,7 @@ class SoftmaxLimitTests:
                         )
                         if mask:
                             target[0, 0] = True
-                        loss = sdca_loss(x, target, precision="float32", backend="torch")
+                        loss = torch_loss(x, target, precision="float32", backend="torch")
                         (gradient,) = torch.autograd.grad(loss, x)
                         with mp.workdps(100):
                             tail = 4096 * mp.exp(-gap)
@@ -54,7 +54,7 @@ class SoftmaxLimitTests:
             for gap in (-20.0, 0.0, 20.0, 110.0):
                 x = torch.tensor([[0.0, -gap]], device=device, requires_grad=True)
                 mask = torch.tensor([[True, False]], device=device)
-                value = sdca_loss(x, mask, precision="float32", backend="torch")
+                value = torch_loss(x, mask, precision="float32", backend="torch")
                 for scale in (info.max, -info.max, info.tiny * info.eps):
                     (gradient,) = torch.autograd.grad(
                         value, x, torch.full_like(value, scale), retain_graph=True
@@ -74,7 +74,7 @@ class SoftmaxLimitTests:
             )
             y = torch.zeros(4, dtype=torch.long, device=device)
             for reduction in ("none", "mean", "sum"):
-                loss = sdca_loss(x, y, reduction=reduction)
+                loss = torch_loss(x, y, reduction=reduction)
                 assert (loss == 0).all()
                 (gradient,) = torch.autograd.grad(loss.sum(), x)
                 assert (gradient == 0).all()
@@ -85,7 +85,7 @@ class SoftmaxLimitTests:
                 x = torch.full((1, 1000), -gap, dtype=dtype, device=device)
                 x[0, 0] = 0
                 x.requires_grad_()
-                loss = sdca_loss(x, torch.tensor([0], device=device))
+                loss = torch_loss(x, torch.tensor([0], device=device))
                 loss.backward()
                 with mp.workdps(100):
                     tail = 999 * mp.exp(-gap)
@@ -108,7 +108,7 @@ class SoftmaxLimitTests:
             ]:
                 x = torch.tensor([[0.0, -gap]], dtype=dtype, device=device, requires_grad=True)
                 y = torch.tensor([0], device=device)
-                loss = sdca_loss(x, y)
+                loss = torch_loss(x, y)
                 scale = torch.finfo(dtype).max
                 for sign in (-1, 1):
                     (g,) = torch.autograd.grad(
@@ -134,7 +134,7 @@ class SoftmaxLimitTests:
             for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
                 gap = torch.finfo(dtype).max / 4
                 x = torch.tensor([[0, gap]] * 8, dtype=dtype, device=device, requires_grad=True)
-                loss = sdca_loss(x, torch.zeros(8, dtype=torch.long, device=device))
+                loss = torch_loss(x, torch.zeros(8, dtype=torch.long, device=device))
                 assert torch.isfinite(loss)
                 assert round(abs(loss.item() / gap - 1.0), 6) == 0
                 loss.backward()
@@ -146,7 +146,7 @@ class SoftmaxLimitTests:
         for device in self.devices():
             x = torch.tensor([[0.0, -750.0]] * 1000, dtype=torch.float64, device=device)
             y = torch.zeros(1000, dtype=torch.long, device=device)
-            loss = sdca_loss(x, y, reduction="sum")
+            loss = torch_loss(x, y, reduction="sum")
             with mp.workdps(100):
                 expected = float(1000 * mp.log1p(mp.exp(-750)))
             assert loss.item() > 0
@@ -156,7 +156,7 @@ class SoftmaxLimitTests:
         for device in self.devices():
             maximum = torch.finfo(torch.float64).max
             x = torch.tensor([[-maximum, maximum], [0, 0]], dtype=torch.float64, device=device)
-            loss = sdca_loss(x, torch.zeros(2, dtype=torch.long, device=device))
+            loss = torch_loss(x, torch.zeros(2, dtype=torch.long, device=device))
             assert torch.isfinite(loss)
             assert abs(loss.item() / maximum - 1) < 1e-12
 
@@ -165,7 +165,7 @@ class SoftmaxLimitTests:
             x = torch.tensor(
                 [[0.0, -745.0]], dtype=torch.float64, device=device, requires_grad=True
             )
-            loss = sdca_loss(x, torch.tensor([0], device=device))
+            loss = torch_loss(x, torch.tensor([0], device=device))
             loss.backward()
             minimum = math.ulp(0.0)
             assert loss.item() == minimum
@@ -183,7 +183,7 @@ class SoftmaxLimitTests:
             y = torch.tensor([0, 2], device=device)
 
             def f(z: torch.Tensor):
-                return sdca_loss(z, y, backend="torch")
+                return torch_loss(z, y, backend="torch")
 
             assert gradcheck(f, (x,))
             assert gradgradcheck(f, (x,))
@@ -197,7 +197,7 @@ class SoftmaxLimitTests:
             y = torch.tensor([0, 2], device=device)
 
             def f(b: torch.Tensor):
-                return sdca_loss(b[1:].view(2, 3), y, backend="torch")
+                return torch_loss(b[1:].view(2, 3), y, backend="torch")
 
             assert gradcheck(f, (base,))
             assert gradgradcheck(f, (base,))
@@ -206,7 +206,7 @@ class SoftmaxLimitTests:
         for device in self.devices():
             x = torch.randn(2, 3, device=device, requires_grad=True)
             y = torch.tensor([0, 2], device=device)
-            loss = sdca_loss(x, y)
+            loss = torch_loss(x, y)
             y[0] = 1
             with pytest.raises(RuntimeError):
                 loss.backward()
@@ -218,7 +218,7 @@ class SoftmaxLimitTests:
                     [[0.0, -gap]], dtype=torch.float64, device=device, requires_grad=True
                 )
                 u = torch.tensor(0.0, dtype=torch.float64, device=device, requires_grad=True)
-                loss = sdca_loss(x, torch.tensor([0], device=device), backend="torch")
+                loss = torch_loss(x, torch.tensor([0], device=device), backend="torch")
                 (gradient,) = torch.autograd.grad(loss, x, u, create_graph=True)
                 second, weight = torch.autograd.grad(gradient[0, 0], (x, u))
                 assert torch.isfinite(second).all()
@@ -236,9 +236,9 @@ class SoftmaxLimitTests:
             ]:
                 if device == "cpu":
                     with pytest.raises(ValueError):
-                        sdca_loss(x.to(device), y.to(device))
+                        torch_loss(x.to(device), y.to(device))
                 else:
-                    assert bool(sdca_loss(x.to(device), y.to(device)).isnan().all())
+                    assert bool(torch_loss(x.to(device), y.to(device)).isnan().all())
 
     def test_mixed_rows_and_upstream_scales_against_reference(self):
         # Ordinary cached rows, the tail branch, and very small competitors
@@ -257,7 +257,7 @@ class SoftmaxLimitTests:
                 y = torch.zeros(len(rows), dtype=torch.long, device=device)
                 minimum = torch.finfo(dtype).tiny * torch.finfo(dtype).eps
                 for reduction in ("none", "sum", "mean"):
-                    loss = sdca_loss(x, y, reduction=reduction, backend="torch")
+                    loss = torch_loss(x, y, reduction=reduction, backend="torch")
                     for scale in (
                         0,
                         1,
@@ -325,7 +325,7 @@ class SoftmaxLimitTests:
                         x = torch.tensor([[0.0, -gap]], dtype=dtype, device=device)
                         x.requires_grad_()
                         y = torch.tensor([0], device=device)
-                        loss = sdca_loss(x, y, backend=backend, precision=precision)
+                        loss = torch_loss(x, y, backend=backend, precision=precision)
                         (g,) = torch.autograd.grad(loss, x, torch.full_like(loss, upstream))
                         fp32 = precision is None and dtype != torch.float64
                         extra = 8 * eps32 if fp32 else 0.0
@@ -345,5 +345,5 @@ class SoftmaxLimitTests:
                 with subtests.test(device=device, backend=backend):
                     x = torch.tensor([[1.0, 1e-8]], device=device)
                     y = torch.tensor([0], device=device)
-                    loss = sdca_loss(x, y, "multiclass_hinge", backend=backend)
+                    loss = torch_loss(x, y, "multiclass_hinge", backend=backend)
                     assert abs(loss.item() - tiny) <= 2 * eps * tiny

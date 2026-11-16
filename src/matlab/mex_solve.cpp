@@ -1,9 +1,8 @@
+#include <cstdint>
 #include <memory>
 
 #include "mex_util.h"
 #include "sdca/solver.h"
-
-#include "sdca/utility/logging.cpp"
 
 #ifndef MEX_SOLVE
 #define MEX_SOLVE "mex_solve"
@@ -18,11 +17,11 @@
 
 using namespace sdca;
 
-static constexpr char default_objective[] = "cross_entropy";
+static constexpr char default_loss[] = "cross_entropy";
 
 inline void printUsage() {
   mexPrintf(
-      "Usage: model = %s(data, labels, opts);\n"
+      "Usage: model = %s(X, Y, opts);\n"
       "  See %s('help') and %s('version') for more information.\n",
       MEX_SOLVE, MEX_SOLVE, MEX_SOLVE);
 }
@@ -32,360 +31,553 @@ inline void printVersion() { mexPrintf("%s version %s.\n", MEX_SOLVE, LIBSDCA_VE
 inline void printHelp(const mxArray* opts) {
   if (opts == nullptr) {
     mexPrintf(
-        "Usage: model = %s(data, labels, opts);\n"
-        "  Optimizes an objective given in opts.objective using the data and labels.\n"
+        "Usage: model = %s(X, Y, opts);\n"
+        "  Minimizes 0.5 ||W - center||^2 + C sum_i loss(W' x_i, y_i) by SDCA.\n"
         "\n"
-        "  opts is a struct with the following fields (defaults in [brackets]):\n"
+        "  opts is a struct with the following fields (defaults in [brackets]);\n"
+        "  an unknown field, or a parameter the loss does not take, is an error:\n"
         "\n"
-        "    objective ['%s'] - the objective to optimize;\n"
-        "    c         [1]           - the loss weight C (alias C);\n"
-        "    k         [1]           - the k in top-k optimization;\n"
-        "    gamma     [0]           - the smoothing of the hinge losses (0: nonsmooth;\n"
-        "                              the historical names default to 1);\n"
-        "    is_dual   [false]       - whether data is given as Gram matrix (alias kernel);\n"
+        "    loss       ['%s'] - the training objective (%s('help', 'loss'));\n"
+        "    C          [1]       - the loss weight, finite and positive;\n"
+        "    k          [none]    - the k of the top-k losses (required), in 1:m-1;\n"
+        "    gamma      [0]       - the smoothing of the hinge losses (0: nonsmooth);\n"
+        "    num_classes [max(Y)] - the number of classes m (single-label Y);\n"
+        "    kernel     [false]   - whether X is an n-by-n Gram matrix;\n"
         "\n"
-        "    epsilon        [1e-3]   - relative duality gap bound (alias tol), stop if\n"
-        "      (primal - dual) <= epsilon * max(abs(primal), abs(dual))\n"
-        "    max_epoch      [1000]   - epochs limit;\n"
-        "    max_cpu_time   [0]      - CPU time limit (0: no limit);\n"
-        "    max_wall_time  [0]      - wall time limit (0: no limit);\n"
-        "    eval_on_start  [false]  - whether to check the duality gap on start;\n"
-        "    eval_epoch     [10]     - how often to check the gap\n"
-        "                              (0: only at the end, unlike Python and Rust);\n"
-        "    recompute_primal [true] - whether each check first rebuilds W = W0 + X * A'\n"
-        "                              (false keeps the incrementally updated W);\n"
-        "    projection_precision ['float64'] - how the multilabel hinge projections\n"
-        "                              solve: 'float64' in double with a checked result,\n"
-        "                              re-solved in extended precision if the check\n"
-        "                              fails; 'extended' always in extended precision;\n"
-        "    shrinking  ['auto']     - what the epochs of the hinge objectives leave out:\n"
-        "                              'heuristic' (skip unchanged examples between\n"
-        "                              full passes), 'safe' (gap-safe screening), 'both',\n"
-        "                              'off'; 'auto' is 'both' (see docs/API.md);\n"
+        "    tol        [1e-3]    - the relative duality gap of 'solved':\n"
+        "      (primal - dual) <= tol * max(abs(primal), abs(dual)); 0: never solved;\n"
+        "    max_epoch  [1000]    - the epoch limit;\n"
+        "    eval_epoch [10]      - evaluate every eval_epoch epochs (0: only at the end);\n"
+        "                           up to two more fall where the gap's trend reaches tol;\n"
+        "    eval_on_start [false] - also evaluate before the first epoch;\n"
+        "    recompute_primal [true] - rebuild W = center + X * A' at each evaluation\n"
+        "                           (false keeps the incrementally updated W);\n"
+        "    shrinking  ['auto']  - the hinge losses only: what the epochs leave out:\n"
+        "                           'heuristic' (skip unchanged examples between full\n"
+        "                           passes), 'safe' (gap-safe screening), 'both', 'off';\n"
+        "                           'auto' is 'both' (see docs/API.md);\n"
+        "    projection_precision ['float64'] - multilabel_hinge only: 'float64' solves\n"
+        "                           its projections in double with a checked result,\n"
+        "                           re-solved in extended precision if the check fails;\n"
+        "                           'extended' always in extended precision;\n"
+        "    seed       [0]       - the order of the examples in the epochs;\n"
+        "    num_threads [SDCA_NUM_THREADS, else the CPUs] - threads of the evaluations\n"
+        "                           (the epochs are sequential); results do not depend on it;\n"
+        "    precision  [class of X] - working precision: 'float32' (single X only) or\n"
+        "                           'float64' (single X keeps double iterates);\n"
+        "    log_level  ['none']  - 'none', 'warning', 'info', 'verbose', 'debug';\n"
+        "    log_format ['short_e'] - 'short_f', 'short_e', 'long_f', 'long_e';\n"
         "\n"
-        "    log_level  ['info']     - logging verbosity:\n"
-        "                              'none', 'warning', 'info', 'verbose', 'debug';\n"
-        "    log_format ['short_e']  - numeric format:\n"
-        "                              'short_f', 'short_e', 'long_f', 'long_e';\n"
-        "    precision  ['double']   - floating-point precision for intermediate\n"
-        "                              computations (e.g. proximal update steps):\n"
-        "                              'double' (or 'float64', 'fp64'),\n"
-        "                              'single' (or 'float32', 'fp32');\n"
+        "    initial_dual [zeros] - m-by-n dual variables to start from, e.g. model.A;\n"
+        "                           they must be feasible for the loss; for features W\n"
+        "                           starts at center + X * A' (computed in double);\n"
+        "    center     [zeros]   - d-by-m center of the regularizer (features only).\n"
         "\n"
-        "  Warm restart:\n"
-        "    initial_dual [none] - m-by-n dual variables, e.g. model.A (alias A);\n"
-        "      for features the primal variables are rebuilt as W = W0 + X * A';\n"
-        "      opts.W is only checked for its shape and otherwise ignored.\n"
+        "  The model struct holds W (d-by-m, features only) and A (m-by-n); the loss\n"
+        "  and options used (loss, C, k, gamma, tol, ...); num_classes, num_examples\n"
+        "  and num_features; status ('solved', 'no_progress', 'max_epoch' or 'failed';\n"
+        "  only 'solved' guarantees the gap), epochs, relative_gap, cpu_time and\n"
+        "  wall_time; history, one entry per evaluation (epoch, primal, dual,\n"
+        "  primal_loss, dual_loss, regularizer, relative_gap, accuracy (the rank loss\n"
+        "  of the multilabel losses), cpu_time, wall_time); and with cell array\n"
+        "  data, test: one row per evaluation and one column per further data set\n"
+        "  (accuracy, primal_loss).\n"
         "\n"
-        "  Proximal regularization:\n"
-        "    center [none] - d-by-m primal variables for the regularization\n"
-        "                    1/2 ||W - W0||^2 (alias W0);\n"
+        "  Prediction scores: scores = model.W' * Xtest, or model.A * Ktest for a\n"
+        "  Gram matrix Ktest = Xtrain' * Xtest.\n"
         "\n"
-        "  The model struct holds W (d-by-m, features only) and A (m-by-n); status,\n"
-        "  epoch, cpu_time, wall_time and relative_gap; the options used (objective,\n"
-        "  c, k, gamma, epsilon, ..., precision, data_precision); train, one entry\n"
-        "  per evaluation (epoch, accuracy or rank_loss, relative_gap, primal, dual,\n"
-        "  primal_loss, dual_loss, the regularizers and times); and test, one row\n"
-        "  per evaluation and one column per further data set.\n"
-        "\n"
-        "  Prediction scores can be computed as:\n"
-        "    scores = model.W' * X;\n"
-        "    scores = model.A * Xtrn' * Xtst;\n"
-        "\n"
-        "  See %s('help', 'data') for more information on\n"
-        "  supported input data formats.\n"
-        "  See %s('help', 'objective') for more information on\n"
-        "  currently supported training objectives.\n",
-        MEX_SOLVE, default_objective, MEX_SOLVE, MEX_SOLVE);
+        "  See %s('help', 'data') for the data and label formats.\n",
+        MEX_SOLVE, default_loss, MEX_SOLVE, MEX_SOLVE);
     return;
   }
 
   std::string arg = mxGetString(opts, "help argument");
   if (arg == "data" || arg == "labels" || arg == "input") {
     mexPrintf(
-        "Input data is given in the first two arguments, data and labels.\n"
+        "Input data is given in the first two arguments, X and Y.\n"
         "\n"
-        "  data can be:\n"
-        "    - a d-by-n feature matrix,\n"
-        "      where d is the number of features and n is the number of examples.\n"
-        "    - a n-by-n Gram matrix (requires opts.is_dual=true),\n"
-        "      where n is the number of training examples.\n"
-        "    - a cell array containing either the feature or the Gram matrices,\n"
-        "      but not a mixture of both.\n"
-        "      In this case, the first matrix is used for training,\n"
-        "      while the rest is used for evaluation only\n"
-        "      (e.g., can be used to monitor performance on a validation set).\n"
-        "      The Gram matrices for testing should be computed as\n"
-        "        Ktst = Xtrn' * Xtst\n"
-        "      and should be num_train_examples-by-num_test_examples.\n"
+        "  X can be:\n"
+        "    - a d-by-n feature matrix (d features, n examples);\n"
+        "    - an n-by-n Gram matrix (opts.kernel = true);\n"
+        "    - a cell array of feature matrices or of Gram matrices, but not a mix:\n"
+        "      the first trains, the others are evaluated at each evaluation (e.g. a\n"
+        "      validation set). Test Gram matrices are Xtrain' * Xtest\n"
+        "      (n_train-by-n_test).\n"
         "\n"
-        "  labels can be:\n"
-        "    - a n-by-1 or a 1-by-n vector of class labels;\n"
-        "      labels must be in the range 0:(m-1) or 1:m,\n"
-        "      where m is the number of classes.\n"
-        "    - a sparse double or logical m-by-n matrix (multilabel objectives\n"
-        "      only), where m is the number of classes,\n"
-        "      with nonzero entries indicating class membership.\n"
-        "    - a cell array with the same number of elements as in data\n"
-        "      containing labels as above.\n"
+        "  Y can be:\n"
+        "    - a vector of n class labels in 1:m (double), for the single-label losses;\n"
+        "    - an m-by-n sparse (double or logical) or logical matrix, for the\n"
+        "      multilabel losses: nonzero entries mark the labels of each example;\n"
+        "    - a cell array of the above, one per data set.\n"
         "\n"
-        "  data matrices must be non-sparse and of type single or double\n"
-        "\n"
-        "  label vectors must be of type double\n");
-  } else if (arg == "obj" || arg == "objective") {
+        "  X must be dense, finite, single or double.\n");
+  } else if (arg == "loss" || arg == "losses") {
     mexPrintf(
-        "opts.objective - the training objective to optimize (all l2 regularized).\n"
-        "  The hinges are smoothed by gamma > 0 (gamma = 0: nonsmooth, the default).\n"
-        "  Multiclass:\n"
+        "opts.loss - the training objective (L2-regularized); the hinges are\n"
+        "  smoothed by gamma > 0 (gamma = 0: nonsmooth, the default).\n"
+        "  Single-label (labels in 1:m):\n"
         "    cross_entropy      - multiclass cross-entropy (softmax) loss\n"
-        "    topk_cross_entropy - top-k entropy loss (cross_entropy for k=1)\n"
-        "    multiclass_hinge   - multiclass SVM of Crammer and Singer (ignores k)\n"
-        "    topk_hinge_alpha   - top-k hinge alpha loss (hinge of the top-k average)\n"
-        "    topk_hinge_beta    - top-k hinge beta loss (average of the top-k hinges)\n"
-        "\n"
-        "  Multilabel (sparse labels):\n"
-        "    multilabel_hinge         - multilabel SVM of Crammer and Singer\n"
-        "    multilabel_cross_entropy - multilabel cross-entropy loss\n"
-        "\n"
-        "  Historical names of v0.2.0, with gamma = 1 by default:\n"
-        "    softmax, l2_multiclass_entropy       = cross_entropy\n"
-        "    l2_entropy_topk                      = topk_cross_entropy\n"
-        "    msvm, l2_multiclass_hinge            = multiclass_hinge, gamma = 0\n"
-        "    msvm_smooth, l2_multiclass_hinge_smooth\n"
-        "                                         = multiclass_hinge\n"
-        "    l2_hinge_topk                        = topk_hinge_alpha\n"
-        "    l2_topk_hinge                        = topk_hinge_beta\n"
-        "    mlsvm, l2_multilabel_hinge           = multilabel_hinge, gamma = 0\n"
-        "    mlsvm_smooth, l2_multilabel_hinge_smooth\n"
-        "                                         = multilabel_hinge\n"
-        "    mlsoftmax, l2_multilabel_entropy     = multilabel_cross_entropy\n"
+        "    topk_cross_entropy - top-k entropy loss (k)\n"
+        "    multiclass_hinge   - multiclass SVM of Crammer and Singer (gamma)\n"
+        "    topk_hinge_alpha   - top-k hinge alpha: hinge of the top-k average (k, gamma)\n"
+        "    topk_hinge_beta    - top-k hinge beta: average of the top-k hinges (k, gamma)\n"
+        "  Multilabel (label sets):\n"
+        "    multilabel_hinge         - multilabel SVM of Crammer and Singer (gamma,\n"
+        "                               projection_precision)\n"
+        "    multilabel_cross_entropy - cross-entropy to the uniform target on the labels\n"
         "\n"
         "  Default value:\n"
         "    %s\n",
-        default_objective);
+        default_loss);
   } else {
     mex_error(err_id[err_help_arg], err_msg[err_help_arg], arg.c_str());
   }
 }
 
-template <typename Result>
-inline void add_train_evals(const std::vector<eval_train<Result, multiclass_output>>& evals,
-                            model_info<mxArray*>& info) {
-  const char* names[] = {"epoch",
-                         "accuracy",
-                         "relative_gap",
-                         "primal",
-                         "dual",
-                         "primal_loss",
-                         "dual_loss",
-                         "primal_regularizer",
-                         "dual_regularizer",
-                         "solve_time_cpu",
-                         "solve_time_wall",
-                         "eval_time_cpu",
-                         "eval_time_wall",
-                         "accuracies"};
-  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 14, names);
-  mxCheckCreated(pa, "train");
-  size_type i(0);
-  for (auto& a : evals) {
-    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.epoch));
-    mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.topk_accuracy(0)));
-    mxSetFieldByNumber(pa, i, 2, mxCreateScalar(a.relative_gap()));
-    mxSetFieldByNumber(pa, i, 3, mxCreateScalar(a.primal));
-    mxSetFieldByNumber(pa, i, 4, mxCreateScalar(a.dual));
-    mxSetFieldByNumber(pa, i, 5, mxCreateScalar(a.primal_loss));
-    mxSetFieldByNumber(pa, i, 6, mxCreateScalar(a.dual_loss));
-    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.primal_regularizer));
-    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.dual_regularizer));
-    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_time_cpu));
-    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.solve_time_wall));
-    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_time_cpu));
-    mxSetFieldByNumber(pa, i, 12, mxCreateScalar(a.eval_time_wall));
-    mxSetFieldByNumber(pa, i, 13, mxCreateVector(a.accuracy, "accuracies"));
-    ++i;
-  }
-  info.add("train", pa);
+// The options of matsdca_fit, read and checked before anything is computed.
+struct fit_options {
+  std::string loss;
+  int id = 0;
+  double C = 1;
+  size_type k = 0;
+  double gamma = 0;
+  size_type num_classes = 0;  // 0: not given
+  bool kernel = false;
+  bool num_threads_given = false;
+  stopping_criteria criteria;
+};
+
+// opts.(name) as a logical or numeric 0/1 scalar.
+inline bool flag_option(const mxArray* opts, const char* name, const bool value) {
+  return mxGetFieldValueOrDefault<double>(opts, name, value ? 1 : 0) != 0;
 }
 
-template <typename Result>
-inline void add_train_evals(const std::vector<eval_train<Result, multilabel_output>>& evals,
-                            model_info<mxArray*>& info) {
-  const char* names[] = {"epoch",
-                         "rank_loss",
-                         "relative_gap",
-                         "primal",
-                         "dual",
-                         "primal_loss",
-                         "dual_loss",
-                         "primal_regularizer",
-                         "dual_regularizer",
-                         "solve_time_cpu",
-                         "solve_time_wall",
-                         "eval_time_cpu",
-                         "eval_time_wall"};
-  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 13, names);
-  mxCheckCreated(pa, "train");
-  size_type i = 0;
-  for (auto& a : evals) {
-    mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.epoch));
-    mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.rank_loss));
-    mxSetFieldByNumber(pa, i, 2, mxCreateScalar(a.relative_gap()));
-    mxSetFieldByNumber(pa, i, 3, mxCreateScalar(a.primal));
-    mxSetFieldByNumber(pa, i, 4, mxCreateScalar(a.dual));
-    mxSetFieldByNumber(pa, i, 5, mxCreateScalar(a.primal_loss));
-    mxSetFieldByNumber(pa, i, 6, mxCreateScalar(a.dual_loss));
-    mxSetFieldByNumber(pa, i, 7, mxCreateScalar(a.primal_regularizer));
-    mxSetFieldByNumber(pa, i, 8, mxCreateScalar(a.dual_regularizer));
-    mxSetFieldByNumber(pa, i, 9, mxCreateScalar(a.solve_time_cpu));
-    mxSetFieldByNumber(pa, i, 10, mxCreateScalar(a.solve_time_wall));
-    mxSetFieldByNumber(pa, i, 11, mxCreateScalar(a.eval_time_cpu));
-    mxSetFieldByNumber(pa, i, 12, mxCreateScalar(a.eval_time_wall));
-    ++i;
+inline fit_options read_fit_options(const mxArray* opts) {
+  check_option_names(opts,
+                     {"loss",
+                      "C",
+                      "k",
+                      "gamma",
+                      "num_classes",
+                      "kernel",
+                      "tol",
+                      "max_epoch",
+                      "eval_epoch",
+                      "eval_on_start",
+                      "recompute_primal",
+                      "shrinking",
+                      "projection_precision",
+                      "seed",
+                      "num_threads",
+                      "precision",
+                      "log_level",
+                      "log_format",
+                      "initial_dual",
+                      "center"},
+                     MEX_SOLVE);
+  fit_options o;
+  o.loss = mxGetFieldValueOrDefault(opts, "loss", std::string(default_loss));
+  o.id = shared_loss_id(o.loss);
+  if (o.id < 0 || o.id >= num_training_losses)
+    throw std::invalid_argument("Unknown loss '" + o.loss + "'; see " + MEX_SOLVE +
+                                "('help', 'loss')");
+  o.C = mxGetFieldValueOrDefault<double>(opts, "C", 1);
+  if (!(o.C > 0) || !std::isfinite(o.C))
+    throw std::invalid_argument("C must be finite and positive");
+  if (loss_takes_k(o.id)) {
+    if (!mxIsField(opts, "k"))
+      throw std::invalid_argument("The loss '" + o.loss + "' needs opts.k");
+    o.k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
+  } else {
+    check_not_given(opts, "k", o.loss);
   }
-  info.add("train", pa);
+  if (loss_takes_gamma(o.id)) {
+    o.gamma = mxGetFieldValueOrDefault<double>(opts, "gamma", 0);
+    if (!(o.gamma >= 0) || !std::isfinite(o.gamma))
+      throw std::invalid_argument("gamma must be finite and nonnegative");
+  } else {
+    check_not_given(opts, "gamma", o.loss);
+    // The entropy objectives update every class of every example.
+    check_not_given(opts, "shrinking", o.loss);
+  }
+  if (o.id != 5) check_not_given(opts, "projection_precision", o.loss);
+  if (mxIsField(opts, "num_classes")) {
+    o.num_classes = mxGetFieldValueOrDefault<size_type>(opts, "num_classes", 0);
+    if (o.num_classes < 2) throw std::invalid_argument("num_classes must be an integer >= 2");
+  }
+  o.kernel = flag_option(opts, "kernel", false);
+
+  stopping_criteria& c = o.criteria;
+  c.tol = mxGetFieldValueOrDefault<double>(opts, "tol", c.tol);
+  if (!(c.tol >= 0) || !std::isfinite(c.tol))
+    throw std::invalid_argument("tol must be finite and nonnegative");
+  c.max_epoch = mxGetFieldValueOrDefault<size_type>(opts, "max_epoch", c.max_epoch);
+  c.eval_epoch = mxGetFieldValueOrDefault<size_type>(opts, "eval_epoch", c.eval_epoch);
+  c.eval_on_start = flag_option(opts, "eval_on_start", c.eval_on_start);
+  c.recompute_primal = flag_option(opts, "recompute_primal", c.recompute_primal);
+  const std::string shrinking = mxGetFieldValueOrDefault(opts, "shrinking", std::string("auto"));
+  if (!shrinking_mode_of(shrinking, c.shrinking))
+    throw std::invalid_argument("Unknown shrinking '" + shrinking +
+                                "' (use 'auto', 'off', 'heuristic', 'safe' or 'both')");
+  const std::string projection =
+      mxGetFieldValueOrDefault(opts, "projection_precision", std::string("float64"));
+  if (!projection_precision_of(projection, c.projection))
+    throw std::invalid_argument("Unknown projection_precision '" + projection +
+                                "' (use 'float64' or 'extended')");
+  c.seed = mxGetFieldValueOrDefault<std::uint64_t>(opts, "seed", 0);
+  c.num_threads = num_threads_option(opts);
+  o.num_threads_given = mxIsField(opts, "num_threads");
+  return o;
 }
 
-template <typename Result, typename Input>
-inline void add_test_evals(
-    const std::vector<dataset<Input, multiclass_output, eval_test<Result, multiclass_output>>>&
-        sets,
-    model_info<mxArray*>& info) {
-  if (sets.size() == 0) return;
+//-----------------------------------------------------------------------------
+// Labels
+//-----------------------------------------------------------------------------
 
-  const char* names[] = {"accuracy", "primal_loss", "accuracies"};
-  mxArray* pa = mxCreateStructMatrix(sets[0].evals.size(), sets.size(), 3, names);
-  mxCheckCreated(pa, "test");
-  size_type i = 0;
-  for (auto& testset : sets) {
-    for (auto& a : testset.evals) {
-      mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.topk_accuracy(0)));
-      mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.primal_loss));
-      mxSetFieldByNumber(pa, i, 2, mxCreateVector(a.accuracy, "accuracies"));
-      ++i;
+// 1-based class labels (a double vector of n entries) as 0-based ones; the
+// largest label in labels_max.
+inline std::vector<size_type> class_labels(const mxArray* labels, const size_type num_examples,
+                                           size_type& labels_max) {
+  if (mxIsSparse(labels) || mxIsComplex(labels) || !mxIsDouble(labels))
+    throw std::invalid_argument(
+        "Y must be a double vector of labels in 1:num_classes for this loss");
+  mxCheckVector(labels, "labels", num_examples);
+  const double* y = mxGetPr(labels);
+  std::vector<size_type> out(num_examples);
+  labels_max = 0;
+  for (size_type i = 0; i < num_examples; ++i) {
+    const double v = y[i];
+    if (!std::isfinite(v) || std::floor(v) != v || v < 1 || v > 9.007199254740992e15)
+      throw std::invalid_argument("Labels must be integers in 1:num_classes");
+    out[i] = static_cast<size_type>(v) - 1;
+    labels_max = std::max(labels_max, out[i] + 1);
+  }
+  return out;
+}
+
+inline multiclass_output make_multiclass(const mxArray* labels, const size_type num_examples,
+                                         const size_type num_classes) {
+  size_type largest = 0;
+  std::vector<size_type> y = class_labels(labels, num_examples, largest);
+  const size_type m = num_classes ? num_classes : largest;
+  if (m < 2) throw std::invalid_argument("Training needs num_classes >= 2");
+  if (largest > m) throw std::invalid_argument("Labels must be integers in 1:num_classes");
+  return multiclass_output(m, std::move(y));
+}
+
+// Label sets as an m-by-n sparse (double or logical) or full logical matrix:
+// the nonzero rows of column i are the labels of example i.
+inline multilabel_output make_multilabel(const mxArray* labels, const size_type num_examples,
+                                         const size_type num_classes) {
+  const bool sparse = mxIsSparse(labels);
+  if (mxIsComplex(labels) || (!mxIsLogical(labels) && !(sparse && mxIsDouble(labels))))
+    throw std::invalid_argument(
+        "Y must be an m-by-n sparse or logical label matrix for the multilabel losses");
+  const size_type m = mxGetM(labels);
+  if (mxGetN(labels) != num_examples)
+    throw std::invalid_argument("Y must have one column per example");
+  if (num_classes && m != num_classes) throw std::invalid_argument("Y must have num_classes rows");
+  if (m < 2) throw std::invalid_argument("Training needs num_classes >= 2");
+  std::vector<size_type> classes, offsets(1, 0);
+  if (sparse) {
+    // Row indices are zero-based classes; jc[n], not nzmax, is the entry count.
+    const mwIndex* ir = mxGetIr(labels);
+    const mwIndex* jc = mxGetJc(labels);
+    const bool logical = mxIsLogical(labels);
+    const double* values = logical ? nullptr : mxGetPr(labels);
+    const mxLogical* flags = logical ? static_cast<const mxLogical*>(mxGetData(labels)) : nullptr;
+    for (size_type i = 0; i < num_examples; ++i) {
+      for (mwIndex j = jc[i]; j < jc[i + 1]; ++j) {
+        // Stored zeros mark no label.
+        if (logical ? flags[j] != 0 : values[j] != 0) classes.push_back(ir[j]);
+      }
+      offsets.push_back(classes.size());
+    }
+  } else {
+    const mxLogical* flags = static_cast<const mxLogical*>(mxGetData(labels));
+    for (size_type i = 0; i < num_examples; ++i) {
+      for (size_type j = 0; j < m; ++j)
+        if (flags[i * m + j]) classes.push_back(j);
+      offsets.push_back(classes.size());
     }
   }
-  info.add("test", pa);
+  return multilabel_output(m, std::move(classes), std::move(offsets));
 }
 
-template <typename Result, typename Input>
-inline void add_test_evals(
-    const std::vector<dataset<Input, multilabel_output, eval_test<Result, multilabel_output>>>&
-        sets,
-    model_info<mxArray*>& info) {
-  if (sets.size() == 0) return;
+//-----------------------------------------------------------------------------
+// Warm start
+//-----------------------------------------------------------------------------
 
-  const char* names[] = {"rank_loss", "primal_loss"};
-  mxArray* pa = mxCreateStructMatrix(sets[0].evals.size(), sets.size(), 2, names);
-  mxCheckCreated(pa, "test");
-  size_type i = 0;
-  for (auto& testset : sets) {
-    for (auto& a : testset.evals) {
-      mxSetFieldByNumber(pa, i, 0, mxCreateScalar(a.rank_loss));
-      mxSetFieldByNumber(pa, i, 1, mxCreateScalar(a.primal_loss));
-      ++i;
+// Throws unless the dual block a (m entries) is finite and sums to zero
+// relative to its largest entry, to eps.
+template <typename Data>
+inline void check_dual_sum(const Data* a, const size_type m, const double eps) {
+  double largest = 0, sum = 0, total = 0;
+  for (size_type j = 0; j < m; ++j) {
+    if (!std::isfinite(a[j])) throw std::invalid_argument("initial_dual must be finite");
+    largest = std::max(largest, std::abs(double(a[j])));
+  }
+  const double scale = largest > 0 ? largest : 1;
+  for (size_type j = 0; j < m; ++j) {
+    sum += double(a[j]) / scale;
+    total += std::abs(double(a[j])) / scale;
+  }
+  if (std::abs(sum) > eps * total)
+    throw std::invalid_argument("initial_dual columns must sum to zero to storage precision");
+}
+
+// The hinge constraints of check_initial_dual on the dual block a (m entries)
+// whose positive entries sum to pos_sum: pos_sum is at most C, and the top-k
+// cone or cap holds.
+template <typename Data>
+inline void check_hinge_dual(const int id, const double C, const size_type k, const double slack,
+                             const Data* a, const size_type m, const double pos_sum) {
+  if (pos_sum > C + slack) throw std::invalid_argument("initial_dual is outside the feasible set");
+  if (id == 1 || id == 2 || id == 3) {
+    const size_type kk = id == 2 ? 1 : k;
+    const double cone = double(std::max<size_type>(1, m / kk)) * 2 * slack;
+    for (size_type j = 0; j < m; ++j)
+      if (-double(a[j]) > pos_sum / double(kk) + cone)
+        throw std::invalid_argument("initial_dual violates the top-k cone");
+  } else if (id == 4) {
+    for (size_type j = 0; j < m; ++j)
+      if (-double(a[j]) > C / double(k) + slack)
+        throw std::invalid_argument("initial_dual violates the top-k cap");
+  }
+}
+
+// The sign, box and cone constraints of check_initial_dual on the dual block a
+// with the p positive classes of positive.
+template <typename Data>
+inline void check_label_dual(const int id, const double C, const size_type k, const double slack,
+                             const Data* a, const std::vector<char>& positive, const size_type p) {
+  const size_type m = positive.size();
+  double pos_sum = 0;
+  for (size_type j = 0; j < m; ++j) {
+    const double v = double(a[j]);
+    if (!positive[j] && v > 0)
+      throw std::invalid_argument("initial_dual: non-label entries must be nonpositive");
+    if (positive[j]) pos_sum += v;
+  }
+  for (size_type j = 0; j < m; ++j) {
+    if (!positive[j]) continue;
+    const double v = double(a[j]);
+    if (id == 0 || id == 6) {  // the entropy losses
+      if (v > C / double(p) + slack)
+        throw std::invalid_argument("initial_dual is outside the entropy feasible set");
+    } else if (v < -slack) {
+      throw std::invalid_argument("initial_dual is outside the feasible set");
     }
   }
-  info.add("test", pa);
+  if (id != 0 && id != 6) check_hinge_dual(id, C, k, slack, a, m, pos_sum);
+}
+
+// Rejects dual blocks (m-by-n, column i the block of example i) outside the
+// feasible set of the loss, to rounding; single-label blocks get the label
+// entry that makes them sum to zero exactly. As the C ABI's check.
+template <typename Data, typename Output>
+inline void check_initial_dual(const int id, const double C, const size_type k, const Output& out,
+                               Data* A) {
+  const size_type m = out.num_classes, n = out.num_examples();
+  const double eps = 32 * double(std::numeric_limits<Data>::epsilon()), slack = eps * C;
+  std::vector<char> positive(m);
+  for (size_type i = 0; i < n; ++i) {
+    Data* a = A + i * m;
+    check_dual_sum(a, m, eps);
+    std::fill(positive.begin(), positive.end(), 0);
+    const size_type p = out.num_labels(i);
+    std::vector<size_type> labels(m);
+    for (size_type j = 0; j < m; ++j) labels[j] = j;
+    out.move_front(i, labels.data());
+    for (size_type j = 0; j < p; ++j) positive[labels[j]] = 1;
+    check_label_dual(id, C, k, slack, a, positive, p);
+    if (!loss_is_multilabel(id)) {
+      const size_type y = labels[0];
+      double others = 0;
+      for (size_type j = 0; j < m; ++j)
+        if (j != y) others += double(a[j]);
+      a[y] = static_cast<Data>(-others);
+    }
+  }
+}
+
+// W (d-by-m) = center + X * A', accumulated in double.
+template <typename Data>
+inline void warm_primal(const feature_input<Data>& in, const size_type m, const Data* A,
+                        const Data* center, Data* W) {
+  const size_type d = in.num_dimensions, n = in.num_examples;
+  std::vector<double> w(d * m, 0.0);
+  if (center)
+    for (size_type j = 0; j < d * m; ++j) w[j] = double(center[j]);
+  for (size_type i = 0; i < n; ++i) {
+    const Data* x = in.features + i * d;
+    for (size_type c = 0; c < m; ++c) {
+      const double a = double(A[i * m + c]);
+      if (a == 0) continue;
+      double* col = &w[c * d];
+      for (size_type l = 0; l < d; ++l) col[l] += a * double(x[l]);
+    }
+  }
+  for (size_type j = 0; j < d * m; ++j) W[j] = static_cast<Data>(w[j]);
+}
+
+// The m-by-n duals: a checked copy of opts.initial_dual, or zeros.
+template <typename Data, typename Output>
+inline mxArray* initial_duals(const mxArray* opts, const fit_options& o, const Output& out) {
+  const size_type m = out.num_classes, n = out.num_examples();
+  const mxArray* given = opts != nullptr ? mxGetField(opts, 0, "initial_dual") : nullptr;
+  mxArray* A = nullptr;
+  if (given != nullptr) {
+    mxCheckNotSparse(given, "initial_dual");
+    mxCheckMatrix(given, "initial_dual", m, n, mex_class<Data>::id());
+    A = mxDuplicateArray(given);
+    mxCheckCreated(A, "A");
+    check_initial_dual(o.id, o.C, o.k, out, static_cast<Data*>(mxGetData(A)));
+  } else {
+    A = mxCreateNumericMatrix(m, n, mex_class<Data>::id(), mxREAL);
+    mxCheckCreated(A, "A");
+  }
+  return A;
+}
+
+// The d-by-m center, or null.
+template <typename Data>
+inline const Data* center_of(const mxArray* opts, const size_type d, const size_type m) {
+  const mxArray* center = opts != nullptr ? mxGetField(opts, 0, "center") : nullptr;
+  if (center == nullptr) return nullptr;
+  mxCheckNotSparse(center, "center");
+  mxCheckMatrix(center, "center", d, m, mex_class<Data>::id());
+  mxCheckFinite<Data>(center, "center");
+  return static_cast<const Data*>(mxGetData(center));
+}
+
+//-----------------------------------------------------------------------------
+// The model
+//-----------------------------------------------------------------------------
+
+template <typename Result>
+inline double history_metric(const eval_train<Result, multiclass_output>& e) {
+  return e.topk_accuracy(0);
+}
+template <typename Result>
+inline double history_metric(const eval_train<Result, multilabel_output>& e) {
+  return e.rank_loss;
+}
+template <typename Result>
+inline double test_metric(const eval_test<Result, multiclass_output>& e) {
+  return e.topk_accuracy(0);
+}
+template <typename Result>
+inline double test_metric(const eval_test<Result, multilabel_output>& e) {
+  return e.rank_loss;
+}
+
+// The status names shared with the other interfaces.
+inline const char* status_name(const solver_status status) {
+  switch (status) {
+    case solver_status::solved:
+      return "solved";
+    case solver_status::no_progress:
+      return "no_progress";
+    case solver_status::failed:
+      return "failed";
+    default:
+      return "max_epoch";
+  }
 }
 
 template <typename Context>
-inline void add_info_solution(const Context& ctx, model_info<mxArray*>& info) {
-  info.add("status", mxCreateString(ctx.status_name().c_str()));
-  info.add("epoch", mxCreateScalar(ctx.epoch));
-  info.add("cpu_time", mxCreateScalar(ctx.cpu_time()));
-  info.add("wall_time", mxCreateScalar(ctx.wall_time()));
-
+inline void add_history(const Context& ctx, model_info<mxArray*>& info) {
+  const char* names[] = {"epoch",       "primal",       "dual",     "primal_loss", "dual_loss",
+                         "regularizer", "relative_gap", "accuracy", "cpu_time",    "wall_time"};
   const auto& evals = ctx.train.evals;
-  if (evals.size() > 0) {
-    info.add("relative_gap", mxCreateScalar(evals.back().relative_gap()));
+  mxArray* pa = mxCreateStructMatrix(evals.size(), 1, 10, names);
+  mxCheckCreated(pa, "history");
+  size_type i = 0;
+  for (const auto& e : evals) {
+    const double row[] = {double(e.epoch),
+                          double(e.primal),
+                          double(e.dual),
+                          double(e.primal_loss),
+                          double(e.dual_loss),
+                          double(e.primal_regularizer),
+                          double(e.relative_gap()),
+                          history_metric(e),
+                          e.cpu_time(),
+                          e.wall_time()};
+    for (int f = 0; f < 10; ++f) mxSetFieldByNumber(pa, i, f, mxCreateScalar(row[f]));
+    ++i;
   }
+  info.add("history", pa);
 
-  add_train_evals(evals, info);
-  add_test_evals(ctx.test, info);
+  if (ctx.test.empty()) return;
+  const char* test_names[] = {"accuracy", "primal_loss"};
+  mxArray* pt = mxCreateStructMatrix(ctx.test[0].evals.size(), ctx.test.size(), 2, test_names);
+  mxCheckCreated(pt, "test");
+  i = 0;
+  for (const auto& set : ctx.test)
+    for (const auto& e : set.evals) {
+      mxSetFieldByNumber(pt, i, 0, mxCreateScalar(test_metric(e)));
+      mxSetFieldByNumber(pt, i, 1, mxCreateScalar(e.primal_loss));
+      ++i;
+    }
+  info.add("test", pt);
 }
 
 template <typename Input>
-inline void add_info_input(const Input&, model_info<mxArray*>&) {}
-
+inline void add_num_features(const Input&, model_info<mxArray*>&) {}
 template <typename Data>
-inline void add_info_input(const feature_input<Data>& in, model_info<mxArray*>& info) {
-  info.add("num_dimensions", mxCreateScalar(in.num_dimensions));
-}
-
-template <typename Objective>
-inline void add_info_k(const Objective&, model_info<mxArray*>&,
-                       typename std::enable_if<!has_param_k<Objective>::value>::type* = 0) {}
-
-template <typename Objective>
-inline void add_info_k(const Objective& obj, model_info<mxArray*>& info,
-                       typename std::enable_if<has_param_k<Objective>::value>::type* = 0) {
-  info.add("k", mxCreateScalar(obj.k));
-}
-
-template <typename Objective>
-inline void add_info_gamma(const Objective&, model_info<mxArray*>&,
-                           typename std::enable_if<!has_param_gamma<Objective>::value>::type* = 0) {
-}
-
-template <typename Objective>
-inline void add_info_gamma(const Objective& obj, model_info<mxArray*>& info,
-                           typename std::enable_if<has_param_gamma<Objective>::value>::type* = 0) {
-  info.add("gamma", mxCreateScalar(obj.gamma));
+inline void add_num_features(const feature_input<Data>& in, model_info<mxArray*>& info) {
+  info.add("num_features", mxCreateScalar(in.num_dimensions));
 }
 
 template <typename Context>
-inline void add_info(const mxArray* opts, const Context& ctx, model_info<mxArray*>& info) {
-  add_info_input(ctx.train.in, info);
-  info.add("num_examples", mxCreateScalar(ctx.train.num_examples()));
+inline void add_model(const fit_options& o, const Context& ctx, model_info<mxArray*>& info) {
+  const stopping_criteria& c = ctx.criteria;
+  info.add("loss", mxCreateString(o.loss.c_str()));
+  info.add("C", mxCreateScalar(o.C));
+  if (loss_takes_k(o.id)) info.add("k", mxCreateScalar(o.k));
+  if (loss_takes_gamma(o.id)) info.add("gamma", mxCreateScalar(o.gamma));
   info.add("num_classes", mxCreateScalar(ctx.train.num_classes()));
-  info.add("is_dual", mxCreateScalar(ctx.is_dual()));
-
-  std::string obj = mxGetFieldValueOrDefault(opts, "objective", std::string(default_objective));
-  info.add("objective", mxCreateString(obj.c_str()));
-  info.add("c", mxCreateScalar(ctx.objective.c));
-  add_info_k(ctx.objective, info);
-  add_info_gamma(ctx.objective, info);
-
-  info.add("epsilon", mxCreateScalar(ctx.criteria.epsilon));
-  info.add("max_epoch", mxCreateScalar(ctx.criteria.max_epoch));
-  info.add("max_cpu_time", mxCreateScalar(ctx.criteria.max_cpu_time));
-  info.add("max_wall_time", mxCreateScalar(ctx.criteria.max_wall_time));
-  info.add("eval_on_start", mxCreateScalar(ctx.criteria.eval_on_start));
-  info.add("recompute_primal", mxCreateScalar(ctx.criteria.recompute_primal));
-  info.add("projection_precision",
-           mxCreateString(ctx.criteria.projection == projection_precision::float64 ? "float64"
-                                                                                   : "extended"));
-  info.add("eval_epoch", mxCreateScalar(ctx.criteria.eval_epoch));
-  info.add("shrinking", mxCreateString(shrinking_mode_name(ctx.criteria.shrinking).c_str()));
-
-  info.add("data_precision", mxCreateString(precision_name<typename Context::data_type>()));
+  info.add("num_examples", mxCreateScalar(ctx.train.num_examples()));
+  add_num_features(ctx.train.in, info);
+  info.add("kernel", mxCreateLogicalScalar(ctx.is_kernel()));
+  info.add("tol", mxCreateScalar(c.tol));
+  info.add("max_epoch", mxCreateScalar(c.max_epoch));
+  info.add("eval_epoch", mxCreateScalar(c.eval_epoch));
+  info.add("eval_on_start", mxCreateLogicalScalar(c.eval_on_start));
+  info.add("recompute_primal", mxCreateLogicalScalar(c.recompute_primal));
+  if (loss_takes_gamma(o.id))
+    info.add("shrinking", mxCreateString(shrinking_mode_name(c.shrinking).c_str()));
+  if (o.id == 5)
+    info.add(
+        "projection_precision",
+        mxCreateString(c.projection == projection_precision::float64 ? "float64" : "extended"));
+  info.add("seed", mxCreateScalar(c.seed));
+  if (o.num_threads_given) info.add("num_threads", mxCreateScalar(c.num_threads));
   info.add("precision", mxCreateString(precision_name<typename Context::result_type>()));
-  info_add_opts_field(opts, "log_level", info);
-  info_add_opts_field(opts, "log_format", info);
 
-  add_info_solution(ctx, info);
+  info.add("status", mxCreateString(status_name(ctx.status)));
+  info.add("epochs", mxCreateScalar(ctx.epoch));
+  const auto& evals = ctx.train.evals;
+  info.add("relative_gap", mxCreateScalar(evals.empty() ? std::numeric_limits<double>::quiet_NaN()
+                                                        : double(evals.back().relative_gap())));
+  info.add("cpu_time", mxCreateScalar(ctx.cpu_time()));
+  info.add("wall_time", mxCreateScalar(ctx.wall_time()));
+  add_history(ctx, info);
 }
+
+//-----------------------------------------------------------------------------
+// Data
+//-----------------------------------------------------------------------------
 
 template <typename Data>
-inline void validate_matrix(const mxArray* data, const bool is_dual = false) {
-  mxCheckNotSparse(data, "data");
-  mxCheckNotEmpty(data, "data");
-  mxCheckReal(data, "data");
-  mxCheckClass(data, "data", mex_class<Data>::id());
-  if (is_dual) {
-    mxCheckSquare(data, "data");
-  }
-}
-
-inline void validate_labels(const mxArray* labels, const size_type num_examples) {
-  mxCheckNotEmpty(labels, "labels");
-  if (mxIsSparse(labels)) {
-    if (!mxIsLogical(labels)) mxCheckDouble(labels, "labels");
-    mxCheck(std::equal_to<size_type>(), mxGetN(labels), num_examples, "num_examples");
-  } else {
-    mxCheckVector(labels, "labels", num_examples);
-  }
+inline void validate_matrix(const mxArray* data, const bool kernel = false) {
+  mxCheckNotSparse(data, "X");
+  mxCheckNotEmpty(data, "X");
+  mxCheckReal(data, "X");
+  mxCheckClass(data, "X", mex_class<Data>::id());
+  if (kernel) mxCheckSquare(data, "X");
 }
 
 template <typename Data>
@@ -407,300 +599,173 @@ inline kernel_input<Data> make_test_input(const kernel_input<Data>& trn_in, cons
   return sdca::make_input_kernel(mxGetM(data), mxGetN(data), static_cast<Data*>(mxGetData(data)));
 }
 
-template <typename Output>
-inline Output make_output(const mxArray*, const size_type) {
-  return Output();
+inline multiclass_output make_output(const mxArray* labels, const size_type n,
+                                     const size_type num_classes, const multiclass_output*) {
+  return make_multiclass(labels, n, num_classes);
 }
-
-template <>
-inline multiclass_output make_output<multiclass_output>(const mxArray* labels,
-                                                        const size_type num_examples) {
-  mxCheckNotSparse(labels, "labels");
-  auto first = mxGetPr(labels);
-  auto last = mxGetPr(labels) + num_examples;
-  return make_output_multiclass(first, last);
-}
-
-template <>
-inline multilabel_output make_output<multilabel_output>(const mxArray* labels,
-                                                        const size_type num_examples) {
-  if (mxIsSparse(labels)) {
-    // Row indices are zero-based classes; jc[n], not nzmax, is the entry count.
-    const mwIndex* ir = mxGetIr(labels);
-    const mwIndex* jc = mxGetJc(labels);
-    std::vector<size_type> classes(ir, ir + jc[num_examples]);
-    std::vector<size_type> offsets(jc, jc + num_examples + 1);
-    return multilabel_output(mxGetM(labels), classes, offsets);
-  } else {
-    auto first = mxGetPr(labels);
-    auto last = mxGetPr(labels) + num_examples;
-    return make_output_multilabel(first, last);
-  }
+inline multilabel_output make_output(const mxArray* labels, const size_type n,
+                                     const size_type num_classes, const multilabel_output*) {
+  return make_multilabel(labels, n, num_classes);
 }
 
 template <typename Data, typename Result, template <typename> class Input, typename Output,
           template <typename, typename> class Objective>
 inline void set_test_data(const mxArray* all_data, const mxArray* all_labels,
                           solver_context<Data, Result, Input, Output, Objective>& ctx) {
-  // The first dataset is for training
-  size_type num_datasets = mxGetNumberOfElements(all_data);
+  // The first data set trains.
+  const size_type num_datasets = mxGetNumberOfElements(all_data);
   for (size_type i = 1; i < num_datasets; ++i) {
-    auto data = mxGetCell(all_data, i);
-    auto labels = mxGetCell(all_labels, i);
+    const mxArray* data = mxGetCell(all_data, i);
+    const mxArray* labels = mxGetCell(all_labels, i);
     validate_matrix<Data>(data);
-    mxCheckFinite<Data>(data, "data");
-    validate_labels(labels, mxGetN(data));
-
+    mxCheckFinite<Data>(data, "X");
     Input<Data> in = make_test_input(ctx.train.in, data, i + 1);
-    Output out = make_output<Output>(labels, in.num_examples);
-    if (out.num_classes != ctx.train.out.num_classes) {
-      mex_error(err_id[err_num_classes], err_msg[err_num_classes],
-                static_cast<unsigned long long>(i) + 1);
-    }
-
+    Output out = make_output(labels, in.num_examples, ctx.train.out.num_classes,
+                             static_cast<const Output*>(nullptr));
     ctx.add_test(std::move(in), std::move(out));
   }
 }
 
-template <typename Context>
-inline void set_stopping_criteria(const mxArray* opts, Context& ctx) {
-  auto c = &ctx.criteria;
-  mxSetFieldValue(opts, "epsilon", c->epsilon);
-  mxSetFieldValue(opts, "eval_on_start", c->eval_on_start);
-  mxSetFieldValue(opts, "recompute_primal", c->recompute_primal);
-  const std::string projection =
-      mxGetFieldValueOrDefault(opts, "projection_precision", std::string("float64"));
-  if (!projection_precision_of(projection, c->projection))
-    mex_error(err_id[err_arg], "Unknown projection_precision '%s' (use 'float64' or 'extended').",
-              projection.c_str());
-  const std::string shrinking = mxGetFieldValueOrDefault(opts, "shrinking", std::string("auto"));
-  if (!shrinking_mode_of(shrinking, c->shrinking))
-    mex_error(err_id[err_arg],
-              "Unknown shrinking '%s' (use 'auto', 'off', 'heuristic', 'safe' or 'both').",
-              shrinking.c_str());
-  mxSetFieldValue(opts, "eval_epoch", c->eval_epoch);
-  mxSetFieldValue(opts, "max_epoch", c->max_epoch);
-  mxSetFieldValue(opts, "max_cpu_time", c->max_cpu_time);
-  mxSetFieldValue(opts, "max_wall_time", c->max_wall_time);
-
-  // Integer options are checked nonnegative on reading; eval_epoch = 0 evaluates only at the end.
-  mxCheck<double>(std::greater_equal<double>(), c->epsilon, 0, "epsilon");
-  mxCheck<double>(std::greater_equal<double>(), c->max_cpu_time, 0, "max_cpu_time");
-  mxCheck<double>(std::greater_equal<double>(), c->max_wall_time, 0, "max_wall_time");
-}
-
-// The m-by-n dual variables: a copy of opts.A (alias initial_dual) or zeros.
-template <typename Data>
-inline Data* set_dual_variables(const mxArray* opts, const size_type num_examples,
-                                const size_type num_classes, model_info<mxArray*>& info) {
-  mxArray* mxA =
-      mxDuplicateFieldOrCreateMatrix(opts, "A", num_classes, num_examples, mex_class<Data>::id());
-  validate_matrix<Data>(mxA);
-  mxCheckFinite<Data>(mxA, "initial_dual");
-  info.add("A", mxA);
-  return static_cast<Data*>(mxGetData(mxA));
-}
-
-// W = W0 + X * A' for the given duals; a given opts.W is checked but not used.
+// The W of a feature fit, from the duals and the center; nothing for a kernel.
 template <typename Data, typename Output>
-inline void set_variables(const mxArray* opts, feature_input<Data>& in, Output& out,
-                          model_info<mxArray*>& info, Data*& A, Data*& W, Data*& W0) {
-  const auto D = static_cast<blas_int>(in.num_dimensions);
-  const auto M = static_cast<blas_int>(out.num_classes);
-  const auto N = static_cast<blas_int>(in.num_examples);
-  A = set_dual_variables<Data>(opts, in.num_examples, out.num_classes, info);
-  if (mxIsField(opts, "W")) {
-    mxCheckMatrix(mxGetField(opts, 0, "W"), "W", in.num_dimensions, out.num_classes,
-                  mex_class<Data>::id());
-  }
-
-  mxArray* mxW =
-      mxCreateNumericMatrix(in.num_dimensions, out.num_classes, mex_class<Data>::id(), mxREAL);
-  mxCheckCreated(mxW, "W");
-  info.add("W", mxW);
-  W = static_cast<Data*>(mxGetData(mxW));
-
-  mxArray* mxW0 = mxGetField(opts, 0, "W0");
-  if (mxW0 != nullptr) {
-    mxCheckMatrix(mxW0, "W0", in.num_dimensions, out.num_classes, mex_class<Data>::id());
-    validate_matrix<Data>(mxW0);
-    mxCheckFinite<Data>(mxW0, "center");
-    W0 = static_cast<Data*>(mxGetData(mxW0));
-    sdca_blas_copy(D * M, W0, W);
-  }
-  if (mxIsField(opts, "A")) {
-    sdca_blas_gemm(D, M, N, in.features, D, A, M, W, CblasNoTrans, CblasTrans, Data(1),
-                   W0 != nullptr ? Data(1) : Data(0));
-  }
+inline Data* primal_variables(const mxArray* opts, const feature_input<Data>& in, const Output& out,
+                              const Data* A, const Data*& center, model_info<mxArray*>& info) {
+  const size_type m = out.num_classes;
+  center = center_of<Data>(opts, in.num_dimensions, m);
+  mxArray* W = mxCreateNumericMatrix(in.num_dimensions, m, mex_class<Data>::id(), mxREAL);
+  mxCheckCreated(W, "W");
+  info.add("W", W);
+  Data* w = static_cast<Data*>(mxGetData(W));
+  warm_primal(in, m, A, center, w);
+  return w;
 }
 
-template <typename Data, template <typename> class Input, typename Output>
-inline void set_variables(const mxArray* opts, Input<Data>& in, Output& out,
-                          model_info<mxArray*>& info, Data*& A, Data*&, Data*&) {
-  A = set_dual_variables<Data>(opts, in.num_examples, out.num_classes, info);
+template <typename Data, typename Output>
+inline Data* primal_variables(const mxArray* opts, const kernel_input<Data>&, const Output&,
+                              const Data*, const Data*&, model_info<mxArray*>&) {
+  if (mxIsField(opts, "center"))
+    throw std::invalid_argument("center is only supported for feature input");
+  return nullptr;
 }
 
+template <typename Data, typename Result, template <typename, typename> class Objective,
+          typename Output>
+inline auto make_fit_context(feature_input<Data>&& in, Output&& out, Objective<Data, Result>&& obj,
+                             Data* W, Data* A, const Data* center)
+    -> decltype(make_context(std::move(in), std::move(out), std::move(obj), W, A, center)) {
+  return make_context(std::move(in), std::move(out), std::move(obj), W, A, center);
+}
+
+template <typename Data, typename Result, template <typename, typename> class Objective,
+          typename Output>
+inline auto make_fit_context(kernel_input<Data>&& in, Output&& out, Objective<Data, Result>&& obj,
+                             Data*, Data* A,
+                             const Data*) -> decltype(make_context(std::move(in), std::move(out),
+                                                                   std::move(obj), A)) {
+  return make_context(std::move(in), std::move(out), std::move(obj), A);
+}
+
+// Trains objective on the data and writes the model to plhs[0].
 template <typename Data, typename Result, template <typename> class Input, typename Output,
           template <typename, typename> class Objective>
-inline void set_context(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts,
-                        Input<Data>&& in, Output&& out, Objective<Data, Result>&& obj) {
-  Data *A(0), *W(0), *W0(0);
+inline void train(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts, const fit_options& o,
+                  Input<Data>&& in, Output&& out, Objective<Data, Result>&& obj) {
   model_info<mxArray*> info;
-  set_variables(opts, in, out, info, A, W, W0);
+  mxArray* mxA = initial_duals<Data>(opts, o, out);
+  Data* A = static_cast<Data*>(mxGetData(mxA));
+  const Data* center = nullptr;
+  Data* W = primal_variables(opts, in, out, A, center, info);
+  info.add("A", mxA);
 
-  auto ctx = make_context(std::move(in), std::move(out), std::move(obj), A, W);
-  ctx.primal_initial = W0;
-
-  if (mxIsCell(prhs[0]) && mxIsCell(prhs[1])) {
+  auto ctx = make_fit_context(std::move(in), std::move(out), std::move(obj), W, A, center);
+  if (prhs != nullptr && mxIsCell(prhs[0]) && mxIsCell(prhs[1]))
     set_test_data(prhs[0], prhs[1], ctx);
-  }
+  ctx.criteria = o.criteria;
 
-  set_stopping_criteria(opts, ctx);
+  sdca::make_solver(ctx).solve();
 
-  auto solver = sdca::make_solver(ctx);
-  solver.solve();
-
-  add_info(opts, ctx, info);
+  add_model(o, ctx, info);
   plhs[0] = mxCreateStruct(info.fields, "model");
 }
 
+// The typed objective of the single-label losses.
 template <typename Data, typename Result, template <typename> class Input>
-inline void set_objective(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts,
-                          const std::string& obj, Input<Data>&& in, multiclass_output&& out) {
-  auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
-  mxCheck<Result>(std::greater<Result>(), c, 0, "c");
-
-  auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
-  mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
-
-  auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
-  mxCheckRange<size_type>(k, 1, out.num_classes - 1, "k");
-
-  if (obj == "multiclass_hinge") {
-    k = 1;  // as cross_entropy, it has no top-k
-    if (gamma > 0) {
-      set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                  make_objective_l2_hinge_topk_smooth<Data>(c, k, gamma));
-    } else {
-      set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                  make_objective_l2_hinge_topk<Data>(c, k));
+inline void dispatch(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts,
+                     const fit_options& o, Input<Data>&& in, multiclass_output&& out) {
+  const Result c = static_cast<Result>(o.C), gamma = static_cast<Result>(o.gamma);
+  const bool smooth = o.gamma > 0;
+  if (loss_takes_k(o.id) && (o.k < 1 || o.k >= out.num_classes))
+    throw std::invalid_argument("k must be an integer in 1:num_classes-1");
+  switch (o.id) {
+    case 0:
+      train(plhs, prhs, opts, o, std::move(in), std::move(out),
+            make_objective_l2_cross_entropy<Data, Result>(c));
+      break;
+    case 1:
+      train(plhs, prhs, opts, o, std::move(in), std::move(out),
+            make_objective_l2_topk_cross_entropy<Data, Result>(c, o.k));
+      break;
+    case 2:
+    case 3: {
+      const size_type k = o.id == 2 ? 1 : o.k;
+      if (smooth)
+        train(plhs, prhs, opts, o, std::move(in), std::move(out),
+              make_objective_l2_topk_hinge_alpha_smooth<Data, Result>(c, k, gamma));
+      else
+        train(plhs, prhs, opts, o, std::move(in), std::move(out),
+              make_objective_l2_topk_hinge_alpha<Data, Result>(c, k));
+      break;
     }
-  } else if (obj == "msvm" || obj == "l2_multiclass_hinge") {
-    mxCheckRange<size_type>(k, 1, 1, "k");
-    set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                make_objective_l2_topk_hinge<Data>(c, k));
-  } else if (obj == "msvm_smooth" || obj == "l2_multiclass_hinge_smooth") {
-    mxCheckRange<size_type>(k, 1, 1, "k");
-    set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                make_objective_l2_topk_hinge_smooth<Data>(c, k, gamma));
-  } else if (obj == "cross_entropy") {
-    // As multiclass_hinge, it has no top-k: k is checked above, as in the other interfaces.
-    set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                make_objective_l2_entropy<Data>(c));
-  } else if (obj == "softmax" || obj == "l2_multiclass_entropy") {
-    mxCheckRange<size_type>(k, 1, 1, "k");
-    set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                make_objective_l2_entropy<Data>(c));
-  } else if (obj == "l2_hinge_topk" || obj == "topk_hinge_alpha") {
-    if (gamma > 0) {
-      set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                  make_objective_l2_hinge_topk_smooth<Data>(c, k, gamma));
-    } else {
-      set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                  make_objective_l2_hinge_topk<Data>(c, k));
-    }
-  } else if (obj == "l2_topk_hinge" || obj == "topk_hinge_beta" || obj == "topk_hinge") {
-    if (gamma > 0) {
-      set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                  make_objective_l2_topk_hinge_smooth<Data>(c, k, gamma));
-    } else {
-      set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                  make_objective_l2_topk_hinge<Data>(c, k));
-    }
-  } else if (obj == "l2_entropy_topk") {
-    set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                make_objective_l2_entropy_topk<Data>(c, k));
-  } else {
-    mex_error(err_id[err_objective], err_msg[err_objective], obj.c_str());
+    case 4:
+      if (smooth)
+        train(plhs, prhs, opts, o, std::move(in), std::move(out),
+              make_objective_l2_topk_hinge_beta_smooth<Data, Result>(c, o.k, gamma));
+      else
+        train(plhs, prhs, opts, o, std::move(in), std::move(out),
+              make_objective_l2_topk_hinge_beta<Data, Result>(c, o.k));
+      break;
+    default:
+      throw std::invalid_argument("Unknown loss '" + o.loss + "'");
   }
 }
 
+// The typed objective of the multilabel losses.
 template <typename Data, typename Result, template <typename> class Input>
-inline void set_objective(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts,
-                          const std::string& obj, Input<Data>&& in, multilabel_output&& out) {
-  auto c = mxGetFieldValueOrDefault<Result>(opts, "c", 1);
-  mxCheck<Result>(std::greater<Result>(), c, 0, "c");
-
-  auto gamma = mxGetFieldValueOrDefault<Result>(opts, "gamma", 0);
-  mxCheck<Result>(std::greater_equal<Result>(), gamma, 0, "gamma");
-
-  // Unused by the multilabel losses, but checked as in the other interfaces.
-  auto k = mxGetFieldValueOrDefault<size_type>(opts, "k", 1);
-  mxCheckRange<size_type>(k, 1, out.num_classes - 1, "k");
-
-  if (obj == "multilabel_hinge") {
-    if (gamma > 0) {
-      set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                  make_objective_l2_multilabel_hinge_smooth<Data>(c, gamma));
-    } else {
-      set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                  make_objective_l2_multilabel_hinge<Data>(c));
-    }
-  } else if (obj == "mlsvm" || obj == "l2_multilabel_hinge") {
-    set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                make_objective_l2_multilabel_hinge<Data>(c));
-  } else if (obj == "mlsvm_smooth" || obj == "l2_multilabel_hinge_smooth") {
-    set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                make_objective_l2_multilabel_hinge_smooth<Data>(c, gamma));
-  } else if (obj == "mlsoftmax" || obj == "l2_multilabel_entropy") {
-    set_context(plhs, prhs, opts, std::move(in), std::move(out),
-                make_objective_l2_multilabel_entropy<Data>(c));
-  } else {
-    mex_error(err_id[err_objective], err_msg[err_objective], obj.c_str());
-  }
-}
-
-// The shared objective names that set_objective takes by a historical name.
-static const std::pair<const char*, const char*> shared_objectives[] = {
-    {"topk_cross_entropy", "l2_entropy_topk"}, {"multilabel_cross_entropy", "mlsoftmax"}};
-
-inline std::string historical_objective(const std::string& obj) {
-  for (const auto& name : shared_objectives)
-    if (obj == name.first) return name.second;
-  return obj;
-}
-
-inline bool shared_objective(const std::string& obj) {
-  for (int i = 0; i < num_shared_names - 1; ++i)
-    if (obj == shared_names[i]) return true;
-  return false;
+inline void dispatch(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts,
+                     const fit_options& o, Input<Data>&& in, multilabel_output&& out) {
+  const Result c = static_cast<Result>(o.C), gamma = static_cast<Result>(o.gamma);
+  if (o.id == 5 && o.gamma > 0)
+    train(plhs, prhs, opts, o, std::move(in), std::move(out),
+          make_objective_l2_multilabel_hinge_smooth<Data, Result>(c, gamma));
+  else if (o.id == 5)
+    train(plhs, prhs, opts, o, std::move(in), std::move(out),
+          make_objective_l2_multilabel_hinge<Data, Result>(c));
+  else if (o.id == 6)
+    train(plhs, prhs, opts, o, std::move(in), std::move(out),
+          make_objective_l2_multilabel_cross_entropy<Data, Result>(c));
+  else
+    throw std::invalid_argument("Unknown loss '" + o.loss + "'");
 }
 
 template <typename Data, typename Result, template <typename> class Input>
 inline void set_output(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts,
-                       const mxArray* labels, Input<Data>&& in) {
-  validate_labels(labels, in.num_examples);
-  std::string obj = historical_objective(
-      mxGetFieldValueOrDefault(opts, "objective", std::string(default_objective)));
-  if ((obj == "mlsoftmax") || (obj == "l2_multilabel_entropy") || (obj == "mlsvm") ||
-      (obj == "l2_multilabel_hinge") || (obj == "mlsvm_smooth") ||
-      (obj == "l2_multilabel_hinge_smooth") || (obj == "multilabel_hinge")) {
-    // Multilabel
-    set_objective<Data, Result>(plhs, prhs, opts, obj, std::move(in),
-                                make_output<multilabel_output>(labels, in.num_examples));
+                       const fit_options& o, const mxArray* labels, Input<Data>&& in) {
+  mxCheckNotEmpty(labels, "Y");
+  if (loss_is_multilabel(o.id)) {
+    multilabel_output out = make_multilabel(labels, in.num_examples, o.num_classes);
+    dispatch<Data, Result>(plhs, prhs, opts, o, std::move(in), std::move(out));
   } else {
-    // Multiclass
-    set_objective<Data, Result>(plhs, prhs, opts, obj, std::move(in),
-                                make_output<multiclass_output>(labels, in.num_examples));
+    multiclass_output out = make_multiclass(labels, in.num_examples, o.num_classes);
+    dispatch<Data, Result>(plhs, prhs, opts, o, std::move(in), std::move(out));
   }
 }
 
 template <typename Data, typename Result>
-inline void set_input(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts) {
-  bool is_dual = mxGetFieldValueOrDefault(opts, "is_dual", false);
+inline void set_input(mxArray* plhs[], const mxArray* prhs[], const mxArray* opts,
+                      const fit_options& o) {
   const mxArray* data;
   const mxArray* labels;
-  if (mxIsNumeric(prhs[0]) && (mxIsNumeric(prhs[1]) || mxIsLogical(prhs[1]))) {
+  if (!mxIsCell(prhs[0]) && !mxIsCell(prhs[1])) {
     data = prhs[0];
     labels = prhs[1];
   } else {
@@ -709,76 +774,28 @@ inline void set_input(mxArray* plhs[], const mxArray* prhs[], const mxArray* opt
     labels = mxGetCell(prhs[1], 0);
   }
 
-  validate_matrix<Data>(data, is_dual);
-  mxCheckFinite<Data>(data, "data");
+  validate_matrix<Data>(data, o.kernel);
+  mxCheckFinite<Data>(data, "X");
   Data* p_data = static_cast<Data*>(mxGetData(data));
-  if (is_dual) {
-    set_output<Data, Result>(plhs, prhs, opts, labels,
+  if (o.kernel) {
+    set_output<Data, Result>(plhs, prhs, opts, o, labels,
                              sdca::make_input_kernel(mxGetN(data), p_data));
   } else {
-    set_output<Data, Result>(plhs, prhs, opts, labels,
+    set_output<Data, Result>(plhs, prhs, opts, o, labels,
                              sdca::make_input_feature(mxGetM(data), mxGetN(data), p_data));
   }
 }
 
-// mxSetField and mxRemoveField do not free the previous field value.
-inline void set_field(mxArray* opts, const char* name, mxArray* value) {
-  if (mxGetFieldNumber(opts, name) < 0) mxAddField(opts, name);
-  mxArray* old = mxGetField(opts, 0, name);
-  if (old != nullptr) mxDestroyArray(old);
-  mxSetField(opts, 0, name, value);
-}
-
-// Moves the value of opts.(alias) to opts.(name).
-inline void rename_field(mxArray* opts, const char* alias, const char* name) {
-  mxArray* value = mxGetField(opts, 0, alias);
-  if (value == nullptr) return;
-  if (mxGetField(opts, 0, name) != nullptr)
-    mex_error(err_id[err_arg], "Specify only opts.%s or its alias opts.%s.", name, alias);
-  mxSetField(opts, 0, alias, nullptr);
-  mxRemoveField(opts, mxGetFieldNumber(opts, alias));
-  set_field(opts, name, value);
-}
-
-// Without opts.gamma, the historical names of v0.2.0 smooth with gamma = 1;
-// the shared names default to 0 (nonsmooth). The model reports the given name.
-inline void set_objective_smoothing(mxArray* opts) {
-  if (mxGetField(opts, 0, "gamma") != nullptr) return;
-  const std::string obj =
-      mxGetFieldValueOrDefault(opts, "objective", std::string(default_objective));
-  if (!shared_objective(obj)) set_field(opts, "gamma", mxCreateDoubleScalar(1));
-}
-
-// A copy of opts with the option names shared with the other interfaces
-// (C, tol, kernel, center, initial_dual) renamed to the historical ones.
-inline mxArray* shared_options(const mxArray* opts) {
-  mxArray* copy = opts == nullptr ? mxCreateStructMatrix(1, 1, 0, nullptr) : mxDuplicateArray(opts);
-  rename_field(copy, "C", "c");
-  rename_field(copy, "tol", "epsilon");
-  rename_field(copy, "kernel", "is_dual");
-  rename_field(copy, "center", "W0");
-  rename_field(copy, "initial_dual", "A");
-  set_objective_smoothing(copy);
-  return copy;
-}
-
-struct mx_array_deleter {
-  void operator()(mxArray* pa) const { mxDestroyArray(pa); }
-};
-
 template <typename Data>
 inline void mex_main(mxArray* plhs[], const int nrhs, const mxArray* prhs[]) {
-  mxCheckStruct(nrhs > 2 ? prhs[2] : nullptr, "opts");
-  std::unique_ptr<mxArray, mx_array_deleter> copy(shared_options(nrhs > 2 ? prhs[2] : nullptr));
-  const mxArray* opts = copy.get();
+  const mxArray* opts = nrhs > 2 ? prhs[2] : nullptr;
+  mxCheckStruct(opts, "opts");
+  const fit_options o = read_fit_options(opts);
   set_logging_options(opts);
-  std::string precision = mxGetFieldValueOrDefault(opts, "precision", std::string("double"));
-  if (precision == "double" || precision == "float64" || precision == "fp64") {
-    set_input<Data, double>(plhs, prhs, opts);
-  } else if (precision == "single" || precision == "float32" || precision == "fp32") {
-    set_input<Data, float>(plhs, prhs, opts);
+  if (float32_work(opts, std::is_same<Data, float>::value)) {
+    set_input<Data, float>(plhs, prhs, opts, o);
   } else {
-    mex_error(err_id[err_precision], err_msg[err_precision], precision.c_str());
+    set_input<Data, double>(plhs, prhs, opts, o);
   }
 }
 
@@ -801,14 +818,14 @@ void mexFunction(const int nlhs, mxArray* plhs[], const int nrhs, const mxArray*
 
     mat_cout_hijack mat_cout;
     try {
-      if (mxIsDouble(prhs[0]) ||
-          (mxIsCell(prhs[0]) && !mxIsEmpty(prhs[0]) && mxIsDouble(mxGetCell(prhs[0], 0)))) {
+      const mxArray* first =
+          mxIsCell(prhs[0]) && !mxIsEmpty(prhs[0]) ? mxGetCell(prhs[0], 0) : prhs[0];
+      if (mxIsDouble(first)) {
         mex_main<double>(plhs, nrhs, prhs);
-      } else if (mxIsSingle(prhs[0]) ||
-                 (mxIsCell(prhs[0]) && !mxIsEmpty(prhs[0]) && mxIsSingle(mxGetCell(prhs[0], 0)))) {
+      } else if (mxIsSingle(first)) {
         mex_main<float>(plhs, nrhs, prhs);
       } else {
-        mex_error(err_id[err_arg], err_msg[err_arg]);
+        mex_error(err_id[err_arg], "X must be single or double.");
       }
     } catch (const std::exception& e) {
       mex_error(err_id[err_exception], err_msg[err_exception], e.what());

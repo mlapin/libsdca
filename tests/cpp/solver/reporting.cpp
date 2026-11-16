@@ -126,18 +126,19 @@ TEST(ReportingTest, status_names_and_stopping_options) {
   for (const auto& c : cases) EXPECT_EQ(c.second, sdca::solver_status_name(c.first));
   sdca::stopping_criteria c;
   EXPECT_EQ(
-      "epsilon: 0.001, eval_epoch: 10, max_epoch: 1000, max_cpu_time: 0, "
-      "max_wall_time: 0, eval_on_start: 0",
+      "tol: 0.001, eval_epoch: 10, max_epoch: 1000, max_cpu_time: 0, "
+      "max_wall_time: 0, eval_on_start: 0, seed: 0",
       c.to_string());
-  c.epsilon = .25;
+  c.tol = .25;
   c.eval_epoch = 2;
   c.max_epoch = 7;
   c.max_cpu_time = 3;
   c.max_wall_time = 4;
   c.eval_on_start = true;
+  c.seed = 42;
   EXPECT_EQ(
-      "epsilon: 0.25, eval_epoch: 2, max_epoch: 7, max_cpu_time: 3, "
-      "max_wall_time: 4, eval_on_start: 1",
+      "tol: 0.25, eval_epoch: 2, max_epoch: 7, max_cpu_time: 3, "
+      "max_wall_time: 4, eval_on_start: 1, seed: 42",
       c.to_string());
 }
 
@@ -147,9 +148,9 @@ TEST(ReportingTest, context_and_log_levels) {
   std::vector<sdca::size_type> labels = {0, 1};
   auto ctx =
       sdca::make_context(sdca::make_input_feature(1, 2, x), sdca::multiclass_output(2, labels),
-                         sdca::make_objective_l2_entropy<double>(), a, w);
+                         sdca::make_objective_l2_cross_entropy<double>(), w, a);
   EXPECT_EQ("none", ctx.status_name());
-  EXPECT_FALSE(ctx.is_dual());
+  EXPECT_FALSE(ctx.is_kernel());
   EXPECT_FALSE(ctx.is_prox());
   contains(ctx.status_string(), "status: none, cpu_time: 0");
   contains(ctx.to_string(), "features (num_dimensions: 1, num_examples: 2, precision: double)");

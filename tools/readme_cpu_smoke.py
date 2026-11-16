@@ -15,6 +15,7 @@ import numpy as np
 
 
 def torch_checks() -> list[dict[str, object]]:
+    import libsdca.torch
     import torch
     from libsdca import _cpu, _cpu_entropy
 
@@ -25,7 +26,7 @@ def torch_checks() -> list[dict[str, object]]:
         teacher = student.detach().flip(-1).contiguous()
         _cpu._applied.cache_clear()
         with mock.patch.object(operators, "apply", wraps=operators.apply) as observed:
-            value = libsdca.distillation_loss(student, teacher)
+            value = libsdca.torch.distillation_loss(student, teacher)
             (gradient,) = torch.autograd.grad(value, student)
         _cpu._applied.cache_clear()
         assert observed.call_count > 0, "shared CPU distillation entry was not executed"
@@ -52,7 +53,7 @@ def jax_checks() -> list[dict[str, object]]:
     from libsdca import _jax_ffi
 
     assert jax.default_backend() == "cpu"
-    assert hasattr(libsdca.Solver().lib, "sdca_run_rows"), (
+    assert hasattr(libsdca._core._native().lib, "sdca_internal_run_rows"), (
         "installed core lacks the shared row executor"
     )
     jax.config.update("jax_enable_x64", True)
@@ -93,7 +94,12 @@ def proximal_call(
     operation = jax.jit(
         jax.value_and_grad(
             lambda s: sjax.proximal_distillation_loss(
-                s, teacher, temperature, alpha, precision=precision, reduction="sum"
+                s,
+                teacher,
+                temperature=temperature,
+                alpha=alpha,
+                precision=precision,
+                reduction="sum",
             )
         )
     )
@@ -114,8 +120,10 @@ def proximal_native_case(student: Any, teacher: Any, precision: str | None) -> d
     assert value.dtype == jnp.result_type(student.dtype, jnp.float32)
     np.testing.assert_array_equal(gradient[0], 0)
     storage = np.float64 if student.dtype == jnp.float64 or precision == "float64" else np.float32
-    expected_value, expected_gradient = libsdca.proximal_distillation_loss_and_grad(
-        np.asarray(student, storage), np.asarray(teacher, storage), temperature=2, alpha=0.5
+    expected_value, expected_gradient = libsdca.loss_and_grad(
+        np.asarray(student, storage),
+        np.asarray(teacher, storage),
+        libsdca.ProximalDistillation(temperature=2, alpha=0.5),
     )
     expected_value = jnp.asarray(expected_value, storage).sum().astype(value.dtype)
     expected_gradient = jnp.asarray(expected_gradient).astype(student.dtype)
@@ -148,7 +156,7 @@ def proximal_derivative_case() -> dict[str, object]:
         with mock.patch.dict(os.environ, SDCA_JAX_FFI=mode):
 
             def loss(s: Any) -> Any:
-                return sjax.proximal_distillation_loss(s, teacher, 2, 0.5)
+                return sjax.proximal_distillation_loss(s, teacher, temperature=2, alpha=0.5)
 
             result = jax.jit(jax.hessian(loss))(student)
             result.block_until_ready()

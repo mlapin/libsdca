@@ -133,7 +133,7 @@ def _evaluate(name: str, classes: int) -> tuple[list[float], np.ndarray, np.ndar
         loss = proximal_distillation_loss if name.startswith("proximal") else distillation_loss
 
         def distill(x: jax.Array) -> jax.Array:
-            return loss(x, teacher, temperature, reduction="none")
+            return loss(x, teacher, temperature=temperature, reduction="none")
 
         values, targets = _value_and_target(distill, student)
         return gaps, values, targets, references
@@ -145,7 +145,7 @@ def _evaluate(name: str, classes: int) -> tuple[list[float], np.ndarray, np.ndar
         mask[:, :positives] = True
         target = jnp.asarray(mask)
     dtype = jnp.bfloat16 if name.endswith("bfloat16") else jnp.float32
-    loss = multilabel_cross_entropy if name == "tied mask" else cross_entropy
+    loss = cross_entropy if name.startswith("labels") else multilabel_cross_entropy
 
     def entropy(x: jax.Array) -> jax.Array:
         return loss(x, target, reduction="none")
@@ -194,7 +194,7 @@ def test_ordinary_rows_beside_far_rows_are_unchanged(path: None, rescale: str, e
     teacher = np.concatenate([ordinary + noise, _rows([91.0, 93.0], 1000)])
     losses = {
         "labels": lambda x: cross_entropy(x, labels, reduction="sum"),
-        "mask": lambda x: cross_entropy(x, mask, reduction="sum"),
+        "mask": lambda x: multilabel_cross_entropy(x, mask, reduction="sum"),
         "distillation": lambda x: distillation_loss(x, teacher, reduction="sum"),
     }
     for name, loss in losses.items():
@@ -229,7 +229,7 @@ def test_far_mass_under_vmap_and_value_only(path: None):
 
         mapped = jax.jit(jax.vmap(jax.value_and_grad(row)))(jnp.asarray(z), labels)
         # The value alone (the primal of distillation's custom VJP).
-        distilled = jax.jit(lambda x: distillation_loss(x, t, 2.0, reduction="none"))(s)
+        distilled = jax.jit(lambda x: distillation_loss(x, t, temperature=2.0, reduction="none"))(s)
     for i, gap in enumerate(gaps):
         expected, entry = _entropy_reference(gap, 1000, 1)
         assert _within(float(mapped[0][i]), expected)
@@ -243,11 +243,10 @@ def test_far_mass_in_second_derivatives(path: None, target: str):
     z = jnp.asarray(_rows([90.0], 1000))
     y = jnp.zeros(1, jnp.int32) if target == "labels" else jnp.arange(1000)[None] == 0
     tangent = jnp.zeros_like(z).at[0, 0].set(1)
+    loss = cross_entropy if target == "labels" else multilabel_cross_entropy
     with x64(False):
         column = jax.jit(
-            lambda x: jax.jvp(
-                jax.grad(lambda v: cross_entropy(v, y, reduction="sum")), (x,), (tangent,)
-            )[1]
+            lambda x: jax.jvp(jax.grad(lambda v: loss(v, y, reduction="sum")), (x,), (tangent,))[1]
         )(z)
     with mp.workdps(50):
         tail = 999 * mp.exp(-90)
@@ -272,7 +271,12 @@ def test_proximal_far_student_with_disagreeing_teacher(
             return jax.jit(
                 jax.value_and_grad(
                     lambda x: proximal_distillation_loss(
-                        x, t, temperature, alpha, reduction="sum", precision=precision
+                        x,
+                        t,
+                        temperature=temperature,
+                        alpha=alpha,
+                        reduction="sum",
+                        precision=precision,
                     )
                 )
             )(z)

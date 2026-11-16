@@ -15,7 +15,6 @@ from libsdca.torch import (
     multiclass_hinge_loss,
     multilabel_cross_entropy,
     multilabel_hinge_loss,
-    sdca_loss,
     topk_cross_entropy,
     topk_hinge_loss,
 )
@@ -47,7 +46,7 @@ def _losses(n: int, c: int, device: str) -> dict[str, Loss]:
     return {
         "cross_entropy": lambda z: cross_entropy(z, y),
         "weighted": lambda z: cross_entropy(z, ignored, weight.to(z.dtype), reduction="sum"),
-        "sdca_entropy": lambda z: sdca_loss(z, y, reduction="none").sum(),
+        "entropy": lambda z: topk_cross_entropy(z, y, k=1, reduction="none").sum(),
         "hinge": lambda z: multiclass_hinge_loss(z, y),
         "smooth_hinge": lambda z: multiclass_hinge_loss(z, y, gamma=0.5),
         "topk_entropy": lambda z: topk_cross_entropy(z, y, k=3),

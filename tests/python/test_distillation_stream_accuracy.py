@@ -23,7 +23,7 @@ def test_wide_rows_against_mpmath(dtype: torch.dtype, classes: int):
     x = torch.tensor(student, dtype=dtype, device="cuda", requires_grad=True)
     t = torch.tensor(teacher, dtype=dtype, device="cuda")
     expected_value, expected_gradient = reference(x.detach().cpu().numpy(), t.cpu().numpy(), 2.0)
-    value = distillation_loss(x, t, 2.0, reduction="none")
+    value = distillation_loss(x, t, temperature=2.0, reduction="none")
     (gradient,) = torch.autograd.grad(value.sum(), x)
     eps = torch.finfo(dtype).eps
     actual_value = value.detach().double().cpu().numpy()
@@ -50,7 +50,7 @@ def test_streamed_overflow_rescue(dtype: torch.dtype, large_temperature: bool):
     expected_value, expected_gradient = reference(
         x.detach().cpu().numpy(), teacher.cpu().numpy(), temperature
     )
-    value = distillation_loss(x, teacher, temperature, reduction="none")
+    value = distillation_loss(x, teacher, temperature=temperature, reduction="none")
     (gradient,) = torch.autograd.grad(value.sum(), x)
     eps = torch.finfo(dtype).eps
     np.testing.assert_allclose(value.detach().cpu(), expected_value, rtol=64 * eps, atol=0)

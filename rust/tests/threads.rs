@@ -1,14 +1,33 @@
 //! Native rows on several threads: bitwise the results of one thread.
-use libsdca::{
-    coordinate_update, loss_and_grad, Loss, LossOptions, Matrix, Objective, Precision, Real,
-    UpdateOptions,
-};
+use std::num::NonZeroUsize;
+
+use libsdca::{Loss, Matrix, Precision, Real, Settings, Solver, Threads};
 
 // 2600 x 101 scores take milliseconds per call: the default (automatic) and
 // the explicit counts add threads.
 const N: usize = 2600;
 const C: usize = 101;
-const THREADS: [Option<usize>; 5] = [None, Some(2), Some(3), Some(8), Some(0)];
+
+fn threads() -> [Threads; 4] {
+    let count = |n| Threads::Count(NonZeroUsize::new(n).unwrap());
+    [Threads::FromEnv, count(2), count(3), count(8)]
+}
+
+fn serial() -> Threads {
+    Threads::Count(NonZeroUsize::MIN)
+}
+
+/// Every loss but distillation, with k = 3, gamma = 0.5 and alpha = 0.7.
+const LOSSES: [Loss; 8] = [
+    Loss::CrossEntropy,
+    Loss::TopKCrossEntropy { k: 3 },
+    Loss::MulticlassHinge { gamma: 0.5 },
+    Loss::TopKHingeAlpha { k: 3, gamma: 0.5 },
+    Loss::TopKHingeBeta { k: 3, gamma: 0.5 },
+    Loss::MultilabelHinge { gamma: 0.5 },
+    Loss::MultilabelCrossEntropy,
+    Loss::ProximalCrossEntropy { alpha: 0.7 },
+];
 
 /// Scores in about [-3, 3] (every 97th row shifted by 1e6), labels and
 /// label sets of 1 to C - 1 labels, from a fixed linear congruential sequence.
@@ -47,34 +66,42 @@ fn same<T: Real>(a: &[T], b: &[T]) -> bool {
 fn losses_match<T: Real + From<f32>>(precision: Precision) {
     let (z, labels, sets) = problem::<T>();
     let z = Matrix::new(&z, N, C).unwrap();
-    for &loss in Loss::ALL {
-        let sets_only = matches!(
-            loss,
-            Loss::MultilabelHinge | Loss::MultilabelCrossEntropy | Loss::ProximalCrossEntropy
-        );
-        let options = |num_threads| LossOptions {
-            loss,
-            k: 3,
-            gamma: 0.5,
+    let teacher: Vec<T> = (0..N * C)
+        .map(|i| T::from(((i % 13) as f32 - 6.0) * 0.5))
+        .collect();
+    let teacher = Matrix::new(&teacher, N, C).unwrap();
+    let distillation = [
+        Loss::Distillation { temperature: 2.0 },
+        Loss::ProximalDistillation {
+            temperature: 2.0,
             alpha: 0.7,
-            precision: Some(precision),
-            num_threads,
-            ..Default::default()
+        },
+    ];
+    for loss in LOSSES.into_iter().chain(distillation) {
+        // Proximal distillation computes in float64 only.
+        let precision = match loss {
+            Loss::ProximalDistillation { .. } => Precision::Float64,
+            _ => precision,
         };
-        let one = if sets_only {
-            loss_and_grad(z, &sets, &options(Some(1))).unwrap()
-        } else {
-            loss_and_grad(z, &labels, &options(Some(1))).unwrap()
+        let eval = |threads| {
+            let settings = Settings::default()
+                .with_precision(precision)
+                .with_threads(threads);
+            match loss {
+                Loss::Distillation { .. } | Loss::ProximalDistillation { .. } => {
+                    loss.loss_and_grad_with(z, libsdca::Targets::Teacher(teacher), &settings)
+                }
+                _ if loss.is_multilabel() => loss.loss_and_grad_with(z, &sets, &settings),
+                _ => loss.loss_and_grad_with(z, &labels, &settings),
+            }
+            .unwrap()
         };
-        for threads in THREADS {
-            let many = if sets_only {
-                loss_and_grad(z, &sets, &options(threads)).unwrap()
-            } else {
-                loss_and_grad(z, &labels, &options(threads)).unwrap()
-            };
+        let one = eval(serial());
+        for threads in threads() {
+            let many = eval(threads);
             assert!(
                 same(&one.0, &many.0) && same(&one.1, &many.1),
-                "{loss} {precision} {threads:?} threads"
+                "{loss} {precision} {threads:?}"
             );
         }
     }
@@ -83,30 +110,23 @@ fn losses_match<T: Real + From<f32>>(precision: Precision) {
 fn updates_match<T: Real + From<f32>>(precision: Precision) {
     let (z, labels, sets) = problem::<T>();
     let z = Matrix::new(&z, N, C).unwrap();
-    for &objective in Objective::ALL {
-        let options = |num_threads| UpdateOptions::<T> {
-            c: 2.0,
-            objective,
-            k: 3,
-            gamma: 0.5,
-            precision: Some(precision),
-            num_threads,
-            ..Default::default()
-        };
+    // The training objectives.
+    for loss in &LOSSES[..7] {
         let update = |threads| {
-            if objective.is_multilabel() {
-                coordinate_update(z, &sets, &options(threads)).unwrap()
+            let solver = Solver::new(*loss)
+                .with_c(2.0)
+                .with_precision(precision)
+                .with_threads(threads);
+            if loss.is_multilabel() {
+                solver.coordinate_update(z, &sets, 1.0, None).unwrap()
             } else {
-                coordinate_update(z, &labels, &options(threads)).unwrap()
+                solver.coordinate_update(z, &labels, 1.0, None).unwrap()
             }
         };
-        let one = update(Some(1));
-        for threads in THREADS {
+        let one = update(serial());
+        for threads in threads() {
             let many = update(threads);
-            assert!(
-                same(&one, &many),
-                "{objective} {precision} {threads:?} threads"
-            );
+            assert!(same(&one, &many), "{loss} {precision} {threads:?}");
         }
     }
 }
@@ -128,25 +148,14 @@ fn coordinate_steps_do_not_depend_on_the_thread_count() {
 #[test]
 fn concurrent_callers_get_the_serial_results() {
     let (z, labels, _) = problem::<f64>();
-    let options = LossOptions {
-        loss: Loss::TopKHingeBeta,
-        k: 2,
-        num_threads: Some(0),
-        ..Default::default()
-    };
+    let loss = Loss::topk_hinge(2);
     let z = Matrix::new(&z, N, C).unwrap();
-    let serial = loss_and_grad(
-        z,
-        &labels,
-        &LossOptions {
-            num_threads: Some(1),
-            ..options
-        },
-    )
-    .unwrap();
+    let settings = Settings::default().with_threads(serial());
+    let serial = loss.loss_and_grad_with(z, &labels, &settings).unwrap();
+    let auto = Settings::default().with_threads(Threads::FromEnv);
     std::thread::scope(|scope| {
         let callers: Vec<_> = (0..4)
-            .map(|_| scope.spawn(|| loss_and_grad(z, &labels, &options).unwrap()))
+            .map(|_| scope.spawn(|| loss.loss_and_grad_with(z, &labels, &auto).unwrap()))
             .collect();
         for caller in callers {
             assert!(caller.join().unwrap() == serial);

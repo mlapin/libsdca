@@ -3,7 +3,7 @@
 import pytest
 import torch
 from hinge_order_cases import rows
-from libsdca.torch import sdca_loss
+from named_losses import torch_loss
 
 
 @pytest.mark.parametrize("classes", [3, 17, 1000])
@@ -24,7 +24,7 @@ def test_distinct_hinge_scores(
     z, labels, expected = rows(classes, power)
     x = torch.tensor(z, dtype=dtype, requires_grad=True)
     for loss in ("multiclass_hinge", "topk_hinge_alpha", "topk_hinge_beta"):
-        value = sdca_loss(x, torch.tensor(labels), loss, precision=precision, backend=backend)
+        value = torch_loss(x, torch.tensor(labels), loss, precision=precision, backend=backend)
         gradient = torch.autograd.grad(value, x)[0]
         torch.testing.assert_close(
             gradient, torch.tensor(expected / len(labels), dtype=dtype), rtol=0, atol=0

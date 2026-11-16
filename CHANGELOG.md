@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.1 (2026-11-16)
+## 0.4.0 (2026-11-16)
 
 - **JAX on CUDA:** `libsdca.jax` runs the same fused Triton kernels as PyTorch for every
   loss (Linux wheels include the handler), falling back to `jax.numpy` with a warning.
@@ -30,8 +30,52 @@
 - **Fixes:** `cross_entropy(..., backend="torch")` accepts nonfinite logits in ignored rows,
   as the other backends do. A solve whose final evaluation throws ends as `failed` instead
   of raising. The JAX CPU build falls back to portable flags when the native-ISA probe fails.
+  A cross-entropy coordinate step whose label probability is 1 to within `exp(-200)` no
+  longer fails a fit ("Entropy normalization did not converge").
   `float64` proximal cross-entropy compensates its row sums: on 4,097–32,768 classes, values
   and gradients were up to `95×` the error bound and are now within it.
+- **API redesign (breaking, every interface):** One vocabulary of losses, each taking only
+  its own parameters (`k`, `gamma`, `alpha`, `temperature`); a parameter of another loss is
+  an error, and string aliases (`topk_hinge`, `softmax`, `fp32`, ...) are gone. One target
+  kind per loss: class labels, label sets / boolean masks, teacher logits, and target
+  probabilities for training `cross_entropy` (the former `distillation` objective).
+  `eval_epoch = 0` evaluates only at the end everywhere; a new `seed` option sets the order
+  of the examples; a fit stopped by `max_epoch` reports `solved` when its last evaluation
+  meets `tol`; statuses are `solved`, `no_progress`, `max_epoch`, `failed`.
+  - **NumPy:** loss objects (`fit(X, y, libsdca.TopKHingeBeta(k=2))`,
+    `loss_and_grad(logits, target, loss)`, `coordinate_update`), `libsdca.Kernel(K)` and
+    `libsdca.Probabilities(P)` inputs, `num_threads` and `seed` on `fit`; 16-bit and
+    `float64` data with `precision="float32"` are cast; the distillation functions and the
+    `Solver` class are gone, and `libsdca` no longer re-exports the PyTorch names.
+  - **scikit-learn:** `libsdca.sklearn.SDCAClassifier(loss, *, C, k, gamma, tol, max_iter,
+    eval_epoch, shrinking, kernel="linear"|"precomputed", precision, n_jobs, random_state,
+    warm_start)` passes `check_estimator`.
+  - **PyTorch and JAX:** one function and module per loss with keyword-only, validated
+    options; `SDCALoss`/`sdca_loss` and the alpha/beta hinge aliases are gone
+    (`topk_hinge_loss(variant=...)`). Cross-entropy and linear cross-entropy take label
+    smoothing and probability targets, the single-label losses `weight` and
+    `ignore_index`, any integer label dtype; `torch.func` `grad`/`vmap`/`jacrev` work for
+    every loss; traced JAX calls return NaN rows instead of raising; `explain_backend`
+    takes the function or module and its arguments.
+  - **Rust:** `Loss` variants carry their parameters (`Loss::topk_hinge(2)`), a `Solver`
+    builder trains and takes coordinate steps, `Settings` hold the precision, `Threads`
+    and projection solver, `Input::Kernel` and `Targets` (labels, sets, probabilities,
+    teacher logits) are explicit, and `Model::history` returns `Evaluation` structs.
+  - **C ABI (version 6):** `sdca_loss_evaluate`, `sdca_dual_update`, `sdca_model_fit` and
+    `sdca_history_rows` over separate `sdca_loss`, `sdca_execution`, `sdca_targets`,
+    `sdca_fit_options` and `sdca_input` structs; every call validates before it writes, and
+    the fit checks warm starts and builds `W` itself.
+  - **C++:** objectives use the shared names with a `gamma` parameter (default `0`), outputs
+    take the number of classes, labels are 0-based without the 1-based guess,
+    `criteria.tol` and `criteria.seed`, a row `loss_and_gradient` taking the target, and
+    self-contained headers (`SDCA_LOG_*` macros, no `logging.cpp`, CBLAS names in
+    `sdca`).
+  - **MATLAB:** shared names only, 1-based labels, `precision` follows `X`, `num_classes`,
+    `num_threads` and `seed`; `matsdca_loss` evaluates the distillation losses.
+- **Stale builds:** Loading a native library built in the source tree before its sources
+  changed warns, and the test suite refuses to run against it.
+- **CI:** `pytest --conformance ci` runs a profile of the conformance matrix (4,362 of
+  46,400 cells); the default still runs it all.
 - **Docs and citation:** The README starts with the installation and shows the same two losses
   in every interface; [TORCH.md](python/TORCH.md#benchmarks) lists CUDA benchmarks;
   `CITATION.cff` prefers the TPAMI 2018 paper.

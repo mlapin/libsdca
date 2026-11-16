@@ -1,5 +1,5 @@
-#ifndef SDCA_SOLVER_OBJECTIVE_L2_TOPK_HINGE_H
-#define SDCA_SOLVER_OBJECTIVE_L2_TOPK_HINGE_H
+#ifndef SDCA_SOLVER_OBJECTIVE_L2_TOPK_HINGE_BETA_H
+#define SDCA_SOLVER_OBJECTIVE_L2_TOPK_HINGE_BETA_H
 
 #include "sdca/prox/knapsack_le_biased.h"
 #include "sdca/solver/objective/objective_base.h"
@@ -8,7 +8,7 @@
 namespace sdca {
 
 template <typename Data, typename Result>
-struct l2_topk_hinge : public objective_base<Data, Result> {
+struct l2_topk_hinge_beta : public objective_base<Data, Result> {
   typedef Data data_type;
   typedef Result result_type;
 
@@ -19,7 +19,7 @@ struct l2_topk_hinge : public objective_base<Data, Result> {
 
   const Result c_div_k;
 
-  l2_topk_hinge(const Result c_, const size_type k_)
+  l2_topk_hinge_beta(const Result c_, const size_type k_)
       : base::objective_base(c_ / static_cast<Result>(k_)),
         c(c_),
         k(k_),
@@ -30,12 +30,12 @@ struct l2_topk_hinge : public objective_base<Data, Result> {
 
   // The same objective in another precision, for the evaluation.
   template <typename D, typename R>
-  explicit l2_topk_hinge(const l2_topk_hinge<D, R>& other)
-      : l2_topk_hinge(static_cast<Result>(other.c), other.k) {}
+  explicit l2_topk_hinge_beta(const l2_topk_hinge_beta<D, R>& other)
+      : l2_topk_hinge_beta(static_cast<Result>(other.c), other.k) {}
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_topk_hinge (c: " << c << ", k: " << k << ", precision: " << type_name<Result>()
+    str << "l2_topk_hinge_beta (c: " << c << ", k: " << k << ", precision: " << type_name<Result>()
         << ")";
     return str.str();
   }
@@ -92,7 +92,7 @@ struct l2_topk_hinge : public objective_base<Data, Result> {
 };
 
 template <typename Data, typename Result>
-struct l2_topk_hinge_smooth : public objective_base<Data, Result> {
+struct l2_topk_hinge_beta_smooth : public objective_base<Data, Result> {
   typedef Data data_type;
   typedef Result result_type;
 
@@ -107,7 +107,7 @@ struct l2_topk_hinge_smooth : public objective_base<Data, Result> {
   const Result gamma_div_c;
   const Result gamma_div_2c;
 
-  l2_topk_hinge_smooth(const Result c_, const size_type k_, const Result gamma_)
+  l2_topk_hinge_beta_smooth(const Result c_, const size_type k_, const Result gamma_)
       : base::objective_base(c_),
         c(c_),
         gamma(gamma_),
@@ -124,13 +124,13 @@ struct l2_topk_hinge_smooth : public objective_base<Data, Result> {
 
   // The same objective in another precision, for the evaluation.
   template <typename D, typename R>
-  explicit l2_topk_hinge_smooth(const l2_topk_hinge_smooth<D, R>& other)
-      : l2_topk_hinge_smooth(static_cast<Result>(other.c), other.k,
-                             static_cast<Result>(other.gamma)) {}
+  explicit l2_topk_hinge_beta_smooth(const l2_topk_hinge_beta_smooth<D, R>& other)
+      : l2_topk_hinge_beta_smooth(static_cast<Result>(other.c), other.k,
+                                  static_cast<Result>(other.gamma)) {}
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "l2_topk_hinge (c: " << c << ", k: " << k << ", gamma: " << gamma
+    str << "l2_topk_hinge_beta (c: " << c << ", k: " << k << ", gamma: " << gamma
         << ", precision: " << type_name<Result>() << ")";
     return str.str();
   }

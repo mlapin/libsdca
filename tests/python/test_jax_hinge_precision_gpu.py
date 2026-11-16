@@ -4,6 +4,7 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import named_losses
 import numpy as np
 import pytest
 from hinge_order_cases import rows
@@ -36,7 +37,7 @@ def test_jax_cuda_hinge_distinct_scores(
         for loss in ("multiclass_hinge", "topk_hinge_alpha", "topk_hinge_beta"):
 
             def f(v: jax.Array) -> jax.Array:
-                return J.sdca_loss(v, y, loss, precision=precision, reduction="sum")
+                return named_losses.loss(J, loss, v, y, precision=precision, reduction="sum")
 
             gradient = jax.jit(jax.grad(f))(x)
             np.testing.assert_array_equal(gradient, expected)

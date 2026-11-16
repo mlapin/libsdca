@@ -18,9 +18,10 @@ typedef long double wide_float;
 template <typename Data, typename Result>
 std::vector<Data> entropy_step(std::size_t k, double c, std::vector<Data> a, std::vector<Data> z) {
   if (k == 1)
-    sdca::l2_entropy<Data, Result>(Result(c)).update_dual_variables(4, Data(1), a.data(), z.data());
+    sdca::l2_cross_entropy<Data, Result>(Result(c)).update_dual_variables(4, Data(1), a.data(),
+                                                                          z.data());
   else
-    sdca::l2_entropy_topk<Data, Result>(Result(c), k)
+    sdca::l2_topk_cross_entropy<Data, Result>(Result(c), k)
         .update_dual_variables(4, Data(1), a.data(), z.data());
   return a;
 }
@@ -123,10 +124,10 @@ void hinge_tiny_margin_steps(const char* precision) {
     z[1] = z1;
   };
   reset();
-  sdca::l2_hinge_topk<Data, Result>(1, 1).update_dual_variables(2, Data(1), a, z);
+  sdca::l2_topk_hinge_alpha<Data, Result>(1, 1).update_dual_variables(2, Data(1), a, z);
   check("topk_hinge_alpha", 0, a);
   reset();
-  sdca::l2_hinge_topk_smooth<Data, Result>(1, 1, 1).update_dual_variables(2, Data(1), a, z);
+  sdca::l2_topk_hinge_alpha_smooth<Data, Result>(1, 1, 1).update_dual_variables(2, Data(1), a, z);
   check("topk_hinge_alpha", 1, a);
   reset();
   sdca::l2_multilabel_hinge<Data, Result>(1).update_dual_variables(2, 1, Data(1), a, z);
@@ -135,10 +136,10 @@ void hinge_tiny_margin_steps(const char* precision) {
   sdca::l2_multilabel_hinge_smooth<Data, Result>(1, 1).update_dual_variables(2, 1, Data(1), a, z);
   check("multilabel_hinge", 2, a);
   reset();
-  sdca::l2_topk_hinge<Data, Result>(1, 1).update_dual_variables(2, Data(1), a, z);
+  sdca::l2_topk_hinge_beta<Data, Result>(1, 1).update_dual_variables(2, Data(1), a, z);
   check("topk_hinge_beta", 0, a);
   reset();
-  sdca::l2_topk_hinge_smooth<Data, Result>(1, 1, 1).update_dual_variables(2, Data(1), a, z);
+  sdca::l2_topk_hinge_beta_smooth<Data, Result>(1, 1, 1).update_dual_variables(2, Data(1), a, z);
   check("topk_hinge_beta", 1, a);
 }
 
@@ -167,18 +168,20 @@ std::vector<Data> hinge_step(const hinge h, const double c, std::vector<Data> a,
   const Result C = Result(c);
   switch (h) {
     case hinge::topk:
-      sdca::l2_hinge_topk<Data, Result>(C, 1).update_dual_variables(n, Data(1), a.data(), z.data());
+      sdca::l2_topk_hinge_alpha<Data, Result>(C, 1).update_dual_variables(n, Data(1), a.data(),
+                                                                          z.data());
       break;
     case hinge::topk_smooth:
-      sdca::l2_hinge_topk_smooth<Data, Result>(C, 1, C).update_dual_variables(n, Data(1), a.data(),
-                                                                              z.data());
+      sdca::l2_topk_hinge_alpha_smooth<Data, Result>(C, 1, C).update_dual_variables(
+          n, Data(1), a.data(), z.data());
       break;
     case hinge::knapsack:
-      sdca::l2_topk_hinge<Data, Result>(C, 1).update_dual_variables(n, Data(1), a.data(), z.data());
+      sdca::l2_topk_hinge_beta<Data, Result>(C, 1).update_dual_variables(n, Data(1), a.data(),
+                                                                         z.data());
       break;
     case hinge::knapsack_smooth:
-      sdca::l2_topk_hinge_smooth<Data, Result>(C, 1, C).update_dual_variables(n, Data(1), a.data(),
-                                                                              z.data());
+      sdca::l2_topk_hinge_beta_smooth<Data, Result>(C, 1, C).update_dual_variables(
+          n, Data(1), a.data(), z.data());
       break;
     case hinge::multilabel:
       sdca::l2_multilabel_hinge<Data, Result>(C).update_dual_variables(n, std::size_t(1), Data(1),
@@ -295,7 +298,8 @@ TEST(Stress, A1_multilabel_entropy_keeps_the_underflowed_other_mass) {
   // z = [400, 400, -400], labels {0, 1}, C = 1e200, norm2 = 1e-200.
   // C norm2 a is negligible, so -a_2 = C e^-800 / (2 + e^-800), a_0 = a_1 = -a_2 / 2.
   double z[] = {400, 400, -400}, a[] = {0, 0, 0};
-  sdca::l2_multilabel_entropy<double, double>(1e200).update_dual_variables(3, 2, 1e-200, a, z);
+  sdca::l2_multilabel_cross_entropy<double, double>(1e200).update_dual_variables(3, 2, 1e-200, a,
+                                                                                 z);
   const double other = std::exp(std::log(1e200) - 800 - std::log(2.0));
   EXPECT_NEAR(-a[2] / other, 1, 1e-12);
   EXPECT_NEAR(a[0] / (other / 2), 1, 1e-12);
@@ -312,9 +316,9 @@ TEST(Stress, topk_entropy_primal_loss_matches_loss_and_gradient_under_far_cap) {
   // Free scores far below a capped competitor keep their differences in primal_loss.
   double z[] = {0.0, 1.0, 1e16, -0.3, 0.2, 1e16 - 3.0};
   double g[6];
-  const double expected =
-      sdca::loss_and_gradient(sdca::loss_kind::topk_cross_entropy, 6, 1, z, g, 3, 1.0);
-  const double actual = sdca::l2_entropy_topk<double, double>(1.0, 3).primal_loss(6, z);
+  const double expected = sdca::detail::permuted_loss_and_gradient(
+      sdca::loss_kind::topk_cross_entropy, 6, 1, z, g, 3, 1.0);
+  const double actual = sdca::l2_topk_cross_entropy<double, double>(1.0, 3).primal_loss(6, z);
   EXPECT_DOUBLE_EQ(expected, actual);
 }
 
@@ -327,7 +331,7 @@ TEST(StressLimit, float32_topk_entropy_at_huge_c_with_zero_scores) {
   const std::size_t n = 1000;
   const double a0 = 82.99536980534230771388;
   std::vector<float> a(n, 0.f), z(n, 0.f);
-  sdca::l2_entropy_topk<float, float>(float(1e35), 2)
+  sdca::l2_topk_cross_entropy<float, float>(float(1e35), 2)
       .update_dual_variables(n, 1.f, a.data(), z.data());
   const double ulp = double(std::numeric_limits<float>::epsilon()) * a0;
   EXPECT_LE(std::abs(double(a[0]) - a0), 2048 * ulp);
@@ -348,9 +352,9 @@ TEST(StressLimit, topk_entropy_error_grows_with_the_score_spread) {
   for (std::size_t i = 0; i < 5; ++i) {
     const double s = spreads[i];
     double z[] = {0, s, -s, -s}, g[4], scores[] = {0, s, -s, -s};
-    const double value =
-        sdca::loss_and_gradient(sdca::loss_kind::topk_cross_entropy, 4, 1, z, g, 2, 1.0);
-    const sdca::l2_entropy_topk<double, double> objective(1.0, 2);
+    const double value = sdca::detail::permuted_loss_and_gradient(
+        sdca::loss_kind::topk_cross_entropy, 4, 1, z, g, 2, 1.0);
+    const sdca::l2_topk_cross_entropy<double, double> objective(1.0, 2);
     EXPECT_LE(std::abs(value - loss), bounds[i][0] * loss) << s;
     EXPECT_EQ(value, objective.primal_loss(4, scores)) << s;
     std::vector<double> x = {s, -s, -s};
@@ -367,8 +371,8 @@ TEST(StressLimit, all_capped_topk_entropy_mean_beyond_double_double) {
   // log1p(4 exp(1/4)) = 1.8142); the documented result is log 5.
   const double h = std::ldexp(1.0, 200), m = std::ldexp(1.0, 100);
   double z[] = {m / 4, h, m, 1, -h}, g[5];
-  const double value =
-      sdca::loss_and_gradient(sdca::loss_kind::topk_cross_entropy, 5, 1, z, g, 4, 1.0);
+  const double value = sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::topk_cross_entropy,
+                                                                5, 1, z, g, 4, 1.0);
   const double exact = std::log1p(4 * std::exp(0.25));
   EXPECT_LE(std::abs(value - exact), exact - std::log(5.0) + 1e-15);
 }
@@ -377,7 +381,8 @@ TEST(StressLimit, hinge_margins_relative_to_a_far_label) {
   // LIMIT: margins are formed relative to the label score, so other scores closer
   // than the resolution of a huge gap tie; the value stays accurate to its own size.
   double z[] = {-1e20, 0, 1e-3}, g[3];
-  const double value = sdca::loss_and_gradient(sdca::loss_kind::topk_hinge_alpha, 3, 1, z, g, 1, 0);
+  const double value =
+      sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::topk_hinge_alpha, 3, 1, z, g, 1, 0);
   EXPECT_NEAR(value / (1e20 + 1 + 1e-3), 1, 2 * std::numeric_limits<double>::epsilon());
   EXPECT_EQ(-1, g[0]);
   EXPECT_EQ(1, g[1] + g[2]);

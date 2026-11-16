@@ -2,7 +2,7 @@
 
 import pytest
 import torch
-from libsdca.torch import distillation_loss
+from libsdca.torch import Reduction, distillation_loss
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 
@@ -30,14 +30,20 @@ def mixed_inputs(classes: int) -> tuple[torch.Tensor, torch.Tensor]:
 @pytest.mark.parametrize("launcher", ["on", "off"])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_mixed_adaptive_rows(
-    monkeypatch: pytest.MonkeyPatch, classes: int, reduction: str, launcher: str, dtype: torch.dtype
+    monkeypatch: pytest.MonkeyPatch,
+    classes: int,
+    reduction: Reduction,
+    launcher: str,
+    dtype: torch.dtype,
 ) -> None:
     monkeypatch.setenv("SDCA_CUDA_LAUNCHER", launcher)
     s, t = (x.to(dtype) for x in mixed_inputs(classes))
     temperature = 2.0
     s.requires_grad_()
-    actual = distillation_loss(s, t, temperature, reduction=reduction)
-    exact = distillation_loss(s, t, temperature, reduction=reduction, precision="float64")
+    actual = distillation_loss(s, t, temperature=temperature, reduction=reduction)
+    exact = distillation_loss(
+        s, t, temperature=temperature, reduction=reduction, precision="float64"
+    )
     weight = (
         torch.linspace(0.25, 2, len(s), device="cuda")
         if reduction == "none"

@@ -4,6 +4,7 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import named_losses
 import numpy as np
 import pytest
 from libsdca import _jax_ffi
@@ -42,14 +43,14 @@ def test_default_fp32_work(
 
         def evaluate(precision: str | None) -> tuple[jax.Array, jax.Array]:
             def evaluate_loss(x: jax.Array) -> jax.Array:
-                return J.sdca_loss(x, y, loss, k=k, backend=backend, precision=precision)
+                return named_losses.loss(J, loss, x, y, k=k, backend=backend, precision=precision)
 
             return jax.jit(jax.value_and_grad(evaluate_loss))(z)
 
         default, narrow = evaluate(None), evaluate("float32")
         for actual, expected in zip(default, narrow, strict=True):
             np.testing.assert_array_equal(actual, expected)
-        if x64 or backend != "jax":
+        if x64:
             wide = evaluate("float64")
             for actual, expected in zip(default, wide, strict=True):
                 np.testing.assert_allclose(
@@ -59,6 +60,7 @@ def test_default_fp32_work(
                     atol=0.002 if dtype == jnp.bfloat16 else 1e-7,
                 )
         else:
+            # Every backend: float64 work needs jax_enable_x64.
             with pytest.raises(ValueError, match="jax_enable_x64"):
                 evaluate("float64")
     jax.clear_caches()
@@ -82,7 +84,7 @@ def test_topk_default_boundary(
 
         def evaluate(precision: str | None):
             return jax.jit(
-                jax.value_and_grad(lambda x: J.topk_cross_entropy(x, y, 5, precision=precision))
+                jax.value_and_grad(lambda x: J.topk_cross_entropy(x, y, k=5, precision=precision))
             )(z)
 
         for actual, expected in zip(

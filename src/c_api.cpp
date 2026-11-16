@@ -1,12 +1,13 @@
-// The C ABI of include/sdca/c_api.h over the headers. SDCA_BASELINE builds
-// the solver entry points against headers without sdca/loss.h; its loss
-// entry point always fails.
+// The C ABI of include/sdca/c_api.h and the internal entry points of
+// src/c_api_internal.h over the headers. SDCA_BASELINE (for benchmarks against
+// earlier releases) builds the training entry points against earlier headers
+// through src/c_api_baseline.h; the loss entry points then fail.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <initializer_list>
 #include <limits>
@@ -18,16 +19,18 @@
 #ifdef __linux__
 #include <sys/mman.h>
 #endif
+#include "c_api_internal.h"
 #include "sdca/c_api.h"
-#include "sdca/solver.h"
-#ifndef SDCA_BASELINE
+#ifdef SDCA_BASELINE
+#include "c_api_baseline.h"
+#else
 #include "sdca/loss.h"
+#include "sdca/solver.h"
 #include "sdca/utility/scratch.h"
 #include "tensor_losses.h"
 #endif
-#include "sdca/utility/parallel.h"
 #include "sdca/utility/fpenv.h"
-#include "sdca/utility/logging.cpp"
+#include "sdca/utility/parallel.h"
 
 #ifndef SDCA_VERSION
 #define SDCA_VERSION "unknown"
@@ -35,10 +38,6 @@
 
 namespace {
 thread_local std::string last_error;
-const bool quiet_logger = [] {
-  sdca::logging::set_level(sdca::logging::level::none);
-  return true;
-}();
 
 // Every computing entry point: IEEE arithmetic (no flush-to-zero, round to
 // nearest, no traps) inside, the caller's modes restored on return.
@@ -48,7 +47,7 @@ int protect(F f) {
   try {
     f();
     last_error.clear();
-    return 0;
+    return SDCA_OK;
   } catch (const std::invalid_argument& e) {
     last_error = e.what();
     return SDCA_INVALID_ARGUMENT;
@@ -61,851 +60,778 @@ int protect(F f) {
   }
 }
 
-void check_labels(std::size_t n, std::size_t k, const int64_t* labels) {
-  for (std::size_t i = 0; i < n; ++i)
-    if (labels[i] < 0 || static_cast<std::size_t>(labels[i]) >= k)
-      throw std::invalid_argument("Labels must lie in [0, num_classes)");
-}
-
-void check_sizes(std::size_t n, std::size_t k) {
-  if (n < 1 || k < 2) throw std::invalid_argument("Invalid dimensions");
-}
+void invalid(const std::string& message) { throw std::invalid_argument(message); }
 
 // The extent a * b of a caller's buffer, which must not wrap around.
 std::size_t extent(std::size_t a, std::size_t b) {
   if (b != 0 && a > std::numeric_limits<std::size_t>::max() / b)
-    throw std::invalid_argument("Buffer extent overflows size_t");
+    invalid("Buffer extent overflows size_t");
   return a * b;
 }
 
 void check_buffers(std::initializer_list<const void*> buffers) {
   for (const void* buffer : buffers)
-    if (!buffer) throw std::invalid_argument("Required buffers must not be NULL");
+    if (!buffer) invalid("Required buffers must not be NULL");
+}
+
+std::size_t max_extent() {
+  return static_cast<std::size_t>(std::numeric_limits<sdca::blas_int>::max());
 }
 
 void check_blas_sizes(std::initializer_list<std::size_t> sizes) {
-  const auto limit = static_cast<std::size_t>(std::numeric_limits<sdca::blas_int>::max());
+  const std::size_t limit = max_extent();
   for (std::size_t size : sizes)
-    if (size > limit)
-      throw std::invalid_argument("Dimensions exceed the native BLAS integer limit");
+    if (size > limit) invalid("Dimensions exceed the native BLAS integer limit");
+}
+
+std::size_t storage_size(int dtype) {
+  if (dtype == SDCA_DTYPE_FLOAT32) return 4;
+  if (dtype == SDCA_DTYPE_FLOAT64) return 8;
+  if (dtype == SDCA_INTERNAL_DTYPE_FLOAT16 || dtype == SDCA_INTERNAL_DTYPE_BFLOAT16) return 2;
+  throw std::invalid_argument("Invalid dtype");
+}
+
+// The num_threads of the headers for that of the ABI (0: the default).
+std::size_t threads_of(std::size_t num_threads) {
+  return num_threads == 0 ? sdca::detail::default_threads : num_threads;
+}
+
+// s = a + b and its rounding error (Knuth's TwoSum).
+double two_sum(double a, double b, double& error) {
+  const double s = a + b, bb = s - a;
+  error = (a - (s - bb)) + (b - bb);
+  return s;
 }
 
 template <typename D>
-void check_finite(const void* x, std::size_t size, const char* message) {
-  const D* first = static_cast<const D*>(x);
-  if (!std::all_of(first, first + size, [](D v) { return std::isfinite(v); }))
-    throw std::invalid_argument(message);
+bool all_finite(const D* x, std::size_t size) {
+  return std::all_of(x, x + size, [](D v) { return std::isfinite(v); });
 }
 
-// The loss and update entry points compute into scratch and write their
-// outputs only on success; a failed call leaves the caller's buffers as given.
-// Rows run on the threads of num_threads (see c_api.h), each independently.
+// Whether the rows of x (n, k) are finite, on the threads of a call.
 template <typename D>
-void check_finite_rows(const D* x, std::size_t n, std::size_t k, std::size_t num_threads,
+void check_finite_rows(const D* x, std::size_t n, std::size_t k, std::size_t threads,
                        const char* message) {
-  sdca::detail::parallel_rows(n, k, num_threads, [=](std::size_t begin, std::size_t end) {
-    check_finite<D>(x + begin * k, (end - begin) * k, message);
+  std::atomic<bool> finite(true);
+  sdca::detail::parallel_rows(n, k, threads, [&](std::size_t begin, std::size_t end) {
+    if (!all_finite(x + begin * k, (end - begin) * k)) finite = false;
   });
+  if (!finite) invalid(message);
 }
 
 template <typename D>
-void copy_rows(const D* from, std::size_t n, std::size_t k, std::size_t num_threads, D* to) {
-  sdca::detail::parallel_rows(n, k, num_threads, [=](std::size_t begin, std::size_t end) {
+void copy_rows(const D* from, std::size_t n, std::size_t k, std::size_t threads, D* to) {
+  sdca::detail::parallel_rows(n, k, threads, [=](std::size_t begin, std::size_t end) {
     std::copy(from + begin * k, from + end * k, to + begin * k);
   });
 }
 
-#ifndef SDCA_BASELINE
-using projection_mode = sdca::projection_precision;
-static_assert(SDCA_PROJECTION_FLOAT64 == static_cast<int>(projection_mode::float64) &&
-                  SDCA_PROJECTION_EXTENDED == static_cast<int>(projection_mode::extended),
-              "The C projection ids follow sdca::projection_precision");
-#else
-enum class projection_mode { float64, extended };  // validated, unused by the baseline headers
-#endif
-
-// The projection_precision argument of an entry point.
-projection_mode check_projection(int mode) {
-  if (mode != SDCA_PROJECTION_FLOAT64 && mode != SDCA_PROJECTION_EXTENDED)
-    throw std::invalid_argument("Invalid projection precision");
-  return static_cast<projection_mode>(mode);
+// A caller's struct: its size between that of the first header of this ABI
+// version (every struct's present size) and this one's; the fields beyond the
+// caller's size take their defaults.
+template <typename T>
+T read_struct(const T* value, const char* name, T defaults) {
+  if (!value) invalid(std::string("struct sdca_") + name + " must not be NULL");
+  const std::size_t first = sizeof(T);
+  if (value->size < first || value->size > sizeof(T))
+    invalid(std::string("struct sdca_") + name + " has a size this library does not know");
+  std::memcpy(static_cast<void*>(&defaults), value, value->size);
+  defaults.size = sizeof(T);
+  return defaults;
 }
 
-#ifndef SDCA_BASELINE
-using shrinking_mode = sdca::shrinking_mode;
-static_assert(SDCA_SHRINKING_AUTO == static_cast<int>(shrinking_mode::automatic) &&
-                  SDCA_SHRINKING_OFF == static_cast<int>(shrinking_mode::off) &&
-                  SDCA_SHRINKING_HEURISTIC == static_cast<int>(shrinking_mode::heuristic) &&
-                  SDCA_SHRINKING_SAFE == static_cast<int>(shrinking_mode::safe) &&
-                  SDCA_SHRINKING_BOTH == static_cast<int>(shrinking_mode::both),
-              "The C shrinking ids follow sdca::shrinking_mode");
-#else
-enum class shrinking_mode { automatic, off, heuristic, safe, both };  // unused by the baseline
-#endif
+const sdca_loss default_loss = SDCA_LOSS_INIT;
+const sdca_execution default_execution = SDCA_EXECUTION_INIT;
+const sdca_targets default_targets = SDCA_TARGETS_INIT;
+const sdca_input default_input = SDCA_INPUT_INIT;
+const sdca_fit_options default_fit_options = SDCA_FIT_OPTIONS_INIT;
+const sdca_fit_result default_fit_result = SDCA_FIT_RESULT_INIT;
 
-// The shrinking of sdca_fit: AUTO for a struct of a header without the field.
-shrinking_mode check_shrinking(const sdca_options& o) {
-  if (o.size < offsetof(sdca_options, shrinking) + sizeof(o.shrinking))
-    return shrinking_mode::automatic;
-  if (o.shrinking < SDCA_SHRINKING_AUTO || o.shrinking > SDCA_SHRINKING_BOTH)
-    throw std::invalid_argument("Invalid shrinking");
-  return static_cast<shrinking_mode>(o.shrinking);
+// ---------------------------------------------------------------------------
+// Losses, targets and settings.
+
+const char* const loss_names[] = {
+    "cross_entropy",   "topk_cross_entropy",   "multiclass_hinge",         "topk_hinge_alpha",
+    "topk_hinge_beta", "multilabel_hinge",     "multilabel_cross_entropy", "proximal_cross_entropy",
+    "distillation",    "proximal_distillation"};
+
+bool is_topk(int kind) {
+  return kind == SDCA_LOSS_TOPK_CROSS_ENTROPY || kind == SDCA_LOSS_TOPK_HINGE_ALPHA ||
+         kind == SDCA_LOSS_TOPK_HINGE_BETA;
+}
+bool is_hinge(int kind) {
+  return kind == SDCA_LOSS_MULTICLASS_HINGE || kind == SDCA_LOSS_TOPK_HINGE_ALPHA ||
+         kind == SDCA_LOSS_TOPK_HINGE_BETA || kind == SDCA_LOSS_MULTILABEL_HINGE;
+}
+bool is_proximal(int kind) {
+  return kind == SDCA_LOSS_PROXIMAL_CROSS_ENTROPY || kind == SDCA_LOSS_PROXIMAL_DISTILLATION;
+}
+bool is_distillation(int kind) {
+  return kind == SDCA_LOSS_DISTILLATION || kind == SDCA_LOSS_PROXIMAL_DISTILLATION;
+}
+bool is_multilabel(int kind) {
+  return kind == SDCA_LOSS_MULTILABEL_HINGE || kind == SDCA_LOSS_MULTILABEL_CROSS_ENTROPY;
+}
+// The losses that sdca_dual_update and sdca_model_fit train.
+bool is_objective(int kind) {
+  return kind >= SDCA_LOSS_CROSS_ENTROPY && kind <= SDCA_LOSS_MULTILABEL_CROSS_ENTROPY;
 }
 
-#ifndef SDCA_BASELINE
-static_assert(SDCA_PROXIMAL_CROSS_ENTROPY ==
-                      static_cast<int>(sdca::loss_kind::proximal_cross_entropy) &&
-                  SDCA_MULTICLASS_HINGE == static_cast<int>(sdca::loss_kind::multiclass_hinge),
-              "The C loss ids follow sdca::loss_kind");
-
-// The index of the first nonzero of p[from, n), else n; eight bytes at a time.
-std::size_t first_nonzero(const uint8_t* p, std::size_t n, std::size_t from) {
-  std::size_t j = from;
-  for (; j + 8 <= n; j += 8) {
-    uint64_t word;
-    std::memcpy(&word, p + j, sizeof word);
-    if (word) break;
+// A real parameter of the loss named name: finite and positive (nonnegative if
+// zero_ok) if the loss takes it, else its default.
+void check_real_parameter(const std::string& name, const char* parameter, double value,
+                          double fallback, bool takes, bool zero_ok) {
+  if (takes) {
+    if (!(zero_ok ? value >= 0 : value > 0) || !std::isfinite(value))
+      invalid(std::string(parameter) + " must be finite and " +
+              (zero_ok ? "nonnegative" : "positive"));
+  } else if (value != fallback) {
+    invalid(name + " takes no parameter " + parameter);
   }
-  while (j < n && !p[j]) ++j;
-  return j;
 }
 
-// The losses of rows [begin, end): z (n, k) and its positive mask in, the
-// values and gradients out.
-template <typename D, typename R>
-struct loss_rows {
-  sdca::loss_kind kind;
-  std::size_t k, topk;
-  double gamma, alpha;
-  projection_mode mode;
-  const D* z;
-  const uint8_t* positive;
-  double* values;
-  D* gradients;
+// The loss with its own parameters only, for num_classes classes.
+sdca_loss check_loss(const sdca_loss* given, std::size_t num_classes) {
+  const sdca_loss loss = read_struct(given, "loss", default_loss);
+  if (loss.kind < SDCA_LOSS_CROSS_ENTROPY || loss.kind > SDCA_LOSS_PROXIMAL_DISTILLATION)
+    invalid("Unknown loss kind");
+  const std::string name = loss_names[loss.kind];
+  if (is_topk(loss.kind)) {
+    if (loss.k < 1 || loss.k >= num_classes) invalid("k must be an integer in [1, num_classes-1]");
+  } else if (loss.k != default_loss.k) {
+    invalid(name + " takes no parameter k");
+  }
+  check_real_parameter(name, "gamma", loss.gamma, default_loss.gamma, is_hinge(loss.kind), true);
+  check_real_parameter(name, "alpha", loss.alpha, default_loss.alpha, is_proximal(loss.kind),
+                       false);
+  check_real_parameter(name, "temperature", loss.temperature, default_loss.temperature,
+                       is_distillation(loss.kind), false);
+  if (loss.projection_precision != SDCA_PROJECTION_FLOAT64 &&
+      loss.projection_precision != SDCA_PROJECTION_EXTENDED)
+    invalid("Invalid projection_precision");
+  if (loss.kind != SDCA_LOSS_MULTILABEL_HINGE &&
+      loss.projection_precision != default_loss.projection_precision)
+    invalid(name + " takes no parameter projection_precision");
+  return loss;
+}
 
-  void operator()(std::size_t begin, std::size_t end) const {
-    // Row scratch on the stack for up to 64 classes.
-    sdca::detail::entropy_buffer<D> scores(k), grad(k);
-    sdca::detail::entropy_buffer<std::size_t> order_buffer(k);
-    std::size_t* order = order_buffer.data();
-    if (kind == sdca::loss_kind::cross_entropy ||
-        kind == sdca::loss_kind::multilabel_cross_entropy) {
-      // In place, as sdca_loss_gradient_rows (the same bits).
-      sdca::detail::entropy_buffer<double> terms(k);
-      for (std::size_t i = begin; i < end; ++i) {
-        const uint8_t* row = positive + i * k;
-        const std::size_t p = sdca::tensor::mask_positions(k, row, order);
-        if (p == 0) throw std::invalid_argument("Invalid loss dimensions or parameters");
-        values[i] = sdca::tensor::mask_entropy_row<D, R>(k, row, z + i * k, p, order, terms.data(),
-                                                         gradients + i * k);
-      }
-      return;
+void check_dtype(int dtype) {
+  if (dtype != SDCA_DTYPE_FLOAT32 && dtype != SDCA_DTYPE_FLOAT64) invalid("Invalid dtype");
+}
+
+// The execution settings for a storage dtype: float work, and the threads of the headers.
+struct execution {
+  bool float_work;
+  std::size_t threads;
+};
+
+execution check_execution(const sdca_execution* given, int dtype) {
+  const sdca_execution e = read_struct(given, "execution", default_execution);
+  if (e.precision < SDCA_PRECISION_DEFAULT || e.precision > SDCA_PRECISION_FLOAT64)
+    invalid("Invalid precision");
+  if (e.precision == SDCA_PRECISION_FLOAT32 && dtype == SDCA_DTYPE_FLOAT64)
+    invalid("float32 work needs float32 storage; convert the data to float32");
+  const bool float_work = e.precision == SDCA_PRECISION_FLOAT32 ||
+                          (e.precision == SDCA_PRECISION_DEFAULT && dtype == SDCA_DTYPE_FLOAT32);
+  const execution out = {float_work, threads_of(e.num_threads)};
+  return out;
+}
+
+// Validated targets of n examples.
+struct target_rows {
+  int kind;
+  const int64_t* labels;
+  const int64_t* offsets;
+  const uint8_t* mask;
+  const double* probabilities;
+  const void* logits;
+};
+
+void check_labels(std::size_t n, std::size_t k, const int64_t* labels) {
+  for (std::size_t i = 0; i < n; ++i)
+    if (labels[i] < 0 || static_cast<uint64_t>(labels[i]) >= k)
+      invalid("Labels must lie in [0, num_classes)");
+}
+
+// A label set of every class: the losses are defined, but the SDCA steps of
+// the multilabel objectives need a class outside each set, and the losses
+// follow them.
+const char* const full_set = "Every label set needs a class outside it";
+
+// Label sets: offsets (n + 1) from zero; each a nonempty strictly increasing
+// list of labels in [0, k) without every class.
+void check_label_sets(std::size_t n, std::size_t k, const int64_t* labels, const int64_t* offsets) {
+  if (offsets[0] != 0) invalid("Label offsets must start at zero");
+  for (std::size_t i = 0; i < n; ++i) {
+    if (offsets[i + 1] <= offsets[i]) invalid("Every label set needs a label");
+    const uint64_t size = static_cast<uint64_t>(offsets[i + 1] - offsets[i]);
+    if (size > k) invalid("Label sets must be sorted without duplicates");
+    if (size == k) invalid(full_set);
+    check_labels(static_cast<std::size_t>(size), k, labels + offsets[i]);
+    for (int64_t j = offsets[i] + 1; j < offsets[i + 1]; ++j)
+      if (labels[j] <= labels[j - 1]) invalid("Label sets must be sorted without duplicates");
+  }
+}
+
+void check_mask(std::size_t n, std::size_t k, const uint8_t* mask) {
+  for (std::size_t i = 0; i < n; ++i) {
+    std::size_t count = 0;
+    for (std::size_t j = 0; j < k; ++j) {
+      if (mask[i * k + j] > 1) invalid("A label mask holds 0 or 1");
+      count += mask[i * k + j];
     }
-    for (std::size_t i = begin; i < end; ++i) {
-      const uint8_t* row = positive + i * k;
-      const bool topk_entropy =
-          kind == sdca::loss_kind::topk_cross_entropy && topk > 1 && topk + 1 < k;
-      if (kind == sdca::loss_kind::cross_entropy || topk_entropy) {
-        // One label: the row itself, no reordering.
-        const std::size_t label = first_nonzero(row, k, 0);
-        if (label < k && first_nonzero(row, k, label + 1) == k) {
-          values[i] = topk_entropy
-                          ? sdca::topk_entropy_label_loss<D, R>(k, label, z + i * k, topk,
-                                                                gradients + i * k)
-                          : sdca::entropy_label_loss<D, R>(k, label, z + i * k, gradients + i * k);
-          continue;
-        }
-      }
-      // Positive labels first, as loss_and_gradient takes them.
-      std::size_t p = 0, q = k;
-      for (std::size_t j = 0; j < k; ++j) {
-        if (row[j]) order[p++] = j;
-      }
-      for (std::size_t j = k; j-- > 0;) {
-        if (!row[j]) order[--q] = j;
-      }
-      for (std::size_t j = 0; j < k; ++j) scores.data()[j] = z[i * k + order[j]];
-      values[i] = sdca::loss_and_gradient<D, R>(kind, k, p, scores.data(), grad.data(), topk, gamma,
-                                                alpha, mode);
-      for (std::size_t j = 0; j < k; ++j) gradients[i * k + order[j]] = grad.data()[j];
+    if (count == 0) invalid("Every label set needs a label");
+    if (count == k) invalid(full_set);
+  }
+}
+
+// Probabilities: finite, nonnegative and on the simplex within 64 k eps per row.
+void check_probabilities(std::size_t n, std::size_t k, const double* p) {
+  const double tol = 64 * std::numeric_limits<double>::epsilon() * static_cast<double>(k);
+  for (std::size_t i = 0; i < n; ++i) {
+    double sum = 0, carry = 0;
+    for (std::size_t j = 0; j < k; ++j) {
+      const double q = p[i * k + j];
+      if (!(q >= 0) || !std::isfinite(q))
+        invalid("Target probabilities must be finite and nonnegative");
+      double error;
+      sum = two_sum(sum, q - carry, error);
+      carry = -error;
     }
+    if (!(std::abs(sum - carry - 1) <= tol)) invalid("Target probability rows must sum to one");
+  }
+}
+
+enum class entry { loss, training };
+
+// The targets of a loss (see c_api.h): only the fields of their kind.
+target_rows check_targets(const sdca_targets* given, int loss, entry use, std::size_t n,
+                          std::size_t k) {
+  const sdca_targets t = read_struct(given, "targets", default_targets);
+  const std::string name = loss_names[loss];
+  bool allowed = false;
+  switch (t.kind) {
+    case SDCA_TARGET_LABELS:
+      allowed = !is_multilabel(loss) && !is_distillation(loss);
+      break;
+    case SDCA_TARGET_LABEL_SETS:
+    case SDCA_TARGET_MASK:
+      allowed = is_multilabel(loss);
+      break;
+    case SDCA_TARGET_PROBABILITIES:
+      allowed = loss == SDCA_LOSS_CROSS_ENTROPY && use == entry::training;
+      break;
+    case SDCA_TARGET_LOGITS:
+      allowed = is_distillation(loss);
+      break;
+    default:
+      invalid("Unknown target kind");
+  }
+  if (!allowed) invalid(name + " does not take targets of this kind");
+  const bool labels = t.kind == SDCA_TARGET_LABELS || t.kind == SDCA_TARGET_LABEL_SETS;
+  if ((t.labels != nullptr) != labels ||
+      (t.offsets != nullptr) != (t.kind == SDCA_TARGET_LABEL_SETS) ||
+      (t.mask != nullptr) != (t.kind == SDCA_TARGET_MASK) ||
+      (t.probabilities != nullptr) != (t.kind == SDCA_TARGET_PROBABILITIES) ||
+      (t.logits != nullptr) != (t.kind == SDCA_TARGET_LOGITS))
+    invalid("Targets need the fields of their kind, and NULL in the others");
+  switch (t.kind) {
+    case SDCA_TARGET_LABELS:
+      extent(n, sizeof(int64_t));
+      check_labels(n, k, t.labels);
+      break;
+    case SDCA_TARGET_LABEL_SETS:
+      extent(n + 1, sizeof(int64_t));
+      check_label_sets(n, k, t.labels, t.offsets);
+      break;
+    case SDCA_TARGET_MASK:
+      extent(n, k);
+      check_mask(n, k, t.mask);
+      break;
+    case SDCA_TARGET_PROBABILITIES:
+      extent(extent(n, k), sizeof(double));
+      check_probabilities(n, k, t.probabilities);
+      break;
+    default:
+      break;  // logits: checked with the scores
+  }
+  const target_rows rows = {t.kind, t.labels, t.offsets, t.mask, t.probabilities, t.logits};
+  return rows;
+}
+
+// Label sets of a mask: the labels and the offsets (n + 1).
+void sets_of_mask(std::size_t n, std::size_t k, const uint8_t* mask, std::vector<int64_t>& labels,
+                  std::vector<int64_t>& offsets) {
+  offsets.assign(1, 0);
+  for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t j = 0; j < k; ++j)
+      if (mask[i * k + j]) labels.push_back(static_cast<int64_t>(j));
+    offsets.push_back(static_cast<int64_t>(labels.size()));
+  }
+}
+
+// Label-set targets as labels and offsets (a mask converted into sets).
+struct label_sets {
+  std::vector<int64_t> labels, offsets;
+  target_rows rows;
+
+  label_sets(const target_rows& t, std::size_t n, std::size_t k) : rows(t) {
+    if (t.kind != SDCA_TARGET_MASK) return;
+    sets_of_mask(n, k, t.mask, labels, offsets);
+    rows.kind = SDCA_TARGET_LABEL_SETS;
+    rows.labels = labels.data();
+    rows.offsets = offsets.data();
+    rows.mask = nullptr;
   }
 };
 
-template <typename D, typename R>
-void batch_loss_gradient(int kind, std::size_t n, std::size_t k, const void* logits,
-                         const uint8_t* positive, std::size_t topk, double gamma, double alpha,
-                         projection_mode mode, std::size_t num_threads, double* values,
-                         void* gradients) {
-  if (kind < 0 || kind > SDCA_PROXIMAL_CROSS_ENTROPY) throw std::invalid_argument("Unknown loss");
-  const D* z = static_cast<const D*>(logits);
-  const std::size_t size = extent(n, k);
-  extent(size, sizeof(D));
-  extent(n, sizeof(double));
-  check_buffers({logits, positive, values, gradients});
-  check_finite_rows(z, n, k, num_threads, "Logits must be finite");
-  if (!sdca::detail::valid_loss_arguments(k, 1, topk, gamma, alpha))
-    throw std::invalid_argument("Invalid loss dimensions or parameters");
-  if (kind == SDCA_CROSS_ENTROPY) {
-    // Valid once every row has a label: compute into the outputs.
-    sdca::detail::parallel_rows(n, k, num_threads, [=](std::size_t begin, std::size_t end) {
-      for (std::size_t i = begin; i < end; ++i)
-        if (first_nonzero(positive + i * k, k, 0) == k)
-          throw std::invalid_argument("Invalid loss dimensions or parameters");
-    });
-    const loss_rows<D, R> rows = {
-        sdca::loss_kind(kind),     k, topk, gamma, alpha, mode, z, positive, values,
-        static_cast<D*>(gradients)};
-    sdca::detail::parallel_rows(n, k, num_threads, rows);
+// ---------------------------------------------------------------------------
+// Dual blocks: feasibility of a caller's duals (to the tolerances of
+// docs/API.md), the label entry that makes single-label rows sum to zero, and
+// the primal of the duals.
+
+// The positive classes of row i of the targets (labels, label sets or a mask).
+std::size_t positives_of(const target_rows& t, std::size_t i, std::size_t k, char* mark) {
+  std::fill(mark, mark + k, char(0));
+  if (t.kind == SDCA_TARGET_LABELS) {
+    mark[static_cast<std::size_t>(t.labels[i])] = 1;
+  } else if (t.kind == SDCA_TARGET_LABEL_SETS) {
+    for (int64_t j = t.offsets[i]; j < t.offsets[i + 1]; ++j)
+      mark[static_cast<std::size_t>(t.labels[j])] = 1;
+  } else {
+    for (std::size_t j = 0; j < k; ++j) mark[j] = t.mask[i * k + j] ? 1 : 0;
+  }
+  return static_cast<std::size_t>(std::count(mark, mark + k, char(1)));
+}
+
+// The distillation constraints of check_feasible on a dual row v with the
+// teacher q: c (q - 1) <= v <= c q to slack.
+void check_distillation_row(const std::vector<double>& v, const double* q, double c, double slack,
+                            const std::string& what) {
+  for (std::size_t j = 0; j < v.size(); ++j)
+    if (v[j] > c * q[j] + slack || v[j] < c * (q[j] - 1) - slack)
+      invalid(what + " is outside the feasible set of the distillation objective");
+}
+
+// The hinge constraints of check_feasible on a dual row v of storage type D with
+// the positive classes mark of mass (their sum): the positive entries are
+// nonnegative, the mass at most c, and the top-k cap or cone holds.
+template <typename D>
+void check_hinge_row(const std::vector<double>& v, const char* mark, double mass,
+                     const sdca_loss& loss, double c, double slack, const std::string& what) {
+  const std::size_t k = v.size();
+  for (std::size_t j = 0; j < k; ++j)
+    if (mark[j] && v[j] < -slack) invalid(what + " is outside the feasible set");
+  if (mass > c + slack) invalid(what + " is outside the feasible set");
+  const std::size_t topk = is_topk(loss.kind) ? loss.k : 1;
+  if (loss.kind == SDCA_LOSS_TOPK_HINGE_BETA) {
+    for (std::size_t j = 0; j < k; ++j)
+      if (-v[j] > c / double(topk) + slack) invalid(what + " violates the top-k cap");
+  } else if (loss.kind != SDCA_LOSS_MULTILABEL_HINGE) {
+    const double cone = double(std::max<std::size_t>(1, k / topk)) * 64 *
+                        double(std::numeric_limits<D>::epsilon()) * c;
+    for (std::size_t j = 0; j < k; ++j)
+      if (-v[j] > mass / double(topk) + cone) invalid(what + " violates the top-k cone");
+  }
+}
+
+// The constraints of check_feasible on a dual row v of storage type D with the
+// count positive classes of mark: the other entries are nonpositive, and the
+// cross-entropy box or the hinge constraints hold to slack.
+template <typename D>
+void check_label_row(const std::vector<double>& v, const char* mark, std::size_t count,
+                     const sdca_loss& loss, double c, double slack, const std::string& what) {
+  const std::size_t k = v.size();
+  double mass = 0;
+  for (std::size_t j = 0; j < k; ++j) {
+    if (!mark[j] && v[j] > 0)
+      invalid(what + ": the entries of the other classes must be nonpositive");
+    if (mark[j]) mass += v[j];
+  }
+  if (loss.kind == SDCA_LOSS_CROSS_ENTROPY || loss.kind == SDCA_LOSS_MULTILABEL_CROSS_ENTROPY) {
+    for (std::size_t j = 0; j < k; ++j)
+      if (mark[j] && v[j] > c / double(count) + slack)
+        invalid(what + " is outside the feasible set of the cross-entropy objective");
     return;
   }
-  // Uninitialized: the workers touch the pages of their own rows first.
-  std::unique_ptr<double[]> value(new double[n]);
-  std::unique_ptr<D[]> g(new D[size]);
-  const loss_rows<D, R> rows = {
-      sdca::loss_kind(kind), k, topk, gamma, alpha, mode, z, positive, value.get(), g.get()};
-  sdca::detail::parallel_rows(n, k, num_threads, rows);
-  std::copy(value.get(), value.get() + n, values);
-  copy_rows(g.get(), n, k, num_threads, static_cast<D*>(gradients));
+  check_hinge_row<D>(v, mark, mass, loss, c, slack, what);
 }
 
-// Statistics of sdca_entropy_forward per row: maximum, lowest, sum, mass, tiny.
-const std::size_t entropy_stats = 5;
+// Whether the dual blocks a (n, k) of storage type D are feasible for the
+// objective with weight c: rows sum to zero relative to their largest entry,
+// and each objective's sign, box and cone constraints hold to slack.
+template <typename D>
+void check_feasible(const D* a, std::size_t n, std::size_t k, const sdca_loss& loss, double c,
+                    const target_rows& t, const char* name) {
+  const double eps = 32 * double(std::numeric_limits<D>::epsilon()), slack = eps * c;
+  const std::string what(name);
+  std::vector<double> v(k);
+  std::vector<char> mark(k);
+  for (std::size_t i = 0; i < n; ++i) {
+    double largest = 0;
+    for (std::size_t j = 0; j < k; ++j) {
+      v[j] = double(a[i * k + j]);
+      largest = std::max(largest, std::abs(v[j]));
+    }
+    const double scale = largest > 0 ? largest : 1;
+    double sum = 0, total = 0;
+    for (double x : v) {
+      sum += x / scale;
+      total += std::abs(x / scale);
+    }
+    if (std::abs(sum) > eps * total) invalid(what + " rows must sum to zero to storage precision");
+    if (t.kind == SDCA_TARGET_PROBABILITIES) {
+      check_distillation_row(v, t.probabilities + i * k, c, slack, what);
+      continue;
+    }
+    const std::size_t count = positives_of(t, i, k, mark.data());
+    check_label_row<D>(v, mark.data(), count, loss, c, slack, what);
+  }
+}
 
-template <typename D, typename R>
-void entropy_forward(std::size_t n, std::size_t k, const void* logits, const int64_t* labels,
-                     std::size_t num_threads, double* values, double* stats) {
-  const D* z = static_cast<const D*>(logits);
-  extent(extent(n, k), sizeof(D));
-  extent(extent(n, entropy_stats), sizeof(double));
-  check_buffers({logits, labels, values});
-  check_labels(n, k, labels);
-  // Into scratch: a nonfinite row fails the call after the pass.
-  std::unique_ptr<double[]> value(new double[n]), stat(new double[n * entropy_stats]);
-  std::atomic<bool> finite(true);
-  double* v = value.get();
-  double* st = stat.get();
-  sdca::detail::parallel_rows(n, k, num_threads, [&](std::size_t begin, std::size_t end) {
-    for (std::size_t i = begin; i < end; ++i) {
-      const std::size_t label = static_cast<std::size_t>(labels[i]);
-      const D* row = z + i * k;
-      const sdca::entropy_row<double> r =
-          sdca::single_entropy_row<double>(k, label, row, static_cast<double*>(nullptr));
-      if (!std::isfinite(r.lowest) || !std::isfinite(r.sum) || !std::isfinite(double(row[label])))
-        finite = false;
-      // As loss_and_gradient in R: float rounds the value.
-      v[i] = double(R(r.loss));
-      double* s = st + i * entropy_stats;
-      s[0] = r.maximum;
-      s[1] = r.lowest;
-      s[2] = r.sum;
-      s[3] = r.mass;
-      s[4] = sdca::entropy_row_tiny(r) ? 1 : 0;
+// The label entry of each single-label row: minus the sum of the others in
+// double, so that the row sums to zero as stored.
+template <typename D>
+void rebuild_label_entries(D* a, std::size_t n, std::size_t k, const int64_t* labels) {
+  for (std::size_t i = 0; i < n; ++i) {
+    const std::size_t y = static_cast<std::size_t>(labels[i]);
+    double others = 0;
+    for (std::size_t j = 0; j < k; ++j)
+      if (j != y) others += double(a[i * k + j]);
+    a[i * k + y] = static_cast<D>(-others);
+  }
+}
+
+// W = center + x' a (d, k) column-major, accumulated in double and rounded once.
+template <typename D>
+void primal_of_dual(const D* x, const D* a, const D* center, std::size_t n, std::size_t d,
+                    std::size_t k, std::size_t threads, D* w) {
+  std::vector<double> acc(extent(d, k), 0.0);
+  double* sum = acc.data();
+  sdca::detail::parallel_rows(d, extent(n, k), threads, [=](std::size_t begin, std::size_t end) {
+    for (std::size_t i = 0; i < n; ++i) {
+      const D* xi = x + i * d;
+      for (std::size_t c = 0; c < k; ++c) {
+        const double aic = double(a[i * k + c]);
+        if (aic == 0) continue;
+        double* column = sum + c * d;
+        for (std::size_t j = begin; j < end; ++j) column[j] += aic * double(xi[j]);
+      }
     }
   });
-  if (!finite) throw std::invalid_argument("Logits must be finite");
-  std::copy(v, v + n, values);
-  if (stats) std::copy(st, st + n * entropy_stats, stats);
+  for (std::size_t j = 0; j < d * k; ++j)
+    w[j] = static_cast<D>(center ? double(center[j]) + acc[j] : acc[j]);
 }
 
-template <typename D, typename R>
-void entropy_gradient(std::size_t n, std::size_t k, const void* logits, const int64_t* labels,
-                      const double* stats, const double* scale, std::size_t num_threads,
-                      void* gradients) {
-  const D* z = static_cast<const D*>(logits);
-  extent(extent(n, k), sizeof(D));
-  extent(extent(n, entropy_stats), sizeof(double));
-  check_buffers({logits, labels, stats, scale, gradients});
-  check_labels(n, k, labels);
-  D* g = static_cast<D*>(gradients);
-  sdca::detail::parallel_rows(n, k, num_threads, [=](std::size_t begin, std::size_t end) {
-    for (std::size_t i = begin; i < end; ++i) {
-      const double* s = stats + i * entropy_stats;
-      const sdca::entropy_row<double> r = {s[0], s[1], s[2], s[3], 0.0};
-      sdca::single_entropy_gradient(k, static_cast<std::size_t>(labels[i]), z + i * k, r, scale[i],
-                                    static_cast<const double*>(nullptr), g + i * k);
-    }
-  });
-}
-#endif
+// ---------------------------------------------------------------------------
+// Training: the objectives over the solver (sdca_dual_update, sdca_model_fit).
 
-static_assert(SDCA_THREADS_DEFAULT == sdca::detail::default_threads,
-              "The C default thread count follows parallel.h");
-
-#ifdef SDCA_PARALLEL_OPENMP
-// From the library's load on: a child forked after it never enters the
-// parent's OpenMP team.
-__attribute__((unused)) static const bool watching_forks = sdca::detail::watch_forks();
-#endif
-
-// History rows: epoch, primal, dual, primal_loss, dual_loss, regularizer,
-// relative_gap, metric (top-1 accuracy or multilabel rank loss), cpu, wall.
-const std::size_t history_fields = 10;
+const std::size_t history_fields = SDCA_HISTORY_FIELDS;
 
 template <typename R>
 double metric(const sdca::eval_train<R, sdca::multiclass_output>& e) {
   return e.accuracy.empty() ? 0 : static_cast<double>(e.accuracy[0]);
 }
-
 #ifndef SDCA_BASELINE
 template <typename R>
 double metric(const sdca::eval_train<R, sdca::distribution_output>& e) {
   return e.accuracy.empty() ? 0 : static_cast<double>(e.accuracy[0]);
 }
 #endif
-
 template <typename R>
 double metric(const sdca::eval_train<R, sdca::multilabel_output>& e) {
   return static_cast<double>(e.rank_loss);
 }
 
-struct fit_options {
-  std::size_t epochs, eval_epoch, history_rows;
-  double tol;
-  bool eval_on_start, recompute_primal;
-  projection_mode projection;
-  std::size_t num_threads;
-  shrinking_mode shrinking;
-};
-
-template <typename Context>
-void solve(Context& ctx, const fit_options& opt, double* history, sdca_fit_result* result) {
-  ctx.criteria.max_epoch = opt.epochs;
-  ctx.criteria.eval_epoch = opt.eval_epoch;
-  ctx.criteria.epsilon = opt.tol;
-  ctx.criteria.eval_on_start = opt.eval_on_start;
-#ifndef SDCA_BASELINE  // v0.2.0 never recomputes the primal
-  ctx.criteria.recompute_primal = opt.recompute_primal;
-  ctx.criteria.projection = opt.projection;
-  ctx.criteria.num_threads = opt.num_threads;
-  ctx.criteria.shrinking = opt.shrinking;
-#endif
-  sdca::make_solver(ctx).solve();
-  std::size_t i = 0;
-  for (const auto& e : ctx.train.evals) {
-    if (i == opt.history_rows) throw std::length_error("The history buffer is too small");
-    double row[history_fields] = {double(e.epoch),
-                                  double(e.primal),
-                                  double(e.dual),
-                                  double(e.primal_loss),
-                                  double(e.dual_loss),
-                                  double(e.primal_regularizer),
-                                  double(e.relative_gap()),
-                                  metric(e),
-                                  e.cpu_time(),
-                                  e.wall_time()};
-    std::copy(row, row + history_fields, history + history_fields * i++);
-  }
-  result->status = static_cast<int>(ctx.status);
-  result->epochs = ctx.epoch;
-  result->history_used = i;
-}
-
-// Objective ids (sdca_loss): the first five take one label per example, the
-// last two sorted label lists with offsets.
-const int last_single_label = SDCA_TOPK_HINGE_BETA, last_objective = SDCA_MULTILABEL_CROSS_ENTROPY;
-static_assert(SDCA_STATUS_FAILED == static_cast<int>(sdca::solver_status::failed),
-              "The C status codes follow sdca::solver_status");
-
-// Offsets (n+1) from zero; each row a strictly increasing list of between 1
-// and k-1 labels in [0, k).
-void check_label_sets(std::size_t n, std::size_t k, const int64_t* labels, const int64_t* offsets) {
-  if (!offsets) throw std::invalid_argument("Multilabel objectives need label offsets");
-  if (offsets[0] != 0) throw std::invalid_argument("Label offsets must start at zero");
-  for (std::size_t i = 0; i < n; ++i) {
-    if (offsets[i + 1] <= offsets[i])
-      throw std::invalid_argument("Label offsets must be strictly increasing");
-    const int64_t size = offsets[i + 1] - offsets[i];
-    if (size < 1 || static_cast<std::size_t>(size) >= k)
-      throw std::invalid_argument("Each example needs between 1 and num_classes-1 labels");
-    check_labels(static_cast<std::size_t>(size), k, labels + offsets[i]);
-    for (int64_t j = offsets[i] + 1; j < offsets[i + 1]; ++j)
-      if (labels[j] <= labels[j - 1])
-        throw std::invalid_argument("Label sets must be sorted without duplicates");
+int status_of(sdca::solver_status status) {
+  switch (status) {
+    case sdca::solver_status::solved:
+      return SDCA_STATUS_SOLVED;
+    case sdca::solver_status::no_progress:
+      return SDCA_STATUS_NO_PROGRESS;
+    case sdca::solver_status::max_epoch:
+      return SDCA_STATUS_MAX_EPOCH;
+    case sdca::solver_status::failed:
+      return SDCA_STATUS_FAILED;
+    default:
+      throw std::logic_error("The solver stopped in an unexpected state");
   }
 }
 
-// The checks of a direct ABI caller, before any output is written.
-void check_objective(int objective, std::size_t n, std::size_t k, const int64_t* labels,
-                     const int64_t* offsets, double c, std::size_t topk, double gamma) {
-  if (objective < 0 || objective > last_objective) throw std::invalid_argument("Unknown objective");
-  if (n < 1 || k < 2 || topk < 1 || topk >= k)
-    throw std::invalid_argument("Invalid objective dimensions");
-  if (!(c > 0) || !std::isfinite(c) || !(gamma >= 0) || !std::isfinite(gamma))
-    throw std::invalid_argument("C must be finite and positive, gamma finite and nonnegative");
-  if (objective <= last_single_label)
-    check_labels(n, k, labels);
-  else
-    check_label_sets(n, k, labels, offsets);
+#ifndef SDCA_BASELINE
+// The stopping criteria of the fit options.
+void configure(sdca::stopping_criteria& criteria, const sdca_fit_options& o, const sdca_loss& loss,
+               std::size_t threads) {
+  criteria.max_epoch = o.max_epoch;
+  criteria.eval_epoch = o.eval_epoch;
+  criteria.tol = o.tol;
+  criteria.eval_on_start = o.eval_on_start != 0;
+  criteria.recompute_primal = o.recompute_primal != 0;
+  criteria.projection = static_cast<sdca::projection_precision>(loss.projection_precision);
+  criteria.num_threads = threads;
+  criteria.shrinking = static_cast<sdca::shrinking_mode>(o.shrinking);
+  criteria.seed = o.seed;
 }
 
-// A smooth top-k hinge from (c, k, gamma); the baseline headers take gamma before k.
-template <typename Objective, typename R>
-Objective smooth_topk(R c, std::size_t k, R gamma) {
-#ifdef SDCA_BASELINE
-  return Objective(c, gamma, k);
-#else
-  return Objective(c, k, gamma);
+// One coordinate step of row i in place.
+template <typename D, typename Objective, typename Output>
+void update_block(std::size_t i, std::size_t k, D norm2, const Output& out, const Objective& obj,
+                  D* block, D* scores, int projection) {
+  sdca::update_dual_variables(i, k, norm2, out, obj, block, scores,
+                              static_cast<sdca::projection_precision>(projection));
+}
+
+static_assert(SDCA_SHRINKING_AUTO == static_cast<int>(sdca::shrinking_mode::automatic) &&
+                  SDCA_SHRINKING_OFF == static_cast<int>(sdca::shrinking_mode::off) &&
+                  SDCA_SHRINKING_HEURISTIC == static_cast<int>(sdca::shrinking_mode::heuristic) &&
+                  SDCA_SHRINKING_SAFE == static_cast<int>(sdca::shrinking_mode::safe) &&
+                  SDCA_SHRINKING_BOTH == static_cast<int>(sdca::shrinking_mode::both),
+              "The C shrinking ids follow sdca::shrinking_mode");
+static_assert(SDCA_PROJECTION_FLOAT64 == static_cast<int>(sdca::projection_precision::float64) &&
+                  SDCA_PROJECTION_EXTENDED ==
+                      static_cast<int>(sdca::projection_precision::extended),
+              "The C projection ids follow sdca::projection_precision");
+static_assert(SDCA_LOSS_PROXIMAL_DISTILLATION ==
+                      static_cast<int>(sdca::loss_kind::proximal_distillation) &&
+                  SDCA_LOSS_MULTICLASS_HINGE == static_cast<int>(sdca::loss_kind::multiclass_hinge),
+              "The C loss ids follow sdca::loss_kind");
 #endif
-}
 
-// request.run(objective, output) does the work for the selected pair.
+// request.run(objective, output) for the objective of a loss and its targets
+// (labels, label sets or probabilities).
 template <typename D, typename R, typename Request>
-void dispatch(int objective, std::size_t n, std::size_t k, const int64_t* labels,
-              const int64_t* offsets, double c, std::size_t topk, double gamma, Request& request) {
-  const R cc = static_cast<R>(c), g = static_cast<R>(gamma);
+void dispatch(const sdca_loss& loss, double c, std::size_t n, std::size_t k, const target_rows& t,
+              Request& request) {
+  const R cc = static_cast<R>(c), g = static_cast<R>(loss.gamma);
   // gamma = 0 selects the nonsmooth hinge; a positive gamma must be normal.
-  const bool smooth = gamma > 0;
+  const bool smooth = loss.gamma > 0;
   if (!std::isnormal(cc) || (smooth && !std::isnormal(g)))
-    throw std::invalid_argument("C and gamma must be normal in the working precision");
-  if (objective <= last_single_label) {
-    std::vector<sdca::size_type> y(labels, labels + n);
+    invalid("C and gamma must be normal in the working precision");
+  if (t.kind == SDCA_TARGET_PROBABILITIES) {
+#ifndef SDCA_BASELINE
+    std::vector<double> q(t.probabilities, t.probabilities + n * k);
+    request.run(sdca::make_objective_l2_distillation<D, R>(cc),
+                sdca::distribution_output(k, n, std::move(q)));
+    return;
+#else
+    throw std::logic_error("Target probabilities are not built against these headers");
+#endif
+  }
+  if (t.kind == SDCA_TARGET_LABELS) {
+    std::vector<sdca::size_type> y(t.labels, t.labels + n);
     sdca::multiclass_output out(k, y);
-    switch (objective) {
-      case SDCA_CROSS_ENTROPY:
-        request.run(sdca::l2_entropy<D, R>(cc), std::move(out));
-        break;
-      case SDCA_TOPK_CROSS_ENTROPY:
-        request.run(sdca::l2_entropy_topk<D, R>(cc, topk), std::move(out));
-        break;
-      case SDCA_MULTICLASS_HINGE:
-      case SDCA_TOPK_HINGE_ALPHA: {
-        const std::size_t kk = objective == SDCA_MULTICLASS_HINGE ? 1 : topk;
+    switch (loss.kind) {
+      case SDCA_LOSS_CROSS_ENTROPY:
+        request.run(sdca::make_objective_l2_cross_entropy<D, R>(cc), std::move(out));
+        return;
+      case SDCA_LOSS_TOPK_CROSS_ENTROPY:
+        request.run(sdca::make_objective_l2_topk_cross_entropy<D, R>(cc, loss.k), std::move(out));
+        return;
+      case SDCA_LOSS_MULTICLASS_HINGE:
+      case SDCA_LOSS_TOPK_HINGE_ALPHA: {
+        const std::size_t topk = loss.kind == SDCA_LOSS_MULTICLASS_HINGE ? 1 : loss.k;
         if (smooth)
-          request.run(smooth_topk<sdca::l2_hinge_topk_smooth<D, R>>(cc, kk, g), std::move(out));
+          request.run(sdca::make_objective_l2_topk_hinge_alpha_smooth<D, R>(cc, topk, g),
+                      std::move(out));
         else
-          request.run(sdca::l2_hinge_topk<D, R>(cc, kk), std::move(out));
-        break;
+          request.run(sdca::make_objective_l2_topk_hinge_alpha<D, R>(cc, topk), std::move(out));
+        return;
       }
-      case SDCA_TOPK_HINGE_BETA:
+      case SDCA_LOSS_TOPK_HINGE_BETA:
         if (smooth)
-          request.run(smooth_topk<sdca::l2_topk_hinge_smooth<D, R>>(cc, topk, g), std::move(out));
+          request.run(sdca::make_objective_l2_topk_hinge_beta_smooth<D, R>(cc, loss.k, g),
+                      std::move(out));
         else
-          request.run(sdca::l2_topk_hinge<D, R>(cc, topk), std::move(out));
-        break;
+          request.run(sdca::make_objective_l2_topk_hinge_beta<D, R>(cc, loss.k), std::move(out));
+        return;
       default:
-        throw std::invalid_argument("Unknown objective");
+        break;
     }
   } else {
-    std::vector<sdca::size_type> u(offsets, offsets + n + 1);
-    std::vector<sdca::size_type> y(labels, labels + u.back());
+    std::vector<sdca::size_type> u(t.offsets, t.offsets + n + 1);
+    std::vector<sdca::size_type> y(t.labels, t.labels + u.back());
     sdca::multilabel_output out(k, y, u);
-    switch (objective) {
-      case SDCA_MULTILABEL_HINGE:
+    switch (loss.kind) {
+      case SDCA_LOSS_MULTILABEL_HINGE:
         if (smooth)
-          request.run(sdca::l2_multilabel_hinge_smooth<D, R>(cc, g), std::move(out));
+          request.run(sdca::make_objective_l2_multilabel_hinge_smooth<D, R>(cc, g), std::move(out));
         else
-          request.run(sdca::l2_multilabel_hinge<D, R>(cc), std::move(out));
-        break;
-      case SDCA_MULTILABEL_CROSS_ENTROPY:
-        request.run(sdca::l2_multilabel_entropy<D, R>(cc), std::move(out));
-        break;
+          request.run(sdca::make_objective_l2_multilabel_hinge<D, R>(cc), std::move(out));
+        return;
+      case SDCA_LOSS_MULTILABEL_CROSS_ENTROPY:
+        request.run(sdca::make_objective_l2_multilabel_cross_entropy<D, R>(cc), std::move(out));
+        return;
       default:
-        throw std::invalid_argument("Unknown objective");
+        break;
     }
   }
+  invalid("Unknown objective");
 }
 
-// Dual (and primal) variables are used as given when warm is set; the caller
-// keeps W = center + X' A consistent. Otherwise both start from zero/center.
-template <typename D>
-struct fit_request {
-  std::size_t n, d, k;
-  const D* input;
-  bool kernel, warm;
-  const D* center;
-  D* weights;
-  D* dual;
-  fit_options options;
-  double* history;
-  sdca_fit_result* result;
-
-  template <typename Objective, typename Output>
-  void run(Objective obj, Output out) {
-    if (!warm) std::fill(dual, dual + n * k, D(0));
-    if (kernel) {
-      auto ctx = sdca::make_context(sdca::make_input_kernel(n, input), std::move(out),
-                                    std::move(obj), dual);
-      solve(ctx, options, history, result);
-    } else {
-      if (!warm) {
-        std::fill(weights, weights + d * k, D(0));
-        if (center) std::copy(center, center + d * k, weights);
-      }
-      auto ctx = sdca::make_context(sdca::make_input_feature(d, n, input), std::move(out),
-                                    std::move(obj), dual, weights);
-      ctx.primal_initial = center;
-      solve(ctx, options, history, result);
-    }
-  }
-};
-
-// One coordinate step per row: scores z_i, current block a_i -> new block.
+// One coordinate step per row: scores z_i and block previous_i (or zero) to out_i.
 template <typename D>
 struct update_request {
   std::size_t n, k;
-  const D* logits;
+  const D* scores;
   const D* previous;
-  D norm2;
-  projection_mode mode;
-  std::size_t num_threads;
-  D* result;
+  const double* norm2;
+  int projection;
+  std::size_t threads;
+  D* out;
 
   template <typename Objective, typename Output>
-  void run(Objective obj, Output out) {
-    sdca::detail::parallel_rows(n, k, num_threads, [&](std::size_t begin, std::size_t end) {
+  void run(Objective obj, Output output) {
+    sdca::detail::parallel_rows(n, k, threads, [&](std::size_t begin, std::size_t end) {
       std::vector<D> z(k);
       for (std::size_t i = begin; i < end; ++i) {
-        std::copy(logits + i * k, logits + (i + 1) * k, z.begin());
-        std::copy(previous + i * k, previous + (i + 1) * k, result + i * k);
-#ifndef SDCA_BASELINE
-        sdca::update_dual_variables(i, k, norm2, out, obj, result + i * k, z.data(), mode);
-#else
-        sdca::update_dual_variables(i, k, norm2, out, obj, result + i * k, z.data());
-#endif
+        std::copy(scores + i * k, scores + (i + 1) * k, z.begin());
+        D* block = out + i * k;
+        if (previous)
+          std::copy(previous + i * k, previous + (i + 1) * k, block);
+        else
+          std::fill(block, block + k, D(0));
+        update_block(i, k, static_cast<D>(norm2[i]), output, obj, block, z.data(), projection);
       }
     });
   }
 };
 
 template <typename D, typename R>
-void fit(int objective, std::size_t n, std::size_t d, std::size_t k, const void* x,
-         const int64_t* labels, const int64_t* offsets, double c, std::size_t topk, double gamma,
-         const fit_options& opt, bool kernel, bool warm, const void* center, void* w, void* a,
-         double* history, sdca_fit_result* result) {
-  check_blas_sizes({n, d, k, extent(n, k), extent(d, k)});
-  extent(extent(n, k), sizeof(D));
-  extent(extent(n, kernel ? n : d), sizeof(D));
-  extent(n, sizeof(int64_t));
-  check_buffers({x, labels, a, history});
-  if (!kernel) check_buffers({w});
-  check_objective(objective, n, k, labels, offsets, c, topk, gamma);
-  if (d < 1 || opt.eval_epoch < 1) throw std::invalid_argument("Invalid fit dimensions");
-  if (!(opt.tol >= 0) || !std::isfinite(opt.tol))
-    throw std::invalid_argument("tol must be finite and nonnegative");
-  extent(extent(d, k), sizeof(D));
-  check_finite<D>(x, extent(n, kernel ? n : d), "Inputs must be finite");
-  if (center && !kernel) check_finite<D>(center, extent(d, k), "The center must be finite");
-  if (warm) {
-    check_finite<D>(a, extent(n, k), "Warm-start duals must be finite");
-    if (!kernel) check_finite<D>(w, d * k, "Warm-start weights must be finite");
+void dual_update(const sdca_loss& loss, double c, const execution& e, std::size_t n, std::size_t k,
+                 const D* scores, const target_rows& t, const D* previous, const double* norm2,
+                 D* out) {
+  check_finite_rows(scores, n, k, e.threads, "Scores must be finite");
+  if (previous) {
+    check_finite_rows(previous, n, k, e.threads, "previous must be finite");
+    check_feasible(previous, n, k, loss, c, t, "previous");
   }
-  // At most epochs / eval_epoch + 2 evaluations (stopping_criteria::eval_epoch).
-  if (opt.history_rows < 2 || opt.epochs / opt.eval_epoch > opt.history_rows - 2)
-    throw std::invalid_argument("The history needs epochs / eval_epoch + 2 rows");
-  fit_request<D> request = {n,
-                            d,
-                            k,
-                            static_cast<const D*>(x),
-                            kernel,
-                            warm,
-                            static_cast<const D*>(center),
-                            static_cast<D*>(w),
-                            static_cast<D*>(a),
-                            opt,
-                            history,
-                            result};
-  dispatch<D, R>(objective, n, k, labels, offsets, c, topk, gamma, request);
-}
-
-template <typename D, typename R>
-void update_objective(int objective, std::size_t n, std::size_t k, const void* z,
-                      const int64_t* labels, const int64_t* offsets, const void* previous, double c,
-                      double norm2, std::size_t topk, double gamma, projection_mode mode,
-                      std::size_t num_threads, void* result) {
-  const std::size_t size = extent(n, k);
-  extent(size, sizeof(D));
-  extent(n, sizeof(int64_t));
-  check_buffers({z, labels, previous, result});
-  check_objective(objective, n, k, labels, offsets, c, topk, gamma);
-  const D *logits = static_cast<const D*>(z), *old = static_cast<const D*>(previous);
-  check_finite_rows(logits, n, k, num_threads, "Logits must be finite");
-  check_finite_rows(old, n, k, num_threads, "Previous duals must be finite");
-  if (!(norm2 > 0) || !std::isfinite(norm2))
-    throw std::invalid_argument("norm2 must be finite and positive");
-  if (!std::isnormal(static_cast<D>(c)) || !std::isnormal(static_cast<D>(norm2)) ||
-      !std::isnormal(static_cast<D>(c * norm2)))
-    throw std::invalid_argument("C, norm2, and C*norm2 must be normal in the data type");
-  std::unique_ptr<D[]> blocks(new D[size]);
-  update_request<D> request = {n,    k,           logits,      old, static_cast<D>(norm2),
-                               mode, num_threads, blocks.get()};
-  dispatch<D, R>(objective, n, k, labels, offsets, c, topk, gamma, request);
-  copy_rows(blocks.get(), n, k, num_threads, static_cast<D*>(result));
-}
-
-#ifndef SDCA_BASELINE
-template <typename D, typename R>
-void fit_distillation(std::size_t n, std::size_t d, std::size_t k, const void* x,
-                      const double* targets, double c, const fit_options& opt, bool kernel,
-                      bool warm, const void* center, void* w, void* a, double* history,
-                      sdca_fit_result* result) {
-  check_blas_sizes({n, d, k, extent(n, k), extent(d, k)});
-  extent(extent(n, k), sizeof(D));
-  extent(extent(n, k), sizeof(double));
-  extent(extent(n, kernel ? n : d), sizeof(D));
-  check_buffers({x, targets, a, history});
-  if (!kernel) check_buffers({w});
-  if (n < 1 || k < 2 || d < 1 || opt.eval_epoch < 1)
-    throw std::invalid_argument("Invalid fit dimensions");
-  if (!(c > 0) || !std::isfinite(c))
-    throw std::invalid_argument("C must be finite and positive, gamma finite and nonnegative");
-  const R cc = static_cast<R>(c);
-  if (!std::isnormal(cc))
-    throw std::invalid_argument("C and gamma must be normal in the working precision");
-  if (!(opt.tol >= 0) || !std::isfinite(opt.tol))
-    throw std::invalid_argument("tol must be finite and nonnegative");
-  extent(extent(d, k), sizeof(D));
-  check_finite<D>(x, extent(n, kernel ? n : d), "Inputs must be finite");
-  if (center && !kernel) check_finite<D>(center, extent(d, k), "The center must be finite");
-  if (warm) {
-    check_finite<D>(a, extent(n, k), "Warm-start duals must be finite");
-    if (!kernel) check_finite<D>(w, d * k, "Warm-start weights must be finite");
+  for (std::size_t i = 0; i < n; ++i) {
+    const double s = norm2[i];
+    if (!(s > 0) || !std::isfinite(s)) invalid("norm2 must be finite and positive");
+    if (!std::isnormal(static_cast<D>(c)) || !std::isnormal(static_cast<D>(s)) ||
+        !std::isnormal(static_cast<D>(c * s)))
+      invalid("C, norm2, and C*norm2 must be normal in the storage type");
   }
-  if (opt.history_rows < 2 || opt.epochs / opt.eval_epoch > opt.history_rows - 2)
-    throw std::invalid_argument("The history needs epochs / eval_epoch + 2 rows");
-  std::vector<double> q(targets, targets + n * k);
-  sdca::distribution_output out(k, n, std::move(q));
-  fit_request<D> request = {n,
-                            d,
-                            k,
-                            static_cast<const D*>(x),
-                            kernel,
-                            warm,
-                            static_cast<const D*>(center),
-                            static_cast<D*>(w),
-                            static_cast<D*>(a),
-                            opt,
-                            history,
-                            result};
-  request.run(sdca::l2_distillation<D, R>(cc), std::move(out));
+  const label_sets sets(t, n, k);
+  std::unique_ptr<D[]> blocks(new D[n * k]);
+  update_request<D> request = {
+      n, k, scores, previous, norm2, loss.projection_precision, e.threads, blocks.get()};
+  dispatch<D, R>(loss, c, n, k, sets.rows, request);
+  copy_rows(blocks.get(), n, k, e.threads, out);
 }
+
+// The solve of a fit, on the library's own copies of W and the duals.
+template <typename D>
+struct fit_request {
+  std::size_t n, d, k;
+  const D* x;
+  bool kernel;
+  const D* center;
+  D* weights;
+  D* dual;
+  sdca_fit_options options;
+  sdca_loss loss;
+  std::size_t threads;
+  double* history;
+  std::size_t history_rows;
+  sdca_fit_result* result;
+
+  template <typename Context>
+  void solve(Context& ctx) {
+    configure(ctx.criteria, options, loss, threads);
+    sdca::make_solver(ctx).solve();
+    std::size_t rows = 0;
+    for (const auto& e : ctx.train.evals) {
+      if (!history) break;
+      if (rows == history_rows) throw std::logic_error("The history outgrew its bound");
+      const double row[history_fields] = {double(e.epoch),
+                                          double(e.primal),
+                                          double(e.dual),
+                                          double(e.primal_loss),
+                                          double(e.dual_loss),
+                                          double(e.primal_regularizer),
+                                          double(e.relative_gap()),
+                                          metric(e),
+                                          e.cpu_time(),
+                                          e.wall_time()};
+      std::copy(row, row + history_fields, history + history_fields * rows++);
+    }
+    result->status = status_of(ctx.status);
+    result->epochs = ctx.epoch;
+    result->history_rows = rows;
+  }
+
+  template <typename Objective, typename Output>
+  void run(Objective obj, Output out) {
+    if (kernel) {
+      auto ctx =
+          sdca::make_context(sdca::make_input_kernel(n, x), std::move(out), std::move(obj), dual);
+      solve(ctx);
+    } else {
+      auto ctx = sdca::make_context(sdca::make_input_feature(d, n, x), std::move(out),
+                                    std::move(obj), weights, dual, center);
+      solve(ctx);
+    }
+  }
+};
 
 template <typename D, typename R>
-void update_distillation(std::size_t n, std::size_t k, const void* z, const double* targets,
-                         const void* previous, double c, double norm2, projection_mode mode,
-                         std::size_t num_threads, void* result) {
-  const std::size_t size = extent(n, k);
-  extent(size, sizeof(D));
-  extent(size, sizeof(double));
-  check_buffers({z, targets, previous, result});
-  if (n < 1 || k < 2) throw std::invalid_argument("Invalid objective dimensions");
-  if (!(c > 0) || !std::isfinite(c))
-    throw std::invalid_argument("C must be finite and positive, gamma finite and nonnegative");
-  const R cc = static_cast<R>(c);
-  if (!std::isnormal(cc))
-    throw std::invalid_argument("C and gamma must be normal in the working precision");
-  const D *logits = static_cast<const D*>(z), *old = static_cast<const D*>(previous);
-  check_finite_rows(logits, n, k, num_threads, "Logits must be finite");
-  check_finite_rows(old, n, k, num_threads, "Previous duals must be finite");
-  if (!(norm2 > 0) || !std::isfinite(norm2))
-    throw std::invalid_argument("norm2 must be finite and positive");
-  if (!std::isnormal(static_cast<D>(c)) || !std::isnormal(static_cast<D>(norm2)) ||
-      !std::isnormal(static_cast<D>(c * norm2)))
-    throw std::invalid_argument("C, norm2, and C*norm2 must be normal in the data type");
-  std::vector<double> q(targets, targets + size);
-  sdca::distribution_output out(k, n, std::move(q));
-  std::unique_ptr<D[]> blocks(new D[size]);
-  update_request<D> request = {n,    k,           logits,      old, static_cast<D>(norm2),
-                               mode, num_threads, blocks.get()};
-  request.run(sdca::l2_distillation<D, R>(cc), std::move(out));
-  copy_rows(blocks.get(), n, k, num_threads, static_cast<D*>(result));
-}
-#endif
-// The caller's struct: its size must be this header's. A later library that
-// appends fields will also take the sizes of the earlier headers.
-template <typename Struct>
-void check_struct(const Struct* value, const char* name) {
-  if (!value) throw std::invalid_argument(std::string(name) + " must not be NULL");
-  if (value->size != sizeof(Struct))
-    throw std::invalid_argument(std::string(name) + " size must be sizeof(struct sdca_" + name +
-                                ") of this header");
+void model_fit(const sdca_loss& loss, const sdca_fit_options& o, const execution& e,
+               const sdca_input& in, std::size_t k, const target_rows& t, const D* center,
+               const D* initial, D* weights, D* dual, double* history, std::size_t history_rows,
+               sdca_fit_result* result) {
+  const bool kernel = in.kind == SDCA_INPUT_KERNEL;
+  const std::size_t n = in.n, d = in.d;
+  const D* x = static_cast<const D*>(in.x);
+  check_finite_rows(x, n, kernel ? n : d, e.threads, "Inputs must be finite");
+  if (center && !all_finite(center, d * k)) invalid("The center must be finite");
+  // The library's copies of the iterate: the caller's outputs are written at the end.
+  std::vector<D> a(n * k, D(0)), w(kernel ? 0 : d * k, D(0));
+  if (initial) {
+    check_finite_rows(initial, n, k, e.threads, "initial_dual must be finite");
+    check_feasible(initial, n, k, loss, o.c, t, "initial_dual");
+    std::copy(initial, initial + n * k, a.begin());
+    if (t.kind == SDCA_TARGET_LABELS) rebuild_label_entries(a.data(), n, k, t.labels);
+    if (!kernel) primal_of_dual(x, a.data(), center, n, d, k, e.threads, w.data());
+  } else if (center && !kernel) {
+    std::copy(center, center + d * k, w.begin());
+  }
+  const label_sets sets(t, n, k);
+  sdca_fit_result outcome = *result;
+  fit_request<D> request = {n,        d, k,    x,         kernel,  center,       w.data(),
+                            a.data(), o, loss, e.threads, history, history_rows, &outcome};
+  dispatch<D, R>(loss, o.c, n, k, sets.rows, request);
+  std::copy(a.begin(), a.end(), dual);
+  if (!kernel) std::copy(w.begin(), w.end(), weights);
+  *result = outcome;
 }
 
-// sdca_options also takes the size of the headers before shrinking.
-template <>
-void check_struct(const sdca_options* value, const char* name) {
-  if (!value) throw std::invalid_argument(std::string(name) + " must not be NULL");
-  const std::size_t align = alignof(sdca_options),
-                    before = (offsetof(sdca_options, shrinking) + align - 1) / align * align;
-  if (value->size != sizeof(sdca_options) && value->size != before)
-    throw std::invalid_argument(std::string(name) + " size must be sizeof(struct sdca_" + name +
-                                ") of this header");
+sdca_fit_options check_fit_options(const sdca_fit_options* given) {
+  const sdca_fit_options o = read_struct(given, "fit_options", default_fit_options);
+  if (!(o.c > 0) || !std::isfinite(o.c)) invalid("C must be finite and positive");
+  if (!(o.tol >= 0) || !std::isfinite(o.tol)) invalid("tol must be finite and nonnegative");
+  if ((o.eval_on_start != 0 && o.eval_on_start != 1) ||
+      (o.recompute_primal != 0 && o.recompute_primal != 1))
+    invalid("eval_on_start and recompute_primal must be 0 or 1");
+  if (o.shrinking < SDCA_SHRINKING_AUTO || o.shrinking > SDCA_SHRINKING_BOTH)
+    invalid("Invalid shrinking");
+  return o;
 }
-}  // namespace
 
-// Precision (sdca_precision): float/float, float/double, double/double.
-#define PRECISION(F, ...)                     \
-  if (precision == SDCA_FLOAT32)              \
-    F<float, float>(__VA_ARGS__);             \
-  else if (precision == SDCA_FLOAT32_FLOAT64) \
-    F<float, double>(__VA_ARGS__);            \
-  else if (precision == SDCA_FLOAT64)         \
-    F<double, double>(__VA_ARGS__);           \
-  else                                        \
-    throw std::invalid_argument("Invalid precision");
+// The evaluations of a fit: at most max_epoch / eval_epoch + 2, the start and
+// the end included (2 for eval_epoch 0).
+// The evaluations of a fit: every eval_epoch epochs, the start and the end (eval_epoch 0:
+// the start and the end only). Saturates instead of wrapping for huge max_epoch.
+std::size_t history_bound(const sdca_fit_options& o) {
+  const std::size_t scheduled = o.eval_epoch == 0 ? 0 : o.max_epoch / o.eval_epoch;
+  const std::size_t max = std::numeric_limits<std::size_t>::max();
+  return scheduled > max - 2 ? max : scheduled + 2;
+}
 
-extern "C" {
 #ifndef SDCA_BASELINE
-int sdca_loss_gradient(const sdca_options* options, std::size_t n, std::size_t k, const void* z,
-                       const uint8_t* positive, double* values, void* gradients) {
-  return protect([&] {
-    check_struct(options, "options");
-    check_sizes(n, k);
-    const sdca_options& o = *options;
-    const projection_mode mode = check_projection(o.projection_precision);
-    const int precision = o.precision;
-    PRECISION(batch_loss_gradient, o.loss, n, k, z, positive, o.k, o.gamma, o.alpha, mode,
-              o.num_threads, values, gradients)
-  });
-}
+// ---------------------------------------------------------------------------
+// Losses: the row kernels of src/tensor_losses.h.
 
-int sdca_entropy_forward(const sdca_options* options, std::size_t n, std::size_t k, const void* z,
-                         const int64_t* labels, double* values, double* stats) {
-  return protect([&] {
-    check_struct(options, "options");
-    check_sizes(n, k);
-    const int precision = options->precision;
-    PRECISION(entropy_forward, n, k, z, labels, options->num_threads, values, stats)
-  });
-}
-
-int sdca_entropy_gradient(const sdca_options* options, std::size_t n, std::size_t k, const void* z,
-                          const int64_t* labels, const double* stats, const double* scale,
-                          void* gradients) {
-  return protect([&] {
-    check_struct(options, "options");
-    check_sizes(n, k);
-    const int precision = options->precision;
-    PRECISION(entropy_gradient, n, k, z, labels, stats, scale, options->num_threads, gradients)
-  });
-}
-#else
-// The bindings resolve every entry point; the baseline headers have no losses.
-int sdca_loss_gradient(const sdca_options*, std::size_t, std::size_t, const void*, const uint8_t*,
-                       double*, void*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
-}
-int sdca_entropy_forward(const sdca_options*, std::size_t, std::size_t, const void*, const int64_t*,
-                         double*, double*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
-}
-int sdca_entropy_gradient(const sdca_options*, std::size_t, std::size_t, const void*,
-                          const int64_t*, const double*, const double*, void*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
-}
-#endif
-int sdca_run_rows(std::size_t rows, std::size_t work_per_row, std::size_t num_threads,
-                  sdca_row_callback callback, void* context) {
-  return protect([&] {
-    if (!callback) throw std::invalid_argument("row callback must not be null");
-    if (rows == 0) return;
-    const std::size_t requested = sdca::detail::requested_threads(num_threads);
-    const std::size_t team =
-        std::min<std::size_t>(requested ? requested : sdca::detail::automatic_threads(), 4096);
-    const std::size_t cpus = requested ? team : team / (sdca::detail::parallel_calls().load() + 1);
-    const std::size_t threads = std::min(rows, cpus);
-    const auto apply = [&](std::size_t begin, std::size_t end) { callback(context, begin, end); };
-    // Fused kernels use the same small-call cutoff as the tensor adapter. Their
-    // callbacks can batch adjacent rows into SIMD lanes, so probing single rows
-    // overestimates their cost and gives unstable thread decisions.
-    if (threads < 2 || static_cast<double>(rows) * work_per_row < 4096 ||
-        sdca::detail::in_parallel_rows() || (requested == 0 && sdca::detail::in_openmp_parallel()))
-      apply(0, rows);
-    else
-      sdca::detail::parallel_tasks(0, rows, threads, team, apply);
-  });
-}
-
-int sdca_abi_version() { return SDCA_ABI_VERSION; }
-const char* sdca_version() { return SDCA_VERSION; }
-const char* sdca_last_error() { return last_error.c_str(); }
-std::size_t sdca_history_fields() { return history_fields; }
-int sdca_update_objective(const sdca_options* options, std::size_t n, std::size_t k, const void* z,
-                          const int64_t* labels, const int64_t* offsets, const void* previous,
-                          double norm2, void* out) {
-  return protect([&] {
-    check_struct(options, "options");
-    const sdca_options& o = *options;
-    const projection_mode mode = check_projection(o.projection_precision);
-    const int precision = o.precision;
-    PRECISION(update_objective, o.loss, n, k, z, labels, offsets, previous, o.c, norm2, o.k,
-              o.gamma, mode, o.num_threads, out)
-  });
-}
-int sdca_fit(const sdca_options* options, std::size_t n, std::size_t d, std::size_t k,
-             const void* x, const int64_t* labels, const int64_t* offsets, const void* center,
-             void* w, void* a, double* history, std::size_t history_rows, sdca_fit_result* result) {
-  return protect([&] {
-    check_struct(options, "options");
-    check_struct(result, "fit_result");
-    extent(extent(history_rows, history_fields), sizeof(double));
-    const sdca_options& o = *options;
-    const fit_options opt = {o.max_epoch,
-                             o.eval_epoch,
-                             history_rows,
-                             o.tol,
-                             o.eval_on_start != 0,
-                             o.recompute_primal != 0,
-                             check_projection(o.projection_precision),
-                             o.num_threads,
-                             check_shrinking(o)};
-    const int precision = o.precision;
-    PRECISION(fit, o.loss, n, d, k, x, labels, offsets, o.c, o.k, o.gamma, opt, o.kernel != 0,
-              o.warm != 0, center, w, a, history, result)
-  });
-}
-#ifndef SDCA_BASELINE
-int sdca_update_distillation(const sdca_options* options, std::size_t n, std::size_t k,
-                             const void* z, const double* targets, const void* previous,
-                             double norm2, void* out) {
-  return protect([&] {
-    check_struct(options, "options");
-    const sdca_options& o = *options;
-    const projection_mode mode = check_projection(o.projection_precision);
-    const int precision = o.precision;
-    PRECISION(update_distillation, n, k, z, targets, previous, o.c, norm2, mode, o.num_threads, out)
-  });
-}
-int sdca_fit_distillation(const sdca_options* options, std::size_t n, std::size_t d, std::size_t k,
-                          const void* x, const double* targets, const void* center, void* w,
-                          void* a, double* history, std::size_t history_rows,
-                          sdca_fit_result* result) {
-  return protect([&] {
-    check_struct(options, "options");
-    check_struct(result, "fit_result");
-    extent(extent(history_rows, history_fields), sizeof(double));
-    const sdca_options& o = *options;
-    const fit_options opt = {o.max_epoch,
-                             o.eval_epoch,
-                             history_rows,
-                             o.tol,
-                             o.eval_on_start != 0,
-                             o.recompute_primal != 0,
-                             check_projection(o.projection_precision),
-                             o.num_threads,
-                             check_shrinking(o)};
-    const int precision = o.precision;
-    PRECISION(fit_distillation, n, d, k, x, targets, o.c, opt, o.kernel != 0, o.warm != 0, center,
-              w, a, history, result)
-  });
-}
-#else
-int sdca_update_distillation(const sdca_options*, std::size_t, std::size_t, const void*,
-                             const double*, const void*, double, void*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
-}
-int sdca_fit_distillation(const sdca_options*, std::size_t, std::size_t, std::size_t, const void*,
-                          const double*, const void*, void*, void*, double*, std::size_t,
-                          sdca_fit_result*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
-}
-#endif
-}
-
-// The tensor entry points: storage dtypes, ignored rows and class weights
-// (src/tensor_losses.h).
-namespace {
-#ifndef SDCA_BASELINE
 namespace tensor = sdca::tensor;
 
 // F<format>(arguments) for the storage dtype.
@@ -917,31 +843,15 @@ namespace tensor = sdca::tensor;
     case SDCA_DTYPE_FLOAT64:                        \
       F<tensor::float64>(__VA_ARGS__);              \
       break;                                        \
-    case SDCA_DTYPE_FLOAT16:                        \
+    case SDCA_INTERNAL_DTYPE_FLOAT16:               \
       F<tensor::float16>(__VA_ARGS__);              \
       break;                                        \
-    case SDCA_DTYPE_BFLOAT16:                       \
+    case SDCA_INTERNAL_DTYPE_BFLOAT16:              \
       F<tensor::bfloat16>(__VA_ARGS__);             \
       break;                                        \
     default:                                        \
       throw std::invalid_argument("Invalid dtype"); \
   }
-
-std::size_t storage_size(int dtype) {
-  if (dtype == SDCA_DTYPE_FLOAT32) return 4;
-  if (dtype == SDCA_DTYPE_FLOAT64) return 8;
-  if (dtype == SDCA_DTYPE_FLOAT16 || dtype == SDCA_DTYPE_BFLOAT16) return 2;
-  throw std::invalid_argument("Invalid dtype");
-}
-
-// Whether options select float arithmetic (SDCA_FLOAT32) for this storage.
-bool float_arithmetic(int precision, int dtype) {
-  if (precision == SDCA_FLOAT32_FLOAT64 || precision == SDCA_FLOAT64) return false;
-  if (precision != SDCA_FLOAT32) throw std::invalid_argument("Invalid precision");
-  if (dtype == SDCA_DTYPE_FLOAT64)
-    throw std::invalid_argument("float64 storage needs double arithmetic");
-  return true;
-}
 
 // Asks Linux for transparent huge pages (THP in madvise mode) over a large
 // output the parallel row loops touch first: 2 MiB faults, not 4 KiB ones.
@@ -958,13 +868,310 @@ void advise_huge_pages(void* data, std::size_t bytes) {
 #endif
 }
 
-// The checks of every tensor call: options, sizes and extents of z (n, k).
-void check_tensor_call(const sdca_options* options, int dtype, std::size_t n, std::size_t k) {
-  check_struct(options, "options");
-  if (k < 2) throw std::invalid_argument("Invalid dimensions");
+// The label losses (kinds 0 to 7) of rows: labels or a 0/1 mask.
+struct loss_rows_call {
+  sdca::loss_kind kind;
+  std::size_t n, k, topk;
+  double gamma, alpha;
+  sdca::projection_precision projection;
+  std::size_t threads;
+  const void* z;
+  const int64_t* labels;
+  const uint8_t* positive;
+  double* values;
+  void* gradients;
+};
+
+template <typename Format, typename Data, typename Result>
+void tensor_loss_rows(const loss_rows_call& c) {
+  const tensor::loss_gradient_rows<Format, Data, Result> rows = {
+      c.kind,
+      c.k,
+      c.topk,
+      c.gamma,
+      c.alpha,
+      c.projection,
+      static_cast<const typename Format::type*>(c.z),
+      c.labels,
+      c.positive,
+      c.values,
+      static_cast<Data*>(c.gradients)};
+  sdca::detail::parallel_rows(c.n, c.k, c.threads, rows);
+}
+
+// Float rows (16-bit and float32 storage) in float or double arithmetic;
+// float64 rows in double.
+template <typename Format>
+void loss_rows_of(const loss_rows_call& c, bool fp32) {
+  if (fp32)
+    tensor_loss_rows<Format, float, float>(c);
+  else
+    tensor_loss_rows<Format, float, double>(c);
+}
+template <>
+void loss_rows_of<tensor::float64>(const loss_rows_call& c, bool) {
+  tensor_loss_rows<tensor::float64, double, double>(c);
+}
+
+struct distillation_call {
+  std::size_t n, k;
+  const void *student, *teacher;
+  double temperature;
+  bool fp32;
+  std::size_t threads;
+
+  template <typename Format>
+  tensor::distillation_logits<Format> logits() const {
+    const tensor::distillation_logits<Format> x = {
+        k, static_cast<const typename Format::type*>(student),
+        static_cast<const typename Format::type*>(teacher), temperature};
+    return x;
+  }
+};
+
+// Whether float work holds a temperature.
+bool float_temperature(double temperature) {
+  const double tiny = double(std::numeric_limits<float>::min());
+  return tiny <= temperature && temperature <= 1 / tiny;
+}
+
+template <typename Format>
+void distillation_forward(const distillation_call& c, double* values, double* stats) {
+  const tensor::distillation_forward_rows<Format> rows = {c.logits<Format>(), c.fp32, values,
+                                                          stats};
+  sdca::detail::parallel_rows(c.n, 2 * c.k, c.threads, rows);
+}
+
+template <typename Format>
+void distillation_backward(const distillation_call& c, const double* stats, const double* scale,
+                           std::size_t stride, void* gradients) {
+  const tensor::distillation_backward_rows<Format> rows = {
+      c.logits<Format>(),
+      c.fp32,
+      stats,
+      scale,
+      stride,
+      static_cast<typename Format::type*>(gradients)};
+  sdca::detail::parallel_rows(c.n, 2 * c.k, c.threads, rows);
+}
+
+// Float gradients for float and 16-bit storage, double ones for float64.
+template <typename Format>
+void proximal_distillation(const distillation_call& c, double alpha, double* values,
+                           void* gradients) {
+  typedef
+      typename std::conditional<std::is_same<Format, tensor::float64>::value, double, float>::type
+          Data;
+  const tensor::proximal_distillation_rows<Format, Data> rows = {c.logits<Format>(), alpha, values,
+                                                                 static_cast<Data*>(gradients)};
+  // Halley steps: several passes per row.
+  sdca::detail::parallel_rows(c.n, 8 * c.k, c.threads, rows);
+}
+
+// sdca_loss_evaluate on validated arguments; every row is checked before any output.
+template <typename D>
+void loss_evaluate(const sdca_loss& loss, const execution& e, int dtype, std::size_t n,
+                   std::size_t k, const D* scores, const target_rows& t, double* values,
+                   D* gradients) {
+  check_finite_rows(scores, n, k, e.threads, "Scores must be finite");
+  if (is_distillation(loss.kind)) {
+    const D* teacher = static_cast<const D*>(t.logits);
+    check_finite_rows(teacher, n, k, e.threads, "Teacher logits must be finite");
+    const distillation_call call = {n,
+                                    k,
+                                    scores,
+                                    teacher,
+                                    loss.temperature,
+                                    e.float_work && float_temperature(loss.temperature),
+                                    e.threads};
+    if (loss.kind == SDCA_LOSS_PROXIMAL_DISTILLATION) {
+      std::unique_ptr<D[]> scratch(gradients ? nullptr : new D[n * k]);
+      void* out = gradients ? static_cast<void*>(gradients) : static_cast<void*>(scratch.get());
+      STORAGE(proximal_distillation, call, loss.alpha, values, out)
+      return;
+    }
+    std::unique_ptr<double[]> stats(gradients ? new double[n * tensor::distillation_stats]
+                                              : nullptr);
+    STORAGE(distillation_forward, call, values, stats.get())
+    if (gradients) {
+      const double one = 1;
+      STORAGE(distillation_backward, call, stats.get(), &one, 0, gradients)
+    }
+    return;
+  }
+  std::vector<uint8_t> mask;
+  const uint8_t* positive = t.mask;
+  if (t.kind == SDCA_TARGET_LABEL_SETS) {
+    mask.assign(n * k, 0);
+    for (std::size_t i = 0; i < n; ++i)
+      for (int64_t j = t.offsets[i]; j < t.offsets[i + 1]; ++j)
+        mask[i * k + static_cast<std::size_t>(t.labels[j])] = 1;
+    positive = mask.data();
+  }
+  const bool labels = t.kind == SDCA_TARGET_LABELS;
+  const loss_rows_call call = {sdca::loss_kind(loss.kind),
+                               n,
+                               k,
+                               is_topk(loss.kind) ? loss.k : 1,
+                               loss.gamma,
+                               loss.alpha,
+                               static_cast<sdca::projection_precision>(loss.projection_precision),
+                               e.threads,
+                               scores,
+                               labels ? t.labels : nullptr,
+                               labels ? nullptr : positive,
+                               values,
+                               gradients};
+  STORAGE(loss_rows_of, call, e.float_work)
+}
+#endif
+}  // namespace
+
+extern "C" {
+int sdca_abi_version() { return SDCA_ABI_VERSION; }
+const char* sdca_version() { return SDCA_VERSION; }
+const char* sdca_last_error() { return last_error.c_str(); }
+
+size_t sdca_max_extent() { return max_extent(); }
+
+size_t sdca_history_rows(const sdca_fit_options* options) {
+  std::size_t rows = 0;
+  protect([&] { rows = history_bound(check_fit_options(options)); });
+  return rows;
+}
+
+int sdca_dual_update(const sdca_loss* loss, double c, const sdca_execution* execution_settings,
+                     int dtype, size_t n, size_t k, const void* scores, const sdca_targets* targets,
+                     const void* previous, const double* norm2, void* out) {
+  return protect([&] {
+    check_dtype(dtype);
+    if (k < 2) invalid("num_classes must be >= 2");
+    const sdca_loss l = check_loss(loss, k);
+    if (!is_objective(l.kind)) invalid(std::string(loss_names[l.kind]) + " is not trainable");
+    if (!(c > 0) || !std::isfinite(c)) invalid("C must be finite and positive");
+    const execution exec = check_execution(execution_settings, dtype);
+    extent(extent(n, k), sizeof(double));
+    const target_rows t = check_targets(targets, l.kind, entry::training, n, k);
+    if (n == 0) return;
+    check_buffers({scores, norm2, out});
+    if (dtype == SDCA_DTYPE_FLOAT64)
+      dual_update<double, double>(l, c, exec, n, k, static_cast<const double*>(scores), t,
+                                  static_cast<const double*>(previous), norm2,
+                                  static_cast<double*>(out));
+    else if (exec.float_work)
+      dual_update<float, float>(l, c, exec, n, k, static_cast<const float*>(scores), t,
+                                static_cast<const float*>(previous), norm2,
+                                static_cast<float*>(out));
+    else
+      dual_update<float, double>(l, c, exec, n, k, static_cast<const float*>(scores), t,
+                                 static_cast<const float*>(previous), norm2,
+                                 static_cast<float*>(out));
+  });
+}
+
+int sdca_model_fit(const sdca_loss* loss, const sdca_fit_options* options,
+                   const sdca_execution* execution_settings, const sdca_input* input, size_t k,
+                   const sdca_targets* targets, const void* center, const void* initial_dual,
+                   void* weights, void* dual, double* history, size_t history_rows,
+                   sdca_fit_result* result) {
+  return protect([&] {
+    const sdca_input in = read_struct(input, "input", default_input);
+    if (in.kind != SDCA_INPUT_FEATURES && in.kind != SDCA_INPUT_KERNEL)
+      invalid("Unknown input kind");
+    const int dtype = in.dtype;
+    check_dtype(dtype);
+    const bool kernel = in.kind == SDCA_INPUT_KERNEL;
+    if (in.n < 1 || in.d < 1 || k < 2) invalid("Invalid fit dimensions");
+    if (kernel && in.d != in.n) invalid("A Gram matrix is square: d must equal n");
+    const sdca_loss l = check_loss(loss, k);
+    if (!is_objective(l.kind)) invalid(std::string(loss_names[l.kind]) + " is not trainable");
+    const sdca_fit_options o = check_fit_options(options);
+    if (!is_hinge(l.kind) && o.shrinking != SDCA_SHRINKING_AUTO)
+      invalid(std::string(loss_names[l.kind]) +
+              " takes no shrinking: its steps update every class of every example");
+    const execution exec = check_execution(execution_settings, dtype);
+    sdca_fit_result r = read_struct(result, "fit_result", default_fit_result);
+    const std::size_t n = in.n, d = in.d, size = storage_size(dtype);
+    check_blas_sizes({n, d, k, extent(n, k), extent(d, k)});
+    extent(extent(n, d), size);
+    extent(extent(n, k), size);
+    extent(extent(d, k), size);
+    extent(extent(history_rows, history_fields), sizeof(double));
+    check_buffers({in.x, dual});
+    if (kernel && (weights || center)) invalid("A Gram matrix takes no weights and no center");
+    if (!kernel) check_buffers({weights});
+    if (!history != (history_rows == 0)) invalid("Pass history with history_rows, or neither");
+    if (history && history_rows < history_bound(o))
+      invalid("The history needs sdca_history_rows(options) rows");
+    const target_rows t = check_targets(targets, l.kind, entry::training, n, k);
+    if (dtype == SDCA_DTYPE_FLOAT64)
+      model_fit<double, double>(l, o, exec, in, k, t, static_cast<const double*>(center),
+                                static_cast<const double*>(initial_dual),
+                                static_cast<double*>(weights), static_cast<double*>(dual), history,
+                                history_rows, &r);
+    else if (exec.float_work)
+      model_fit<float, float>(l, o, exec, in, k, t, static_cast<const float*>(center),
+                              static_cast<const float*>(initial_dual), static_cast<float*>(weights),
+                              static_cast<float*>(dual), history, history_rows, &r);
+    else
+      model_fit<float, double>(l, o, exec, in, k, t, static_cast<const float*>(center),
+                               static_cast<const float*>(initial_dual),
+                               static_cast<float*>(weights), static_cast<float*>(dual), history,
+                               history_rows, &r);
+    result->status = r.status;
+    result->epochs = r.epochs;
+    result->history_rows = r.history_rows;
+  });
+}
+
+#ifndef SDCA_BASELINE
+int sdca_loss_evaluate(const sdca_loss* loss, const sdca_execution* execution_settings, int dtype,
+                       size_t n, size_t k, const void* scores, const sdca_targets* targets,
+                       double* values, void* gradients) {
+  return protect([&] {
+    check_dtype(dtype);
+    if (k < 2) invalid("num_classes must be >= 2");
+    const sdca_loss l = check_loss(loss, k);
+    const execution exec = check_execution(execution_settings, dtype);
+    extent(extent(n, k), sizeof(double));
+    const target_rows t = check_targets(targets, l.kind, entry::loss, n, k);
+    if (n == 0) return;
+    check_buffers({scores, values});
+    if (gradients) advise_huge_pages(gradients, n * k * storage_size(dtype));
+    if (dtype == SDCA_DTYPE_FLOAT64)
+      loss_evaluate<double>(l, exec, dtype, n, k, static_cast<const double*>(scores), t, values,
+                            static_cast<double*>(gradients));
+    else
+      loss_evaluate<float>(l, exec, dtype, n, k, static_cast<const float*>(scores), t, values,
+                           static_cast<float*>(gradients));
+  });
+}
+#else
+int sdca_loss_evaluate(const sdca_loss*, const sdca_execution*, int, size_t, size_t, const void*,
+                       const sdca_targets*, double*, void*) {
+  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
+}
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// The internal entry points (src/c_api_internal.h).
+
+namespace {
+#ifndef SDCA_BASELINE
+// The internal options and the checks of every internal tensor call.
+const sdca_internal_options& check_internal(const sdca_internal_options* options, int dtype,
+                                            std::size_t n, std::size_t k) {
+  if (!options) invalid("Internal options must not be NULL");
+  if (options->size != sizeof(sdca_internal_options))
+    invalid("struct sdca_internal_options is not this library's");
+  if (k < 2) invalid("Invalid dimensions");
   storage_size(dtype);
+  if (options->float_work && dtype == SDCA_DTYPE_FLOAT64)
+    invalid("float64 storage needs double arithmetic");
   extent(extent(n, k), sizeof(double));
   extent(extent(n, tensor::entropy_stats + 1), sizeof(double));
+  return *options;
 }
 
 struct cross_entropy_call {
@@ -974,7 +1181,7 @@ struct cross_entropy_call {
   int64_t ignore;
   const double* weights;
   bool fp32;
-  std::size_t num_threads;
+  std::size_t threads;
 };
 
 template <typename Format>
@@ -987,7 +1194,7 @@ void cross_entropy_forward(const cross_entropy_call& c, double* values, double* 
   const tensor::cross_entropy_forward_rows<Format> rows = {
       c.k, static_cast<const typename Format::type*>(c.z), c.labels, c.ignore, c.weights, c.fp32, v,
       s};
-  sdca::detail::parallel_rows(c.n, c.k, c.num_threads, rows);
+  sdca::detail::parallel_rows(c.n, c.k, c.threads, rows);
   if (totals) {
     // In row order, compensated: the same for every thread count.
     double sum[2] = {0, 0}, carry[2] = {0, 0};
@@ -1019,245 +1226,203 @@ void cross_entropy_backward(const cross_entropy_call& c, const double* stats, co
       c.weights, stats,
       scale,     stride,
       c.fp32,    static_cast<typename Format::type*>(gradients)};
-  sdca::detail::parallel_rows(c.n, c.k, c.num_threads, rows);
+  sdca::detail::parallel_rows(c.n, c.k, c.threads, rows);
 }
 
-struct loss_rows_call {
-  const sdca_options* options;
-  std::size_t n, k;
-  const void* z;
-  const int64_t* labels;
-  const uint8_t* positive;
-  double* values;
-  void* gradients;
-};
-
-template <typename Format, typename Data, typename Result>
-void tensor_loss_rows(const loss_rows_call& c) {
-  const sdca_options& o = *c.options;
-  const tensor::loss_gradient_rows<Format, Data, Result> rows = {
-      sdca::loss_kind(o.loss),
-      c.k,
-      o.k,
-      o.gamma,
-      o.alpha,
-      check_projection(o.projection_precision),
-      static_cast<const typename Format::type*>(c.z),
-      c.labels,
-      c.positive,
-      c.values,
-      static_cast<Data*>(c.gradients)};
-  sdca::detail::parallel_rows(c.n, c.k, o.num_threads, rows);
-}
-
-// Float rows (16-bit and float32 storage) in float or double arithmetic;
-// float64 rows in double.
-template <typename Format>
-void loss_rows_of(const loss_rows_call& c, bool fp32) {
-  if (fp32)
-    tensor_loss_rows<Format, float, float>(c);
-  else
-    tensor_loss_rows<Format, float, double>(c);
-}
-template <>
-void loss_rows_of<tensor::float64>(const loss_rows_call& c, bool) {
-  tensor_loss_rows<tensor::float64, double, double>(c);
-}
-
-struct distillation_call {
-  std::size_t n, k;
-  const void *student, *teacher;
-  double temperature;
-  bool fp32;
-  std::size_t num_threads;
-
-  template <typename Format>
-  tensor::distillation_logits<Format> logits() const {
-    const tensor::distillation_logits<Format> x = {
-        k, static_cast<const typename Format::type*>(student),
-        static_cast<const typename Format::type*>(teacher), temperature};
-    return x;
-  }
-};
-
-// The checks of a distillation call; whether it takes float arithmetic.
-bool check_distillation(const sdca_options* options, int dtype, std::size_t n, std::size_t k,
-                        double temperature, double alpha) {
-  check_tensor_call(options, dtype, n, k);
-  extent(extent(n, tensor::distillation_stats), sizeof(double));
+void check_temperature(double temperature, double alpha) {
   if (!(std::isfinite(temperature) && temperature > 0))
-    throw std::invalid_argument("temperature must be finite and positive");
-  if (!(std::isfinite(alpha) && alpha > 0))
-    throw std::invalid_argument("alpha must be finite and positive");
-  // Float work needs a temperature float holds.
-  const double tiny = double(std::numeric_limits<float>::min());
-  return float_arithmetic(options->precision, dtype) && tiny <= temperature &&
-         temperature <= 1 / tiny;
-}
-
-template <typename Format>
-void distillation_forward(const distillation_call& c, double* values, double* stats) {
-  const tensor::distillation_forward_rows<Format> rows = {c.logits<Format>(), c.fp32, values,
-                                                          stats};
-  sdca::detail::parallel_rows(c.n, 2 * c.k, c.num_threads, rows);
-}
-
-template <typename Format>
-void distillation_backward(const distillation_call& c, const double* stats, const double* scale,
-                           std::size_t stride, void* gradients) {
-  const tensor::distillation_backward_rows<Format> rows = {
-      c.logits<Format>(),
-      c.fp32,
-      stats,
-      scale,
-      stride,
-      static_cast<typename Format::type*>(gradients)};
-  sdca::detail::parallel_rows(c.n, 2 * c.k, c.num_threads, rows);
-}
-
-// Float gradients for float and 16-bit storage, double ones for float64.
-template <typename Format>
-void proximal_distillation(const distillation_call& c, double alpha, double* values,
-                           void* gradients) {
-  typedef
-      typename std::conditional<std::is_same<Format, tensor::float64>::value, double, float>::type
-          Data;
-  const tensor::proximal_distillation_rows<Format, Data> rows = {c.logits<Format>(), alpha, values,
-                                                                 static_cast<Data*>(gradients)};
-  // Halley steps: several passes per row.
-  sdca::detail::parallel_rows(c.n, 8 * c.k, c.num_threads, rows);
+    invalid("temperature must be finite and positive");
+  if (!(std::isfinite(alpha) && alpha > 0)) invalid("alpha must be finite and positive");
 }
 #endif
 }  // namespace
 
 extern "C" {
 #ifndef SDCA_BASELINE
-int sdca_cross_entropy_forward(const sdca_options* options, int dtype, std::size_t n, std::size_t k,
-                               const void* z, const int64_t* labels, int64_t ignore_index,
-                               const double* class_weights, double* values, double* stats,
-                               double* totals) {
+int sdca_internal_loss_rows(const sdca_internal_options* options, int dtype, size_t n, size_t k,
+                            const void* z, const int64_t* labels, const uint8_t* positive,
+                            double* values, void* gradients) {
   return protect([&] {
-    check_tensor_call(options, dtype, n, k);
-    const bool fp32 = float_arithmetic(options->precision, dtype);
+    const sdca_internal_options& o = check_internal(options, dtype, n, k);
+    if (o.loss < SDCA_LOSS_CROSS_ENTROPY || o.loss > SDCA_LOSS_PROXIMAL_CROSS_ENTROPY)
+      invalid("Unknown loss");
+    if (o.projection_precision != SDCA_PROJECTION_FLOAT64 &&
+        o.projection_precision != SDCA_PROJECTION_EXTENDED)
+      invalid("Invalid projection precision");
+    if (!sdca::detail::valid_loss_arguments(k, 1, o.k, o.gamma, o.alpha))
+      invalid("Invalid loss dimensions or parameters");
+    if (!labels == !positive) invalid("Pass either labels or positive");
+    if (n == 0) return;
+    check_buffers({z, values});
+    if (gradients) advise_huge_pages(gradients, n * k * (dtype == SDCA_DTYPE_FLOAT64 ? 8 : 4));
+    const loss_rows_call call = {sdca::loss_kind(o.loss),
+                                 n,
+                                 k,
+                                 o.k,
+                                 o.gamma,
+                                 o.alpha,
+                                 static_cast<sdca::projection_precision>(o.projection_precision),
+                                 threads_of(o.num_threads),
+                                 z,
+                                 labels,
+                                 positive,
+                                 values,
+                                 gradients};
+    STORAGE(loss_rows_of, call, o.float_work != 0)
+  });
+}
+
+int sdca_internal_cross_entropy_forward(const sdca_internal_options* options, int dtype, size_t n,
+                                        size_t k, const void* z, const int64_t* labels,
+                                        int64_t ignore_index, const double* class_weights,
+                                        double* values, double* stats, double* totals) {
+  return protect([&] {
+    const sdca_internal_options& o = check_internal(options, dtype, n, k);
     if (n == 0) {
       if (totals) totals[0] = totals[1] = 0;
       return;
     }
     check_buffers({z, labels, values});
     const cross_entropy_call call = {
-        n, k, z, labels, ignore_index, class_weights, fp32, options->num_threads};
+        n, k, z, labels, ignore_index, class_weights, o.float_work != 0, threads_of(o.num_threads)};
     STORAGE(cross_entropy_forward, call, values, stats, totals)
   });
 }
 
-int sdca_cross_entropy_backward(const sdca_options* options, int dtype, std::size_t n,
-                                std::size_t k, const void* z, const int64_t* labels,
-                                int64_t ignore_index, const double* class_weights,
-                                const double* stats, const double* scale, std::size_t scale_stride,
-                                void* gradients) {
+int sdca_internal_cross_entropy_backward(const sdca_internal_options* options, int dtype, size_t n,
+                                         size_t k, const void* z, const int64_t* labels,
+                                         int64_t ignore_index, const double* class_weights,
+                                         const double* stats, const double* scale,
+                                         size_t scale_stride, void* gradients) {
   return protect([&] {
-    check_tensor_call(options, dtype, n, k);
-    const bool fp32 = float_arithmetic(options->precision, dtype);
-    if (scale_stride > 1) throw std::invalid_argument("scale_stride must be 0 or 1");
+    const sdca_internal_options& o = check_internal(options, dtype, n, k);
+    if (scale_stride > 1) invalid("scale_stride must be 0 or 1");
     if (n == 0) return;
     check_buffers({z, labels, stats, scale, gradients});
     advise_huge_pages(gradients, n * k * storage_size(dtype));
     const cross_entropy_call call = {
-        n, k, z, labels, ignore_index, class_weights, fp32, options->num_threads};
+        n, k, z, labels, ignore_index, class_weights, o.float_work != 0, threads_of(o.num_threads)};
     STORAGE(cross_entropy_backward, call, stats, scale, scale_stride, gradients)
   });
 }
 
-int sdca_loss_gradient_rows(const sdca_options* options, int dtype, std::size_t n, std::size_t k,
-                            const void* z, const int64_t* labels, const uint8_t* positive,
-                            double* values, void* gradients) {
+int sdca_internal_distillation_forward(const sdca_internal_options* options, int dtype, size_t n,
+                                       size_t k, const void* student, const void* teacher,
+                                       double temperature, double* values, double* stats) {
   return protect([&] {
-    check_tensor_call(options, dtype, n, k);
-    const sdca_options& o = *options;
-    const bool fp32 = float_arithmetic(o.precision, dtype);
-    if (o.loss < 0 || o.loss > SDCA_PROXIMAL_CROSS_ENTROPY)
-      throw std::invalid_argument("Unknown loss");
-    check_projection(o.projection_precision);
-    if (!sdca::detail::valid_loss_arguments(k, 1, o.k, o.gamma, o.alpha))
-      throw std::invalid_argument("Invalid loss dimensions or parameters");
-    if (!labels == !positive) throw std::invalid_argument("Pass either labels or positive");
-    if (n == 0) return;
-    check_buffers({z, values});
-    if (gradients) advise_huge_pages(gradients, n * k * (dtype == SDCA_DTYPE_FLOAT64 ? 8 : 4));
-    const loss_rows_call call = {options, n, k, z, labels, positive, values, gradients};
-    STORAGE(loss_rows_of, call, fp32)
-  });
-}
-
-int sdca_distillation_forward(const sdca_options* options, int dtype, std::size_t n, std::size_t k,
-                              const void* student, const void* teacher, double temperature,
-                              double* values, double* stats) {
-  return protect([&] {
-    const bool fp32 = check_distillation(options, dtype, n, k, temperature, 1);
+    const sdca_internal_options& o = check_internal(options, dtype, n, k);
+    extent(extent(n, tensor::distillation_stats), sizeof(double));
+    check_temperature(temperature, 1);
     if (n == 0) return;
     check_buffers({student, teacher, values});
-    const distillation_call call = {
-        n, k, student, teacher, temperature, fp32, options->num_threads};
+    const distillation_call call = {n,
+                                    k,
+                                    student,
+                                    teacher,
+                                    temperature,
+                                    o.float_work != 0 && float_temperature(temperature),
+                                    threads_of(o.num_threads)};
     STORAGE(distillation_forward, call, values, stats)
   });
 }
 
-int sdca_distillation_backward(const sdca_options* options, int dtype, std::size_t n, std::size_t k,
-                               const void* student, const void* teacher, double temperature,
-                               const double* stats, const double* scale, std::size_t scale_stride,
-                               void* gradients) {
+int sdca_internal_distillation_backward(const sdca_internal_options* options, int dtype, size_t n,
+                                        size_t k, const void* student, const void* teacher,
+                                        double temperature, const double* stats,
+                                        const double* scale, size_t scale_stride, void* gradients) {
   return protect([&] {
-    const bool fp32 = check_distillation(options, dtype, n, k, temperature, 1);
-    if (scale_stride > 1) throw std::invalid_argument("scale_stride must be 0 or 1");
+    const sdca_internal_options& o = check_internal(options, dtype, n, k);
+    extent(extent(n, tensor::distillation_stats), sizeof(double));
+    check_temperature(temperature, 1);
+    if (scale_stride > 1) invalid("scale_stride must be 0 or 1");
     if (n == 0) return;
     check_buffers({student, teacher, stats, scale, gradients});
     advise_huge_pages(gradients, n * k * storage_size(dtype));
-    const distillation_call call = {
-        n, k, student, teacher, temperature, fp32, options->num_threads};
+    const distillation_call call = {n,
+                                    k,
+                                    student,
+                                    teacher,
+                                    temperature,
+                                    o.float_work != 0 && float_temperature(temperature),
+                                    threads_of(o.num_threads)};
     STORAGE(distillation_backward, call, stats, scale, scale_stride, gradients)
   });
 }
 
-int sdca_proximal_distillation_rows(const sdca_options* options, int dtype, std::size_t n,
-                                    std::size_t k, const void* student, const void* teacher,
-                                    double temperature, double alpha, double* values,
-                                    void* gradients) {
+int sdca_internal_proximal_distillation_rows(const sdca_internal_options* options, int dtype,
+                                             size_t n, size_t k, const void* student,
+                                             const void* teacher, double temperature, double alpha,
+                                             double* values, void* gradients) {
   return protect([&] {
-    check_distillation(options, dtype, n, k, temperature, alpha);
+    const sdca_internal_options& o = check_internal(options, dtype, n, k);
+    check_temperature(temperature, alpha);
     if (n == 0) return;
     check_buffers({student, teacher, values, gradients});
     advise_huge_pages(gradients, n * k * (dtype == SDCA_DTYPE_FLOAT64 ? 8 : 4));
     const distillation_call call = {
-        n, k, student, teacher, temperature, false, options->num_threads};
+        n, k, student, teacher, temperature, false, threads_of(o.num_threads)};
     STORAGE(proximal_distillation, call, alpha, values, gradients)
   });
 }
 #else
-int sdca_cross_entropy_forward(const sdca_options*, int, std::size_t, std::size_t, const void*,
-                               const int64_t*, int64_t, const double*, double*, double*, double*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
-}
-int sdca_cross_entropy_backward(const sdca_options*, int, std::size_t, std::size_t, const void*,
-                                const int64_t*, int64_t, const double*, const double*,
-                                const double*, std::size_t, void*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
-}
-int sdca_loss_gradient_rows(const sdca_options*, int, std::size_t, std::size_t, const void*,
+// The bindings resolve every entry point; the earlier headers have no losses.
+#define SDCA_NO_LOSSES \
+  return protect([] { throw std::logic_error("Losses are not built against these headers"); })
+int sdca_internal_loss_rows(const sdca_internal_options*, int, size_t, size_t, const void*,
                             const int64_t*, const uint8_t*, double*, void*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
+  SDCA_NO_LOSSES;
 }
-int sdca_distillation_forward(const sdca_options*, int, std::size_t, std::size_t, const void*,
-                              const void*, double, double*, double*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
+int sdca_internal_cross_entropy_forward(const sdca_internal_options*, int, size_t, size_t,
+                                        const void*, const int64_t*, int64_t, const double*,
+                                        double*, double*, double*) {
+  SDCA_NO_LOSSES;
 }
-int sdca_distillation_backward(const sdca_options*, int, std::size_t, std::size_t, const void*,
-                               const void*, double, const double*, const double*, std::size_t,
-                               void*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
+int sdca_internal_cross_entropy_backward(const sdca_internal_options*, int, size_t, size_t,
+                                         const void*, const int64_t*, int64_t, const double*,
+                                         const double*, const double*, size_t, void*) {
+  SDCA_NO_LOSSES;
 }
-int sdca_proximal_distillation_rows(const sdca_options*, int, std::size_t, std::size_t, const void*,
-                                    const void*, double, double, double*, void*) {
-  return protect([] { throw std::logic_error("Losses are not built against these headers"); });
+int sdca_internal_distillation_forward(const sdca_internal_options*, int, size_t, size_t,
+                                       const void*, const void*, double, double*, double*) {
+  SDCA_NO_LOSSES;
+}
+int sdca_internal_distillation_backward(const sdca_internal_options*, int, size_t, size_t,
+                                        const void*, const void*, double, const double*,
+                                        const double*, size_t, void*) {
+  SDCA_NO_LOSSES;
+}
+int sdca_internal_proximal_distillation_rows(const sdca_internal_options*, int, size_t, size_t,
+                                             const void*, const void*, double, double, double*,
+                                             void*) {
+  SDCA_NO_LOSSES;
 }
 #endif
+
+int sdca_internal_run_rows(size_t rows, size_t work_per_row, size_t num_threads,
+                           sdca_internal_row_callback callback, void* context) {
+  return protect([&] {
+    if (!callback) invalid("row callback must not be null");
+    if (rows == 0) return;
+    const std::size_t requested = sdca::detail::requested_threads(threads_of(num_threads));
+    const std::size_t team =
+        std::min<std::size_t>(requested ? requested : sdca::detail::automatic_threads(), 4096);
+    const std::size_t cpus = requested ? team : team / (sdca::detail::parallel_calls().load() + 1);
+    const std::size_t threads = std::min(rows, cpus);
+    const auto apply = [&](std::size_t begin, std::size_t end) { callback(context, begin, end); };
+    // Fused kernels use the same small-call cutoff as the tensor adapter. Their
+    // callbacks can batch adjacent rows into SIMD lanes, so probing single rows
+    // overestimates their cost and gives unstable thread decisions.
+    if (threads < 2 || static_cast<double>(rows) * work_per_row < 4096 ||
+        sdca::detail::in_parallel_rows() || (requested == 0 && sdca::detail::in_openmp_parallel()))
+      apply(0, rows);
+    else
+      sdca::detail::parallel_tasks(0, rows, threads, team, apply);
+  });
 }
+}
+
+#ifdef SDCA_PARALLEL_OPENMP
+// From the library's load on: a child forked after it never enters the
+// parent's OpenMP team.
+__attribute__((unused)) static const bool watching_forks = sdca::detail::watch_forks();
+#endif

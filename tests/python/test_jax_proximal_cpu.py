@@ -5,8 +5,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.typing import DTypeLike
-from libsdca import _jax_ffi, proximal_distillation_loss_and_grad
-from libsdca.jax import proximal_distillation_loss
+from libsdca import _jax_ffi
+from libsdca.jax import Reduction, proximal_distillation_loss
+from numpy_api import proximal_distillation_loss_and_grad
 
 jax.config.update("jax_enable_x64", True)
 pytestmark = pytest.mark.skipif(
@@ -22,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 def test_native_rows_and_scaled_gradient(
     monkeypatch: pytest.MonkeyPatch,
     dtype: DTypeLike,
-    reduction: str,
+    reduction: Reduction,
     alpha: float,
     precision: str | None,
 ) -> None:
@@ -47,7 +48,7 @@ def test_native_rows_and_scaled_gradient(
 
     def loss(z: jax.Array) -> jax.Array:
         return proximal_distillation_loss(
-            z, teacher, 2, alpha, reduction=reduction, precision=precision
+            z, teacher, temperature=2, alpha=alpha, reduction=reduction, precision=precision
         )
 
     call = jax.jit(loss)
@@ -94,7 +95,9 @@ def test_overflow_loss_preserves_finite_gradient(
     np.testing.assert_array_equal(gradient, expected_gradient)
     value, gradient = jax.jit(
         jax.value_and_grad(
-            lambda s: proximal_distillation_loss(s, teacher, 1, 1, precision=precision)
+            lambda s: proximal_distillation_loss(
+                s, teacher, temperature=1, alpha=1, precision=precision
+            )
         )
     )(student)
     assert np.isposinf(value)
@@ -109,7 +112,7 @@ def test_native_hessian_matches_array(
     teacher = jnp.asarray([[0.0, 0.5, -0.5], [0.0, 0.0, -1.0]], jnp.float32)
 
     def loss(s: jax.Array) -> jax.Array:
-        return proximal_distillation_loss(s, teacher, 2, 0.5, precision=precision)
+        return proximal_distillation_loss(s, teacher, temperature=2, alpha=0.5, precision=precision)
 
     monkeypatch.setenv("SDCA_JAX_FFI", "off")
     expected = jax.jit(jax.hessian(loss))(student)

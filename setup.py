@@ -29,7 +29,7 @@ if enabled("SDCA_BUILD_NATIVE"):
             ["src/c_api.cpp"],
             include_dirs=["include"],
             depends=sorted(str(p) for p in Path("include").rglob("*") if p.suffix in (".h", ".cpp"))
-            + ["src/tensor_losses.h"],
+            + ["src/c_api_internal.h", "src/tensor_losses.h"],
             define_macros=[
                 (macro, "1"),
                 ("NDEBUG", None),

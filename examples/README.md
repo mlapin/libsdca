@@ -4,7 +4,7 @@ Runnable examples for each language interface:
 
 | Directory | Contents | Guide |
 | --- | --- | --- |
-| [python/](python/README.md) | PyTorch (`CrossEntropyLoss` drop-in, loss tour, MNIST LeNet-5, distillation), NumPy (`fit`, `loss_and_grad`), scikit-learn (`SDCAClassifier`) and JAX (`sdca_loss`) scripts | [python/README.md](python/README.md) |
+| [python/](python/README.md) | PyTorch (`CrossEntropyLoss` drop-in, loss tour, MNIST LeNet-5, distillation), NumPy (`fit`, `loss_and_grad`), scikit-learn (`SDCAClassifier`) and JAX (the named losses) scripts | [python/README.md](python/README.md) |
 | [cpp/](cpp) | [`train.cpp`](cpp/train.cpp) and [`CMakeLists.txt`](cpp/CMakeLists.txt) linking `libsdca::libsdca` | [docs/CPP.md](../docs/CPP.md) |
 | [c/](c) | [`train.c`](c/train.c) and [`CMakeLists.txt`](c/CMakeLists.txt) linking `libsdca::sdca_c` | [docs/C.md](../docs/C.md) |
 

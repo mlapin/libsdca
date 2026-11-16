@@ -14,7 +14,9 @@ import pytest
 import torch
 from libsdca import _entropy, _multilabel
 from libsdca import torch as sdca_torch
-from libsdca.torch import explain_backend, sdca_loss
+from libsdca.torch import explain_backend
+from named_losses import function, parameters
+from named_losses import loss as named_loss
 
 CLASSES = 6
 
@@ -25,6 +27,19 @@ class KernelCalled(Exception):
 
 def _raise(*args: object, **kwargs: object) -> Any:
     raise KernelCalled
+
+
+def sdca_loss(
+    z: torch.Tensor, target: torch.Tensor, loss: str, k: int = 1, gamma: float = 0.0, **options: Any
+) -> torch.Tensor:
+    return named_loss(sdca_torch, loss, z, target, k=k, gamma=gamma, **options)
+
+
+def explain(
+    z: torch.Tensor, target: torch.Tensor, loss: str, k: int, gamma: float, **options: Any
+) -> tuple[str, str]:
+    fn = function(sdca_torch, loss)
+    return explain_backend(fn, z, target, **parameters(loss, k, gamma), **options)
 
 
 def cuda_like(shape: torch.Size) -> torch.Tensor:
@@ -43,7 +58,7 @@ def problem(loss: str) -> tuple[torch.Tensor, torch.Tensor]:
 
 def cases() -> list[tuple[str, int, float]]:
     out = []
-    for loss in libsdca.LOSSES:
+    for loss in libsdca._core._LABEL_LOSSES:
         ks = (1, 2) if "topk" in loss else (1,)
         gammas = (0.0, 0.5) if loss in libsdca.HINGES else (0.0,)
         out += [(loss, k, gamma) for k in ks for gamma in gammas]
@@ -97,9 +112,9 @@ def device_loss(
     z: torch.Tensor, target: torch.Tensor, loss: str, k: int, gamma: float, backend: str
 ) -> torch.Tensor:
     """The device path of sdca_loss (the CUDA dispatch, on CPU tensors)."""
-    objective, kind_k, kind_gamma = libsdca._core._tensor_kind(loss, k, gamma)
+    spec = sdca_torch._bind(loss, k=k, gamma=gamma).spec
     return sdca_torch._device_loss(
-        z, z, target, objective, kind_k, kind_gamma, 1.0, "none", -1, None, backend
+        z, z, target, spec.objective, spec.k, spec.gamma, 1.0, "none", -1, None, backend
     )
 
 
@@ -119,7 +134,7 @@ def test_torch_backend_reaches_no_kernel(subtests: pytest.Subtests):
             with subtests.test(loss=loss, k=k, gamma=gamma):
                 value = device_loss(z, target, loss, k, gamma, "torch")
                 torch.testing.assert_close(value, expected[loss, k, gamma], rtol=0, atol=0)
-                name, reason = explain_backend(z, target, loss, k=k, gamma=gamma, backend="torch")
+                name, reason = explain(z, target, loss, k, gamma, backend="torch")
                 assert name == "torch" and "backend='torch'" in reason
                 # The same call with backend="auto" reaches a kernel.
                 with pytest.raises(KernelCalled):
@@ -132,8 +147,10 @@ def test_torch_backend_reaches_no_kernel(subtests: pytest.Subtests):
 def test_torch_backend_with_float32_precision():
     # precision="float32" is float32 work: the route of None, for "auto" and for "torch".
     z, y = problem("cross_entropy")
-    expected = sdca_loss(z.float(), y, backend="torch", reduction="none")
-    value = sdca_loss(z.float(), y, backend="torch", precision="float32", reduction="none")
+    expected = sdca_loss(z.float(), y, "cross_entropy", backend="torch", reduction="none")
+    value = sdca_loss(
+        z.float(), y, "cross_entropy", backend="torch", precision="float32", reduction="none"
+    )
     torch.testing.assert_close(value, expected, rtol=0, atol=0)
 
 
@@ -169,13 +186,19 @@ def test_backends_reject_other_devices(subtests: pytest.Subtests):
                 with pytest.raises(ValueError, match="CPU or CUDA tensors, not meta"):
                     sdca_loss(z, target, loss, k=k, gamma=gamma, backend=backend)
                 with pytest.raises(ValueError, match="CPU or CUDA tensors, not meta"):
-                    explain_backend(z, target, loss, k=k, gamma=gamma, backend=backend)
+                    explain(z, target, loss, k, gamma, backend=backend)
 
 
 def test_boolean_options_are_rejected(subtests: pytest.Subtests):
     z, target = torch.zeros(2, 3), torch.tensor([0, 1])
-    bad_options: list[dict[str, Any]] = [{"gamma": True}, {"alpha": True}]
-    for bad in bad_options:
+    bad_options: list[tuple[Any, dict[str, Any]]] = [
+        (sdca_torch.multiclass_hinge_loss, {"gamma": True}),
+        (sdca_torch.topk_hinge_loss, {"k": True}),
+        (sdca_torch.proximal_cross_entropy, {"alpha": True}),
+        (sdca_torch.distillation_loss, {"temperature": True}),
+    ]
+    for fn, bad in bad_options:
         for backend in ("auto", "torch"):
-            with subtests.test(bad=bad, backend=backend), pytest.raises(ValueError):
-                sdca_loss(z, target, "topk_hinge_alpha", backend=backend, k=1, **bad)
+            with subtests.test(bad=bad, backend=backend), pytest.raises(TypeError):
+                other = z if fn is sdca_torch.distillation_loss else target
+                fn(z, other, backend=backend, **bad)

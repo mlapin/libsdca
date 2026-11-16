@@ -1,12 +1,11 @@
 // XLA FFI handlers of the native JAX losses on the CPU (libsdca.jax, backend "native"), built
 // on first use by _jax_ffi.py against the headers of the running jaxlib. They call
-// sdca_loss_gradient_rows of the loaded native library (bound once by sdca_jax_bind) on XLA's
-// buffers, as the host callback they replace calls loss_and_grad: the same scores, label mask,
-// options and threads, and the same messages in the same order for invalid inputs.
+// sdca_internal_loss_rows of the loaded native library (bound once by sdca_jax_bind) on XLA's
+// buffers, as the host callback they replace calls _core._host_loss_and_grad: the same scores, label mask,
+// options and threads. Rows the native library rejects give NaN, as in the host callback.
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -26,20 +25,17 @@ namespace ffi = xla::ffi;
 
 namespace {
 
-// struct sdca_options of include/sdca/c_api.h; sdca_jax_bind checks its size.
-struct sdca_options {
+// struct sdca_internal_options of src/c_api_internal.h; sdca_jax_bind checks its size.
+struct sdca_internal_options {
   std::size_t size;
-  int precision, loss;
-  double c;
+  int float_work, loss;
   std::size_t k;
   double gamma, alpha;
   int projection_precision;
-  std::size_t num_threads, max_epoch, eval_epoch;
-  double tol;
-  int eval_on_start, recompute_primal, kernel, warm, shrinking;
+  std::size_t num_threads;
 };
 
-using Rows = int (*)(const sdca_options*, int, std::size_t, std::size_t, const void*,
+using Rows = int (*)(const sdca_internal_options*, int, std::size_t, std::size_t, const void*,
                      const std::int64_t*, const std::uint8_t*, double*, void*);
 using LastError = const char* (*)();
 Rows loss_rows = nullptr;
@@ -49,7 +45,8 @@ LastError last_error = nullptr;
 const int invalid_argument = -2;
 const int dtype_float32 = 0, dtype_float64 = 1;
 const int proximal_cross_entropy = 7;
-const std::size_t threads_default = static_cast<std::size_t>(-1);
+// num_threads 0: SDCA_NUM_THREADS, else the available CPUs, as XLA's own CPU operations.
+const std::size_t threads_default = 0;
 
 // Integer labels of any width as int64, as NumPy's astype (unsigned ones wrap).
 template <typename T>
@@ -138,7 +135,7 @@ ffi::Error rows_of(const ffi::AnyBuffer& z, std::size_t& n, std::size_t& classes
   return ffi::Error::Success();
 }
 
-// The targets as sdca_loss_gradient_rows takes them: int64 labels or a 0/1 mask
+// The targets as sdca_internal_loss_rows takes them: int64 labels or a 0/1 mask
 // (exactly one of labels and positive is set).
 struct targets {
   std::vector<std::int64_t> wide;
@@ -165,23 +162,50 @@ ffi::Error targets_of(const ffi::AnyBuffer& target, std::size_t n, std::size_t c
   return ffi::Error::Success();
 }
 
-// SDCA_OPTIONS_DEFAULT with the loss options of a call.
-sdca_options options_of(int loss, std::int64_t k, double gamma, double alpha, int precision) {
-  sdca_options options = {};
-  options.size = sizeof(sdca_options);
-  options.precision = precision;
+// The options of a call; precision is the code of the FFI attribute: 0 float work on float32
+// storage, 1 double work on float32, 2 double work on float64.
+sdca_internal_options options_of(int loss, std::int64_t k, double gamma, double alpha,
+                                 int precision) {
+  sdca_internal_options options = {};
+  options.size = sizeof(sdca_internal_options);
+  options.float_work = precision == 0;
   options.loss = loss;
-  options.c = 1.0;
   options.k = static_cast<std::size_t>(k);
   options.gamma = gamma;
   options.alpha = alpha;
-  // The available CPUs, as XLA's own CPU operations, unless SDCA_NUM_THREADS is set.
-  options.num_threads = std::getenv("SDCA_NUM_THREADS") ? threads_default : 0;
-  options.max_epoch = 1000;
-  options.eval_epoch = 10;
-  options.tol = 1e-3;
-  options.recompute_primal = 1;
+  options.num_threads = threads_default;
   return options;
+}
+
+// After a failed call, each row again on its own: a row the native library rejects (invalid
+// traced inputs, or a proximal normalization that does not converge) gives NaN losses and
+// gradients, as the jax.numpy losses. False if every row succeeds alone (the failure is not
+// a row's: the call fails).
+bool nan_rows(const sdca_internal_options& options, int dtype, std::size_t n, std::size_t classes,
+              const ffi::AnyBuffer& z, const targets& t, double* values, void* gradients) {
+  const std::size_t width = dtype == dtype_float32 ? sizeof(float) : sizeof(double);
+  const char* scores = static_cast<const char*>(z.untyped_data());
+  char* entries = static_cast<char*>(gradients);
+  bool failed = false;
+  for (std::size_t i = 0; i < n; ++i) {
+    const std::size_t offset = i * classes * width;
+    void* row_gradient = entries ? entries + offset : nullptr;
+    const int code =
+        loss_rows(&options, dtype, 1, classes, scores + offset, t.labels ? t.labels + i : nullptr,
+                  t.positive ? t.positive + i * classes : nullptr, values + i, row_gradient);
+    if (code == 0) continue;
+    failed = true;
+    values[i] = std::nan("");
+    if (!entries) continue;
+    if (dtype == dtype_float32) {
+      float* g = reinterpret_cast<float*>(row_gradient);
+      for (std::size_t j = 0; j < classes; ++j) g[j] = std::nanf("");
+    } else {
+      double* g = reinterpret_cast<double*>(row_gradient);
+      for (std::size_t j = 0; j < classes; ++j) g[j] = std::nan("");
+    }
+  }
+  return failed;
 }
 
 // Losses (float64, or float32 rounded once from double) and gradients (the dtype of z, or
@@ -196,14 +220,14 @@ ffi::Error loss_gradient(ffi::AnyBuffer z, ffi::AnyBuffer target, ffi::AnyBuffer
   ffi::Error error = rows_of(z, n, classes);
   if (error.success()) error = targets_of(target, n, classes, t);
   if (error.failure()) return error;
-  const sdca_options options = options_of(loss, k, gamma, alpha, precision);
+  const sdca_internal_options options = options_of(loss, k, gamma, alpha, precision);
   const bool float64_values = values.element_type() == ffi::DataType::F64;
   std::vector<double> computed(float64_values ? 0 : n);
   double* out = float64_values ? static_cast<double*>(values.untyped_data()) : computed.data();
   const int dtype = z.element_type() == ffi::DataType::F32 ? dtype_float32 : dtype_float64;
   const int code = loss_rows(&options, dtype, n, classes, z.untyped_data(), t.labels, t.positive,
                              out, gradients);
-  if (code != 0) {
+  if (code != 0 && !nan_rows(options, dtype, n, classes, z, t, out, gradients)) {
     const std::string message = failure(loss, z, n, classes, t.labels, t.positive);
     return code == invalid_argument ? ffi::Error::InvalidArgument(message)
                                     : ffi::Error::Internal(message);
@@ -233,16 +257,16 @@ ffi::Error loss_values(ffi::AnyBuffer z, ffi::AnyBuffer target, ffi::Result<ffi:
 // Shared SIMD distillation, with native general-precision rows for exceptional inputs.
 using RowCallback = void (*)(void*, std::size_t, std::size_t);
 using RunRows = int (*)(std::size_t, std::size_t, std::size_t, RowCallback, void*);
-using DistillForward = int (*)(const sdca_options*, int, std::size_t, std::size_t, const void*,
-                               const void*, double, double*, double*);
-using DistillBackward = int (*)(const sdca_options*, int, std::size_t, std::size_t, const void*,
-                                const void*, double, const double*, const double*, std::size_t,
-                                void*);
+using DistillForward = int (*)(const sdca_internal_options*, int, std::size_t, std::size_t,
+                               const void*, const void*, double, double*, double*);
+using DistillBackward = int (*)(const sdca_internal_options*, int, std::size_t, std::size_t,
+                                const void*, const void*, double, const double*, const double*,
+                                std::size_t, void*);
 RunRows run_rows = nullptr;
 DistillForward distill_forward = nullptr;
 DistillBackward distill_backward = nullptr;
-using ProxDistill = int (*)(const sdca_options*, int, std::size_t, std::size_t, const void*,
-                            const void*, double, double, double*, void*);
+using ProxDistill = int (*)(const sdca_internal_options*, int, std::size_t, std::size_t,
+                            const void*, const void*, double, double, double*, void*);
 ProxDistill prox_distill = nullptr;
 
 template <typename Out, typename In>
@@ -259,7 +283,7 @@ template <typename T>
 bool general_distillation(const T* s, const T* t, int64_t c, double temp, double& value,
                           T* gradient, sdca_cpu::DistillationBuffers&) {
   constexpr bool wide = std::is_same_v<T, double>;
-  sdca_options options = options_of(0, 1, 1, 0, wide ? 2 : 1);
+  sdca_internal_options options = options_of(0, 1, 1, 0, wide ? 2 : 1);
   options.num_threads = 1;
   double stats[7];
   const int dtype = wide ? dtype_float64 : dtype_float32;
@@ -331,7 +355,7 @@ ffi::Error shared_distillation(const ffi::AnyBuffer& s, const ffi::AnyBuffer& t,
       losses.data(),
       static_cast<int64_t>(c),
       temp};
-  const auto threads = std::getenv("SDCA_NUM_THREADS") ? threads_default : 0;
+  const auto threads = threads_default;
   const int code = run_rows(n, c, threads, DistillationTask<T, NeedGradient>::call, &task);
   if (code) return ffi::Error::Internal(last_error());
   T* out = static_cast<T*>(values.untyped_data());
@@ -396,7 +420,7 @@ struct DistillationStatsTask {
   int reduction;
 
   void backward_row(std::size_t row, int64_t cp, sdca_cpu::DistillationBuffers& buffers,
-                    const sdca_options& options) {
+                    const sdca_internal_options& options) {
     const T *sr = s + row * classes, *tr = t + row * classes;
     double* st = stats ? stats + row * 7 : nullptr;
     const double u = double(upstream[reduction == 0 ? row : 0]) / (reduction == 2 ? rows : 1);
@@ -416,7 +440,7 @@ struct DistillationStatsTask {
   }
 
   void forward_row(std::size_t row, sdca_cpu::DistillationBuffers& buffers,
-                   const sdca_options& options) {
+                   const sdca_internal_options& options) {
     double* st = stats ? stats + row * 7 : nullptr;
     double& value = values[row];
     const bool ok = sdca_cpu::distillation_forward_row(
@@ -444,7 +468,7 @@ struct DistillationStatsTask {
     const int64_t cp = (c + sdca_cpu::lanes::L - 1) / sdca_cpu::lanes::L * sdca_cpu::lanes::L;
     sdca_cpu::DistillationBuffers buffers{
         std::vector<float>(Backward && task.work32 ? 6 * cp : 0), {}, {}};
-    sdca_options options = options_of(0, 1, 1, 0, task.work32 ? 1 : 2);
+    sdca_internal_options options = options_of(0, 1, 1, 0, task.work32 ? 1 : 2);
     options.num_threads = 1;
     std::vector<char> done;
     if constexpr (!Backward) {
@@ -489,7 +513,7 @@ ffi::Error shared_stats(const ffi::AnyBuffer& s, const ffi::AnyBuffer& t, ffi::A
       temperature,
       work32,
       reduction};
-  const auto threads = std::getenv("SDCA_NUM_THREADS") ? threads_default : 0;
+  const auto threads = threads_default;
   const int code = run_rows(n, c, threads, DistillationStatsTask<T, Backward>::call, &task);
   if (code) return ffi::Error::Internal(last_error());
   if constexpr (!Backward) {
@@ -576,7 +600,7 @@ struct ProximalDistillationTask {
     std::vector<double> buffer(13 * c);
     std::vector<int32_t> index(c);
     double* b = buffer.data();
-    sdca_options options = options_of(0, 1, 1, task.alpha, compensated ? 2 : 1);
+    sdca_internal_options options = options_of(0, 1, 1, task.alpha, compensated ? 2 : 1);
     options.num_threads = 1;
     for (std::size_t row = begin; row < end; ++row) {
       const T *s = task.student + row * c, *t = task.teacher + row * c;
@@ -619,7 +643,7 @@ ffi::Error proximal_distillation_rows(const ffi::AnyBuffer& s, const ffi::AnyBuf
                                       static_cast<int64_t>(c),
                                       temperature,
                                       alpha};
-  const auto threads = std::getenv("SDCA_NUM_THREADS") ? threads_default : 0;
+  const auto threads = threads_default;
   const int code = run_rows(n, 8 * c, threads, ProximalDistillationTask<T, G>::call, &task);
   return code ? ffi::Error::Internal(last_error()) : ffi::Error::Success();
 }
@@ -655,10 +679,10 @@ ffi::Error proximal_distillation(ffi::AnyBuffer s, ffi::AnyBuffer t,
 
 }  // namespace
 
-// Binds the native library's sdca_loss_gradient_rows and sdca_last_error; 0, or -1 if its
-// struct sdca_options (options_size) is not the one above.
+// Binds the native library's sdca_internal_loss_rows and sdca_last_error; 0, or -1 if its
+// struct sdca_internal_options (options_size) is not the one above.
 extern "C" int sdca_jax_bind(void* rows, void* error, std::size_t options_size) {
-  if (options_size != sizeof(sdca_options)) return -1;
+  if (options_size != sizeof(sdca_internal_options)) return -1;
   loss_rows = reinterpret_cast<Rows>(rows);
   last_error = reinterpret_cast<LastError>(error);
   return 0;

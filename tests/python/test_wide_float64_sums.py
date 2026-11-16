@@ -71,7 +71,7 @@ class WideFloat64SumTests:
                     student[0, 0] = 0
                     student.requires_grad_()
                     with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": flag}):
-                        loss = distillation_loss(student, teacher, 2.0)
+                        loss = distillation_loss(student, teacher, temperature=2.0)
                         loss.backward()
                     assert student.grad is not None
                     with mp.workdps(100):
@@ -93,7 +93,9 @@ class WideFloat64SumTests:
                         student[0, 0] = 0
                         student.requires_grad_()
                         with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": flag}):
-                            loss = proximal_distillation_loss(student, teacher, temperature, alpha)
+                            loss = proximal_distillation_loss(
+                                student, teacher, temperature=temperature, alpha=alpha
+                            )
                             loss.backward()
                         assert student.grad is not None
                         with mp.workdps(100):

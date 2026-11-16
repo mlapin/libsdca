@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <sstream>
 
 #include "sdca/prox/proxdef.h"
@@ -72,12 +73,13 @@ inline std::string shrinking_mode_name(const shrinking_mode mode) {
 }
 
 struct stopping_criteria {
-  // Evaluate every eval_epoch epochs (0: only at the end), and with epsilon > 0
-  // up to twice in between where the gap's trend reaches epsilon: at most
+  // Evaluate every eval_epoch epochs (0: only at the end), and with tol > 0
+  // up to twice in between where the gap's trend reaches tol: at most
   // max_epoch / eval_epoch + 2 evaluations, the start and the end included.
   size_type eval_epoch = 10;
   size_type max_epoch = 1000;
-  double epsilon = 1e-3;
+  // The relative duality gap of solver_status::solved (0: never solved).
+  double tol = 1e-3;
   double max_cpu_time = 0;
   double max_wall_time = 0;
   bool eval_on_start = false;
@@ -99,10 +101,13 @@ struct stopping_criteria {
   // CPUs, as the work allows); 1 is serial.
   // Results are identical for every count.
   std::size_t num_threads = static_cast<std::size_t>(-1);
+  // The seed of the order of the examples in the epochs; seeds that are equal
+  // modulo 2^31 - 2 give the same order.
+  std::uint64_t seed = 0;
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str << "epsilon: " << epsilon
+    str << "tol: " << tol
         << ", "
            "eval_epoch: "
         << eval_epoch
@@ -117,7 +122,7 @@ struct stopping_criteria {
         << max_wall_time
         << ", "
            "eval_on_start: "
-        << eval_on_start;
+        << eval_on_start << ", seed: " << seed;
     return str.str();
   }
 };

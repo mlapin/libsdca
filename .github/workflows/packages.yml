@@ -54,7 +54,7 @@ jobs:
           py="$RUNNER_TEMP/env/bin/python" src="$RUNNER_TEMP/sdist"
           SDCA_BLAS_BACKEND=BUILTIN "$py" -m pip install dist/*.tar.gz pytest scipy mpmath scikit-learn
           mkdir "$src" && tar -xzf dist/*.tar.gz -C "$src" --strip-components=1
-          cd "$RUNNER_TEMP" && "$py" -m pytest -p no:cacheprovider "$src/tests/python" --group core --installed
+          cd "$RUNNER_TEMP" && "$py" -m pytest -p no:cacheprovider "$src/tests/python" --group core --installed --conformance ci
       # Verify that the C++ sources shipped inside the sdist can JIT-compile the PyTorch CPU extension.
       - name: Build the CPU extension from the sdist sources
         run: |

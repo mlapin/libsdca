@@ -132,7 +132,7 @@ def check_versions() -> None:
             r"OUTPUT_NAME sdca_c VERSION (\d+) SOVERSION \1\b", "CMakeLists.txt"
         ),
         "python/libsdca/_core.py": _version(r"^ABI_VERSION = (\d+)", "python/libsdca/_core.py"),
-        "rust/src/solver.rs": _version(r"^const ABI_VERSION: c_int = (\d+);", "rust/src/solver.rs"),
+        "rust/src/ffi.rs": _version(r"^pub const ABI_VERSION: c_int = (\d+);", "rust/src/ffi.rs"),
     }
     if len(set(abi.values())) != 1:
         raise SystemExit(f"SDCA_ABI_VERSION differs: {abi}")

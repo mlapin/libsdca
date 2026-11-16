@@ -3,7 +3,7 @@
 import mpmath as mp
 import numpy as np
 import pytest
-from libsdca import loss_and_grad
+from libsdca._core import _host_loss_and_grad
 
 
 class AccuracyEnvelopeTests:
@@ -35,7 +35,9 @@ class AccuracyEnvelopeTests:
         scale = np.finfo(np.float32).eps * np.abs(reference).max()
         for precision, budget in (("float32", 400), ("float64", 1)):
             with subtests.test(precision=precision):
-                _, gradient = loss_and_grad(
+                # Several targets: the internal rows of the tensor layers (the public loss
+                # takes one label).
+                _, gradient = _host_loss_and_grad(
                     logits, target, "proximal_cross_entropy", alpha=alpha, precision=precision
                 )
                 assert gradient.dtype == np.float32

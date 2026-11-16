@@ -7,7 +7,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.typing import DTypeLike
-from libsdca.jax import cross_entropy, distillation_loss, proximal_distillation_loss, sdca_loss
+from libsdca.jax import cross_entropy, distillation_loss, proximal_distillation_loss
+from named_losses import jax_loss as named_loss
 
 jax.config.update("jax_enable_x64", True)
 
@@ -16,7 +17,6 @@ REDUCTIONS = ("none", "sum", "mean")
 # (name, loss, target kind, keyword options): every loss, nonsmooth and smoothed.
 CASES = [
     ("cross_entropy", "cross_entropy", "index", {}),
-    ("cross_entropy mask", "cross_entropy", "mask", {}),
     ("topk_cross_entropy k=2", "topk_cross_entropy", "index", {"k": 2}),
     ("multiclass_hinge", "multiclass_hinge", "index", {}),
     ("multiclass_hinge gamma", "multiclass_hinge", "index", {"gamma": 0.5}),
@@ -53,13 +53,14 @@ class JaxLossDtypeTests:
         assert gradient.dtype == z.dtype, message
         assert bool(jnp.isfinite(value).all()), message
 
+    @pytest.mark.long
     def test_every_loss_dtype_and_reduction(self):
         for dtype in DTYPES:
             for name, loss, kind, options in CASES:
                 z, target = self.inputs(kind, dtype)
                 for reduction in REDUCTIONS:
                     self.check(
-                        lambda x, r, t=target, o=options, n=loss: sdca_loss(
+                        lambda x, r, t=target, o=options, n=loss: named_loss(
                             x, t, n, reduction=r, **o
                         ),
                         z,
@@ -78,9 +79,11 @@ class JaxLossDtypeTests:
             ran = True
             cases = {
                 "cross_entropy": lambda x, r: cross_entropy(x, labels, reduction=r),
-                "distillation": lambda x, r: distillation_loss(x, teacher, 2.0, reduction=r),
+                "distillation": lambda x, r: distillation_loss(
+                    x, teacher, temperature=2.0, reduction=r
+                ),
                 "proximal_distillation": lambda x, r: proximal_distillation_loss(
-                    x, teacher, 2.0, 0.5, reduction=r
+                    x, teacher, temperature=2.0, alpha=0.5, reduction=r
                 ),
             }
             for name, fn in cases.items():

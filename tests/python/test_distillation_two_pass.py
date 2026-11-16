@@ -40,7 +40,7 @@ def test_two_pass_keeps_tiny_loss_and_large_weighted_sum(dtype: torch.dtype):
     large = torch.finfo(dtype).max * 0.75
     student[2] = -large
     student[2, 0] = large
-    actual = distillation_loss(student, teacher, 1.0, reduction="none")
+    actual = distillation_loss(student, teacher, temperature=1.0, reduction="none")
     assert actual[0] > 0
     assert torch.isfinite(actual).all()
     with mp.workdps(110):
@@ -54,7 +54,7 @@ def test_two_pass_propagates_nonfinite_rows():
     teacher = student.clone()
     student[0, 0], student[1, -1] = float("nan"), float("inf")
     teacher[2, 0], teacher[3, -1] = float("nan"), -float("inf")
-    assert torch.isnan(distillation_loss(student, teacher, 2.0, reduction="none")).all()
+    assert torch.isnan(distillation_loss(student, teacher, temperature=2.0, reduction="none")).all()
 
 
 @pytest.mark.parametrize("dtype,temperature", [(torch.float64, 1.0), (torch.float32, 1e300)])
@@ -64,7 +64,7 @@ def test_value_only_keeps_float64_work_fallback(dtype: torch.dtype, temperature:
     student[0, 0] = 0
     teacher = torch.zeros_like(student)
     # Float64's unnormalized sum can overflow too, so normalize its terms before summing.
-    actual = distillation_loss(student, teacher, temperature, reduction="none")
+    actual = distillation_loss(student, teacher, temperature=temperature, reduction="none")
     assert torch.isfinite(actual).all()
     with mp.workdps(110):
         _assert_contract(actual[0], _grouped_value(student[0], teacher[0], temperature))

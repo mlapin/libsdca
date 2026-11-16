@@ -107,11 +107,18 @@ def verify_code(profile: str, device: str) -> str:
             if device == "cuda"
             else ""
         )
+        paths = "('kernel',)" if device == "cuda" else "('kernel', 'native')"
+        explained = (
+            "from libsdca.torch import explain_backend\n"
+            "_path = explain_backend(TopKHingeLoss(k=2), logits, targets)\n"
+            f"assert _path[0] in {paths}, _path\n"
+        )
         return (
             base
             + "assert ce.isfinite() and hinge.isfinite()\n"
             + f"assert logits.grad.isfinite().all()\nassert logits.device.type == {device!r}\n"
             + fused
+            + explained
         )
     if profile.startswith("jax"):
         check = (
@@ -126,14 +133,13 @@ def verify_code(profile: str, device: str) -> str:
                 "assert _jax_cuda.TARGET in _lowered.as_text()\n"
             )
             check += (
-                "from libsdca.jax import sdca_loss as _generic_loss\n"
-                "_ce_z = jnp.arange(28, dtype=jnp.float32).reshape(4, 7) / 100\n"
-                "_ce_y = jnp.arange(4) % 7\n"
-                "_ce = jax.jit(jax.value_and_grad(lambda z: _generic_loss(z, _ce_y, 'cross_entropy')))\n"
-                "assert _jax_cuda.TARGET in _ce.lower(_ce_z).as_text(), 'generic CE bypassed fused CUDA'\n"
-                "_ce_value, _ce_gradient = _ce(_ce_z)\n"
-                "_ce_gradient.block_until_ready()\n"
-                "assert jnp.isfinite(_ce_value).all() and jnp.isfinite(_ce_gradient).all()\n"
+                "_z = jnp.arange(28, dtype=jnp.float32).reshape(4, 7) / 100\n"
+                "_y = jnp.arange(4) % 7\n"
+                "_hinge = jax.jit(jax.value_and_grad(lambda z: topk_hinge_loss(z, _y, k=2)))\n"
+                "assert _jax_cuda.TARGET in _hinge.lower(_z).as_text(), 'top-2 hinge bypassed fused CUDA'\n"
+                "_value, _gradient = _hinge(_z)\n"
+                "_gradient.block_until_ready()\n"
+                "assert jnp.isfinite(_value).all() and jnp.isfinite(_gradient).all()\n"
             )
         return check
     if profile == "numpy":

@@ -4,8 +4,8 @@ from typing import Any
 
 import numpy as np
 import pytest
-from libsdca import LOSSES
-from libsdca._core import Solver
+from libsdca import MULTILABEL, OBJECTIVES
+from numpy_api import Solver
 
 
 class IntegrationTests:
@@ -16,12 +16,8 @@ class IntegrationTests:
         mask = np.eye(4, dtype=bool)[labels]
         mask[np.arange(len(x)), (labels + 1) % 4] = True
         solver = Solver()
-        for objective in list(LOSSES)[:-1]:
-            for multi in (
-                [False, True]
-                if objective == "cross_entropy"
-                else [objective.startswith("multilabel")]
-            ):
+        for objective in OBJECTIVES:
+            for multi in [objective in MULTILABEL]:
                 y = mask if multi else labels
                 opts: dict[str, Any] = dict(
                     C=0.4, objective=objective, k=2, gamma=0.7, tol=1e-8, max_epoch=2000
@@ -42,7 +38,8 @@ class IntegrationTests:
                     warm = solver.fit(x, y, initial_dual=model.dual, **opts)
                     assert warm.weights is not None
                     np.testing.assert_allclose(warm.weights, model.weights, atol=2e-4)
-                    assert ("rank_loss" if multi else "accuracy") in model.history
+                    # Top-1 accuracy, or the rank loss of the multilabel losses.
+                    assert "accuracy" in model.history
 
     def test_shifted_loss_and_multilabel_residual_regressions(self):
         for precision, dtype in [
@@ -51,15 +48,16 @@ class IntegrationTests:
             ("float64", np.float64),
         ]:
             s = Solver(precision, dtype=dtype)
-            for objective in list(LOSSES)[:-1]:
+            for objective in OBJECTIVES + ("proximal_cross_entropy",):
                 y = [[True, True, False]] if objective.startswith("multilabel") else [0]
                 value, grad = s.loss_and_grad([[1e16] * 3], y, objective, k=2, gamma=0.7)
                 reference = s.loss_and_grad([[0.0] * 3], y, objective, k=2, gamma=0.7)
                 np.testing.assert_allclose(value, reference[0], rtol=1e-6)
                 np.testing.assert_allclose(grad, reference[1], rtol=1e-6, atol=1e-7)
-            a = s.coordinate_update([[20.0, 20.0, -20.0]], [[True, True, False]])
+            ml = "multilabel_cross_entropy"
+            a = s.coordinate_update([[20.0, 20.0, -20.0]], [[True, True, False]], ml)
             # float32 solves in float arithmetic: a few float ulps.
             rtol = 2e-6 if precision == "float32" else 1e-6
             np.testing.assert_allclose(a[0, :2], np.exp(-40) / 4, rtol=rtol, atol=0)
-            a = s.coordinate_update([[0.0, 1e-10, -40.0]], [[True, True, False]])
+            a = s.coordinate_update([[0.0, 1e-10, -40.0]], [[True, True, False]], ml)
             np.testing.assert_allclose(a[0, :2], [1e-10 / 6, -1e-10 / 6], rtol=2e-7, atol=0)

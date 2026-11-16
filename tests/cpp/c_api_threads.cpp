@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "c_api_internal.h"
 #include "sdca/c_api.h"
 #include "sdca/utility/parallel.h"
 
@@ -37,7 +38,8 @@ void add_scheduler(std::vector<named_case>& cases) {
                      [n](std::size_t threads, bytes& out) {
                        std::atomic<unsigned> visits[137];
                        for (auto& count : visits) count = 0;
-                       const int code = sdca_run_rows(n, 1000, threads, visit_rows, visits);
+                       const int code =
+                           sdca_internal_run_rows(n, 1000, threads, visit_rows, visits);
                        for (std::size_t row = 0; row < 137; ++row) {
                          const unsigned count = visits[row].load();
                          if (count != (row < n ? 1u : 0u)) ++failures;
@@ -117,12 +119,12 @@ struct inputs {
   const void* scores(int dtype) const {
     if (dtype == SDCA_DTYPE_FLOAT64) return z64.data();
     if (dtype == SDCA_DTYPE_FLOAT32) return z32.data();
-    return dtype == SDCA_DTYPE_FLOAT16 ? z16.data() : zb16.data();
+    return dtype == SDCA_INTERNAL_DTYPE_FLOAT16 ? z16.data() : zb16.data();
   }
   const void* teacher(int dtype) const {
     if (dtype == SDCA_DTYPE_FLOAT64) return t64.data();
     if (dtype == SDCA_DTYPE_FLOAT32) return t32.data();
-    return dtype == SDCA_DTYPE_FLOAT16 ? t16.data() : tb16.data();
+    return dtype == SDCA_INTERNAL_DTYPE_FLOAT16 ? t16.data() : tb16.data();
   }
 };
 
@@ -130,13 +132,8 @@ std::size_t storage(int dtype) {
   return dtype == SDCA_DTYPE_FLOAT64 ? 8 : dtype == SDCA_DTYPE_FLOAT32 ? 4 : 2;
 }
 
-// Gradients of sdca_loss_gradient_rows and sdca_proximal_distillation_rows: float or double.
+// Gradients of the internal loss rows and proximal distillation: float or double.
 std::size_t wide(int dtype) { return dtype == SDCA_DTYPE_FLOAT64 ? 8 : 4; }
-
-sdca_options with_threads(sdca_options o, std::size_t threads) {
-  o.num_threads = threads;
-  return o;
-}
 
 const char* dtype_name(int dtype) {
   static const char* names[] = {"float32", "float64", "float16", "bfloat16"};
@@ -144,123 +141,173 @@ const char* dtype_name(int dtype) {
 }
 
 bool multilabel(int loss) {
-  return loss == SDCA_MULTILABEL_HINGE || loss == SDCA_MULTILABEL_CROSS_ENTROPY;
+  return loss == SDCA_LOSS_MULTILABEL_HINGE || loss == SDCA_LOSS_MULTILABEL_CROSS_ENTROPY;
+}
+bool topk(int loss) {
+  return loss == SDCA_LOSS_TOPK_CROSS_ENTROPY || loss == SDCA_LOSS_TOPK_HINGE_ALPHA ||
+         loss == SDCA_LOSS_TOPK_HINGE_BETA;
+}
+bool hinge(int loss) {
+  return loss == SDCA_LOSS_MULTICLASS_HINGE || loss == SDCA_LOSS_TOPK_HINGE_ALPHA ||
+         loss == SDCA_LOSS_TOPK_HINGE_BETA || loss == SDCA_LOSS_MULTILABEL_HINGE;
+}
+
+// The public loss of kind with its own parameters (k 3, the given gamma, alpha 0.7).
+sdca_loss loss_of(int kind, double gamma) {
+  sdca_loss loss = SDCA_LOSS_INIT;
+  loss.kind = kind;
+  if (topk(kind)) loss.k = 3;
+  if (hinge(kind)) loss.gamma = gamma;
+  if (kind == SDCA_LOSS_PROXIMAL_CROSS_ENTROPY || kind == SDCA_LOSS_PROXIMAL_DISTILLATION)
+    loss.alpha = 0.7;
+  if (kind == SDCA_LOSS_DISTILLATION || kind == SDCA_LOSS_PROXIMAL_DISTILLATION)
+    loss.temperature = 2.0;
+  return loss;
+}
+
+sdca_execution execution_of(int precision, std::size_t threads) {
+  sdca_execution e = SDCA_EXECUTION_INIT;
+  e.precision = precision;
+  e.num_threads = threads;
+  return e;
+}
+
+sdca_internal_options internal_of(bool float_work, std::size_t threads) {
+  const sdca_internal_options o = {sizeof(sdca_internal_options),
+                                   float_work ? 1 : 0,
+                                   0,
+                                   1,
+                                   0.0,
+                                   1.0,
+                                   SDCA_PROJECTION_FLOAT64,
+                                   threads};
+  return o;
+}
+
+// The label targets of a loss: labels, a mask or label sets.
+sdca_targets targets_of(const inputs& in, int loss, bool mask) {
+  sdca_targets t = SDCA_TARGETS_INIT;
+  if (!multilabel(loss)) {
+    t.labels = in.labels.data();
+  } else if (mask) {
+    t.kind = SDCA_TARGET_MASK;
+    t.mask = in.multi.data();
+  } else {
+    t.kind = SDCA_TARGET_LABEL_SETS;
+    t.labels = in.sets.data();
+    t.offsets = in.offsets.data();
+  }
+  return t;
 }
 
 void add_cases(const inputs& in, std::vector<named_case>& cases) {
   const std::size_t n = in.n, k = in.k;
   const std::string shape = " " + std::to_string(n) + "x" + std::to_string(k);
   const double gammas[] = {0.0, 0.5};
-  for (int loss = SDCA_CROSS_ENTROPY; loss <= SDCA_PROXIMAL_CROSS_ENTROPY; ++loss) {
+  for (int loss = SDCA_LOSS_CROSS_ENTROPY; loss <= SDCA_LOSS_PROXIMAL_CROSS_ENTROPY; ++loss) {
     for (double gamma : gammas) {
-      sdca_options o = SDCA_OPTIONS_DEFAULT;
-      o.loss = loss;
-      o.k = loss == SDCA_TOPK_CROSS_ENTROPY || loss == SDCA_TOPK_HINGE_ALPHA ||
-                    loss == SDCA_TOPK_HINGE_BETA
-                ? 3
-                : 1;
-      o.gamma = gamma;
-      o.alpha = 0.7;
-      const std::vector<std::uint8_t>& mask = multilabel(loss) ? in.multi : in.single;
+      if (gamma > 0 && !hinge(loss)) continue;
+      const sdca_loss l = loss_of(loss, gamma);
       const std::string name = "loss " + std::to_string(loss) + " gamma " + std::to_string(gamma);
-      for (int precision : {SDCA_FLOAT32, SDCA_FLOAT32_FLOAT64, SDCA_FLOAT64}) {
-        cases.push_back({name + " precision " + std::to_string(precision) + shape,
-                         [=, &in, &mask](std::size_t threads, bytes& out) {
-                           sdca_options t = with_threads(o, threads);
-                           t.precision = precision;
-                           const bool d = precision == SDCA_FLOAT64;
-                           std::vector<double> values(n);
-                           std::vector<unsigned char> g(n * k * (d ? 8 : 4));
-                           const int code =
-                               sdca_loss_gradient(&t, n, k, d ? in.scores(1) : in.scores(0),
-                                                  mask.data(), values.data(), g.data());
-                           append(out, values);
-                           append(out, g);
-                           return code;
-                         },
-                         bytes()});
-      }
-      for (int dtype = 0; dtype < 4; ++dtype)
-        for (int precision : {SDCA_FLOAT32, SDCA_FLOAT64}) {
-          if (dtype == SDCA_DTYPE_FLOAT64 && precision == SDCA_FLOAT32) continue;
-          const bool labeled = !multilabel(loss);
+      for (int dtype : {SDCA_DTYPE_FLOAT32, SDCA_DTYPE_FLOAT64})
+        for (int precision :
+             {SDCA_PRECISION_DEFAULT, SDCA_PRECISION_FLOAT32, SDCA_PRECISION_FLOAT64}) {
+          if (dtype == SDCA_DTYPE_FLOAT64 && precision == SDCA_PRECISION_FLOAT32) continue;
           cases.push_back(
-              {name + " rows " + dtype_name(dtype) + " " + std::to_string(precision) + shape,
-               [=, &in, &mask](std::size_t threads, bytes& out) {
-                 sdca_options t = with_threads(o, threads);
-                 t.precision = precision;
+              {name + " " + dtype_name(dtype) + " precision " + std::to_string(precision) + shape,
+               [=, &in](std::size_t threads, bytes& out) {
+                 const sdca_execution e = execution_of(precision, threads);
+                 const sdca_targets t = targets_of(in, loss, false);
                  std::vector<double> values(n);
-                 std::vector<unsigned char> g(n * k * wide(dtype));
-                 const int code = sdca_loss_gradient_rows(
-                     &t, dtype, n, k, in.scores(dtype), labeled ? in.labels.data() : nullptr,
-                     labeled ? nullptr : mask.data(), values.data(), g.data());
+                 std::vector<unsigned char> g(n * k * storage(dtype));
+                 const int code = sdca_loss_evaluate(&l, &e, dtype, n, k, in.scores(dtype), &t,
+                                                     values.data(), g.data());
                  append(out, values);
                  append(out, g);
                  return code;
                },
                bytes()});
         }
-      if (loss == SDCA_PROXIMAL_CROSS_ENTROPY) continue;
-      cases.push_back({"update " + name + shape,
-                       [=, &in](std::size_t threads, bytes& out) {
-                         sdca_options t = with_threads(o, threads);
-                         t.c = 2.0;
-                         std::vector<double> previous(n * k, 0.0), next_dual(n * k);
-                         const bool sets = multilabel(loss);
-                         const int code = sdca_update_objective(
-                             &t, n, k, in.z64.data(), sets ? in.sets.data() : in.labels.data(),
-                             sets ? in.offsets.data() : nullptr, previous.data(), 1.5,
-                             next_dual.data());
-                         append(out, next_dual);
-                         return code;
-                       },
-                       bytes()});
+      for (int dtype = 0; dtype < 4; ++dtype)
+        for (bool float_work : {true, false}) {
+          if (dtype == SDCA_DTYPE_FLOAT64 && float_work) continue;
+          const bool labeled = !multilabel(loss);
+          cases.push_back(
+              {name + " rows " + dtype_name(dtype) + (float_work ? " float" : " double") + shape,
+               [=, &in](std::size_t threads, bytes& out) {
+                 sdca_internal_options t = internal_of(float_work, threads);
+                 t.loss = loss;
+                 t.k = l.k ? l.k : 1;
+                 t.gamma = gamma;
+                 t.alpha = 0.7;
+                 std::vector<double> values(n);
+                 std::vector<unsigned char> g(n * k * wide(dtype));
+                 const int code = sdca_internal_loss_rows(
+                     &t, dtype, n, k, in.scores(dtype), labeled ? in.labels.data() : nullptr,
+                     labeled ? nullptr : in.multi.data(), values.data(), g.data());
+                 append(out, values);
+                 append(out, g);
+                 return code;
+               },
+               bytes()});
+        }
+      if (loss == SDCA_LOSS_PROXIMAL_CROSS_ENTROPY) continue;
+      for (bool mask : {false, true}) {
+        if (mask && !multilabel(loss)) continue;
+        cases.push_back({"update " + name + (mask ? " mask" : "") + shape,
+                         [=, &in](std::size_t threads, bytes& out) {
+                           const sdca_execution e = execution_of(SDCA_PRECISION_DEFAULT, threads);
+                           const sdca_targets t = targets_of(in, loss, mask);
+                           std::vector<double> norm2(n, 1.5), next_dual(n * k);
+                           const int code = sdca_dual_update(&l, 2.0, &e, SDCA_DTYPE_FLOAT64, n, k,
+                                                             in.z64.data(), &t, nullptr,
+                                                             norm2.data(), next_dual.data());
+                           append(out, next_dual);
+                           return code;
+                         },
+                         bytes()});
+      }
     }
   }
-  for (int precision : {SDCA_FLOAT32, SDCA_FLOAT64}) {
-    cases.push_back({"entropy precision " + std::to_string(precision) + shape,
-                     [=, &in](std::size_t threads, bytes& out) {
-                       sdca_options t = SDCA_OPTIONS_DEFAULT;
-                       t.precision = precision;
-                       t.num_threads = threads;
-                       const bool d = precision == SDCA_FLOAT64;
-                       std::vector<double> values(n), stats(n * 5), scale(n, 0.75);
-                       std::vector<unsigned char> g(n * k * (d ? 8 : 4));
-                       const void* z = d ? in.scores(1) : in.scores(0);
-                       int code = sdca_entropy_forward(&t, n, k, z, in.labels.data(), values.data(),
-                                                       stats.data());
-                       if (code == 0)
-                         code = sdca_entropy_gradient(&t, n, k, z, in.labels.data(), stats.data(),
-                                                      scale.data(), g.data());
-                       append(out, values);
-                       append(out, stats);
-                       append(out, g);
-                       return code;
-                     },
-                     bytes()});
-  }
+  for (int dtype : {SDCA_DTYPE_FLOAT32, SDCA_DTYPE_FLOAT64})
+    for (int loss : {SDCA_LOSS_DISTILLATION, SDCA_LOSS_PROXIMAL_DISTILLATION})
+      cases.push_back(
+          {std::string("loss ") + std::to_string(loss) + " " + dtype_name(dtype) + shape,
+           [=, &in](std::size_t threads, bytes& out) {
+             const sdca_loss l = loss_of(loss, 0.0);
+             const sdca_execution e = execution_of(SDCA_PRECISION_DEFAULT, threads);
+             sdca_targets t = SDCA_TARGETS_INIT;
+             t.kind = SDCA_TARGET_LOGITS;
+             t.logits = in.teacher(dtype);
+             std::vector<double> values(n);
+             std::vector<unsigned char> g(n * k * storage(dtype));
+             const int code = sdca_loss_evaluate(&l, &e, dtype, n, k, in.scores(dtype), &t,
+                                                 values.data(), g.data());
+             append(out, values);
+             append(out, g);
+             return code;
+           },
+           bytes()});
   for (int dtype = 0; dtype < 4; ++dtype)
-    for (int precision : {SDCA_FLOAT32, SDCA_FLOAT64}) {
-      if (dtype == SDCA_DTYPE_FLOAT64 && precision == SDCA_FLOAT32) continue;
-      const std::string name = std::string(dtype_name(dtype)) + " " + std::to_string(precision);
+    for (bool float_work : {true, false}) {
+      if (dtype == SDCA_DTYPE_FLOAT64 && float_work) continue;
+      const std::string name = std::string(dtype_name(dtype)) + (float_work ? " float" : " double");
       for (bool weighted : {false, true}) {
         cases.push_back({"cross_entropy " + name + (weighted ? " weighted" : "") + shape,
                          [=, &in](std::size_t threads, bytes& out) {
-                           sdca_options t = SDCA_OPTIONS_DEFAULT;
-                           t.precision = precision;
-                           t.num_threads = threads;
+                           const sdca_internal_options t = internal_of(float_work, threads);
                            const std::vector<std::int64_t>& y = weighted ? in.ignored : in.labels;
                            const double* w = weighted ? in.weights.data() : nullptr;
                            std::vector<double> values(n), stats(n * 5), totals(2), scale(n);
                            for (std::size_t i = 0; i < n; ++i) scale[i] = 1.0 + (i % 3);
                            std::vector<unsigned char> g(n * k * storage(dtype));
-                           int code = sdca_cross_entropy_forward(&t, dtype, n, k, in.scores(dtype),
-                                                                 y.data(), -100, w, values.data(),
-                                                                 stats.data(), totals.data());
+                           int code = sdca_internal_cross_entropy_forward(
+                               &t, dtype, n, k, in.scores(dtype), y.data(), -100, w, values.data(),
+                               stats.data(), totals.data());
                            if (code == 0)
-                             code = sdca_cross_entropy_backward(&t, dtype, n, k, in.scores(dtype),
-                                                                y.data(), -100, w, stats.data(),
-                                                                scale.data(), 1, g.data());
+                             code = sdca_internal_cross_entropy_backward(
+                                 &t, dtype, n, k, in.scores(dtype), y.data(), -100, w, stats.data(),
+                                 scale.data(), 1, g.data());
                            append(out, values);
                            append(out, stats);
                            append(out, totals);
@@ -271,18 +318,16 @@ void add_cases(const inputs& in, std::vector<named_case>& cases) {
       }
       cases.push_back({"distillation " + name + shape,
                        [=, &in](std::size_t threads, bytes& out) {
-                         sdca_options t = SDCA_OPTIONS_DEFAULT;
-                         t.precision = precision;
-                         t.num_threads = threads;
+                         const sdca_internal_options t = internal_of(float_work, threads);
                          std::vector<double> values(n), stats(n * 7), scale(1, 0.5);
                          std::vector<unsigned char> g(n * k * storage(dtype));
-                         int code = sdca_distillation_forward(&t, dtype, n, k, in.scores(dtype),
-                                                              in.teacher(dtype), 2.0, values.data(),
-                                                              stats.data());
+                         int code = sdca_internal_distillation_forward(
+                             &t, dtype, n, k, in.scores(dtype), in.teacher(dtype), 2.0,
+                             values.data(), stats.data());
                          if (code == 0)
-                           code = sdca_distillation_backward(&t, dtype, n, k, in.scores(dtype),
-                                                             in.teacher(dtype), 2.0, stats.data(),
-                                                             scale.data(), 0, g.data());
+                           code = sdca_internal_distillation_backward(
+                               &t, dtype, n, k, in.scores(dtype), in.teacher(dtype), 2.0,
+                               stats.data(), scale.data(), 0, g.data());
                          append(out, values);
                          append(out, stats);
                          append(out, g);
@@ -293,11 +338,10 @@ void add_cases(const inputs& in, std::vector<named_case>& cases) {
   for (int dtype = 0; dtype < 4; ++dtype)
     cases.push_back({std::string("proximal distillation ") + dtype_name(dtype) + shape,
                      [=, &in](std::size_t threads, bytes& out) {
-                       sdca_options t = SDCA_OPTIONS_DEFAULT;
-                       t.num_threads = threads;
+                       const sdca_internal_options t = internal_of(false, threads);
                        std::vector<double> values(n);
                        std::vector<unsigned char> g(n * k * wide(dtype));
-                       const int code = sdca_proximal_distillation_rows(
+                       const int code = sdca_internal_proximal_distillation_rows(
                            &t, dtype, n, k, in.scores(dtype), in.teacher(dtype), 2.0, 0.7,
                            values.data(), g.data());
                        append(out, values);
@@ -310,27 +354,30 @@ void add_cases(const inputs& in, std::vector<named_case>& cases) {
 // Fits whose evaluations take threads: weights, duals and the history but its times.
 void add_fits(const inputs& in, std::size_t d, std::vector<named_case>& cases) {
   const std::size_t n = in.n, k = in.k;
-  for (int loss : {SDCA_CROSS_ENTROPY, SDCA_MULTICLASS_HINGE, SDCA_TOPK_HINGE_BETA,
-                   SDCA_MULTILABEL_HINGE, SDCA_MULTILABEL_CROSS_ENTROPY}) {
+  for (int loss : {SDCA_LOSS_CROSS_ENTROPY, SDCA_LOSS_MULTICLASS_HINGE, SDCA_LOSS_TOPK_HINGE_BETA,
+                   SDCA_LOSS_MULTILABEL_HINGE, SDCA_LOSS_MULTILABEL_CROSS_ENTROPY}) {
     cases.push_back({"fit " + std::to_string(loss),
                      [=, &in](std::size_t threads, bytes& out) {
-                       sdca_options t = SDCA_OPTIONS_DEFAULT;
-                       t.loss = loss;
-                       t.k = loss == SDCA_TOPK_HINGE_BETA ? 2 : 1;
-                       t.gamma = 0.5;
-                       t.max_epoch = 4;
-                       t.eval_epoch = 1;
-                       t.tol = 0;
-                       t.num_threads = threads;
-                       std::vector<double> w(d * k), a(n * k), history(6 * 10);
+                       sdca_loss l = loss_of(loss, 0.5);
+                       if (loss == SDCA_LOSS_TOPK_HINGE_BETA) l.k = 2;
+                       sdca_fit_options o = SDCA_FIT_OPTIONS_INIT;
+                       o.max_epoch = 4;
+                       o.eval_epoch = 1;
+                       o.tol = 0;
+                       const sdca_execution e = execution_of(SDCA_PRECISION_DEFAULT, threads);
+                       sdca_input input = SDCA_INPUT_INIT;
+                       input.n = n;
+                       input.d = d;
+                       input.x = in.z64.data();
+                       const sdca_targets t = targets_of(in, loss, false);
+                       std::vector<double> w(d * k), a(n * k), history(6 * SDCA_HISTORY_FIELDS);
                        sdca_fit_result result = SDCA_FIT_RESULT_INIT;
-                       const bool sets = multilabel(loss);
-                       const int code = sdca_fit(&t, n, d, k, in.z64.data(),
-                                                 sets ? in.sets.data() : in.labels.data(),
-                                                 sets ? in.offsets.data() : nullptr, nullptr,
-                                                 w.data(), a.data(), history.data(), 6, &result);
+                       const int code =
+                           sdca_model_fit(&l, &o, &e, &input, k, &t, nullptr, nullptr, w.data(),
+                                          a.data(), history.data(), 6, &result);
                        for (std::size_t row = 0; row < 6; ++row)
-                         history[row * 10 + 8] = history[row * 10 + 9] = 0;
+                         history[row * SDCA_HISTORY_FIELDS + SDCA_HISTORY_CPU_TIME] =
+                             history[row * SDCA_HISTORY_FIELDS + SDCA_HISTORY_WALL_TIME] = 0;
                        append(out, w);
                        append(out, a);
                        append(out, history);
@@ -363,7 +410,7 @@ int main() {
 #endif
   const inputs narrow(37, 10), wide_rows(23, 70), fit_data(64, 6);
   std::vector<named_case> cases;
-  if (sdca_run_rows(1, 1, 1, nullptr, nullptr) != SDCA_INVALID_ARGUMENT) ++failures;
+  if (sdca_internal_run_rows(1, 1, 1, nullptr, nullptr) != SDCA_INVALID_ARGUMENT) ++failures;
   add_scheduler(cases);
   add_cases(narrow, cases);
   add_cases(wide_rows, cases);
@@ -377,8 +424,7 @@ int main() {
     }
   }
   for (const named_case& c : cases)
-    for (std::size_t threads :
-         {std::size_t(2), std::size_t(3), std::size_t(8), std::size_t(0), SDCA_THREADS_DEFAULT})
+    for (std::size_t threads : {std::size_t(2), std::size_t(3), std::size_t(8), std::size_t(0)})
       check(c, threads);
   // Callers on four threads at once: one takes the pool, the others new threads.
   std::vector<std::thread> callers;

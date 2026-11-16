@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "sdca/solver/data/output.h"
+#include "sdca/utility/logging.h"
 
 namespace sdca {
 
@@ -51,7 +52,7 @@ struct eval_train_base {
 
   inline std::string to_string(bool skip_time = false) const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << "epoch: " << epoch
         << ", "
            "relative_gap: "
@@ -101,7 +102,7 @@ struct eval_train<Result, multiclass_output> : public eval_train_base<Result> {
 
   inline std::string to_string(bool skip_time = false) const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << ", accuracy: ";
     long offset = std::min(5L, static_cast<long>(accuracy.size()));
     std::copy(accuracy.begin(), accuracy.begin() + offset, std::ostream_iterator<Result>(str, " "));
@@ -117,7 +118,7 @@ struct eval_train<Result, multilabel_output> : public eval_train_base<Result> {
 
   inline std::string to_string(bool skip_time = false) const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << ", rank_loss: " << rank_loss;
     return base::to_string(skip_time) + str.str();
   }
@@ -133,7 +134,7 @@ struct eval_train<Result, distribution_output> : public eval_train_base<Result> 
 
   inline std::string to_string(bool skip_time = false) const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << ", accuracy: ";
     long offset = std::min(5L, static_cast<long>(accuracy.size()));
     std::copy(accuracy.begin(), accuracy.begin() + offset, std::ostream_iterator<Result>(str, " "));
@@ -153,7 +154,7 @@ struct eval_test<Result, distribution_output> {
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << "primal_loss: " << primal_loss
         << ", "
            "accuracy: ";
@@ -172,7 +173,7 @@ struct eval_test<Result, multiclass_output> {
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << "primal_loss: " << primal_loss
         << ", "
            "accuracy: ";
@@ -189,7 +190,7 @@ struct eval_test<Result, multilabel_output> {
 
   inline std::string to_string() const {
     std::ostringstream str;
-    str.copyfmt(std::cout);
+    str.copyfmt(logging::stream());
     str << "primal_loss: " << primal_loss
         << ", "
            "rank_loss: "

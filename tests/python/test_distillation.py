@@ -6,7 +6,7 @@ references."""
 import contextlib
 import math
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 from unittest import mock
 
@@ -31,15 +31,24 @@ def _no_kernel(proximal: bool = False) -> None:
     return None
 
 
-def _none(*args: object) -> None:
-    return None
+# The backend option of the losses that loss_fn makes: paths() sets it ("torch": tensor ops).
+_BACKEND: list[Any] = ["auto"]
+
+
+@contextlib.contextmanager
+def _backend(name: str) -> Iterator[None]:
+    _BACKEND[0] = name
+    try:
+        yield
+    finally:
+        _BACKEND[0] = "auto"
 
 
 def paths():
     """(name, device, context factory) of every backend."""
     result = [
         ("cpu-native", "cpu", lambda: mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": "off"})),
-        ("cpu-tensor", "cpu", lambda: mock.patch.object(sdca_torch, "_cpu_distillation", _none)),
+        ("cpu-tensor", "cpu", lambda: _backend("torch")),
     ]
     if _cpu_entropy.buildable():
         result.append(
@@ -59,8 +68,10 @@ def paths():
 
 def loss_fn(proximal: bool, alpha: float) -> Callable[..., torch.Tensor]:
     if proximal:
-        return lambda x, t, T, **kw: proximal_distillation_loss(x, t, T, alpha, **kw)
-    return distillation_loss
+        return lambda x, t, T, **kw: proximal_distillation_loss(
+            x, t, temperature=T, alpha=alpha, backend=_BACKEND[0], **kw
+        )
+    return lambda x, t, T, **kw: distillation_loss(x, t, temperature=T, backend=_BACKEND[0], **kw)
 
 
 def evaluate(
@@ -313,7 +324,7 @@ class DistillationPathTests:
                         with subtests.test(name=name, dtype=dtype, gap=gap, classes=classes):
                             with context():
                                 x = torch.tensor(z)
-                                value = distillation_loss(x, x, reduction="none")
+                                value = loss_fn(False, 0.0)(x, x, 1.0, reduction="none")
                             error = abs(value.double().item() - expected[0]) / expected[0]
                             assert error <= 8 * eps
 
@@ -345,7 +356,7 @@ class DistillationPathTests:
                     ) / np.longdouble(2.0)
                     x = s.clone().requires_grad_()
                     with subtests.test(name=name, dtype=dtype, spread=spread), context():
-                        loss = distillation_loss(x, t, 2.0, reduction="sum")
+                        loss = loss_fn(False, 0.0)(x, t, 2.0, reduction="sum")
                         (gradient,) = torch.autograd.grad(loss, x)
                         error = np.abs(gradient.numpy().astype(np.longdouble) - expected)
                         scale = np.abs(expected).max(1, keepdims=True)
@@ -379,7 +390,7 @@ class DistillationPathTests:
                 for temperature in (0.5, 1.0, 4.0):
                     p = torch.softmax(t.double() / temperature, -1)
                     with context():
-                        distill, distill_g = evaluate(distillation_loss, z, t, temperature)
+                        distill, distill_g = evaluate(loss_fn(False, 0.0), z, t, temperature)
                         tiny_alpha = evaluate(loss_fn(True, 1e-12), z, t, temperature)
                         for alpha in (1e-4, 0.1, 1.0, 10.0, 1e4):
                             message = f"{name} {dtype} T={temperature} alpha={alpha}"
@@ -439,19 +450,22 @@ class DistillationPathTests:
     def test_modules_and_validation(self, subtests: pytest.Subtests):
         z = torch.randn(3, 4)
         torch.testing.assert_close(
-            ProximalDistillationLoss(2.0, 0.5, reduction="sum")(z, z.flip(-1)),
-            proximal_distillation_loss(z, z.flip(-1), 2.0, 0.5, reduction="sum"),
+            ProximalDistillationLoss(temperature=2.0, alpha=0.5, reduction="sum")(z, z.flip(-1)),
+            proximal_distillation_loss(z, z.flip(-1), temperature=2.0, alpha=0.5, reduction="sum"),
         )
         torch.testing.assert_close(
-            DistillationLoss(2.0, reduction="sum")(z, z.flip(-1)),
-            distillation_loss(z, z.flip(-1), 2.0, reduction="sum"),
+            DistillationLoss(temperature=2.0, reduction="sum")(z, z.flip(-1)),
+            distillation_loss(z, z.flip(-1), temperature=2.0, reduction="sum"),
         )
         for name, device, context in paths():
             x = z.to(device)
             with subtests.test(name=name), context():
-                for fn in (distillation_loss, loss_fn(True, 0.5)):
+                for fn in (loss_fn(False, 0.0), loss_fn(True, 0.5)):
+                    # Teachers of another dtype are promoted with the student.
+                    torch.testing.assert_close(
+                        fn(x, x.double().flip(-1), 1.0), fn(x.double(), x.double().flip(-1), 1.0)
+                    )
                     for teacher, options in [
-                        (x.double(), {}),
                         (x[:1], {}),
                         (x, dict(temperature=0.0)),
                         (x, dict(temperature=math.inf)),
@@ -461,17 +475,18 @@ class DistillationPathTests:
                         temperature = options.pop("temperature", 1.0)
                         with pytest.raises(ValueError):
                             fn(x, teacher, temperature, **options)
-                    for bad in (x[:, :1], x.long()):
-                        with pytest.raises(ValueError):
-                            fn(bad, bad, 1.0)
+                    with pytest.raises(ValueError):
+                        fn(x[:, :1], x[:, :1], 1.0)
+                    with pytest.raises(TypeError):
+                        fn(x.long(), x.long(), 1.0)
                 for alpha in (0.0, -1.0, math.nan):
                     with pytest.raises(ValueError):
-                        proximal_distillation_loss(x, x, 1.0, alpha)
+                        loss_fn(True, alpha)(x, x, 1.0)
                 # Nonfinite logits: an error from the CPU kernels, nan rows (only) from the
                 # CUDA kernels and the tensor operations.
                 y = x.clone()
                 y[1, 2] = math.inf
-                for fn in (distillation_loss, loss_fn(True, 0.5)):
+                for fn in (loss_fn(False, 0.0), loss_fn(True, 0.5)):
                     if name in ("cpu-native", "cpu-kernel"):
                         with pytest.raises(ValueError):
                             fn(y, x, 1.0)

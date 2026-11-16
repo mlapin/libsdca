@@ -7,11 +7,11 @@ objective's "solved" fits within tol of the optimum, judged by an independent pr
 
 from typing import Any
 
-import libsdca
 import numpy as np
 import pytest
-from libsdca import OBJECTIVES, loss_and_grad
+from libsdca import OBJECTIVES
 from loss_references import REFERENCED, nonsmooth_gap, primal, reference
+from numpy_api import fit, loss_and_grad
 
 
 def targets(loss: str, n: int, m: int, rng: np.random.Generator) -> tuple[np.ndarray, Any]:
@@ -50,12 +50,9 @@ class OrdinaryInputTests:
                             zz = z.astype(dtype)
                             if dtype == np.float32 and precision == "float64":
                                 rv, rg = reference(zz, positive, loss, k, gamma)
-                            # Fortran order, and the target as labels, a mask or label lists.
-                            encodings = [
-                                target,
-                                positive,
-                                [list(np.flatnonzero(r)) for r in positive],
-                            ]
+                            # Fortran order, and the target as labels, or a mask or label lists.
+                            sets = [list(np.flatnonzero(r)) for r in positive]
+                            encodings = [positive, sets] if multilabel else [target]
                             for t in encodings:
                                 v, g = loss_and_grad(
                                     np.asfortranarray(zz),
@@ -104,14 +101,14 @@ class OrdinaryInputTests:
             y = labels
         x = rng.normal(size=(n, d)) + 2 * np.eye(m, d)[labels]
         options: dict[str, Any] = dict(k=2, gamma=0.5 if "hinge" in objective else 0.0)
-        tight = libsdca.fit(x, y, objective, tol=1e-10, max_epoch=20000, **options)
+        tight = fit(x, y, objective, tol=1e-10, max_epoch=20000, **options)
         assert tight.status == "solved" and tight.weights is not None
         best = primal(x, tight.weights, y, objective, 1.0, **options)
         for dtype in (np.float64, np.float32):
             for order in ("C", "F"):
                 data = np.asarray(x, dtype, order=order)
                 for tol in (1e-2, 1e-4):
-                    model = libsdca.fit(data, y, objective, tol=tol, **options)
+                    model = fit(data, y, objective, tol=tol, **options)
                     message = f"{objective} {dtype} {order} tol={tol}"
                     assert model.status == "solved", message
                     assert model.weights is not None and model.weights.dtype == dtype
@@ -121,14 +118,10 @@ class OrdinaryInputTests:
                     reported = model.history["primal"][-1]
                     assert abs(reported - value) <= 1e-9 * value, message
                     if order == "F":
-                        again = libsdca.fit(
-                            np.ascontiguousarray(data), y, objective, tol=tol, **options
-                        )
+                        again = fit(np.ascontiguousarray(data), y, objective, tol=tol, **options)
                         np.testing.assert_array_equal(again.dual, model.dual, err_msg=message)
         # A Gram matrix trains the same scores.
-        gram = libsdca.fit(
-            x @ x.T, y, objective, tol=1e-10, kernel=True, max_epoch=20000, **options
-        )
+        gram = fit(x @ x.T, y, objective, tol=1e-10, kernel=True, max_epoch=20000, **options)
         # (||W - W*||^2 <= 2 gap bounds the scores.)
         np.testing.assert_allclose(
             gram.decision_function(x @ x.T), tight.decision_function(x), atol=1e-3

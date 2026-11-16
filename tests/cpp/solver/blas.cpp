@@ -38,18 +38,20 @@ TEST(BlasTest, vectors_double) { check_blas_vectors<double>(); }
 template <typename T>
 void check_blas_matrices() {
   for (int m : {3, 257})
-    for (auto ta : {CblasNoTrans, CblasTrans, CblasConjTrans})
-      for (auto tb : {CblasNoTrans, CblasTrans, CblasConjTrans}) {
-        const int n = 4, k = 5, lda = (ta == CblasNoTrans ? m : k) + 2,
-                  ldb = (tb == CblasNoTrans ? k : n) + 3;
-        std::vector<T> a(std::size_t(lda * (ta == CblasNoTrans ? k : m)), T(99));
-        std::vector<T> b(std::size_t(ldb * (tb == CblasNoTrans ? n : k)), T(99));
+    for (auto ta : {sdca::CblasNoTrans, sdca::CblasTrans, sdca::CblasConjTrans})
+      for (auto tb : {sdca::CblasNoTrans, sdca::CblasTrans, sdca::CblasConjTrans}) {
+        const int n = 4, k = 5, lda = (ta == sdca::CblasNoTrans ? m : k) + 2,
+                  ldb = (tb == sdca::CblasNoTrans ? k : n) + 3;
+        std::vector<T> a(std::size_t(lda * (ta == sdca::CblasNoTrans ? k : m)), T(99));
+        std::vector<T> b(std::size_t(ldb * (tb == sdca::CblasNoTrans ? n : k)), T(99));
         for (int i = 0; i < m; ++i)
           for (int p = 0; p < k; ++p)
-            a[std::size_t(ta == CblasNoTrans ? i + p * lda : p + i * lda)] = T((i + 2 * p) % 7 - 3);
+            a[std::size_t(ta == sdca::CblasNoTrans ? i + p * lda : p + i * lda)] =
+                T((i + 2 * p) % 7 - 3);
         for (int p = 0; p < k; ++p)
           for (int j = 0; j < n; ++j)
-            b[std::size_t(tb == CblasNoTrans ? p + j * ldb : j + p * ldb)] = T((p + 3 * j) % 5 - 2);
+            b[std::size_t(tb == sdca::CblasNoTrans ? p + j * ldb : j + p * ldb)] =
+                T((p + 3 * j) % 5 - 2);
         for (T alpha : {T(0), T(1.25)})
           for (T beta : {T(0), T(.25)}) {
             std::vector<T> c(std::size_t(m * n),
@@ -65,10 +67,10 @@ void check_blas_matrices() {
           }
       }
   T a[] = {1, 2, 3, 4, 5, 6}, x[] = {2, 3, 4}, y[3];
-  for (auto trans : {CblasNoTrans, CblasTrans, CblasConjTrans}) {
+  for (auto trans : {sdca::CblasNoTrans, sdca::CblasTrans, sdca::CblasConjTrans}) {
     std::fill(y, y + 3, std::numeric_limits<T>::quiet_NaN());
     sdca::sdca_blas_gemv(2, 3, a, x, y, trans, 1, 0);
-    if (trans == CblasNoTrans) {
+    if (trans == sdca::CblasNoTrans) {
       EXPECT_EQ(y[0], T(31));
       EXPECT_EQ(y[1], T(40));
     } else {
@@ -77,7 +79,7 @@ void check_blas_matrices() {
       EXPECT_EQ(y[2], T(28));
     }
     sdca::sdca_blas_gemv(2, 3, a, x, y, trans, 0, T(.5));
-    EXPECT_EQ(y[0], trans == CblasNoTrans ? T(15.5) : T(4));
+    EXPECT_EQ(y[0], trans == sdca::CblasNoTrans ? T(15.5) : T(4));
   }
   T b[6] = {0};
   sdca::sdca_blas_ger(2, 3, 2, x, x, b);
@@ -85,7 +87,7 @@ void check_blas_matrices() {
   EXPECT_EQ(b[5], T(24));
   sdca::sdca_blas_ger(2, 3, 0, x, x, b);
   EXPECT_EQ(b[0], T(8));
-  sdca::sdca_blas_gemm(2, 3, 0, a, 2, a, 3, b, CblasNoTrans, CblasNoTrans, 1, 0);
+  sdca::sdca_blas_gemm(2, 3, 0, a, 2, a, 3, b, sdca::CblasNoTrans, sdca::CblasNoTrans, 1, 0);
   for (T value : b) EXPECT_EQ(value, T(0));
   b[0] = T(42);
   sdca::sdca_blas_gemm(0, 3, 2, a, 2, a, 3, b);
@@ -103,9 +105,9 @@ TEST(BlasTest, builtin_nonfinite_and_zero_coefficients) {
   EXPECT_EQ(sdca::sdca_blas_nrm2(2, x), inf);
   x[1] = nan;
   EXPECT_TRUE(std::isnan(sdca::sdca_blas_nrm2(2, x)));
-  sdca::sdca_blas_gemv(1, 2, x, x, y, CblasNoTrans, 0, 0);
+  sdca::sdca_blas_gemv(1, 2, x, x, y, sdca::CblasNoTrans, 0, 0);
   EXPECT_EQ(y[0], 0.);
-  sdca::sdca_blas_gemm(1, 2, 2, x, 1, x, 2, y, CblasNoTrans, CblasNoTrans, 0, 0);
+  sdca::sdca_blas_gemm(1, 2, 2, x, 1, x, 2, y, sdca::CblasNoTrans, sdca::CblasNoTrans, 0, 0);
   EXPECT_EQ(y[0], 0.);
   EXPECT_EQ(y[1], 0.);
 }
@@ -133,7 +135,7 @@ TEST(BlasTest, builtin_sum_order_depends_on_length_only) {
       std::copy(a.begin(), a.end(), copy.begin() + offset);
       const double* b = copy.data() + offset;
       double y[cols];
-      sdca::sdca_blas_gemv(n, cols, b, x.data(), y, CblasTrans);
+      sdca::sdca_blas_gemv(n, cols, b, x.data(), y, sdca::CblasTrans);
       for (int c = 0; c < cols; ++c) EXPECT_EQ(y[c], reference(n, &a[std::size_t(c * n)], &x[0]));
       EXPECT_EQ(sdca::sdca_blas_dot(n, b, x.data()), reference(n, a.data(), x.data()));
     }
@@ -144,11 +146,11 @@ TEST(BlasTest, builtin_sum_order_depends_on_length_only) {
 template <typename T>
 void check_gemv_scratch_boundaries() {
   for (int m : {1, 255, 256, 257, 1024})
-    for (auto trans : {CblasNoTrans, CblasTrans, CblasConjTrans})
+    for (auto trans : {sdca::CblasNoTrans, sdca::CblasTrans, sdca::CblasConjTrans})
       for (T alpha : {T(0), T(1.25)})
         for (T beta : {T(0), T(.25)}) {
-          const int n = 7, outputs = trans == CblasNoTrans ? m : n;
-          const int inputs = trans == CblasNoTrans ? n : m;
+          const int n = 7, outputs = trans == sdca::CblasNoTrans ? m : n;
+          const int inputs = trans == sdca::CblasNoTrans ? n : m;
           std::vector<T> a(std::size_t(m * n)), x(std::size_t(inputs), T(0));
           std::vector<T> y(std::size_t(outputs),
                            beta == 0 ? std::numeric_limits<T>::quiet_NaN() : T(2));
@@ -161,8 +163,8 @@ void check_gemv_scratch_boundaries() {
           for (int i = 0; i < outputs; ++i) {
             int sum = 0;
             for (int j = 0; j < inputs; ++j)
-              sum +=
-                  (trans == CblasNoTrans ? (i + 2 * j) % 7 - 3 : (j + 2 * i) % 7 - 3) * (j % 5 - 2);
+              sum += (trans == sdca::CblasNoTrans ? (i + 2 * j) % 7 - 3 : (j + 2 * i) % 7 - 3) *
+                     (j % 5 - 2);
             EXPECT_EQ(y[std::size_t(i)], alpha * T(sum) + beta * T(2));
           }
         }

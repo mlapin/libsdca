@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 from child_process import run_python
-from libsdca.torch import topk_cross_entropy
+from libsdca.torch import Backend, topk_cross_entropy
 from test_topk_references import topk_entropy_reference
 
 ROUTES = [
@@ -39,7 +39,7 @@ def _rows(classes: int) -> np.ndarray:
 
 @pytest.mark.parametrize("device,backend,extension", ROUTES)
 @pytest.mark.parametrize("k", [16, 17, 64, 128, 255])
-def test_large_k_against_reference(device: str, backend: str, extension: str, k: int):
+def test_large_k_against_reference(device: str, backend: Backend, extension: str, k: int):
     route = _route(device, extension)
     scores = _rows(257)
     x = torch.tensor(scores, device=device, requires_grad=True)
@@ -74,7 +74,7 @@ print(seconds(8192) / seconds(1024))
 
 
 @pytest.mark.parametrize("backend,extension", [route[1:] for route in ROUTES[:2]])
-def test_large_k_scales_nearly_linearly(backend: str, extension: str):
+def test_large_k_scales_nearly_linearly(backend: Backend, extension: str):
     """k = n / 2: eight times the classes take far less than the 64 times of O(k^2) work. On
     one thread, in a child: thread teams stall on a loaded machine (other test workers)."""
     env = {**os.environ, "SDCA_CPU_EXTENSION": extension}

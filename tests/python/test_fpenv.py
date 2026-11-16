@@ -5,7 +5,7 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 import torch
-from libsdca import coordinate_update, loss_and_grad
+from numpy_api import coordinate_update, loss_and_grad
 
 
 def _flushes() -> bool:
@@ -33,12 +33,12 @@ class FlushToZeroTests:
             assert np.all(gradients[:, 1].view(np.uint64) == tiny)
 
     def test_proximal_entropy_converges_and_errors_restore_the_caller(self):
-        z, mask = np.array([[0.0, 20.0, 20.0, -100.0]]), np.array([[True, False, True, False]])
-        values, _ = loss_and_grad(z, mask, "proximal_cross_entropy", alpha=1e300)
+        z = np.array([[0.0, 20.0, 20.0, -100.0]])
+        values, _ = loss_and_grad(z, [2], "proximal_cross_entropy", alpha=1e300)
         assert _flushes()
-        assert round(abs(values[0] - np.log(2.0)), 12) == 0
-        with pytest.raises(ValueError, match="exactly one target"):
-            loss_and_grad(z, mask, "topk_hinge_alpha")
+        assert 0 <= values[0] < 1e-12  # the infimum of cross-entropy
+        with pytest.raises(ValueError, match="Labels"):
+            loss_and_grad(z, [4], "topk_hinge_alpha")
         assert _flushes()
         coordinate_update(z, [0], "cross_entropy", C=2.0)
         assert _flushes()

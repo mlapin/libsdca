@@ -12,14 +12,16 @@ from unittest import mock
 import numpy as np
 import pytest
 import torch
-from libsdca import _cpu_entropy, loss_and_grad
+from libsdca import _cpu_entropy
 from libsdca import torch as sdca_torch
-from libsdca.torch import explain_backend, sdca_loss
+from named_losses import function, parameters
+from named_losses import loss as named_loss
+from numpy_api import loss_and_grad
 
 # (loss, k, gamma, mask target)
 LOSSES = [
     ("cross_entropy", 1, 0.0, False),
-    ("cross_entropy", 1, 0.0, True),
+    ("multilabel_cross_entropy", 1, 0.0, True),
     ("topk_cross_entropy", 3, 0.0, False),
     ("topk_cross_entropy", 70, 0.0, False),
     ("multiclass_hinge", 1, 0.0, False),
@@ -31,6 +33,26 @@ LOSSES = [
     ("multilabel_hinge", 1, 0.5, True),
     ("proximal_cross_entropy", 1, 0.0, False),
 ]
+
+
+def sdca_loss(
+    z: torch.Tensor,
+    target: torch.Tensor,
+    loss: str,
+    k: int = 1,
+    gamma: float = 0.0,
+    **options: Any,
+) -> torch.Tensor:
+    return named_loss(sdca_torch, loss, z, target, k=k, gamma=gamma, **options)
+
+
+def explain_backend(
+    z: torch.Tensor, target: torch.Tensor, loss: str, k: int = 1, gamma: float = 0.0, **options: Any
+) -> tuple[str, str]:
+    fn = function(sdca_torch, loss)
+    return sdca_torch.explain_backend(fn, z, target, **parameters(loss, k, gamma), **options)
+
+
 SMOOTH = [(loss, k, gamma, mask) for loss, k, gamma, mask in LOSSES if gamma > 0]
 
 
@@ -88,7 +110,7 @@ def test_cpu_routes_of_float32_work():
         z, target = _problem(torch.float32, mask)
         name, reason = explain_backend(z, target, loss, k=k, gamma=gamma, precision="float32")
         if "hinge" in loss:
-            assert name == "cpu-kernel" and "(float64)" in reason, (loss, reason)
+            assert name == "kernel" and "(float64)" in reason, (loss, reason)
         if loss == "proximal_cross_entropy":
             assert "kernel (float32" in reason, reason
             half = explain_backend(z.bfloat16(), target, loss, precision=None)
@@ -130,9 +152,9 @@ def test_proximal_kernel_takes_float32_work_for_float32_logits():
 def test_cuda_proximal_default_is_float32_work():
     z, y = _problem(torch.float32, False, "cuda")
     name, reason = explain_backend(z, y, "proximal_cross_entropy")
-    assert name == "triton" and "float32" in reason, reason
+    assert name == "kernel" and "float32" in reason, reason
     name, reason = explain_backend(z, y, "proximal_cross_entropy", precision="float64")
-    assert name == "triton" and "float32" not in reason, reason
+    assert name == "kernel" and "float32" not in reason, reason
 
 
 def _native_problem(mask: bool, classes: int = 80):

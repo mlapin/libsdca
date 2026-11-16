@@ -3,11 +3,16 @@
 import gc
 import itertools
 
+import libsdca.torch
 import numpy as np
 import pytest
 import torch
-from libsdca import _core
-from libsdca.torch import sdca_loss
+from named_losses import loss as named_loss
+
+
+def sdca_loss(z: torch.Tensor, target: torch.Tensor, loss: str, **options: object) -> torch.Tensor:
+    return named_loss(libsdca.torch, loss, z, target, **options)  # pyright: ignore[reportArgumentType]
+
 
 OBJECTIVES = (
     "topk_hinge_alpha",
@@ -39,6 +44,8 @@ def extreme_scores(dtype: torch.dtype, device: str, classes: int = 3):
 def value_and_gradient(z: torch.Tensor, objective: str, precision: str | None, backend: str):
     x = z.detach().clone().requires_grad_()
     labels = torch.zeros(len(x), device=x.device, dtype=torch.int64)
+    if objective == "multilabel_hinge":
+        labels = torch.nn.functional.one_hot(labels, x.shape[1]).bool()
     value = sdca_loss(x, labels, objective, precision=precision, backend=backend, reduction="none")
     (gradient,) = torch.autograd.grad(value.sum(), x)
     return value.detach(), gradient
@@ -84,28 +91,29 @@ class PrecisionRangeTests:
     def test_cuda_multilabel_entropy_finite_average(self, subtests: pytest.Subtests):
         self.check_multilabel_entropy_range(subtests, "cuda")
 
-    def test_native_half_storage_is_rejected_before_conversion(self, subtests: pytest.Subtests):
+    def test_native_half_storage_is_cast_to_float32(self, subtests: pytest.Subtests):
+        # 16-bit floats convert exactly: float32 storage (the default work of 16-bit inputs).
+        import libsdca
+
         inputs = (
             np.ones((2, 3), dtype=np.float16),
             torch.ones((2, 3), dtype=torch.float16),
             torch.ones((2, 3), dtype=torch.bfloat16),
         )
+        exact = np.ones((2, 3), dtype=np.float32)
         for precision in (None, "float32", "float64"):
             for x in inputs:
-                for operation in (_core.fit, _core.loss_and_grad, _core.coordinate_update):
-                    with subtests.test(precision=precision, dtype=x.dtype, operation=operation):
-                        with pytest.raises(
-                            ValueError, match="Native APIs require float32 or float64"
-                        ):
-                            operation(x, [0, 1], precision=precision)
-        # Explicit Solver instances must not silently cast half inputs either.
-        solver = _core.Solver("float64", dtype=np.float32)
-        for x, operation in itertools.product(
-            inputs, (solver.fit, solver.loss_and_grad, solver.coordinate_update)
-        ):
-            with subtests.test(dtype=x.dtype, operation=operation):
-                with pytest.raises(ValueError, match="Native APIs require float32 or float64"):
-                    operation(x, [0, 1])
+                with subtests.test(precision=precision, dtype=x.dtype):
+                    model = libsdca.fit(x, [0, 1], num_classes=3, precision=precision)
+                    reference = libsdca.fit(exact, [0, 1], num_classes=3, precision=precision)
+                    assert model.dual.dtype == np.float32
+                    np.testing.assert_array_equal(model.dual, reference.dual)
+                    got = libsdca.loss_and_grad(x, [0, 1], precision=precision)
+                    expected = libsdca.loss_and_grad(exact, [0, 1], precision=precision)
+                    assert got[1].dtype == np.float32
+                    np.testing.assert_array_equal(got[0], expected[0])
+                    step = libsdca.coordinate_update(x, [0, 1], precision=precision)
+                    assert step.dtype == np.float32
 
     def check_ranges(self, subtests: pytest.Subtests, device: str, classes: int = 3):
         for dtype, objective in itertools.product(
@@ -159,6 +167,8 @@ class PrecisionRangeTests:
             with subtests.test(dtype=dtype, objective=objective):
                 x = extreme_scores(dtype, "cuda").requires_grad_()
                 labels = torch.zeros(len(x), device=x.device, dtype=torch.int64)
+                if objective == "multilabel_hinge":
+                    labels = torch.nn.functional.one_hot(labels, x.shape[1]).bool()
 
                 def evaluate():
                     value = sdca_loss(

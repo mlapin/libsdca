@@ -9,6 +9,7 @@ import mpmath as mp
 import pytest
 import torch
 from libsdca import torch as sdca_torch
+from named_losses import proximal_mask_loss, torch_loss
 
 
 class ProximalExtremeTests:
@@ -35,10 +36,9 @@ class ProximalExtremeTests:
                         else contextlib.nullcontext()
                     )
                     with context:
-                        value = sdca_torch.sdca_loss(
+                        value = proximal_mask_loss(
                             x,
                             target,
-                            "proximal_cross_entropy",
                             backend="torch",
                             reduction=reduction,
                             precision=precision,
@@ -113,9 +113,7 @@ class ProximalExtremeTests:
                 x = torch.tensor([scores], device="cuda", dtype=torch.float64, requires_grad=True)
                 target = torch.tensor([mask], device="cuda")
                 with mock.patch.object(sdca_torch, "_prox_kernel", return_value=None):
-                    value = sdca_torch.sdca_loss(
-                        x, target, "proximal_cross_entropy", alpha=alpha, backend="torch"
-                    )
+                    value = proximal_mask_loss(x, target, alpha=alpha, backend="torch")
                 gradient = torch.autograd.grad(value, x)[0]
                 torch.testing.assert_close(
                     value, value.new_tensor(expected_loss), rtol=2e-14, atol=0
@@ -146,9 +144,8 @@ class ProximalExtremeTests:
                     else contextlib.nullcontext()
                 )
                 with context:
-                    value = sdca_torch.sdca_loss(
-                        x, target, "proximal_cross_entropy", backend="torch", reduction="none"
-                    )
+                    loss = proximal_mask_loss if mask else sdca_torch.proximal_cross_entropy
+                    value = loss(x, target, backend="torch", reduction="none")
                 gradient = torch.autograd.grad(value.sum(), x)[0]
                 assert bool(value[0].isnan())
                 assert bool(gradient[0].isnan().all())
@@ -165,7 +162,7 @@ class ProximalExtremeTests:
         limit = torch.finfo(torch.float64).max
         x = torch.tensor([[limit, -limit]], dtype=torch.float64)
         with pytest.raises(ValueError, match="finite"):
-            sdca_torch.sdca_loss(x, torch.tensor([0]), "proximal_cross_entropy", backend="torch")
+            torch_loss(x, torch.tensor([0]), "proximal_cross_entropy", backend="torch")
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
     def test_cuda_tensor_long_solve_graph_capture(self):

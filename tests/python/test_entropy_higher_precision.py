@@ -3,14 +3,15 @@
 import mpmath as mp
 import pytest
 import torch
-from libsdca.torch import cross_entropy, sdca_loss
+from libsdca.torch import cross_entropy
+from named_losses import torch_loss
 
 
 class EntropyHigherPrecisionTests:
     def check_later_derivatives(self, device: str) -> None:
         x = torch.tensor([[0.0, -780.0]], device=device, requires_grad=True)
         y = torch.tensor([0], device=device)
-        loss = sdca_loss(x, y, backend="torch", reduction="sum")
+        loss = torch_loss(x, y, backend="torch", reduction="sum")
         value = torch.autograd.grad(loss, x, create_graph=True)[0][0, 0]
         scale = x.new_tensor(1e38)
         # Each output keeps float32 storage, but its differentiable double
@@ -40,7 +41,7 @@ class EntropyHigherPrecisionTests:
                         value = (
                             cross_entropy(x, y, w, reduction="sum", backend=backend)
                             if weighted
-                            else sdca_loss(x, y, reduction="sum", backend=backend)
+                            else torch_loss(x, y, reduction="sum", backend=backend)
                         )
                         upstream = value.new_tensor(scale)
                         gradient = torch.autograd.grad(value, x, upstream, create_graph=True)[0]

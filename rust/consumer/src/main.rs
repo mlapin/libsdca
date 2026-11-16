@@ -1,6 +1,6 @@
 //! A downstream crate: trains through the BLAS that SDCA_BLAS linked and checks
-//! the certificate and W = X' A with plain loops, independently of that BLAS.
-use libsdca::{fit, FitOptions, Matrix, Objective, Real, Status};
+//! the duality gap and W = X' A with plain loops, independently of that BLAS.
+use libsdca::{Loss, Matrix, Real, Solver, Status};
 
 /// Deterministic features in [-1, 1) and labels of (n, d) data with `classes` classes.
 fn data(n: usize, d: usize, classes: usize) -> (Vec<f64>, Vec<usize>) {
@@ -16,26 +16,17 @@ fn data(n: usize, d: usize, classes: usize) -> (Vec<f64>, Vec<usize>) {
     (x, y)
 }
 
-fn check<T: Real + Into<f64>>(objective: Objective, x: &[T], y: &[usize], d: usize) -> String {
+fn check<T: Real + Into<f64>>(loss: Loss, x: &[T], y: &[usize], d: usize) -> String {
     // Real is sealed to f32/f64. Each defaults to working arithmetic of its own
     // type, and primal/dual storage rounding follows the element type.
     let wide = std::mem::size_of::<T>() == std::mem::size_of::<f64>();
     let (n, classes) = (y.len(), 4);
     let tol = if wide { 1e-8 } else { 1e-4 };
-    let options = FitOptions {
-        c: 10.0,
-        objective,
-        k: 2,
-        gamma: 1.0,
-        tol,
-        max_epoch: 2000,
-        ..Default::default()
-    };
-    let model = fit(Matrix::new(x, n, d).unwrap(), y, &options).unwrap();
-    let gap = model.history().get("relative_gap").unwrap();
-    let gap = *gap.last().unwrap();
-    assert_eq!(model.status(), Status::Solved, "{objective}");
-    assert!(gap <= tol, "{objective}: relative gap {gap} above {tol}");
+    let solver = Solver::new(loss).with_c(10.0).with_tol(tol).with_max_epoch(2000);
+    let model = solver.fit(Matrix::new(x, n, d).unwrap(), y).unwrap();
+    let gap = model.history().last().unwrap().relative_gap;
+    assert_eq!(model.status(), Status::Solved, "{loss}");
+    assert!(gap <= tol, "{loss}: relative gap {gap} above {tol}");
     // W (d, classes) = X' A, both row-major.
     let (w, a) = (model.weights().unwrap(), model.dual());
     let mut error = 0.0_f64;
@@ -48,9 +39,9 @@ fn check<T: Real + Into<f64>>(objective: Objective, x: &[T], y: &[usize], d: usi
         }
     }
     let limit = if wide { 1e-10 } else { 1e-4 };
-    assert!(error <= limit, "{objective}: max |W - X'A| {error}");
+    assert!(error <= limit, "{loss}: max |W - X'A| {error}");
     format!(
-        "{objective} {}: solved in {} epochs, gap {gap:.1e}, |W - X'A| {error:.1e}",
+        "{loss} {}: solved in {} epochs, gap {gap:.1e}, |W - X'A| {error:.1e}",
         std::any::type_name::<T>(),
         model.epochs()
     )
@@ -60,8 +51,9 @@ fn main() {
     let (n, d) = (120, 9);
     let (x, y) = data(n, d, 4);
     let x32: Vec<f32> = x.iter().map(|&v| v as f32).collect();
-    for objective in [Objective::CrossEntropy, Objective::TopKHingeAlpha] {
-        println!("{}", check(objective, &x, &y, d));
-        println!("{}", check(objective, &x32, &y, d));
+    let alpha = Loss::TopKHingeAlpha { k: 2, gamma: 1.0 };
+    for loss in [Loss::cross_entropy(), alpha] {
+        println!("{}", check(loss, &x, &y, d));
+        println!("{}", check(loss, &x32, &y, d));
     }
 }

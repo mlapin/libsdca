@@ -1,40 +1,35 @@
-"""PyTorch loss layers: SDCALoss and sdca_loss (the LOSSES at the input
-scores) and DistillationLoss and distillation_loss (cross-entropy to a
-teacher's softmax). CPU losses run in the CPU extension (built on first use,
-_cpu_entropy) or the native library (_cpu), CUDA losses in fused Triton kernels;
-the tensor backend runs every loss on either device, and its entropy has higher
-derivatives.
+"""PyTorch losses: one function and one module per loss (cross_entropy and CrossEntropyLoss,
+topk_cross_entropy, the hinges, the multilabel losses, proximal_cross_entropy, the
+distillation losses and linear_cross_entropy). CPU losses run in the CPU extension (built on
+first use, _cpu_entropy) or the native library (_cpu), CUDA losses in fused Triton kernels;
+the tensor backend runs every loss on either device, and its entropy has higher derivatives.
 """
 
 from __future__ import annotations
 
 import functools
+import inspect
 import math
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple, overload
 
 import torch
 from torch import nn
 from torch.autograd.function import FunctionCtx
 
 from . import _cpu, _cpu_entropy, _cuda_launch, _entropy, _hinge, _multilabel, _ops, _topk
-from ._core import (
-    _KINDS,
-    _canonical_precision,
-    _check_options,
-    _Entry,
-    _entry,
-    _kind_of,
-    _tensor_kind,
-    _topk_hinge_name,
-)
+from . import _cross_entropy as _ce
+from . import _linear_cross_entropy as _lce
+from . import _loss_options as _opt
 from ._cross_entropy import CrossEntropyLoss as CrossEntropyLoss
 from ._cross_entropy import cross_entropy as cross_entropy
 from ._entropy import entropy as _indexed_entropy
 from ._entropy import fused as _fused_entropy
+from ._first_order import MESSAGE as _FIRST_ORDER
 from ._first_order import first_order as _first_order
 from ._linear_cross_entropy import LinearCrossEntropyLoss as LinearCrossEntropyLoss
 from ._linear_cross_entropy import linear_cross_entropy as linear_cross_entropy
+from ._loss_options import Spec as _Spec
 from ._tensor_losses import (
     _SINGLE_TARGET,
     _first,
@@ -61,10 +56,7 @@ __all__ = [
     "MultilabelHingeLoss",
     "ProximalCrossEntropyLoss",
     "ProximalDistillationLoss",
-    "SDCALoss",
     "TopKCrossEntropyLoss",
-    "TopKHingeAlphaLoss",
-    "TopKHingeBetaLoss",
     "TopKHingeLoss",
     "cross_entropy",
     "distillation_loss",
@@ -75,12 +67,25 @@ __all__ = [
     "multilabel_hinge_loss",
     "proximal_cross_entropy",
     "proximal_distillation_loss",
-    "sdca_loss",
     "topk_cross_entropy",
-    "topk_hinge_alpha_loss",
-    "topk_hinge_beta_loss",
     "topk_hinge_loss",
 ]
+
+Reduction = Literal["none", "sum", "mean"]
+Backend = Literal["auto", "kernel", "native", "torch"]
+# backend="kernel" is "auto" raising NotImplementedError where no fused kernel runs.
+BACKENDS = ("auto", "kernel", "native", "torch")
+_PRECISIONS = {torch.float32: "float32", torch.float64: "float64"}
+# explain_backend's names of the internal routes.
+_PUBLIC = {"cpu-kernel": "kernel", "cuda-launcher": "kernel", "triton": "kernel"}
+
+
+def _precision(precision: object) -> str | None:
+    """None, "float32" or "float64" (or torch.float32, torch.float64); else raise."""
+    if precision is None:
+        return None
+    return _opt.check_precision_name(precision, _PRECISIONS, "torch")
+
 
 # The widest register-resident rows of the fused Triton kernels; wider ones stream tiles.
 _KERNEL_CLASSES = 4096
@@ -140,7 +145,7 @@ def _contract(logits: torch.Tensor, canonical: str | None) -> str | None:
 
 def _check_precision(logits: torch.Tensor, precision: object) -> str | None:
     """float64 logits take float64 (or None); other dtypes take float32 or float64 (or None)."""
-    canonical = _canonical_precision(precision)
+    canonical = _precision(precision)
     if logits.dtype == torch.float64 and canonical == "float32":
         raise ValueError("float64 logits require precision='float64' or None")
     return canonical
@@ -297,15 +302,55 @@ def _check_device(t: torch.Tensor) -> None:
 
 
 def _check_tensors(logits: torch.Tensor, target: torch.Tensor) -> None:
-    if not isinstance(logits, torch.Tensor) or logits.ndim < 1:
-        raise ValueError("logits must be a tensor with a class dimension")
-    _check_device(logits)
+    """Tensors (TypeError) on one CPU or CUDA device, logits with a class dimension
+    (ValueError)."""
+    if not isinstance(logits, torch.Tensor):
+        raise TypeError(f"logits must be a tensor, not {type(logits).__name__}")
     if not logits.is_floating_point():
-        raise ValueError("logits must be finite floating-point values")
+        raise TypeError(f"logits must be floating-point, not {logits.dtype}")
     if not isinstance(target, torch.Tensor):
-        raise ValueError("target must be a tensor")
+        raise TypeError(f"target must be a tensor, not {type(target).__name__}")
+    if logits.ndim < 1:
+        raise ValueError("logits must have a class dimension")
+    _check_device(logits)
     if target.device != logits.device:
         raise ValueError("target and logits must be on the same device")
+
+
+def _labels_of(spec: _Spec, logits: torch.Tensor, target: torch.Tensor, dim: int) -> torch.Tensor:
+    """The checked target of a loss: int64 class labels (logits.shape without dim; any integer
+    dtype is cast) for the single-label losses, a boolean mask of logits.shape for the
+    multilabel ones. A target of the other kind raises TypeError, a wrong shape ValueError."""
+    if spec.multilabel:
+        if target.dtype != torch.bool:
+            raise TypeError(
+                f"{spec.name} takes a boolean mask of the logits' shape, not {target.dtype} targets"
+            )
+        if target.shape != logits.shape:
+            raise ValueError(
+                f"target must have the logits' shape {tuple(logits.shape)}, "
+                f"not {tuple(target.shape)}"
+            )
+        return target
+    if target.dtype != torch.int64:
+        if target.dtype == torch.bool or target.is_floating_point() or target.is_complex():
+            hint = "; multilabel losses take boolean masks" if target.dtype == torch.bool else ""
+            raise TypeError(f"{spec.name} takes integer class labels, not {target.dtype}{hint}")
+        target = target.long()
+    if target.ndim != logits.ndim - 1 or target.shape != _without(logits.shape, dim):
+        raise ValueError(
+            f"target must have shape {tuple(_without(logits.shape, dim))} (the logits' shape "
+            f"without dim), not {tuple(target.shape)}"
+        )
+    return target
+
+
+def _without(shape: torch.Size, dim: int) -> torch.Size:
+    """shape without the dimension dim (ValueError if out of range)."""
+    if not -len(shape) <= dim < len(shape):
+        raise ValueError(f"dim {dim} is out of range for {len(shape)}-D logits")
+    dim %= len(shape)
+    return shape[:dim] + shape[dim + 1 :]
 
 
 def _raise_failed(checks: list[tuple[torch.Tensor, str]]) -> None:
@@ -354,106 +399,298 @@ def _target_mask(
     return positive
 
 
-def sdca_loss(
-    logits: torch.Tensor,
-    target: torch.Tensor,
-    loss: str = "cross_entropy",
+_TOPK = frozenset(("topk_cross_entropy", "topk_hinge_alpha", "topk_hinge_beta"))
+
+
+class _Call(NamedTuple):
+    """A loss with checked options: what a module holds, and a function checks per call."""
+
+    spec: _Spec
+    reduction: str
+    dim: int
+    backend: str
+    precision: str | None
+    ignore_index: int | None = None
+
+
+# The _Call of each distinct set of options (all hashable), checked once.
+_CALLS: dict[tuple[object, ...], _Call] = {}
+
+
+def _bind(
+    name: str,
     *,
-    backend: str = "auto",
-    k: int = 1,
-    gamma: float = 0.0,
-    alpha: float = 1.0,
-    reduction: str = "mean",
-    dim: int = -1,
+    k: object = 1,
+    gamma: object = 0.0,
+    alpha: object = 1.0,
+    ignore_index: object = None,
+    reduction: object = "mean",
+    dim: object = -1,
+    backend: object = "auto",
     precision: object = None,
-) -> torch.Tensor:
-    """A loss of the scores (not a differentiable call to libsdca.fit).
-
-    Gradients are first-order only (differentiating them raises), except
-    that entropy supports double backward (integer entropy on every backend,
-    boolean-mask entropy on the tensor backend and the CPU extension). Hinge
-    values at kinks use deterministic subgradients.
-
-    Args:
-        logits: Finite floating-point scores with the class dimension dim
-            (at least two classes; without examples the result is that of
-            torch.nn.functional: empty, a zero sum or a NaN mean).
-        target: int64 class indices of logits.shape without dim, or a boolean
-            mask of logits.shape: uniformly weighted positive labels for
-            the cross-entropies, positive sets for multilabel hinge. Other
-            losses require one target. Must be on the device of logits.
-        loss: One of libsdca.LOSSES.
-        backend: "auto" (on the CPU the CPU extension, else the native
-            library; fused kernels on CUDA; else torch), "native" (the native
-            library, CPU tensors) or "torch" (tensor operations, CPU or CUDA).
-        k: Top-k parameter in [1, classes-1]; only the topk losses use it.
-        gamma: Hinge smoothing, finite and >= 0 (0: nonsmooth).
-        alpha: proximal_cross_entropy step, finite and positive.
-        reduction: "none", "sum" or "mean".
-        dim: Class dimension of logits.
-        precision: None or "float32" (float32 work for 16- and 32-bit logits, the
-            same route), "float64" (or a matching dtype object); see TORCH.md for what
-            each guarantees.
-
-    Returns:
-        Per-example losses (logits.shape without dim) or their reduction.
-
-    Raises:
-        ValueError: For invalid inputs or options.
-        RuntimeError: If a proximal_cross_entropy normalization does not converge on CPU.
-    """
-    return _bound_loss(
-        _entry(loss), loss, logits, target, backend, k, gamma, alpha, reduction, dim, precision
+) -> _Call:
+    """The checked _Call of loss name: TypeError for wrong types, ValueError for bad values."""
+    key: tuple[object, ...] | None = (
+        name,
+        k,
+        type(k),
+        gamma,
+        type(gamma),
+        alpha,
+        type(alpha),
+        ignore_index,
+        type(ignore_index),
+        reduction,
+        dim,
+        type(dim),
+        backend,
+        precision,
     )
+    try:
+        call = _CALLS.get(key)  # type: ignore[arg-type]
+    except TypeError:  # an unhashable option: checked below
+        call, key = None, None
+    if call is not None:
+        return call
+    spec = _opt.spec(
+        name,
+        _opt.check_k(k) if name in _TOPK else 1,
+        _opt.check_gamma(gamma),
+        _opt.check_positive(alpha, "alpha"),
+    )
+    call = _Call(
+        spec,
+        _opt.check_reduction(reduction),
+        _opt.check_axis(dim, "dim"),
+        _opt.check_backend(backend, BACKENDS),
+        _precision(precision),
+        _opt.check_ignore_index(ignore_index),
+    )
+    if key is not None and len(_CALLS) < 4096:
+        _CALLS[key] = call
+    return call
 
 
-def _bound_loss(
-    entry: _Entry,
-    loss: str,
-    logits: torch.Tensor,
-    target: torch.Tensor,
-    backend: str,
-    k: int,
-    gamma: float,
-    alpha: float,
-    reduction: str,
-    dim: int,
-    precision: object,
+def _topk_hinge(variant: object) -> str:
+    return "topk_hinge_" + _opt.check_variant(variant)
+
+
+def _check_weight(weight: object, logits: torch.Tensor, classes: int) -> None:
+    """A (classes,) floating-point tensor on the logits' device; its values are checked with
+    the losses (_row_weights)."""
+    if not isinstance(weight, torch.Tensor):
+        raise TypeError(f"weight must be None or a tensor, not {type(weight).__name__}")
+    if not weight.is_floating_point():
+        raise TypeError(f"weight must be floating-point, not {weight.dtype}")
+    if weight.shape != (classes,):
+        raise ValueError(f"weight must have shape ({classes},), not {tuple(weight.shape)}")
+    if weight.device != logits.device:
+        raise ValueError("weight and logits must be on the same device")
+
+
+def _loss(
+    call: _Call, logits: torch.Tensor, target: torch.Tensor, weight: torch.Tensor | None = None
 ) -> torch.Tensor:
-    """sdca_loss of the loss bound in entry (named loss)."""
-    _untransformed(loss)
-    if _has_dtensor(logits, target):
-        return _call_with_dtensors(
-            sdca_loss,
-            logits,
-            target,
-            loss,
-            backend=backend,
-            k=k,
-            gamma=gamma,
-            alpha=alpha,
-            reduction=reduction,
-            dim=dim,
-            precision=precision,
-        )
-    # The private kind of the tensor backends; gamma is 1 for a nonsmooth hinge.
-    objective, kind_k, gamma = _kind_of(entry, k, gamma)
-    if backend not in ("auto", "native", "torch"):
-        raise ValueError("Unknown backend")
+    """A named loss of checked options (_bind): per example (logits.shape without dim) or
+    reduced."""
+    if _has_dtensor(logits, target, weight):
+        return _call_with_dtensors(_loss, call, logits, target, weight)
     _check_tensors(logits, target)
-    canonical = _canonical_precision(precision)
+    target = _labels_of(call.spec, logits, target, call.dim)
+    if weight is not None or call.ignore_index is not None:
+        return _weighted(call, logits, target, weight)
+    if _ops.transformed():
+        return _transformed(call, logits, target)
+    backend = call.backend
+    if backend == "kernel":
+        _require_kernel(_explain_loss(call, logits, target))
+        backend = "auto"
+    spec = call.spec
     return _resolved_loss(
-        logits, target, objective, backend, kind_k, gamma, alpha, reduction, dim, canonical, k
+        logits,
+        target,
+        spec.objective,
+        backend,
+        spec.k,
+        spec.gamma,
+        spec.alpha,
+        call.reduction,
+        call.dim,
+        call.precision,
+        spec.k,
     )
 
 
-def _untransformed(name: str) -> None:
-    """Raise inside torch.func transforms, which only cross_entropy supports."""
-    if _ops.transformed():
-        raise ValueError(
-            f"{name} does not support torch.func transforms (grad, vmap, jacrev, ...); "
-            "use torch.autograd, or cross_entropy, which does"
+def _require_kernel(explained: tuple[str, str]) -> None:
+    """NotImplementedError for backend="kernel" where no fused kernel computes the call."""
+    backend, reason = explained
+    if backend != "kernel":
+        raise NotImplementedError(
+            f"backend='kernel': no fused kernel computes this call ({reason}); "
+            "backend='auto' takes that path"
         )
+
+
+def _weighted(
+    call: _Call, logits: torch.Tensor, target: torch.Tensor, weight: torch.Tensor | None
+) -> torch.Tensor:
+    """A single-label loss with class weights or an ignored label, as torch's cross-entropy:
+    w[label] times each example's loss (0 where ignored); the mean divides the sum by the sum
+    of those weights. Ignored examples take label 0 and zero logits (so their values are
+    neither read nor checked, and their gradient is zero)."""
+    _without(logits.shape, call.dim)
+    dim = call.dim % logits.ndim
+    classes = logits.shape[dim]
+    if weight is not None:
+        _check_weight(weight, logits, classes)
+    z = logits.movedim(dim, -1)
+    ignored = None
+    if call.ignore_index is not None:
+        ignored = target == call.ignore_index
+        z = z.masked_fill(ignored[..., None], 0)
+        target = target.masked_fill(ignored, 0)
+    rows = call._replace(reduction="none", dim=-1, ignore_index=None)
+    values = _loss(rows, z, target)
+    row_weight = _row_weights(weight, target, ignored, classes, values)
+    weighted = values * row_weight
+    if call.reduction == "none":
+        return weighted
+    if call.reduction == "sum":
+        return weighted.sum()
+    return weighted.sum() / row_weight.sum()
+
+
+def _row_weights(
+    weight: torch.Tensor | None,
+    target: torch.Tensor,
+    ignored: torch.Tensor | None,
+    classes: int,
+    values: torch.Tensor,
+) -> torch.Tensor:
+    """w[label] per example in the values' dtype (1 without weights, 0 where ignored). Class
+    weights must be finite and nonnegative: ValueError on the CPU, NaN rows elsewhere."""
+    if weight is None:
+        row = torch.ones_like(values)
+    else:
+        w = weight.to(values.dtype)
+        valid = torch.isfinite(w).all() & (w >= 0).all()
+        if w.is_cuda or _ops.is_compiling() or _ops.transformed():
+            w = w.masked_fill(~valid, math.nan)
+        elif not bool(valid):
+            raise ValueError("weight must be finite and nonnegative")
+        row = w[target.clamp(0, classes - 1)]
+    return row if ignored is None else row.masked_fill(ignored, 0)
+
+
+def _transformed(call: _Call, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """A named loss under torch.func transforms: the eager loss of the rows (_Transformed)."""
+    spec = call.spec
+    _without(logits.shape, call.dim)
+    z = logits.movedim(call.dim, -1)
+    shape, classes = z.shape[:-1], z.shape[-1]
+    _opt.check_classes(spec.k, classes)
+    flat = z.reshape(-1, classes)
+    if spec.multilabel:
+        rows = target.movedim(call.dim, -1).reshape(-1, classes)
+    else:
+        rows = target.reshape(-1)
+    run = functools.partial(_rows_loss, call)
+    value = _Transformed.apply(flat, rows, run)[0]
+    return _reduce(value.reshape(shape), call.reduction)
+
+
+def _rows_loss(call: _Call, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """The eager per-example loss of (rows, classes) logits (_transformed)."""
+    spec = call.spec
+    backend = "auto" if call.backend == "kernel" else call.backend
+    return _resolved_loss(
+        logits,
+        target,
+        spec.objective,
+        backend,
+        spec.k,
+        spec.gamma,
+        spec.alpha,
+        "none",
+        -1,
+        call.precision,
+        spec.k,
+    )
+
+
+class _Guard(torch.autograd.Function):
+    """The gradient of a first-order loss under torch.func transforms, linked to the logits
+    through a node that raises when it is differentiated (a hessian, jacrev of a gradient)."""
+
+    generate_vmap_rule = True
+
+    @staticmethod
+    def forward(gradient: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
+        return gradient.clone()
+
+    @staticmethod
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: torch.Tensor) -> None:
+        pass
+
+    @staticmethod
+    def backward(ctx: Any, *grad_outputs: torch.Tensor) -> tuple[None, ...]:
+        raise RuntimeError(_FIRST_ORDER)
+
+
+class _Transformed(torch.autograd.Function):
+    """A first-order loss of (rows, classes) logits under torch.func transforms (grad, vjp,
+    vmap, jacrev): forward runs the eager loss of the rows, run(logits, other), with its
+    gradient; vmap merges the mapped dimension into the rows. Forward mode raises."""
+
+    @staticmethod
+    def forward(
+        logits: torch.Tensor, other: torch.Tensor, run: Callable[..., torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        with torch.enable_grad():
+            leaf = logits.detach().requires_grad_()
+            value = run(leaf, other)
+            if value.numel() == 0:
+                return value.detach(), torch.zeros_like(leaf)
+            (gradient,) = torch.autograd.grad(value, leaf, torch.ones_like(value))
+        return value.detach(), gradient
+
+    @staticmethod
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: tuple[torch.Tensor, ...]) -> None:
+        ctx.mark_non_differentiable(output[1])
+        ctx.save_for_backward(output[1], inputs[0])
+
+    @staticmethod
+    def backward(ctx: Any, *grad_outputs: torch.Tensor) -> tuple[torch.Tensor | None, ...]:
+        gradient, logits = ctx.saved_tensors
+        upstream = grad_outputs[0]
+        out = (gradient.to(upstream.dtype) * upstream[:, None]).to(logits.dtype)
+        if torch.is_grad_enabled():
+            out = _Guard.apply(out, upstream, logits)
+        return out, None, None
+
+    @staticmethod
+    def jvp(ctx: Any, *tangents: torch.Tensor | None) -> tuple[torch.Tensor, ...]:
+        raise RuntimeError(_FIRST_ORDER + " (nor forward mode: jvp, jacfwd, hessian)")
+
+    @staticmethod
+    def vmap(  # pyright: ignore[reportIncompatibleMethodOverride]
+        info: Any,
+        in_dims: tuple[int | None, ...],
+        logits: torch.Tensor,
+        other: torch.Tensor,
+        run: Callable[..., torch.Tensor],
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[int, int]]:
+        size = info.batch_size
+
+        def front(x: torch.Tensor, d: int | None) -> torch.Tensor:
+            return x.movedim(d, 0) if d is not None else x.expand(size, *x.shape)
+
+        z, o = front(logits, in_dims[0]), front(other, in_dims[1])
+        rows = z.shape[1]
+        value, gradient = _Transformed.apply(
+            z.reshape(size * rows, z.shape[-1]), o.reshape(size * rows, *o.shape[2:]), run
+        )
+        return (value.reshape(size, rows), gradient.reshape(z.shape)), (0, 0)
 
 
 def _resolved_loss(
@@ -487,9 +724,7 @@ def _resolved_loss(
         else logits.movedim(dim, -1)
     )
     shape, classes = z.shape[:-1], z.shape[-1]
-    if classes < 2:
-        raise ValueError("At least two classes are required")
-    _check_options(given_k, gamma, alpha, classes)
+    _opt.check_classes(given_k, classes)
     if z.numel() == 0:
         return _empty_loss(z, reduction, _value_dtype(logits))
     if z.device.type == "cpu":
@@ -851,16 +1086,6 @@ def _run_cpu(
     return _reduce(value.reshape(shape), reduction).to(_value_dtype(logits))
 
 
-# The named wrappers' losses, bound once at import.
-_TOPK_CROSS_ENTROPY = _KINDS["topk_cross_entropy"]
-_MULTICLASS_HINGE = _KINDS["multiclass_hinge"]
-_TOPK_HINGE_ALPHA = _KINDS["topk_hinge_alpha"]
-_TOPK_HINGE_BETA = _KINDS["topk_hinge_beta"]
-_MULTILABEL_CROSS_ENTROPY = _KINDS["multilabel_cross_entropy"]
-_MULTILABEL_HINGE = _KINDS["multilabel_hinge"]
-_PROXIMAL_CROSS_ENTROPY = _KINDS["proximal_cross_entropy"]
-
-
 def _indexed_entropy_path(target: torch.Tensor, objective: str, k: int) -> bool:
     """Integer-target entropy (or top-1 entropy): the fused float32 kernels where they apply,
     else float64 (whose storage-limit guarantees the float32 tensor entropy lacks)."""
@@ -901,44 +1126,25 @@ def _unfused(objective: str, hinge: bool, target: torch.Tensor) -> str:
     return f"{objective} has no fused integer-target path"
 
 
-def explain_backend(
-    logits: torch.Tensor,
-    target: torch.Tensor,
-    loss: str = "cross_entropy",
-    *,
-    backend: str = "auto",
-    k: int = 1,
-    gamma: float = 0.0,
-    reduction: str = "mean",
-    dim: int = -1,
-    precision: object = None,
-) -> tuple[str, str]:
-    """(backend, reason) that sdca_loss takes for these arguments, without computing the loss.
+def _explain_loss(call: _Call, logits: torch.Tensor, target: torch.Tensor) -> tuple[str, str]:
+    """(backend, reason) of a named loss with checked tensors and target (_loss), in the
+    names explain_backend reports."""
+    name, reason = _explain_route(call, logits, target)
+    return _PUBLIC.get(name, name), reason
 
-    The backend is "cuda-launcher" (fused Triton kernels launched from C++), "triton"
-    (Triton kernels launched by Triton), "cpu-kernel" (the CPU extension), "native" or
-    "torch", or "dtensor" (a full-input distributed fallback). Like the first such
-    call, it may build the CPU extension or the launcher and compile kernels. Arguments
-    as in sdca_loss.
-    """
-    objective, kind_k, gamma = _tensor_kind(loss, k, gamma)
-    if backend not in ("auto", "native", "torch"):
-        raise ValueError("Unknown backend")
-    _check_device(logits)
-    canonical = _contract(logits, _check_precision(logits, precision))
-    if _has_dtensor(logits, target):
-        _dtensor_mesh(logits, target)
-        if backend == "native" and logits.device.type != "cpu":
-            raise ValueError(
-                "Native losses require CPU tensors; use backend='torch' on other devices"
-            )
-        return "dtensor", "gathers full inputs on every rank and returns a replicated global loss"
-    z = logits.movedim(dim, -1)
+
+def _explain_route(call: _Call, logits: torch.Tensor, target: torch.Tensor) -> tuple[str, str]:
+    """The internal route (cpu-kernel, cuda-launcher, triton, native or torch) of _loss."""
+    spec = call.spec
+    objective, k, gamma, reduction = spec.objective, spec.k, spec.gamma, call.reduction
+    backend = "auto" if call.backend == "kernel" else call.backend
+    if logits.dtype == torch.float64 and call.precision == "float32":
+        raise ValueError("float64 logits require precision='float64' or None")
+    canonical = _contract(logits, call.precision)
+    _without(logits.shape, call.dim)
+    z = logits.movedim(call.dim, -1)
     shape, classes = z.shape[:-1], z.shape[-1]
-    if classes < 2:
-        raise ValueError("At least two classes are required")
-    _check_options(k, gamma, 1.0, classes)
-    k = kind_k
+    _opt.check_classes(k, classes)
     flat = z.reshape(-1, classes)
     work = _device_working(logits, flat, canonical, objective, backend != "torch")
     if flat.device.type == "cpu":
@@ -951,24 +1157,10 @@ def explain_backend(
         return _explain_torch(z, flat, target, objective, k, work)
     indexed = target.dtype == torch.int64 and target.shape == shape
     if target.shape == shape and _indexed_entropy_path(target, objective, k):
-        if _fused_entropy(flat):
-            kernel = _entropy._kernel()
-            assert kernel is not None
-            fp32_entropy = canonical != "float64" and logits.dtype != torch.float64
-            launch = kernel.launcher(flat, kernel._REDUCTIONS[reduction], fp32_entropy)
-            return _fused_cuda(launch, kernel.describe(classes, fp32_entropy))
-        why = "needs Triton 3.3, at most 2**28 rows and 2**25 classes" if flat.is_cuda else "CPU"
-        return "torch", f"integer entropy in float64 tensor operations ({why})"
+        return _explain_entropy(logits, flat, canonical, reduction)
     fast = indexed and k == 1 and objective in _hinge.SMOOTH
-    if fast and reduction in ("none", "sum", "mean") and _hinge.covers(flat):
-        kernel = _hinge._kernel()
-        assert kernel is not None
-        code = kernel._REDUCTIONS[reduction]
-        fp32 = _hinge_fp32(logits, canonical, gamma, flat.shape[1])
-        return _fused_cuda(
-            kernel.launcher(flat, code, _hinge.SMOOTH[objective], fp32),
-            "float32" if fp32 else "float64",
-        )
+    if fast and _hinge.covers(flat):
+        return _explain_hinge(logits, flat, objective, gamma, reduction, canonical)
     reason = _multilabel.explain(objective, logits, target, classes, backend, canonical, reduction)
     if reason is not None:
         return reason
@@ -978,14 +1170,127 @@ def explain_backend(
     )
     if explained is not None:
         return explained
+    return _explain_tensor(objective, flat, work, fast and flat.is_cuda, target)
+
+
+def _explain_entropy(
+    logits: torch.Tensor, flat: torch.Tensor, canonical: str | None, reduction: str
+) -> tuple[str, str]:
+    """_explain_route of integer targets on the entropy path: the fused CUDA kernel or the
+    tensor operations."""
+    if _fused_entropy(flat):
+        kernel = _entropy._kernel()
+        assert kernel is not None
+        fp32_entropy = canonical != "float64" and logits.dtype != torch.float64
+        launch = kernel.launcher(flat, kernel._REDUCTIONS[reduction], fp32_entropy)
+        return _fused_cuda(launch, kernel.describe(flat.shape[1], fp32_entropy))
+    why = "needs Triton 3.3, at most 2**28 rows and 2**25 classes" if flat.is_cuda else "CPU"
+    return "torch", f"integer entropy in float64 tensor operations ({why})"
+
+
+def _explain_hinge(
+    logits: torch.Tensor,
+    flat: torch.Tensor,
+    objective: str,
+    gamma: float,
+    reduction: str,
+    canonical: str | None,
+) -> tuple[str, str]:
+    """_explain_route of a k = 1 hinge the fused CUDA kernels cover."""
+    kernel = _hinge._kernel()
+    assert kernel is not None
+    code = kernel._REDUCTIONS[reduction]
+    fp32 = _hinge_fp32(logits, canonical, gamma, flat.shape[1])
+    return _fused_cuda(
+        kernel.launcher(flat, code, _hinge.SMOOTH[objective], fp32),
+        "float32" if fp32 else "float64",
+    )
+
+
+def _explain_tensor(
+    objective: str, flat: torch.Tensor, work: str | None, hinge: bool, target: torch.Tensor
+) -> tuple[str, str]:
+    """_explain_route without a fused path: proximal_cross_entropy's Triton kernel or the
+    tensor operations (hinge: a k = 1 hinge the CUDA kernels skip)."""
     arithmetic = _tensor_arithmetic(objective, flat, work)
     if objective == "proximal_cross_entropy" and _prox_kernel(flat) is not None:
         return (
             "triton",
             f"proximal_cross_entropy runs one Triton kernel (Python launch, {arithmetic})",
         )
-    why = _unfused(objective, fast and flat.is_cuda, target)
+    why = _unfused(objective, hinge, target)
     return "torch", f"tensor operations in {arithmetic}: {why}"
+
+
+@overload
+def _stand_in(x: torch.Tensor) -> torch.Tensor: ...
+@overload
+def _stand_in(x: torch.Tensor | None) -> torch.Tensor | None: ...
+def _stand_in(x: torch.Tensor | None) -> torch.Tensor | None:
+    """The full (gathered) tensor's stand-in for explaining a DTensor call: an uninitialized
+    tensor of its global shape on the local device; other values unchanged."""
+    if x is not None and _has_dtensor(x):
+        return torch.empty(x.shape, dtype=x.dtype, device=x.device)
+    return x
+
+
+def _gathered(explained: tuple[str, str]) -> tuple[str, str]:
+    name, reason = explained
+    return name, f"DTensor inputs, gathered in full on every rank: {reason}"
+
+
+def _explain_call(
+    call: _Call, logits: torch.Tensor, target: torch.Tensor, weight: torch.Tensor | None = None
+) -> tuple[str, str]:
+    """explain_backend of _loss(call, logits, target, weight)."""
+    if _has_dtensor(logits, target, weight):
+        _dtensor_mesh(logits, target, weight)
+        stand = _stand_in(logits), _stand_in(target), _stand_in(weight)
+        return _gathered(_explain_call(call, *stand))
+    _check_tensors(logits, target)
+    target = _labels_of(call.spec, logits, target, call.dim)
+    if weight is None and call.ignore_index is None:
+        return _explain_loss(call, logits, target)
+    _without(logits.shape, call.dim)
+    if weight is not None:
+        _check_weight(weight, logits, logits.shape[call.dim])
+    if call.ignore_index is not None:
+        target = target.masked_fill(target == call.ignore_index, 0)
+    rows = call._replace(reduction="none", ignore_index=None)
+    name, reason = _explain_loss(rows, logits, target)
+    return name, f"{reason}; class weights and ignore_index weigh its per-example losses"
+
+
+def explain_backend(
+    loss: Callable[..., torch.Tensor], /, *args: Any, **kwargs: Any
+) -> tuple[str, str]:
+    """(backend, reason): the path that loss(*args, **kwargs) takes, without computing it.
+
+    loss is a function of libsdca.torch (topk_hinge_loss, cross_entropy, ...) or one of its
+    loss modules (TopKHingeLoss(k=2), ...), called with these arguments. The backend is a
+    value of the backend option that takes this path: "kernel" (the CPU extension's kernels
+    or fused CUDA kernels; the reason says which, and how they launch), "native" (the
+    native library) or "torch" (tensor operations). DTensor inputs report the path of the
+    gathered full inputs. Like the first such call, it may build the CPU extension or the
+    CUDA launcher and compile kernels.
+
+    Raises:
+        TypeError: If loss is not a libsdca.torch loss, or for arguments the call rejects.
+        ValueError: For arguments the call rejects.
+    """
+    if isinstance(loss, nn.Module):
+        explain = getattr(loss, "_explain", None)
+        if explain is None:
+            raise TypeError(f"{type(loss).__name__} is not a libsdca.torch loss module")
+        explained: tuple[str, str] = explain(*args, **kwargs)
+        return explained
+    explain = _EXPLAINERS.get(loss) if callable(loss) else None
+    if explain is None:
+        raise TypeError(f"{loss!r} is not a libsdca.torch loss function")
+    bound = inspect.signature(loss).bind(*args, **kwargs)
+    bound.apply_defaults()
+    explained = explain(**bound.arguments)
+    return explained
 
 
 def _explain_torch(
@@ -1011,116 +1316,6 @@ def _tensor_arithmetic(objective: str, logits: torch.Tensor, work: str | None) -
     if work == "float32":
         return "float32, or float64 where float32 cannot hold gamma, alpha or a row's spread"
     return "float64"
-
-
-# SDCALoss options resolved by _bind when set.
-_STATIC = frozenset(("loss", "backend", "k", "gamma", "precision"))
-
-
-class SDCALoss(nn.Module):
-    """A libsdca loss as a module; see sdca_loss for the arguments.
-
-    Example:
-        >>> criterion = SDCALoss("topk_hinge_beta", k=2, gamma=0.5)
-        >>> criterion(torch.randn(8, 5), torch.randint(0, 5, (8,))).shape
-        torch.Size([])
-    """
-
-    # Resolved by _resolve from the options; forward only reads them.
-    _objective: str
-    _k: int
-    _gamma: float
-    _canonical: str | None
-
-    def __init__(
-        self,
-        loss: str = "cross_entropy",
-        *,
-        backend: str = "auto",
-        k: int = 1,
-        gamma: float = 0.0,
-        alpha: float = 1.0,
-        reduction: str = "mean",
-        dim: int = -1,
-        precision: object = None,
-    ) -> None:
-        super().__init__()
-        self.loss = loss
-        self.backend = backend
-        self.k = k
-        self.gamma = gamma
-        self.alpha = alpha
-        self.reduction = reduction
-        self.dim = dim
-        self.precision = precision
-        self._bind()
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name in _STATIC and "_objective" in self.__dict__:
-            # Validate before assigning, so a rejected value leaves the module unchanged.
-            options = {key: getattr(self, key) for key in _STATIC}
-            options[name] = value
-            bound = self._resolve(**options)
-            super().__setattr__(name, value)
-            self.__dict__.update(bound)
-        else:
-            super().__setattr__(name, value)
-
-    @staticmethod
-    def _resolve(
-        loss: str, backend: str, k: int, gamma: float, precision: object
-    ) -> dict[str, Any]:
-        """The loss, k, gamma, backend and precision resolved once; forward only reads them."""
-        objective, kind_k, kind_gamma = _tensor_kind(loss, k, gamma)
-        if backend not in ("auto", "native", "torch"):
-            raise ValueError("Unknown backend")
-        return {
-            "_objective": objective,
-            "_k": kind_k,
-            "_gamma": kind_gamma,
-            "_canonical": _canonical_precision(precision),
-        }
-
-    def _bind(self) -> None:
-        self.__dict__.update(self._resolve(**{key: getattr(self, key) for key in _STATIC}))
-
-    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """sdca_loss(logits, target) with the stored loss and options."""
-        if _has_dtensor(logits, target):
-            return sdca_loss(
-                logits,
-                target,
-                self.loss,
-                backend=self.backend,
-                k=self.k,
-                gamma=self.gamma,
-                alpha=self.alpha,
-                reduction=self.reduction,
-                dim=self.dim,
-                precision=self.precision,
-            )
-        _untransformed(self.loss)
-        _check_tensors(logits, target)
-        return _resolved_loss(
-            logits,
-            target,
-            self._objective,
-            self.backend,
-            self._k,
-            self._gamma,
-            self.alpha,
-            self.reduction,
-            self.dim,
-            self._canonical,
-            self.k,
-        )
-
-    def extra_repr(self) -> str:
-        return (
-            f"{self.loss!r}, backend={self.backend!r}, k={self.k}, gamma={self.gamma}, "
-            f"alpha={self.alpha}, reduction={self.reduction!r}, dim={self.dim}, "
-            f"precision={self.precision!r}"
-        )
 
 
 @functools.cache
@@ -1278,8 +1473,9 @@ class _ProximalDistillation(_SavedGradient):
         temperature: float,
         alpha: float,
         double: bool,
+        fused: bool = True,
     ) -> torch.Tensor:
-        kernel = _kernel_distill(True) if student.is_cuda else None
+        kernel = _kernel_distill(True) if fused and student.is_cuda else None
         if kernel is not None:
             kernel = _ops.proximal_distillation if _ops.compiling() else kernel
             value, gradient = kernel(
@@ -1324,118 +1520,178 @@ def _temperature_difference(
     return scaled
 
 
+class _Distill(NamedTuple):
+    """A distillation loss with checked options (alpha None: distillation_loss)."""
+
+    temperature: float
+    alpha: float | None
+    reduction: str
+    dim: int
+    backend: str
+    precision: str | None
+
+
+def _bind_distillation(
+    temperature: object,
+    alpha: object,
+    reduction: object,
+    dim: object,
+    backend: object,
+    precision: object,
+) -> _Distill:
+    return _Distill(
+        _opt.check_positive(temperature, "temperature"),
+        None if alpha is None else _opt.check_positive(alpha, "alpha"),
+        _opt.check_reduction(reduction),
+        _opt.check_axis(dim, "dim"),
+        _opt.check_backend(backend, BACKENDS),
+        _precision(precision),
+    )
+
+
 def distillation_loss(
     student: torch.Tensor,
     teacher: torch.Tensor,
-    temperature: float = 1.0,
     *,
+    temperature: float = 1.0,
     reduction: str = "mean",
     dim: int = -1,
+    backend: str = "auto",
     precision: object = None,
 ) -> torch.Tensor:
-    """Cross-entropy with a fixed teacher distribution softmax(teacher/T).
+    """Cross-entropy with a fixed teacher distribution softmax(teacher / T).
 
-    Both arguments are LOGITS. The teacher is detached by definition. No T²
-    multiplier is applied. This first-order gradient is exactly zero at equal
-    represented logits; near equality it avoids probability subtraction.
+    Both arguments are LOGITS. The teacher is detached by definition. No T² multiplier is
+    applied. This first-order gradient is exactly zero at equal represented logits; near
+    equality it avoids probability subtraction.
 
     Args:
-        student: Finite floating-point logits with the class dimension dim
-            (at least two classes; no examples give the torch.nn.functional
-            results).
-        teacher: Finite logits of the same shape, device and dtype.
+        student: Floating-point logits with the class dimension dim (at least two classes;
+            no examples give the torch.nn.functional results).
+        teacher: Logits of the same shape and device; logits of another floating-point
+            dtype are promoted with the student's (torch.promote_types).
         temperature: T, finite and positive.
         reduction: "none", "sum" or "mean".
         dim: Class dimension of the logits.
-        precision: None or "float32" (float32 arithmetic for non-float64
-            logits) or "float64" (float64 arithmetic, or matching dtype
-            objects). Temperatures float32 cannot hold use float64.
+        backend: "auto" (the CPU extension, else the native library, on the CPU; fused
+            kernels on CUDA; else tensor operations), "kernel" (as "auto", raising
+            NotImplementedError where no fused kernel runs), "native" (the native library,
+            CPU tensors) or "torch" (tensor operations).
+        precision: None or "float32" (float32 arithmetic for non-float64 logits) or
+            "float64" (or torch.float32, torch.float64). Temperatures float32 cannot hold
+            use float64.
 
     Returns:
         Per-example losses (student.shape without dim) or their reduction.
 
     Raises:
-        ValueError: For invalid inputs or options.
+        TypeError: For arguments of the wrong type.
+        ValueError: For invalid shapes or options, and on the CPU for nonfinite logits.
     """
-    _untransformed("distillation_loss")
-    fast = _fast_distillation(student, teacher, temperature, reduction, dim, precision)
+    options = _bind_distillation(temperature, None, reduction, dim, backend, precision)
+    return _distill(options, student, teacher)
+
+
+def proximal_distillation_loss(
+    student: torch.Tensor,
+    teacher: torch.Tensor,
+    *,
+    temperature: float = 1.0,
+    alpha: float = 1.0,
+    reduction: str = "mean",
+    dim: int = -1,
+    backend: str = "auto",
+    precision: object = None,
+) -> torch.Tensor:
+    """Moreau envelope of distillation cross-entropy with step alpha and temperature T.
+
+    Computes min_u { H(softmax(teacher/T), softmax(u)) + |u - student/T|^2 / (2 alpha) }.
+    As alpha -> 0+, this converges to distillation_loss(student, teacher, temperature=T).
+    The first-order gradient is identically zero at equal represented student and teacher
+    logits. alpha is finite and positive; other arguments, the result and errors as in
+    distillation_loss.
+    """
+    options = _bind_distillation(temperature, alpha, reduction, dim, backend, precision)
+    return _distill(options, student, teacher)
+
+
+def _distill(options: _Distill, student: torch.Tensor, teacher: torch.Tensor) -> torch.Tensor:
+    """distillation_loss or proximal_distillation_loss of checked options."""
+    fast = _fast_distillation(options, student, teacher)
     if fast is not None:
         return fast
     if _has_dtensor(student, teacher):
-        return _call_with_dtensors(
-            distillation_loss,
-            student,
-            teacher,
-            temperature,
-            reduction=reduction,
-            dim=dim,
-            precision=precision,
-        )
-    return _distillation(student, teacher, temperature, None, reduction, dim, precision)
+        return _call_with_dtensors(_distill, options, student, teacher)
+    student, teacher = _check_distillation(student, teacher, options)
+    if _ops.transformed():
+        return _transformed_distillation(options, student, teacher)
+    if options.backend == "kernel":
+        _require_kernel(_explain_distillation_route(options, student, teacher))
+        options = options._replace(backend="auto")
+    return _distillation(options, student, teacher)
 
 
 _FAST_DTYPES = (torch.float32, torch.bfloat16, torch.float16, torch.float64)
 
 
 def _fast_distillation(
-    student: torch.Tensor,
-    teacher: torch.Tensor,
-    temperature: float,
-    reduction: str,
-    dim: int,
-    precision: object,
+    options: _Distill, student: torch.Tensor, teacher: torch.Tensor
 ) -> torch.Tensor | None:
     """_cpu_distillation of ordinary (N, C) CPU tensors, or None: where it applies every check
     of distillation_loss passes but finiteness, which the kernels check."""
     if (
-        type(student) is torch.Tensor
+        options.alpha is None
+        and options.backend == "auto"
+        and type(student) is torch.Tensor
         and type(teacher) is torch.Tensor
-        and type(temperature) in (float, int)
-        and 0 < temperature < math.inf
-        and reduction in ("none", "mean", "sum")
         and student.is_cpu
         and student.ndim == 2
-        and dim in (-1, 1)
+        and options.dim in (-1, 1)
         and student.dtype in _FAST_DTYPES
-        and (precision is None or (precision == "float32" and student.dtype != torch.float64))
+        and (
+            options.precision is None
+            or (options.precision == "float32" and student.dtype != torch.float64)
+        )
         and teacher.dtype == student.dtype
         and teacher.is_cpu
         and teacher.shape == student.shape
         and student.shape[0] > 0
         and student.shape[1] >= 2
         and not _ops.is_compiling()
+        and not _ops.transformed()
     ):
-        return _cpu_distillation(student, teacher.detach(), temperature, None, False, reduction)
+        return _cpu_distillation(
+            student, teacher.detach(), options.temperature, None, False, options.reduction
+        )
     return None
 
 
 def _check_distillation(
-    student: torch.Tensor,
-    teacher: torch.Tensor,
-    temperature: float,
-    alpha: float | None,
-    reduction: str,
-    precision: object,
-) -> bool:
-    """Check the arguments of a distillation loss; whether it computes in float64."""
-    if (
-        student.shape != teacher.shape
-        or student.device != teacher.device
-        or student.dtype != teacher.dtype
-        or student.ndim < 1
-    ):
-        raise ValueError("Student and teacher must have matching shape, device, and dtype")
-    if not student.is_floating_point():
-        raise ValueError("Logits must be finite floating-point tensors")
+    student: torch.Tensor, teacher: torch.Tensor, options: _Distill
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Checked logits of a distillation loss, promoted to one dtype."""
+    for name, t in (("student", student), ("teacher", teacher)):
+        if not isinstance(t, torch.Tensor):
+            raise TypeError(f"{name} must be a tensor, not {type(t).__name__}")
+        if not t.is_floating_point():
+            raise TypeError(f"{name} logits must be floating-point, not {t.dtype}")
+    if student.shape != teacher.shape:
+        raise ValueError(
+            f"student and teacher must have one shape, not {tuple(student.shape)} and "
+            f"{tuple(teacher.shape)}"
+        )
+    if student.device != teacher.device:
+        raise ValueError("student and teacher must be on the same device")
+    if student.ndim < 1:
+        raise ValueError("logits must have a class dimension")
     _check_device(student)
-    double = _check_precision(student, precision) == "float64"
-    if not math.isfinite(temperature) or temperature <= 0:
-        raise ValueError("temperature must be finite and positive")
-    if alpha is not None and (not math.isfinite(alpha) or alpha <= 0):
-        raise ValueError("alpha must be finite and positive")
-    if reduction not in ("none", "sum", "mean"):
-        raise ValueError("reduction must be none, sum, or mean")
-    return double
+    _without(student.shape, options.dim)
+    if student.dtype != teacher.dtype:
+        common = torch.promote_types(student.dtype, teacher.dtype)
+        student, teacher = student.to(common), teacher.to(common)
+    if student.dtype == torch.float64 and options.precision == "float32":
+        raise ValueError("float64 logits require precision='float64' or None")
+    return student, teacher
 
 
 def _cpu_distillation(
@@ -1445,11 +1701,13 @@ def _cpu_distillation(
     alpha: float | None,
     double: bool,
     reduction: str,
-) -> torch.Tensor | None:
-    """The distillation loss of (N, C) CPU logits, reduced, by the extension or the native
-    library (None: the tensor operations, which tests select)."""
+    native: bool = False,
+) -> torch.Tensor:
+    """The distillation loss of (N, C) CPU logits, reduced, by the extension (unless native)
+    or the native library."""
     # Both check finiteness in their own passes.
-    implementation = _cpu.EXTENSION if _cpu_entropy.enabled() else _cpu.NATIVE
+    extension = not native and _cpu_entropy.enabled()
+    implementation = _cpu.EXTENSION if extension else _cpu.NATIVE
     ints = [implementation, int(double), int(alpha is not None), _cpu.REDUCTIONS[reduction]]
     floats = [temperature, 1.0 if alpha is None else alpha]
     kind = "distillation_stats" if alpha is None else "distillation"
@@ -1464,17 +1722,11 @@ def _cpu_distillation(
     return _cpu.loss(kind, student.contiguous(), teacher.contiguous(), None, ints, floats)
 
 
-def _distillation(
-    student: torch.Tensor,
-    teacher: torch.Tensor,
-    temperature: float,
-    alpha: float | None,
-    reduction: str,
-    dim: int,
-    precision: object,
-) -> torch.Tensor:
-    """distillation_loss, or proximal_distillation_loss with step alpha."""
-    double = _check_distillation(student, teacher, temperature, alpha, reduction, precision)
+def _distillation(options: _Distill, student: torch.Tensor, teacher: torch.Tensor) -> torch.Tensor:
+    """distillation_loss, or proximal_distillation_loss with step alpha, of checked logits."""
+    temperature, alpha, reduction, dim = options[:4]
+    double = options.precision == "float64"
+    backend = options.backend
     s, t = student, teacher.detach()
     if dim not in (-1, s.ndim - 1):
         s, t = s.movedim(dim, -1), t.movedim(dim, -1)
@@ -1484,390 +1736,357 @@ def _distillation(
     if s.numel() == 0:
         return _empty_loss(s, reduction, dtype)
     s2, t2 = (s, t) if s.ndim == 2 else (s.reshape(-1, s.shape[-1]), t.reshape(-1, t.shape[-1]))
-    if student.device.type == "cpu":
-        loss = _cpu_distillation(s2, t2, temperature, alpha, double, reduction)
-        if loss is not None:
-            return loss.reshape(shape) if reduction == "none" else loss
+    if student.device.type == "cpu" and backend != "torch":
+        loss = _cpu_distillation(s2, t2, temperature, alpha, double, reduction, backend == "native")
+        return loss.reshape(shape) if reduction == "none" else loss
+    if backend == "native":
+        raise ValueError("Native losses require CPU tensors; use backend='torch' on other devices")
+    fused = backend == "auto"
     if alpha is None:
-        fused = _fused_distillation(s2, t2, temperature, double, reduction)
-        if fused is not None:
-            return fused.reshape(shape) if reduction == "none" else fused
+        if fused:
+            value = _fused_distillation(s2, t2, temperature, double, reduction)
+            if value is not None:
+                return value.reshape(shape) if reduction == "none" else value
         values = _Distillation.apply(s2, t2, temperature, double)
     else:
-        values = _ProximalDistillation.apply(s2, t2, temperature, alpha, double)
+        values = _ProximalDistillation.apply(s2, t2, temperature, alpha, double, fused)
     return _reduce(values.reshape(shape), reduction)
+
+
+def _transformed_distillation(
+    options: _Distill, student: torch.Tensor, teacher: torch.Tensor
+) -> torch.Tensor:
+    """A distillation loss under torch.func transforms: the eager loss of the rows."""
+    s = student.movedim(options.dim, -1)
+    t = teacher.detach().movedim(options.dim, -1)
+    shape, classes = s.shape[:-1], s.shape[-1]
+    if classes < 2:
+        raise ValueError("At least two classes are required")
+    rows = options._replace(reduction="none", dim=-1)
+    if rows.backend == "kernel":
+        rows = rows._replace(backend="auto")
+    run = functools.partial(_distillation, rows)
+    value = _Transformed.apply(s.reshape(-1, classes), t.reshape(-1, classes), run)[0]
+    return _reduce(value.reshape(shape), options.reduction)
+
+
+def _explain_distillation(
+    options: _Distill, student: torch.Tensor, teacher: torch.Tensor
+) -> tuple[str, str]:
+    """explain_backend of a distillation loss."""
+    if _has_dtensor(student, teacher):
+        _dtensor_mesh(student, teacher)
+        stand = _stand_in(student), _stand_in(teacher)
+        return _gathered(_explain_distillation(options, *stand))
+    student, teacher = _check_distillation(student, teacher, options)
+    return _explain_distillation_route(options, student, teacher)
+
+
+def _explain_distillation_route(
+    options: _Distill, student: torch.Tensor, teacher: torch.Tensor
+) -> tuple[str, str]:
+    """The path of _distillation (backend "kernel" as "auto")."""
+    backend = "auto" if options.backend == "kernel" else options.backend
+    proximal = options.alpha is not None
+    name = "proximal_distillation" if proximal else "distillation"
+    if student.shape[options.dim] < 2:
+        raise ValueError("At least two classes are required")
+    work = (
+        "float64" if options.precision == "float64" or student.dtype == torch.float64 else "float32"
+    )
+    if student.device.type == "cpu" and backend != "torch":
+        if backend == "auto" and _cpu_entropy.enabled():
+            return "kernel", f"the CPU extension's {name} kernel ({work})"
+        why = (
+            ""
+            if backend == "native"
+            else f"; the CPU extension is unavailable ({_cpu_entropy.why_not()})"
+        )
+        return "native", f"the native library ({work}){why}"
+    if backend == "native":
+        raise ValueError("Native losses require CPU tensors; use backend='torch' on other devices")
+    rows = student.numel() // student.shape[options.dim]
+    if backend == "auto" and student.is_cuda:
+        if _kernel_distill(proximal) is not None and (proximal or rows <= _cuda_launch.ROWS):
+            return "kernel", f"fused Triton {name} kernels ({work})"
+        return "torch", f"tensor operations ({work}): the fused {name} kernels need Triton 3.3"
+    why = "backend='torch'" if backend == "torch" else "no fused kernel off CUDA"
+    return "torch", f"tensor operations ({work}): {why}"
 
 
 class DistillationLoss(nn.Module):
     """distillation_loss as a module; see it for the arguments."""
 
+    temperature: float
+    reduction: str
+    dim: int
+    backend: str
+    precision: object
+
     def __init__(
         self,
-        temperature: float = 1.0,
         *,
+        temperature: float = 1.0,
         reduction: str = "mean",
         dim: int = -1,
+        backend: str = "auto",
         precision: object = None,
     ) -> None:
         super().__init__()
+        _bind_distillation(temperature, None, reduction, dim, backend, precision)
         self.temperature = temperature
         self.reduction = reduction
         self.dim = dim
+        self.backend = backend
         self.precision = precision
 
     def forward(self, student: torch.Tensor, teacher: torch.Tensor) -> torch.Tensor:
         """distillation_loss(student, teacher) with the stored options."""
-        return distillation_loss(
-            student,
-            teacher,
+        return distillation_loss(student, teacher, **self._options())
+
+    def _options(self) -> dict[str, Any]:
+        return dict(
             temperature=self.temperature,
             reduction=self.reduction,
             dim=self.dim,
+            backend=self.backend,
             precision=self.precision,
         )
 
+    def _explain(self, student: torch.Tensor, teacher: torch.Tensor) -> tuple[str, str]:
+        return explain_backend(distillation_loss, student, teacher, **self._options())
+
     def extra_repr(self) -> str:
-        return (
-            f"temperature={self.temperature}, reduction={self.reduction!r}, dim={self.dim}, "
-            f"precision={self.precision!r}"
-        )
-
-
-def proximal_distillation_loss(
-    student: torch.Tensor,
-    teacher: torch.Tensor,
-    temperature: float = 1.0,
-    alpha: float = 1.0,
-    *,
-    reduction: str = "mean",
-    dim: int = -1,
-    precision: object = None,
-) -> torch.Tensor:
-    """Moreau envelope of distillation cross-entropy with step alpha and temperature T.
-
-    Computes min_u { H(softmax(teacher/T), softmax(u)) + |u - student/T|^2 / (2 alpha) }.
-    As alpha -> 0+, this converges to distillation_loss(student, teacher, temperature).
-    The first-order gradient is identically zero at equal represented student and teacher logits.
-    alpha is finite and positive; other arguments, the result and errors as in distillation_loss.
-    """
-    _untransformed("proximal_distillation_loss")
-    if _has_dtensor(student, teacher):
-        return _call_with_dtensors(
-            proximal_distillation_loss,
-            student,
-            teacher,
-            temperature,
-            alpha,
-            reduction=reduction,
-            dim=dim,
-            precision=precision,
-        )
-    return _distillation(student, teacher, temperature, alpha, reduction, dim, precision)
+        return _repr(self._options())
 
 
 class ProximalDistillationLoss(nn.Module):
     """proximal_distillation_loss as a module; see it for the arguments."""
 
+    temperature: float
+    alpha: float
+    reduction: str
+    dim: int
+    backend: str
+    precision: object
+
     def __init__(
         self,
+        *,
         temperature: float = 1.0,
         alpha: float = 1.0,
-        *,
         reduction: str = "mean",
         dim: int = -1,
+        backend: str = "auto",
         precision: object = None,
     ) -> None:
         super().__init__()
-        if not math.isfinite(temperature) or temperature <= 0:
-            raise ValueError("temperature must be finite and positive")
-        if not math.isfinite(alpha) or alpha <= 0:
-            raise ValueError("alpha must be finite and positive")
+        _bind_distillation(temperature, alpha, reduction, dim, backend, precision)
         self.temperature = temperature
         self.alpha = alpha
         self.reduction = reduction
         self.dim = dim
+        self.backend = backend
         self.precision = precision
 
     def forward(self, student: torch.Tensor, teacher: torch.Tensor) -> torch.Tensor:
         """proximal_distillation_loss(student, teacher) with the stored options."""
-        return proximal_distillation_loss(
-            student,
-            teacher,
+        return proximal_distillation_loss(student, teacher, **self._options())
+
+    def _options(self) -> dict[str, Any]:
+        return dict(
             temperature=self.temperature,
             alpha=self.alpha,
             reduction=self.reduction,
             dim=self.dim,
+            backend=self.backend,
             precision=self.precision,
         )
 
+    def _explain(self, student: torch.Tensor, teacher: torch.Tensor) -> tuple[str, str]:
+        return explain_backend(proximal_distillation_loss, student, teacher, **self._options())
+
     def extra_repr(self) -> str:
-        return (
-            f"temperature={self.temperature}, alpha={self.alpha}, "
-            f"reduction={self.reduction!r}, dim={self.dim}, precision={self.precision!r}"
-        )
+        return _repr(self._options())
+
+
+def _repr(options: dict[str, Any]) -> str:
+    return ", ".join(f"{key}={value!r}" for key, value in options.items())
+
+
+def _check_module_weight(weight: object) -> None:
+    """A module's class weights: None or a 1-D floating-point tensor (its length and values
+    are checked with the logits)."""
+    if weight is None:
+        return
+    if not isinstance(weight, torch.Tensor):
+        raise TypeError(f"weight must be None or a tensor, not {type(weight).__name__}")
+    if not weight.is_floating_point():
+        raise TypeError(f"weight must be floating-point, not {weight.dtype}")
+    if weight.ndim != 1:
+        raise ValueError(f"weight must be 1-D (classes,), not {tuple(weight.shape)}")
+
+
+_SINGLE_LABEL_DOC = """
+    Args:
+        logits: Floating-point scores with the class dimension dim (at least k + 1 classes;
+            no examples give the torch.nn.functional results: empty, a zero sum or a NaN
+            mean).
+        target: Integer class labels of logits.shape without dim (any integer dtype), on
+            the device of logits.
+        weight: None or class weights (classes,), finite and nonnegative: each example's
+            loss is multiplied by the weight of its label, and the mean divides by the sum
+            of those weights (as torch.nn.functional.cross_entropy).
+        ignore_index: None or a label whose examples contribute nothing (zero loss and
+            gradient; the mean leaves them out).
+        reduction: "none", "sum" or "mean".
+        dim: Class dimension of logits.
+        backend: "auto" (on the CPU the CPU extension, else the native library; fused
+            kernels on CUDA; else tensor operations), "kernel" (as "auto", raising
+            NotImplementedError where no fused kernel runs), "native" (the native library,
+            CPU tensors) or "torch" (tensor operations, CPU or CUDA).
+        precision: None (float32 work for 16-bit logits, else their dtype's), "float32" or
+            "float64" (or torch.float32, torch.float64); see TORCH.md.
+
+    Returns:
+        Per-example losses (logits.shape without dim) or their reduction, in
+        promote_types(logits.dtype, float32).
+
+    Raises:
+        TypeError: For arguments of the wrong type (a boolean or floating-point target).
+        ValueError: For invalid shapes or options; on the CPU also for nonfinite logits,
+            labels out of range or invalid class weights (CUDA and torch.func transforms
+            give NaN instead).
+"""
+
+_MULTILABEL_DOC = """
+    Args:
+        logits: Floating-point scores with the class dimension dim (at least two classes).
+        target: Boolean mask of logits.shape: the positive labels of each example (at
+            least one, and for multilabel_hinge_loss at least one negative).
+        reduction, dim, backend, precision: As in topk_cross_entropy.
+
+    Returns:
+        Per-example losses (logits.shape without dim) or their reduction.
+
+    Raises:
+        TypeError: For arguments of the wrong type (a target that is not boolean).
+        ValueError: For invalid shapes or options; on the CPU also for nonfinite logits or
+            rows without the labels they need (CUDA and transforms give NaN instead).
+"""
 
 
 def topk_cross_entropy(
     logits: torch.Tensor,
     target: torch.Tensor,
-    k: int = 1,
     *,
+    k: int,
+    weight: torch.Tensor | None = None,
+    ignore_index: int | None = None,
     reduction: str = "mean",
     dim: int = -1,
     backend: str = "auto",
     precision: object = None,
 ) -> torch.Tensor:
-    """Top-k cross-entropy (the top-k entropy loss); cross_entropy at k = 1.
-
-    Other arguments, the result and errors as in sdca_loss.
+    """Top-k cross-entropy (the top-k entropy loss of Lapin et al., 2016); cross-entropy at
+    k = 1. k is an integer in [1, classes - 1].
     """
-    return _bound_loss(
-        _TOPK_CROSS_ENTROPY,
+    call = _bind(
         "topk_cross_entropy",
-        logits,
-        target,
-        backend,
-        k,
-        0.0,
-        1.0,
-        reduction,
-        dim,
-        precision,
+        k=k,
+        ignore_index=ignore_index,
+        reduction=reduction,
+        dim=dim,
+        backend=backend,
+        precision=precision,
     )
-
-
-class TopKCrossEntropyLoss(SDCALoss):
-    """topk_cross_entropy as a module; one target per example."""
-
-    def __init__(
-        self,
-        k: int = 1,
-        *,
-        reduction: str = "mean",
-        dim: int = -1,
-        backend: str = "auto",
-        precision: object = None,
-    ) -> None:
-        super().__init__(
-            "topk_cross_entropy",
-            k=k,
-            reduction=reduction,
-            dim=dim,
-            backend=backend,
-            precision=precision,
-        )
+    return _loss(call, logits, target, weight)
 
 
 def multiclass_hinge_loss(
     logits: torch.Tensor,
     target: torch.Tensor,
-    gamma: float = 0.0,
     *,
+    gamma: float = 0.0,
+    weight: torch.Tensor | None = None,
+    ignore_index: int | None = None,
     reduction: str = "mean",
     dim: int = -1,
     backend: str = "auto",
     precision: object = None,
 ) -> torch.Tensor:
-    """Multiclass hinge loss of Crammer and Singer, smoothed by gamma > 0.
-
-    Other arguments, the result and errors as in sdca_loss.
+    """Multiclass hinge loss of Crammer and Singer (2001), smoothed by gamma > 0 (finite);
+    hinge values at kinks take deterministic subgradients.
     """
-    return _bound_loss(
-        _MULTICLASS_HINGE,
+    call = _bind(
         "multiclass_hinge",
-        logits,
-        target,
-        backend,
-        1,
-        gamma,
-        1.0,
-        reduction,
-        dim,
-        precision,
+        gamma=gamma,
+        ignore_index=ignore_index,
+        reduction=reduction,
+        dim=dim,
+        backend=backend,
+        precision=precision,
     )
-
-
-class MulticlassHingeLoss(SDCALoss):
-    """multiclass_hinge_loss as a module."""
-
-    def __init__(
-        self,
-        gamma: float = 0.0,
-        *,
-        reduction: str = "mean",
-        dim: int = -1,
-        backend: str = "auto",
-        precision: object = None,
-    ) -> None:
-        super().__init__(
-            "multiclass_hinge",
-            gamma=gamma,
-            reduction=reduction,
-            dim=dim,
-            backend=backend,
-            precision=precision,
-        )
+    return _loss(call, logits, target, weight)
 
 
 def topk_hinge_loss(
     logits: torch.Tensor,
     target: torch.Tensor,
-    k: int = 1,
     *,
-    variant: str = "beta",
+    k: int,
+    variant: Literal["alpha", "beta"] = "beta",
     gamma: float = 0.0,
+    weight: torch.Tensor | None = None,
+    ignore_index: int | None = None,
     reduction: str = "mean",
     dim: int = -1,
     backend: str = "auto",
     precision: object = None,
 ) -> torch.Tensor:
-    """Top-k hinge loss, smoothed by gamma > 0. Variant "beta" averages the k
-    largest hinges; "alpha" is the hinge of the average of the k largest margins.
-
-    variant is "alpha" or "beta"; other arguments, the result and errors as in sdca_loss.
+    """Top-k hinge loss (Lapin et al., 2015), smoothed by gamma > 0 (finite). Variant "beta"
+    averages the k largest hinges; "alpha" is the hinge of the average of the k largest
+    margins. k is an integer in [1, classes - 1].
     """
-    if variant == "beta":
-        entry, name = _TOPK_HINGE_BETA, "topk_hinge_beta"
-    elif variant == "alpha":
-        entry, name = _TOPK_HINGE_ALPHA, "topk_hinge_alpha"
-    else:
-        raise ValueError("variant must be 'alpha' or 'beta'")
-    return _bound_loss(
-        entry, name, logits, target, backend, k, gamma, 1.0, reduction, dim, precision
+    call = _bind(
+        _topk_hinge(variant),
+        k=k,
+        gamma=gamma,
+        ignore_index=ignore_index,
+        reduction=reduction,
+        dim=dim,
+        backend=backend,
+        precision=precision,
     )
+    return _loss(call, logits, target, weight)
 
 
-def topk_hinge_alpha_loss(
+def proximal_cross_entropy(
     logits: torch.Tensor,
     target: torch.Tensor,
-    k: int = 1,
     *,
-    gamma: float = 0.0,
+    alpha: float = 1.0,
+    weight: torch.Tensor | None = None,
+    ignore_index: int | None = None,
     reduction: str = "mean",
     dim: int = -1,
     backend: str = "auto",
     precision: object = None,
 ) -> torch.Tensor:
-    """topk_hinge_loss with variant="alpha".
+    """Moreau envelope of the cross-entropy with step alpha (finite and positive).
 
-    Other arguments, the result and errors as in sdca_loss.
+    Raises RuntimeError if a CPU normalization does not converge.
     """
-    return _bound_loss(
-        _TOPK_HINGE_ALPHA,
-        "topk_hinge_alpha",
-        logits,
-        target,
-        backend,
-        k,
-        gamma,
-        1.0,
-        reduction,
-        dim,
-        precision,
+    call = _bind(
+        "proximal_cross_entropy",
+        alpha=alpha,
+        ignore_index=ignore_index,
+        reduction=reduction,
+        dim=dim,
+        backend=backend,
+        precision=precision,
     )
-
-
-def topk_hinge_beta_loss(
-    logits: torch.Tensor,
-    target: torch.Tensor,
-    k: int = 1,
-    *,
-    gamma: float = 0.0,
-    reduction: str = "mean",
-    dim: int = -1,
-    backend: str = "auto",
-    precision: object = None,
-) -> torch.Tensor:
-    """topk_hinge_loss with variant="beta".
-
-    Other arguments, the result and errors as in sdca_loss.
-    """
-    return _bound_loss(
-        _TOPK_HINGE_BETA,
-        "topk_hinge_beta",
-        logits,
-        target,
-        backend,
-        k,
-        gamma,
-        1.0,
-        reduction,
-        dim,
-        precision,
-    )
-
-
-class TopKHingeLoss(SDCALoss):
-    """topk_hinge_loss as a module (variant "beta" by default)."""
-
-    def __init__(
-        self,
-        k: int = 1,
-        *,
-        variant: str = "beta",
-        gamma: float = 0.0,
-        reduction: str = "mean",
-        dim: int = -1,
-        backend: str = "auto",
-        precision: object = None,
-    ) -> None:
-        super().__init__(
-            _topk_hinge_name(variant),
-            k=k,
-            gamma=gamma,
-            reduction=reduction,
-            dim=dim,
-            backend=backend,
-            precision=precision,
-        )
-
-
-class TopKHingeAlphaLoss(TopKHingeLoss):
-    """topk_hinge_alpha_loss as a module."""
-
-    def __init__(
-        self,
-        k: int = 1,
-        *,
-        gamma: float = 0.0,
-        reduction: str = "mean",
-        dim: int = -1,
-        backend: str = "auto",
-        precision: object = None,
-    ) -> None:
-        super().__init__(
-            k,
-            variant="alpha",
-            gamma=gamma,
-            reduction=reduction,
-            dim=dim,
-            backend=backend,
-            precision=precision,
-        )
-
-
-class TopKHingeBetaLoss(TopKHingeLoss):
-    """topk_hinge_beta_loss as a module."""
-
-    def __init__(
-        self,
-        k: int = 1,
-        *,
-        gamma: float = 0.0,
-        reduction: str = "mean",
-        dim: int = -1,
-        backend: str = "auto",
-        precision: object = None,
-    ) -> None:
-        super().__init__(
-            k,
-            variant="beta",
-            gamma=gamma,
-            reduction=reduction,
-            dim=dim,
-            backend=backend,
-            precision=precision,
-        )
+    return _loss(call, logits, target, weight)
 
 
 def multilabel_cross_entropy(
@@ -1879,88 +2098,154 @@ def multilabel_cross_entropy(
     backend: str = "auto",
     precision: object = None,
 ) -> torch.Tensor:
-    """Multilabel cross-entropy: uniform target probabilities on the positive labels.
-
-    Other arguments, the result and errors as in sdca_loss.
-    """
-    return _bound_loss(
-        _MULTILABEL_CROSS_ENTROPY,
+    """Multilabel cross-entropy: uniform target probabilities on the positive labels."""
+    call = _bind(
         "multilabel_cross_entropy",
-        logits,
-        target,
-        backend,
-        1,
-        0.0,
-        1.0,
-        reduction,
-        dim,
-        precision,
+        reduction=reduction,
+        dim=dim,
+        backend=backend,
+        precision=precision,
     )
+    return _loss(call, logits, target)
 
 
-class MultilabelCrossEntropyLoss(SDCALoss):
-    """multilabel_cross_entropy as a module."""
+def multilabel_hinge_loss(
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    gamma: float = 0.0,
+    reduction: str = "mean",
+    dim: int = -1,
+    backend: str = "auto",
+    precision: object = None,
+) -> torch.Tensor:
+    """Multilabel hinge loss, smoothed by gamma > 0 (finite)."""
+    call = _bind(
+        "multilabel_hinge",
+        gamma=gamma,
+        reduction=reduction,
+        dim=dim,
+        backend=backend,
+        precision=precision,
+    )
+    return _loss(call, logits, target)
+
+
+for _function in (
+    topk_cross_entropy,
+    multiclass_hinge_loss,
+    topk_hinge_loss,
+    proximal_cross_entropy,
+):
+    _function.__doc__ = (_function.__doc__ or "") + _SINGLE_LABEL_DOC
+for _function in (multilabel_cross_entropy, multilabel_hinge_loss):
+    _function.__doc__ = (_function.__doc__ or "") + _MULTILABEL_DOC
+
+
+class _SingleLabel(nn.Module):
+    """The common parts of the single-label loss modules: class weights (a buffer moved by
+    .to() and saved in state_dict()), ignore_index and the call options. Subclasses define
+    _function and _options; forward checks the current attributes (a cached check)."""
+
+    weight: torch.Tensor | None
+    _function: Callable[..., torch.Tensor]
+    ignore_index: int | None
+    reduction: str
+    dim: int
+    backend: str
+    precision: object
+
+    def _setup(self, weight: torch.Tensor | None, ignore_index: int | None, **options: Any) -> None:
+        _check_module_weight(weight)
+        for key, value in options.items():
+            setattr(self, key, value)
+        self.ignore_index = ignore_index
+        self.register_buffer("weight", weight)
+        # The options, checked now as each call checks them.
+        _bind(self._name(), **self._call_options())
+
+    def _name(self) -> str:
+        return self._function.__name__
+
+    def _call_options(self) -> dict[str, Any]:
+        return {key: value for key, value in self._options().items() if key != "variant"}
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """The loss of logits and integer class labels with the stored options."""
+        return type(self)._function(logits, target, weight=self.weight, **self._options())
+
+    def _options(self) -> dict[str, Any]:
+        return {**self._own(), "ignore_index": self.ignore_index, **self._common()}
+
+    def _own(self) -> dict[str, Any]:
+        return {}
+
+    def _common(self) -> dict[str, Any]:
+        return dict(
+            reduction=self.reduction, dim=self.dim, backend=self.backend, precision=self.precision
+        )
+
+    def _explain(self, logits: torch.Tensor, target: torch.Tensor) -> tuple[str, str]:
+        function = type(self)._function
+        return explain_backend(function, logits, target, weight=self.weight, **self._options())
+
+    def extra_repr(self) -> str:
+        return _repr(self._options())
+
+
+class TopKCrossEntropyLoss(_SingleLabel):
+    """topk_cross_entropy as a module; see it for the arguments."""
+
+    _function = staticmethod(topk_cross_entropy)
+    k: int
 
     def __init__(
         self,
         *,
+        k: int,
+        weight: torch.Tensor | None = None,
+        ignore_index: int | None = None,
         reduction: str = "mean",
         dim: int = -1,
         backend: str = "auto",
         precision: object = None,
     ) -> None:
-        super().__init__(
-            "multilabel_cross_entropy",
+        super().__init__()
+        self._setup(
+            weight,
+            ignore_index,
+            k=k,
             reduction=reduction,
             dim=dim,
             backend=backend,
             precision=precision,
         )
 
-
-def multilabel_hinge_loss(
-    logits: torch.Tensor,
-    target: torch.Tensor,
-    gamma: float = 0.0,
-    *,
-    reduction: str = "mean",
-    dim: int = -1,
-    backend: str = "auto",
-    precision: object = None,
-) -> torch.Tensor:
-    """Multilabel hinge loss, smoothed by gamma > 0.
-
-    Other arguments, the result and errors as in sdca_loss.
-    """
-    return _bound_loss(
-        _MULTILABEL_HINGE,
-        "multilabel_hinge",
-        logits,
-        target,
-        backend,
-        1,
-        gamma,
-        1.0,
-        reduction,
-        dim,
-        precision,
-    )
+    def _own(self) -> dict[str, Any]:
+        return {"k": self.k}
 
 
-class MultilabelHingeLoss(SDCALoss):
-    """multilabel_hinge_loss as a module."""
+class MulticlassHingeLoss(_SingleLabel):
+    """multiclass_hinge_loss as a module; see it for the arguments."""
+
+    _function = staticmethod(multiclass_hinge_loss)
+    gamma: float
 
     def __init__(
         self,
-        gamma: float = 0.0,
         *,
+        gamma: float = 0.0,
+        weight: torch.Tensor | None = None,
+        ignore_index: int | None = None,
         reduction: str = "mean",
         dim: int = -1,
         backend: str = "auto",
         precision: object = None,
     ) -> None:
-        super().__init__(
-            "multilabel_hinge",
+        super().__init__()
+        self._setup(
+            weight,
+            ignore_index,
             gamma=gamma,
             reduction=reduction,
             dim=dim,
@@ -1968,53 +2253,220 @@ class MultilabelHingeLoss(SDCALoss):
             precision=precision,
         )
 
+    def _name(self) -> str:
+        return "multiclass_hinge"
 
-def proximal_cross_entropy(
-    logits: torch.Tensor,
-    target: torch.Tensor,
-    alpha: float = 1.0,
-    *,
-    reduction: str = "mean",
-    dim: int = -1,
-    backend: str = "auto",
-    precision: object = None,
-) -> torch.Tensor:
-    """Moreau envelope of the cross-entropy with step alpha.
-
-    Other arguments, the result and errors as in sdca_loss.
-    """
-    return _bound_loss(
-        _PROXIMAL_CROSS_ENTROPY,
-        "proximal_cross_entropy",
-        logits,
-        target,
-        backend,
-        1,
-        0.0,
-        alpha,
-        reduction,
-        dim,
-        precision,
-    )
+    def _own(self) -> dict[str, Any]:
+        return {"gamma": self.gamma}
 
 
-class ProximalCrossEntropyLoss(SDCALoss):
-    """proximal_cross_entropy as a module."""
+class TopKHingeLoss(_SingleLabel):
+    """topk_hinge_loss as a module; see it for the arguments."""
+
+    _function = staticmethod(topk_hinge_loss)
+    k: int
+    variant: Literal["alpha", "beta"]
+    gamma: float
 
     def __init__(
         self,
-        alpha: float = 1.0,
         *,
+        k: int,
+        variant: Literal["alpha", "beta"] = "beta",
+        gamma: float = 0.0,
+        weight: torch.Tensor | None = None,
+        ignore_index: int | None = None,
         reduction: str = "mean",
         dim: int = -1,
         backend: str = "auto",
         precision: object = None,
     ) -> None:
-        super().__init__(
-            "proximal_cross_entropy",
+        super().__init__()
+        _topk_hinge(variant)
+        self._setup(
+            weight,
+            ignore_index,
+            k=k,
+            variant=variant,
+            gamma=gamma,
+            reduction=reduction,
+            dim=dim,
+            backend=backend,
+            precision=precision,
+        )
+
+    def _name(self) -> str:
+        return _topk_hinge(self.variant)
+
+    def _own(self) -> dict[str, Any]:
+        return {"k": self.k, "variant": self.variant, "gamma": self.gamma}
+
+
+class ProximalCrossEntropyLoss(_SingleLabel):
+    """proximal_cross_entropy as a module; see it for the arguments."""
+
+    _function = staticmethod(proximal_cross_entropy)
+    alpha: float
+
+    def __init__(
+        self,
+        *,
+        alpha: float = 1.0,
+        weight: torch.Tensor | None = None,
+        ignore_index: int | None = None,
+        reduction: str = "mean",
+        dim: int = -1,
+        backend: str = "auto",
+        precision: object = None,
+    ) -> None:
+        super().__init__()
+        self._setup(
+            weight,
+            ignore_index,
             alpha=alpha,
             reduction=reduction,
             dim=dim,
             backend=backend,
             precision=precision,
         )
+
+    def _own(self) -> dict[str, Any]:
+        return {"alpha": self.alpha}
+
+
+class _Multilabel(nn.Module):
+    """The common parts of the multilabel loss modules."""
+
+    reduction: str
+    dim: int
+    backend: str
+    precision: object
+    _function: Callable[..., torch.Tensor]
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """The loss of logits and a boolean label mask with the stored options."""
+        return type(self)._function(logits, target, **self._options())
+
+    def _options(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def _explain(self, logits: torch.Tensor, target: torch.Tensor) -> tuple[str, str]:
+        return explain_backend(type(self)._function, logits, target, **self._options())
+
+    def extra_repr(self) -> str:
+        return _repr(self._options())
+
+
+class MultilabelCrossEntropyLoss(_Multilabel):
+    """multilabel_cross_entropy as a module; see it for the arguments."""
+
+    _function = staticmethod(multilabel_cross_entropy)
+
+    def __init__(
+        self,
+        *,
+        reduction: str = "mean",
+        dim: int = -1,
+        backend: str = "auto",
+        precision: object = None,
+    ) -> None:
+        super().__init__()
+        _bind(
+            "multilabel_cross_entropy",
+            reduction=reduction,
+            dim=dim,
+            backend=backend,
+            precision=precision,
+        )
+        self.reduction = reduction
+        self.dim = dim
+        self.backend = backend
+        self.precision = precision
+
+    def _options(self) -> dict[str, Any]:
+        return dict(
+            reduction=self.reduction, dim=self.dim, backend=self.backend, precision=self.precision
+        )
+
+
+class MultilabelHingeLoss(_Multilabel):
+    """multilabel_hinge_loss as a module; see it for the arguments."""
+
+    _function = staticmethod(multilabel_hinge_loss)
+    gamma: float
+
+    def __init__(
+        self,
+        *,
+        gamma: float = 0.0,
+        reduction: str = "mean",
+        dim: int = -1,
+        backend: str = "auto",
+        precision: object = None,
+    ) -> None:
+        super().__init__()
+        _bind(
+            "multilabel_hinge",
+            gamma=gamma,
+            reduction=reduction,
+            dim=dim,
+            backend=backend,
+            precision=precision,
+        )
+        self.gamma = gamma
+        self.reduction = reduction
+        self.dim = dim
+        self.backend = backend
+        self.precision = precision
+
+    def _options(self) -> dict[str, Any]:
+        return dict(
+            gamma=self.gamma,
+            reduction=self.reduction,
+            dim=self.dim,
+            backend=self.backend,
+            precision=self.precision,
+        )
+
+
+def _explain_single_label(name: str) -> Callable[..., tuple[str, str]]:
+    def explain(
+        logits: torch.Tensor,
+        target: torch.Tensor,
+        weight: torch.Tensor | None = None,
+        variant: object = None,
+        **options: Any,
+    ) -> tuple[str, str]:
+        loss = _topk_hinge(variant) if name == "topk_hinge" else name
+        return _explain_call(_bind(loss, **options), logits, target, weight)
+
+    return explain
+
+
+def _explain_distillation_call(
+    student: torch.Tensor,
+    teacher: torch.Tensor,
+    temperature: object = 1.0,
+    alpha: object = None,
+    reduction: object = "mean",
+    dim: object = -1,
+    backend: object = "auto",
+    precision: object = None,
+) -> tuple[str, str]:
+    options = _bind_distillation(temperature, alpha, reduction, dim, backend, precision)
+    return _explain_distillation(options, student, teacher)
+
+
+# explain_backend of each loss function, called with its bound arguments.
+_EXPLAINERS: dict[Callable[..., Any], Callable[..., tuple[str, str]]] = {
+    topk_cross_entropy: _explain_single_label("topk_cross_entropy"),
+    multiclass_hinge_loss: _explain_single_label("multiclass_hinge"),
+    topk_hinge_loss: _explain_single_label("topk_hinge"),
+    proximal_cross_entropy: _explain_single_label("proximal_cross_entropy"),
+    multilabel_cross_entropy: _explain_single_label("multilabel_cross_entropy"),
+    multilabel_hinge_loss: _explain_single_label("multilabel_hinge"),
+    distillation_loss: _explain_distillation_call,
+    proximal_distillation_loss: _explain_distillation_call,
+    cross_entropy: _ce.explain,
+    linear_cross_entropy: _lce.explain,
+}
