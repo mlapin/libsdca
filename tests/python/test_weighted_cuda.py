@@ -323,7 +323,7 @@ class WeightedCudaTests:
         z = torch.randn(3, 5, device="cuda", requires_grad=True)
         y = torch.tensor([0, 1, 2], device="cuda")
         with mock.patch(
-            "libsdca.torch.sdca_loss",
+            "libsdca.torch._resolved_loss",
             side_effect=AssertionError("CUDA cross_entropy must run in one pass"),
         ):
             cross_entropy(z, y).backward()
@@ -414,7 +414,7 @@ class WeightedCudaTests:
             (torch_loss(z, y) + cross_entropy(z, y, w)).backward()
             z.grad = None
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
                 loss = torch_loss(z, y) + cross_entropy(z, y, w)
                 loss.backward()
         graph.replay()

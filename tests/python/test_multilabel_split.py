@@ -104,7 +104,7 @@ def test_split_mask_graph_reclassifies_rows():
             del value
     torch.cuda.current_stream().wait_stream(stream)
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, capture_error_mode="thread_local"):
         value = multilabel_cross_entropy(z, mask)
         (gradient,) = torch.autograd.grad(value, z)
     for positive_top in (False, True):

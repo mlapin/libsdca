@@ -22,7 +22,10 @@ fn check<T: Real + Into<f64>>(loss: Loss, x: &[T], y: &[usize], d: usize) -> Str
     let wide = std::mem::size_of::<T>() == std::mem::size_of::<f64>();
     let (n, classes) = (y.len(), 4);
     let tol = if wide { 1e-8 } else { 1e-4 };
-    let solver = Solver::new(loss).with_c(10.0).with_tol(tol).with_max_epoch(2000);
+    let solver = Solver::new(loss)
+        .with_c(10.0)
+        .with_tol(tol)
+        .with_max_epoch(2000);
     let model = solver.fit(Matrix::new(x, n, d).unwrap(), y).unwrap();
     let gap = model.history().last().unwrap().relative_gap;
     assert_eq!(model.status(), Status::Solved, "{loss}");

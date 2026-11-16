@@ -492,7 +492,7 @@ class Float64CudaEntropyTests:
                 cross_entropy(x, y).backward()
                 x.grad = None
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
                 value = cross_entropy(x, y)
                 value.backward()
         torch.cuda.current_stream().wait_stream(stream)

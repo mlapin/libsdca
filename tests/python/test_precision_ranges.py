@@ -191,7 +191,7 @@ class PrecisionRangeTests:
                 # Collect earlier tests' cyclic graphs before entering capture.
                 gc.collect()
                 graph = torch.cuda.CUDAGraph()
-                with torch.cuda.graph(graph):
+                with torch.cuda.graph(graph, capture_error_mode="thread_local"):
                     value, gradient = evaluate()
                 graph.replay()
                 assert value[0].item() == 0

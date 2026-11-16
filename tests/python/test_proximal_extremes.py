@@ -179,7 +179,7 @@ class ProximalExtremeTests:
             # unreachable graphs from earlier tests be finalized during capture.
             gc.collect()
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
                 value, gradient = _tensor_prox.proximal_entropy(x, mask, 1.0)
         torch.cuda.current_stream().wait_stream(stream)
         graph.replay()

@@ -846,7 +846,7 @@ class TopkDispatchTests:
                     del warm
             torch.cuda.current_stream().wait_stream(stream)
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
                 val = torch_loss(x, yt, name, k=3, gamma=gamma)
                 (captured,) = torch.autograd.grad(val, x)
             with torch.no_grad():

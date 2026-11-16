@@ -422,7 +422,7 @@ class PackedHingeKernelTests:
                         del warm
                 torch.cuda.current_stream().wait_stream(stream)
                 graph = torch.cuda.CUDAGraph()
-                with torch.cuda.graph(graph):
+                with torch.cuda.graph(graph, capture_error_mode="thread_local"):
                     loss = sdca_loss(x, yt, "topk_hinge_alpha", k=1, gamma=gamma)
                     (captured,) = torch.autograd.grad(loss, x)
                 with torch.no_grad():
