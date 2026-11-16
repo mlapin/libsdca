@@ -9,7 +9,7 @@ included), and CMake 3.12+ is needed only for the CMake packages `libsdca::libsd
 | Component | Environments |
 | --- | --- |
 | C++ and C ABI | Ubuntu 22.04 / 24.04 `x86_64` with GCC 11 and 13 and Clang 18 (built-in and external BLAS, ASan/UBSan, TSan); macOS `arm64` with Apple Clang (built-in BLAS and Accelerate) |
-| Python | Python 3.10–3.13, NumPy 1.26–2.5, SciPy 1.15–1.18, scikit-learn 1.7–1.9, PyTorch 2.1–2.15, JAX 0.4.35–0.12 |
+| Python | Python 3.10–3.14, NumPy 1.26–2.5, SciPy 1.15–1.18, scikit-learn 1.7–1.9, PyTorch 2.1–2.15, JAX 0.4.35–0.12 |
 | CUDA | NVIDIA A100 with PyTorch 2.14–2.15, Triton 3.8–3.9 and JAX 0.12 (hosted CI has no GPU) |
 | Packaging | `py3-none` wheels via `cibuildwheel` on `manylinux_2_28` `x86_64` and macOS 11+ `arm64`, sdist, `.crate` |
 | Rust | Rust 1.74 (MSRV) and stable on Linux `x86_64` (built-in BLAS, reference BLAS, OpenBLAS, BLIS) |
