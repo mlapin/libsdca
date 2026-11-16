@@ -48,7 +48,7 @@ struct train {
     const sdca::size_type n = y.size();
     std::vector<double> w(d * m);
     a.assign(n * m, 0);
-    auto ctx = sdca::make_context(sdca::make_input_feature(d, n, x.data()),
+    auto ctx = sdca::make_context(sdca::make_input_feature(n, d, x.data()),
                                   sdca::make_output_multiclass(y.begin(), y.end(), m),
                                   std::move(objective), w.data(), a.data());
     ctx.criteria.seed = seed;

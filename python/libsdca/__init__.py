@@ -13,9 +13,10 @@ Names: LOSSES (shared name -> loss class), OBJECTIVES (the names fit trains), th
     subsets TOPK, HINGES and MULTILABEL, PRECISIONS, HISTORY (Model.history keys) and
     STATUS (Model.status values).
 
-Arrays use conventional Python layouts: X (n, d), W (d, m), A (n, m) for m classes.
-Objective = 0.5 * ||W - center||^2 + C * sum_i loss(X[i] @ W, y[i]); there is no implicit
-intercept (append a constant feature for a regularized intercept).
+Arrays are C-contiguous: X (n, d), the weights W (m, d) with one row per class, and the
+duals A (n, m) for m classes. Objective = 0.5 * ||W - center||^2 + C * sum_i loss(W @ X[i],
+y[i]); there is no implicit intercept (append a constant feature for a regularized
+intercept).
 """
 
 from __future__ import annotations

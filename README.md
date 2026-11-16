@@ -15,13 +15,14 @@ classifiers with them.
 - **Fast:** The losses are fused CPU and CUDA kernels, not chains of tensor operations. On an
   A100 with 32k–128k classes, cross-entropy matches `torch.compile` and is 2.4–3× faster than
   eager PyTorch, and the multiclass hinge is 4–8× faster than compiled and 8–14× faster than
-  eager PyTorch implementations ([benchmarks](python/TORCH.md#benchmarks)).
+  eager PyTorch implementations ([benchmarks](docs/TORCH.md#benchmarks)).
 - **Accurate:** Losses and gradients of confident predictions are kept down to the subnormal
-  range of the output dtype: a naive `float32` cross-entropy rounds to zero from a margin of
-  about 17 (softmax collapse [7]), and `libsdca` stays accurate up to about 104. Distillation
-  gradients are exactly zero at equal student and teacher logits [6]. The entropy and
-  distillation losses are tested on CPU and CUDA against 100-digit `mpmath` references
-  ([known limits](docs/API.md#known-limits)).
+  range of the output dtype ([known limits](docs/API.md#known-limits)).
+  - A naive `float32` cross-entropy rounds to zero from a margin of about 17 (softmax
+    collapse [7]), and `libsdca` stays accurate up to about 104.
+  - Distillation gradients are exactly zero at equal student and teacher logits [6].
+  - The entropy and distillation losses are tested on CPU and CUDA against 100-digit
+    `mpmath` references.
 - **Many losses:** Cross-entropy, the multiclass hinge (Crammer–Singer SVM [1]), the top-*k*
   hinge and entropy losses [4, 5], the multilabel hinge [2] and cross-entropy, logit
   distillation and proximal variants, with nonsmooth or smoothed hinges, and
@@ -32,11 +33,12 @@ classifiers with them.
   C++, C and MATLAB/Octave, with the same loss and option names in each
   ([API reference](docs/API.md)).
 - **SDCA solver with a duality-gap guarantee:** SDCA trains linear and kernel classifiers
-  (multiclass, top-*k* and multilabel SVMs, softmax regression). The duality gap bounds the
-  distance to the optimum, so `status == "solved"` guarantees that the objective of the
-  returned model is within the relative tolerance `tol` of the optimal value
-  ([results](docs/API.md#results)). Its steps use efficient projections onto the simplex and
-  the top-*k* cone [3, 4], which C++ and MATLAB also provide directly.
+  (multiclass, top-*k* and multilabel SVMs, softmax regression).
+  - The duality gap bounds the distance to the optimum, so `status == "solved"` guarantees
+    that the objective of the returned model is within the relative tolerance `tol` of the
+    optimal value ([results](docs/API.md#results)).
+  - Its steps use efficient projections onto the simplex and the top-*k* cone [3, 4], which
+    C++ and MATLAB also provide directly.
 
 ## Installation
 
@@ -73,12 +75,12 @@ options:
 
 | Interface | Install | Guide |
 | --- | --- | --- |
-| Python (NumPy) | `pip install libsdca` | [python/README.md](python/README.md) |
-| scikit-learn estimator | `pip install 'libsdca[sklearn]'` | [python/README.md](python/README.md#classifier) |
-| PyTorch losses | `pip install 'libsdca[torch]'` | [python/TORCH.md](python/TORCH.md) |
-| JAX losses (CPU) | `pip install 'libsdca[jax]'` | [python/JAX.md](python/JAX.md) |
-| JAX losses (Linux NVIDIA GPU) | `pip install 'libsdca[jax-cuda]'` | [python/JAX.md](python/JAX.md) |
-| Rust | `cargo add libsdca` | [rust/README.md](rust/README.md) |
+| Python (NumPy) | `pip install libsdca` | [docs/PYTHON.md](docs/PYTHON.md) |
+| scikit-learn estimator | `pip install 'libsdca[sklearn]'` | [docs/PYTHON.md](docs/PYTHON.md#classifier) |
+| PyTorch losses | `pip install 'libsdca[torch]'` | [docs/TORCH.md](docs/TORCH.md) |
+| JAX losses (CPU) | `pip install 'libsdca[jax]'` | [docs/JAX.md](docs/JAX.md) |
+| JAX losses (Linux NVIDIA GPU) | `pip install 'libsdca[jax-cuda]'` | [docs/JAX.md](docs/JAX.md) |
+| Rust | `cargo add libsdca` | [docs/RUST.md](docs/RUST.md) |
 | C++ (header-only) | CMake target `libsdca::libsdca` | [docs/CPP.md](docs/CPP.md) |
 | C | CMake target `libsdca::sdca_c` (`-DSDCA_BUILD_C_API=ON`) | [docs/C.md](docs/C.md) |
 | MATLAB / Octave | `run matlab/make.m` / `tests/matlab/run_octave_tests.sh` | [docs/MATLAB.md](docs/MATLAB.md) |
@@ -119,7 +121,7 @@ CMake and BLAS options are in [DEPENDENCIES.md](DEPENDENCIES.md).
 - **Compilers:** PyTorch and JAX compile small C++ extensions on first use when a C++17
   compiler and Python headers are present (`build-essential python3-dev` on Debian/Ubuntu,
   `xcode-select --install` on macOS); otherwise they fall back with a one-time warning
-  ([build tools](python/TORCH.md#build-tools)). uv-managed and conda Pythons include headers.
+  ([build tools](docs/TORCH.md#build-tools)). uv-managed and conda Pythons include headers.
 
 </details>
 
@@ -226,10 +228,10 @@ struct train {
     template <typename Objective>
     void operator()(Objective objective) const {
         double features[] = {1, 0, 0, 1, -1, -1};   // 3 examples, 2 features
-        double weights[6] = {}, dual[9] = {};       // W (2, 3), A (3, 3)
+        double weights[6] = {}, dual[9] = {};       // weights (3, 2), dual (3, 3)
         std::vector<int> labels = {0, 1, 2};
         auto context = sdca::make_context(
-            sdca::make_input_feature(2, 3, features),
+            sdca::make_input_feature(3, 2, features),
             sdca::make_output_multiclass(labels.begin(), labels.end(), 3),
             std::move(objective), weights, dual);
         sdca::make_solver(context).solve();
@@ -298,8 +300,8 @@ An index of the guides is in [docs/](docs/README.md).
 
 - [API reference](docs/API.md): loss formulas, names across languages, options, precision,
   results, threads, environment variables and known limits
-- Interface guides: [Python](python/README.md), [PyTorch](python/TORCH.md),
-  [JAX](python/JAX.md), [Rust](rust/README.md), [C++](docs/CPP.md), [C](docs/C.md),
+- Interface guides: [Python](docs/PYTHON.md), [PyTorch](docs/TORCH.md),
+  [JAX](docs/JAX.md), [Rust](docs/RUST.md), [C++](docs/CPP.md), [C](docs/C.md),
   [MATLAB](docs/MATLAB.md)
 - [Dependencies](DEPENDENCIES.md), [contributing](CONTRIBUTING.md),
   [guide for AI coding assistants](AGENTS.md) and [changelog](CHANGELOG.md)

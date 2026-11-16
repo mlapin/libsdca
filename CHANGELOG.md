@@ -19,7 +19,7 @@
   exponentials.
 - **Faster CUDA paths:** Adaptive distillation kernels and packed short hinge rows.
 - **JAX CPU fusion:** `SDCA_JAX_CPU_FUSION=auto` times fused and fenced array programs once
-  per machine and caches the choice ([JAX.md](python/JAX.md#cpu-pass-fusion)).
+  per machine and caches the choice ([JAX.md](docs/JAX.md#cpu-pass-fusion)).
 - **Packaging:** JAX-only installs no longer need PyTorch; the `torch` extra works with
   PyTorch 2.1; transient build failures no longer suppress retries for 24 hours. The
   version is read from one `VERSION` file.
@@ -72,12 +72,20 @@
     `sdca`).
   - **MATLAB:** shared names only, 1-based labels, `precision` follows `X`, `num_classes`,
     `num_threads` and `seed`; `matsdca_loss` evaluates the distillation losses.
+  - **One array layout:** NumPy, Rust, C and C++ share row-major features `(n, d)`,
+    weights `(m, d)` (one weight vector per class) and duals `(n, m)`, passed to the native
+    library in place ([API.md](docs/API.md#array-layouts)). NumPy `Model.weights` and
+    `center` were Fortran-ordered `(d, m)`, and Rust copied its weights into `(d, m)`.
+    C++ `make_input_feature(n, d, X)` and `make_input_kernel(n, n_train, K)` take the
+    number of examples first (they took it second). `sdca_model_scores` (C),
+    `sdca::batch_scores` (C++) and Rust's `Model::decision_function` compute a batch of
+    scores with one BLAS `gemm`.
 - **Stale builds:** Loading a native library built in the source tree before its sources
   changed warns, and the test suite refuses to run against it.
 - **CI:** `pytest --conformance ci` runs a profile of the conformance matrix (4,362 of
   46,400 cells); the default still runs it all.
 - **Docs and citation:** The README starts with the installation and shows the same two losses
-  in every interface; [TORCH.md](python/TORCH.md#benchmarks) lists CUDA benchmarks;
+  in every interface; [TORCH.md](docs/TORCH.md#benchmarks) lists CUDA benchmarks;
   `CITATION.cff` prefers the TPAMI 2018 paper.
 - **Known limits:** [API.md](docs/API.md#known-limits) lists the recorded `float64`
   cancellation errors (below `5e-17` absolute) and the behavior of finite rows at
@@ -111,13 +119,13 @@
   `ProximalDistillationLoss`, `SDCALoss`, and `LinearCrossEntropyLoss` (chunked linear head
   + cross-entropy without materializing `(N, V)` logits) across `float16`, `bfloat16`,
   `float32` and `float64` on CPU and CUDA, with `torch.compile(fullgraph=True)` and
-  `DTensor` support ([TORCH.md](python/TORCH.md)).
+  `DTensor` support ([TORCH.md](docs/TORCH.md)).
 - **JAX (`libsdca.jax`):** Classification and distillation losses for `jit`, `grad` and
-  `vmap`, with zero-copy XLA FFI custom calls on CPU ([JAX.md](python/JAX.md)).
+  `vmap`, with zero-copy XLA FFI custom calls on CPU ([JAX.md](docs/JAX.md)).
 - **Python & scikit-learn:** `fit`, `loss_and_grad`, `distillation_loss_and_grad`,
   `proximal_distillation_loss_and_grad`, `coordinate_update`, and `SDCAClassifier`
-  ([python/README.md](python/README.md)).
-- **Rust, C, C++ and MATLAB:** Rust crate `libsdca` ([rust/README.md](rust/README.md)),
+  ([docs/PYTHON.md](docs/PYTHON.md)).
+- **Rust, C, C++ and MATLAB:** Rust crate `libsdca` ([docs/RUST.md](docs/RUST.md)),
   versioned C ABI `libsdca::sdca_c` ([docs/C.md](docs/C.md)), CMake target
   `libsdca::libsdca` ([docs/CPP.md](docs/CPP.md)), and MEX gateways `matsdca_fit`,
   `matsdca_loss` and `matsdca_prox` ([docs/MATLAB.md](docs/MATLAB.md)).

@@ -58,7 +58,7 @@ inline void test_solver_basic_tests_feature_in(Output out, Objective<Data, Resul
   std::vector<Data> A(m * n);  // dual vars
 
   // Use features
-  auto ctx_feat = sdca::make_context(sdca::make_input_feature(d, n, &X[0]), std::move(out),
+  auto ctx_feat = sdca::make_context(sdca::make_input_feature(n, d, &X[0]), std::move(out),
                                      std::move(objective), &W[0], &A[0]);
 
   test_solver_check_converged<Data, Result>(ctx_feat);
@@ -87,7 +87,7 @@ inline void test_solver_basic_tests_feature_in(Output out, Objective<Data, Resul
   std::vector<Data> W0(W);  // initial primal vars
   for (sdca::size_type j = 0; j < d * m; ++j) W[j] = W0[j] *= Data(0.5);
   auto ctx_prox =
-      sdca::make_context(sdca::make_input_feature(d, n, &X[0]), std::move(ctx_warm.train.out),
+      sdca::make_context(sdca::make_input_feature(n, d, &X[0]), std::move(ctx_warm.train.out),
                          std::move(ctx_warm.objective), &W[0], &A[0]);
 
   // Note: the solver expects that W = W0 before the first iteration;
@@ -234,7 +234,7 @@ static void test_early_evaluations(const bool on_start, const sdca::size_type ma
   }
   auto make = [&]() {
     return sdca::make_context(
-        sdca::make_input_feature(d, n, &X[0]), sdca::make_output_multiclass(Y.begin(), Y.end(), m),
+        sdca::make_input_feature(n, d, &X[0]), sdca::make_output_multiclass(Y.begin(), Y.end(), m),
         sdca::make_objective_l2_cross_entropy<Data, Data>(Data(1)), &W[0], &A[0]);
   };
   if (warm) {
@@ -288,7 +288,7 @@ TEST(SolverTest, early_evaluation_stops_before_the_schedule) {
     std::fill(W.begin(), W.end(), 0.);
     std::fill(A.begin(), A.end(), 0.);
     auto ctx = sdca::make_context(
-        sdca::make_input_feature(d, n, &X[0]), sdca::make_output_multiclass(Y.begin(), Y.end(), m),
+        sdca::make_input_feature(n, d, &X[0]), sdca::make_output_multiclass(Y.begin(), Y.end(), m),
         sdca::make_objective_l2_cross_entropy<double, double>(1.), &W[0], &A[0]);
     ctx.criteria.eval_epoch = every;
     ctx.criteria.tol = every == 1 ? 0. : 1.01 * gaps.at(14);
@@ -331,7 +331,7 @@ static void test_shrinking(const Objective<double, double>& objective, const int
     std::vector<double> first_A;
     for (int run = 0; run < 2; ++run) {
       std::vector<double> W(d * m), A(m * n);
-      auto ctx = sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
+      auto ctx = sdca::make_context(sdca::make_input_feature(n, d, &X[0]),
                                     sdca::make_output_multiclass(Y.begin(), Y.end(), m),
                                     Objective<double, double>(objective), &W[0], &A[0]);
       ctx.criteria.shrinking = mode;
@@ -358,7 +358,7 @@ static void test_shrinking(const Objective<double, double>& objective, const int
       EXPECT_GT(solver.num_updates(), 0UL) << what;
 
       // A fresh evaluation of the final iterate gives the reported objectives.
-      auto check = sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
+      auto check = sdca::make_context(sdca::make_input_feature(n, d, &X[0]),
                                       sdca::make_output_multiclass(Y.begin(), Y.end(), m),
                                       Objective<double, double>(objective), &W[0], &A[0]);
       check.criteria.max_epoch = 0;
@@ -392,7 +392,7 @@ static void test_screening_is_safe(const Objective<double, double>& objective) {
                    std::vector<char>* examples, std::vector<char>* classes) {
     std::vector<double> W(d * m);
     A.assign(m * n, 0);
-    auto ctx = sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
+    auto ctx = sdca::make_context(sdca::make_input_feature(n, d, &X[0]),
                                   sdca::make_output_multiclass(Y.begin(), Y.end(), m),
                                   Objective<double, double>(objective), &W[0], &A[0]);
     ctx.criteria.shrinking = mode;
@@ -454,7 +454,7 @@ static void test_part_steps(const Objective<double, double>& objective) {
     Y[i] = i % m;
     for (sdca::size_type j = 0; j < d; ++j) X[d * i + j] = noise(gen) + (j == Y[i] % d ? 1.5 : 0);
   }
-  auto ctx = sdca::make_context(sdca::make_input_feature(d, n, &X[0]),
+  auto ctx = sdca::make_context(sdca::make_input_feature(n, d, &X[0]),
                                 sdca::make_output_multiclass(Y.begin(), Y.end(), m),
                                 Objective<double, double>(objective), &W[0], &A[0]);
   ctx.criteria.max_epoch = 5;
@@ -556,7 +556,7 @@ static void test_wide_iterate(const Objective<float, double>& objective, const O
         return wide_solve(sdca::make_context(sdca::make_input_kernel(n, &K[0]), Output(output),
                                              Objective<float, double>(objective), &A[0]),
                           max_epoch, epsilon, on_start, threads);
-      return wide_solve(sdca::make_context(sdca::make_input_feature(d, n, &X[0]), Output(output),
+      return wide_solve(sdca::make_context(sdca::make_input_feature(n, d, &X[0]), Output(output),
                                            Objective<float, double>(objective), &W[0], &A[0]),
                         max_epoch, epsilon, on_start, threads);
     };

@@ -147,7 +147,7 @@ class TorchReferenceTests:
                 x, labels, objective=objective, initial_dual=torch.tensor(model.dual), max_epoch=0
             )
             assert warm.weights is not None
-            np.testing.assert_allclose(warm.weights, x.T @ model.dual, atol=1e-15)
+            np.testing.assert_allclose(warm.weights, model.dual.T @ x, atol=1e-15)
         for bad in [
             [[0, 0], [1], [0, 1], [2]],
             [[], [1], [0, 1], [2]],

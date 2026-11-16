@@ -71,7 +71,7 @@ inline Work max_column_norm(const size_type dim, const size_type m, const Data* 
   return max;
 }
 
-// The norms of the n examples of a dim-by-n feature matrix.
+// The norms of the n examples of a feature matrix (n, dim).
 template <typename Work, typename Data>
 inline std::vector<Work> example_norms(const size_type dim, const size_type n, const Data* X,
                                        const std::size_t num_threads) {
@@ -139,7 +139,7 @@ struct weight_scores {
   size_type dim, m, cost, scratch_size;
   std::vector<Work> wide;  // narrower weights in Work
   const Work* weights;
-  const Data* inputs;  // dim-by-n
+  const Data* inputs;  // (n, dim)
   const Work* norms;   // n
   Work steps, max_norm;
 

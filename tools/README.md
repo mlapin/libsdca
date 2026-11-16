@@ -11,6 +11,7 @@ Scripts used in development and CI ([CONTRIBUTING.md](../CONTRIBUTING.md)):
 | `check_extension_builds.py` | Compiles the PyTorch CPU extension for AVX-512, AVX2 and generic targets |
 | `check_install_archives.py` | Checks that an sdist or wheel contains the shared CPU sources and native libraries |
 | `readme_smoke.py` | Installs a wheel into fresh uv or conda environments and runs the README examples verbatim |
+| `check_docs.py` | Checks local Markdown links, heading anchors and GitHub math compatibility; included in `quality.py` |
 | `readme_*_smoke.py` | Installed-package probes used by `readme_smoke.py` (precision, CPU and CUDA dispatch, contracts) |
 | `perf_gate.py` | CUDA speed and memory against `torch.compile`, with per-loss speedup floors |
 | `apt_mirror.sh` | Adds retries and a fallback Ubuntu mirror before `apt-get` in CI |

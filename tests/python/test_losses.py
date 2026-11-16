@@ -122,8 +122,8 @@ class LossTests:
             m = s.fit(np.eye(3), [0, 1, 2], C=1e18, max_epoch=5, tol=1e-5, eval_epoch=1)
             assert m.status == "solved"
             assert m.weights is not None
-            np.testing.assert_allclose(m.weights.sum(1), 0, atol=1e-6)
-            assert m.weights[0, 0] - m.weights[0, 1] > 38
+            np.testing.assert_allclose(m.weights.sum(0), 0, atol=1e-6)
+            assert m.weights[0, 0] - m.weights[1, 0] > 38
             base = s.fit(np.eye(3), [0, 1, 2], max_epoch=1, tol=0)
             assert base.weights is not None
             for scale in [1e4, 1e8]:

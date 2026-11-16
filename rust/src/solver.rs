@@ -26,7 +26,8 @@ use crate::targets::{self, Targets};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Input<'a, T> {
-    /// Features X (n, d), one example per row: a linear model W (d, num_classes).
+    /// Features X (n, d), one example per row: a linear model of weights
+    /// (num_classes, d).
     Features(Matrix<'a, T>),
     /// A symmetric positive semidefinite Gram matrix K (n, n) of the
     /// examples: a kernel model of its duals.
@@ -61,8 +62,9 @@ pub struct Start<'a, T> {
     /// with the label entry of single-label rows rebuilt so that rows sum to
     /// zero exactly.
     pub initial_dual: Option<&'a [T]>,
-    /// The center W0 (d, num_classes), row-major as [`Model::weights`], of the
-    /// regularizer `0.5 ||W - W0||^2`; features only.
+    /// The center W0 (num_classes, d), row-major as [`Model::weights`], of the
+    /// regularizer `0.5 ||W - W0||^2`; features only. Passed to the native
+    /// library in place.
     pub center: Option<&'a [T]>,
 }
 
@@ -396,7 +398,7 @@ impl Solver {
         if classes < 2 {
             return invalid(format!("num_classes must be at least 2, not {classes}"));
         }
-        // Before the buffers of (n, classes) and (d, classes) are allocated.
+        // Before the buffers of (n, classes) and (classes, d) are allocated.
         let sizes = [
             n,
             d,
@@ -435,7 +437,13 @@ impl Solver {
             Some(_) if kernel => {
                 return invalid("Start::center is for Input::Features, not Input::Kernel");
             }
-            Some(center) => Some(column_major(center, d, classes)?),
+            Some(center) if center.len() != d * classes => {
+                return invalid(format!(
+                    "Start::center must have the {classes}x{d} entries of (num_classes, d), not {}",
+                    center.len()
+                ));
+            }
+            Some(center) => Some(center),
         };
         if let Some(initial) = start.initial_dual {
             if initial.len() != n * classes {
@@ -471,7 +479,7 @@ impl Solver {
                 &input,
                 classes,
                 &targets.abi(),
-                center.as_deref().map_or(ptr::null(), <[T]>::as_ptr).cast(),
+                center.map_or(ptr::null(), <[T]>::as_ptr).cast(),
                 start.initial_dual.map_or(ptr::null(), <[T]>::as_ptr).cast(),
                 if kernel {
                     ptr::null_mut()
@@ -485,12 +493,8 @@ impl Solver {
             )
         })?;
         let status = Status::from_code(result.status)?;
-        // W (d, classes) column-major to row-major.
-        let weights = (!kernel).then(|| {
-            (0..d * classes)
-                .map(|i| weights[(i % classes) * d + i / classes])
-                .collect()
-        });
+        // The weights (classes, d) as the native library wrote them.
+        let weights = (!kernel).then_some(weights);
         Ok(Model {
             weights,
             dual,
@@ -613,17 +617,4 @@ fn implied_classes<T>(targets: &Targets<'_, T>) -> Result<usize> {
             Ok,
         ),
     }
-}
-
-/// The center (d, classes), row-major, in the column-major layout of the C ABI.
-fn column_major<T: Real>(center: &[T], d: usize, classes: usize) -> Result<Vec<T>> {
-    if center.len() != d * classes {
-        return invalid(format!(
-            "Start::center must have the {d}x{classes} entries of (d, num_classes), not {}",
-            center.len()
-        ));
-    }
-    Ok((0..d * classes)
-        .map(|i| center[(i % d) * classes + i / d])
-        .collect())
 }

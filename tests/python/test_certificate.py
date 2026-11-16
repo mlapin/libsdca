@@ -146,7 +146,7 @@ class CertificateTests:
 
             def primal(w: np.ndarray | None):
                 assert w is not None
-                ww = mp.matrix(np.asarray(w, dtype=np.float64).tolist())
+                ww = mp.matrix(np.asarray(w, dtype=np.float64).T.tolist())
                 z = xx * ww
                 loss = mp.mpf(0)
                 for i in range(len(y)):
@@ -234,7 +234,7 @@ class CertificateTests:
 
                 def exact_primal(w: np.ndarray | None, w0: _matrix | None = None):
                     assert w is not None
-                    ww = mp.matrix(np.asarray(w, dtype=np.float64).tolist())
+                    ww = mp.matrix(np.asarray(w, dtype=np.float64).T.tolist())
                     z = xx * ww
                     reg = mp.fsum(v * v for v in ww) / 2
                     if w0 is not None:
@@ -300,7 +300,7 @@ class CertificateTests:
                         C=c,
                         k=k,
                         gamma=gamma,
-                        center=center,
+                        center=center.T,
                         tol=1e-11,
                         max_epoch=4000,
                     )
@@ -312,7 +312,7 @@ class CertificateTests:
                         C=c,
                         k=k,
                         gamma=gamma,
-                        center=center,
+                        center=center.T,
                         tol=tol,
                         max_epoch=3000,
                     )
@@ -336,7 +336,7 @@ class CertificateTests:
         assert model.status == "solved"
         with mp.workdps(50):
             assert model.weights is not None
-            w = mp.matrix(model.weights.tolist())
+            w = mp.matrix(model.weights.T.tolist())
             z = mp.matrix(x.tolist()) * w
             rows = [[z[i, j] for j in range(5)] for i in range(16)]
             loss = mp.fsum(

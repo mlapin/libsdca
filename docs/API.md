@@ -2,8 +2,17 @@
 
 One set of loss names, option names, status codes and defaults is shared by C++, the C ABI
 (`include/sdca/c_api.h`), Python, PyTorch, JAX, Rust and MATLAB. Interface guides:
-[Python](../python/README.md), [PyTorch](../python/TORCH.md), [JAX](../python/JAX.md),
-[Rust](../rust/README.md), [C++](CPP.md), [C](C.md) and [MATLAB](MATLAB.md).
+[Python](PYTHON.md), [PyTorch](TORCH.md), [JAX](JAX.md),
+[Rust](RUST.md), [C++](CPP.md), [C](C.md) and [MATLAB](MATLAB.md).
+
+Use an interface guide for runnable examples. This page defines the common contract.
+
+| Looking for | Section |
+| --- | --- |
+| Choose a loss | [Loss definitions](#loss-definitions), [names across interfaces](#names-across-interfaces) |
+| Configure training | [Options](#options), [results](#results) |
+| Choose accuracy and execution | [Precision](#precision), [threads](#threads) |
+| Diagnose a call | [Errors](#errors), [known limits](#known-limits), [environment variables](#environment-variables) |
 
 ## Loss definitions
 
@@ -63,36 +72,56 @@ Public C++ headers: `sdca/solver.h`, `sdca/prox.h` and `sdca/loss.h`
 Every interface uses the canonical names and takes, for each loss, only its own parameters
 (`k`, `gamma`, `alpha`, `temperature`); a parameter of another loss is an error.
 
-| Canonical name | NumPy | PyTorch module, PyTorch / JAX function | Rust | C |
-| --- | --- | --- | --- | --- |
-| `cross_entropy` | `CrossEntropy()` | `CrossEntropyLoss`, `cross_entropy` | `Loss::CrossEntropy` | `SDCA_LOSS_CROSS_ENTROPY` |
-| `topk_cross_entropy` | `TopKCrossEntropy(k)` | `TopKCrossEntropyLoss`, `topk_cross_entropy` | `Loss::TopKCrossEntropy { k }` | `SDCA_LOSS_TOPK_CROSS_ENTROPY` |
-| `multiclass_hinge` | `MulticlassHinge(gamma)` | `MulticlassHingeLoss`, `multiclass_hinge_loss` | `Loss::MulticlassHinge { gamma }` | `SDCA_LOSS_MULTICLASS_HINGE` |
-| `topk_hinge_alpha` | `TopKHingeAlpha(k, gamma)` | `TopKHingeLoss`, `topk_hinge_loss` (`variant="alpha"`) | `Loss::TopKHingeAlpha { k, gamma }` | `SDCA_LOSS_TOPK_HINGE_ALPHA` |
-| `topk_hinge_beta` | `TopKHingeBeta(k, gamma)` | `TopKHingeLoss`, `topk_hinge_loss` (`variant="beta"`) | `Loss::TopKHingeBeta { k, gamma }` | `SDCA_LOSS_TOPK_HINGE_BETA` |
-| `multilabel_hinge` | `MultilabelHinge(gamma)` | `MultilabelHingeLoss`, `multilabel_hinge_loss` | `Loss::MultilabelHinge { gamma }` | `SDCA_LOSS_MULTILABEL_HINGE` |
-| `multilabel_cross_entropy` | `MultilabelCrossEntropy()` | `MultilabelCrossEntropyLoss`, `multilabel_cross_entropy` | `Loss::MultilabelCrossEntropy` | `SDCA_LOSS_MULTILABEL_CROSS_ENTROPY` |
-| `proximal_cross_entropy` | `ProximalCrossEntropy(alpha)` | `ProximalCrossEntropyLoss`, `proximal_cross_entropy` | `Loss::ProximalCrossEntropy { alpha }` | `SDCA_LOSS_PROXIMAL_CROSS_ENTROPY` |
-| `distillation` | `Distillation(temperature)` | `DistillationLoss`, `distillation_loss` | `Loss::Distillation { temperature }` | `SDCA_LOSS_DISTILLATION` |
-| `proximal_distillation` | `ProximalDistillation(temperature, alpha)` | `ProximalDistillationLoss`, `proximal_distillation_loss` | `Loss::ProximalDistillation { temperature, alpha }` | `SDCA_LOSS_PROXIMAL_DISTILLATION` |
-| `linear_cross_entropy` | — | `LinearCrossEntropyLoss`, `linear_cross_entropy` (PyTorch) | — | — |
+#### Python interfaces
+
+| Canonical name | NumPy loss object | PyTorch module / PyTorch and JAX function |
+| --- | --- | --- |
+| `cross_entropy` | `CrossEntropy()` | `CrossEntropyLoss`, `cross_entropy` |
+| `topk_cross_entropy` | `TopKCrossEntropy(k)` | `TopKCrossEntropyLoss`, `topk_cross_entropy` |
+| `multiclass_hinge` | `MulticlassHinge(gamma)` | `MulticlassHingeLoss`, `multiclass_hinge_loss` |
+| `topk_hinge_alpha` | `TopKHingeAlpha(k, gamma)` | `TopKHingeLoss`, `topk_hinge_loss` (`variant="alpha"`) |
+| `topk_hinge_beta` | `TopKHingeBeta(k, gamma)` | `TopKHingeLoss`, `topk_hinge_loss` (`variant="beta"`) |
+| `multilabel_hinge` | `MultilabelHinge(gamma)` | `MultilabelHingeLoss`, `multilabel_hinge_loss` |
+| `multilabel_cross_entropy` | `MultilabelCrossEntropy()` | `MultilabelCrossEntropyLoss`, `multilabel_cross_entropy` |
+| `proximal_cross_entropy` | `ProximalCrossEntropy(alpha)` | `ProximalCrossEntropyLoss`, `proximal_cross_entropy` |
+| `distillation` | `Distillation(temperature)` | `DistillationLoss`, `distillation_loss` |
+| `proximal_distillation` | `ProximalDistillation(temperature, alpha)` | `ProximalDistillationLoss`, `proximal_distillation_loss` |
+| `linear_cross_entropy` | — | `LinearCrossEntropyLoss`, `linear_cross_entropy` (PyTorch) |
+
+#### Native interfaces
+
+| Canonical name | Rust | C |
+| --- | --- | --- |
+| `cross_entropy` | `Loss::CrossEntropy` | `SDCA_LOSS_CROSS_ENTROPY` |
+| `topk_cross_entropy` | `Loss::TopKCrossEntropy { k }` | `SDCA_LOSS_TOPK_CROSS_ENTROPY` |
+| `multiclass_hinge` | `Loss::MulticlassHinge { gamma }` | `SDCA_LOSS_MULTICLASS_HINGE` |
+| `topk_hinge_alpha` | `Loss::TopKHingeAlpha { k, gamma }` | `SDCA_LOSS_TOPK_HINGE_ALPHA` |
+| `topk_hinge_beta` | `Loss::TopKHingeBeta { k, gamma }` | `SDCA_LOSS_TOPK_HINGE_BETA` |
+| `multilabel_hinge` | `Loss::MultilabelHinge { gamma }` | `SDCA_LOSS_MULTILABEL_HINGE` |
+| `multilabel_cross_entropy` | `Loss::MultilabelCrossEntropy` | `SDCA_LOSS_MULTILABEL_CROSS_ENTROPY` |
+| `proximal_cross_entropy` | `Loss::ProximalCrossEntropy { alpha }` | `SDCA_LOSS_PROXIMAL_CROSS_ENTROPY` |
+| `distillation` | `Loss::Distillation { temperature }` | `SDCA_LOSS_DISTILLATION` |
+| `proximal_distillation` | `Loss::ProximalDistillation { temperature, alpha }` | `SDCA_LOSS_PROXIMAL_DISTILLATION` |
+| `linear_cross_entropy` | — | — |
 
 C++ objectives use the canonical names with an `l2_` prefix (`l2_topk_hinge_beta`;
 `*_objective(c, ...)` factories take `gamma`, default `0`), and MATLAB takes the canonical
-names as `opts.objective` / `opts.loss`.
+names as `opts.loss`.
 
-- **Targets:** The single-label losses take class labels (0-based; 1-based in MATLAB), the
-  multilabel losses label sets or a boolean mask, and the distillation losses teacher
-  logits. The training objective `cross_entropy` also takes target probabilities, rows of an
-  `(n, num_classes)` matrix such as a teacher's softmax (`libsdca.Probabilities` in NumPy,
-  `Targets::Probabilities` in Rust, `SDCA_TARGET_PROBABILITIES` in C). The proximal and
-  distillation losses are not training objectives.
+### Targets
+
+The single-label losses take class labels (0-based; 1-based in MATLAB), the
+multilabel losses label sets or a boolean mask, and the distillation losses teacher logits.
+PyTorch/JAX `cross_entropy` also accepts probability targets of the logits' shape.
+
+The training objective `cross_entropy` accepts target probabilities: rows of an
+`(n, num_classes)` matrix such as a teacher's softmax (`libsdca.Probabilities` in NumPy,
+`Targets::Probabilities` in Rust, `SDCA_TARGET_PROBABILITIES` in C). The proximal and
+distillation losses are not training objectives.
 
 ## Options
 
-The solver options below have the same names and defaults in every interface (Rust: `Solver`
-setters such as `with_tol`; C: `struct sdca_fit_options`; C++: `context.criteria`; the
-scikit-learn estimator names `max_epoch` `max_iter` and `seed` `random_state`):
+The solver options below have the same names and defaults in every interface:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -108,20 +137,32 @@ scikit-learn estimator names `max_epoch` `max_iter` and `seed` `random_state`):
 | `center` | none | Regularize $0.5\Vert W - W_0 \Vert_2^2$ instead of $0.5\Vert W \Vert_2^2$ (features only) |
 | `initial_dual` | none | Initial dual variables $A$ for warm starts; the library checks them and builds $W$ |
 
-Kernel input is explicit: `libsdca.Kernel(K)` in NumPy, `kernel="precomputed"` in
-scikit-learn, `Input::Kernel` in Rust, `SDCA_INPUT_KERNEL` in C, `make_input_kernel` in C++.
-Every call also takes the execution settings `precision` ([below](#precision)) and
+Rust sets them with `Solver` setters such as `with_tol`, C with `struct sdca_fit_options`
+and C++ with `context.criteria`. The scikit-learn estimator names `max_epoch` `max_iter` and
+`seed` `random_state`.
+
+Kernel input is explicit:
+
+| Interface | Kernel input |
+| --- | --- |
+| NumPy | `libsdca.Kernel(K)` |
+| scikit-learn | `kernel="precomputed"` |
+| Rust | `Input::Kernel` |
+| C | `SDCA_INPUT_KERNEL` |
+| C++ | `make_input_kernel` |
+
+The binding determines how to pass the execution settings `precision` ([below](#precision)) and
 `num_threads` ([threads](#threads)); `projection_precision` belongs to `multilabel_hinge`
 ([below](#projection-precision)).
 
-- **Evaluations (`eval_epoch`, `recompute_primal`):** Besides checking every
-  `eval_epoch` epochs, a fit with `tol > 0` schedules up to two interpolated
-  evaluations when the gap trend projects crossing `tol` early. With
-  `recompute_primal=True` (default), feature fits rebuild $W = W_0 + X^\top A$
-  before evaluating the primal objective so incremental update drift does not
-  enter the gap (not for `float32` data with `precision="float64"`, whose `double` $W$ is
-  evaluated as stored). A fit stopped by `max_epoch` reports `solved` when its last
-  evaluation meets `tol`.
+- **Evaluations (`eval_epoch`, `recompute_primal`):**
+  - Besides checking every `eval_epoch` epochs, a fit with `tol > 0` schedules up to two
+    interpolated evaluations when the gap trend projects crossing `tol` early.
+  - With `recompute_primal=True` (default), feature fits rebuild $W = W_0 + X^\top A$
+    before evaluating the primal objective so incremental update drift does not enter the
+    gap (not for `float32` data with `precision="float64"`, whose `double` $W$ is evaluated
+    as stored).
+  - A fit stopped by `max_epoch` reports `solved` when its last evaluation meets `tol`.
 - **Kernel validation:** Every interface verifies a nonnegative
   diagonal, symmetry within $10^{-5}\sqrt{K_{ii}K_{jj}}$, and
   $\lvert K_{ij} \rvert \le (1 + 10^{-3})\sqrt{K_{ii}K_{jj}}$.
@@ -132,7 +173,7 @@ Every call also takes the execution settings `precision` ([below](#precision)) a
 
 `shrinking` accelerates hinge fits (`multiclass_hinge`, `topk_hinge_alpha`,
 `topk_hinge_beta`, `multilabel_hinge`) by skipping dual variables that sit at zero
-bounds (entropy objectives have strictly positive probabilities and ignore the option):
+bounds (entropy objectives accept only `"auto"`):
 
 - `"heuristic"` (`Shrinking::Heuristic`, `SDCA_SHRINKING_HEURISTIC`): LIBLINEAR-style
   shrinking [7]. Epochs between full passes skip examples whose dual block did not change
@@ -166,7 +207,7 @@ working precision explicitly:
 
 | Storage dtype | `None` (default), `"float32"` | `"float64"` |
 | --- | --- | --- |
-| `float16`, `bfloat16` | `float32` work (NumPy casts 16-bit arrays to `float32`; C takes `float32` or `float64`) | `float64` work (JAX: see [backends](../python/JAX.md#backends)) |
+| `float16`, `bfloat16` | `float32` work (NumPy casts 16-bit arrays to `float32`; C takes `float32` or `float64`) | `float64` work (JAX: see [backends](JAX.md#backends)) |
 | `float32` | `float32` work | `float64` work |
 | `float64` | `float64` work (`"float32"`: NumPy casts to `float32` and returns `float32` arrays; PyTorch and JAX raise, since gradients keep the logits' dtype) | `float64` work |
 
@@ -190,11 +231,16 @@ MATLAB follows the class of `X` (`'single'` or `'double'`). In C the storage typ
 
 ### Parameter domains and numerical limits
 
-All loss and training entry points require `classes >= 2`, integer `1 <= k < classes`,
-finite scores/features, and valid targets (0-based class indices, or 1-based in MATLAB;
-boolean masks require at least one positive label, plus one negative label for
-`multilabel_hinge` and `proximal_cross_entropy`; label sets in `fit` and `coordinate_update`
-require a negative label for every objective).
+All loss and training entry points require:
+
+- `classes >= 2` and integer `1 <= k < classes`;
+- finite scores/features;
+- valid targets:
+  - class indices are 0-based, or 1-based in MATLAB;
+  - boolean masks require at least one positive label, plus one negative label for
+    `multilabel_hinge`;
+  - label sets in `fit` and `coordinate_update` require a negative label for every
+    objective.
 
 | Parameter | Valid domain | Notes |
 | --- | --- | --- |
@@ -208,29 +254,55 @@ See [known limits](#known-limits) for accuracy bounds.
 
 ## Results
 
-Training returns a status (`solved`, `no_progress`, `max_epoch` or `failed`) and an
-evaluation `history` with the same fields in every interface: `epoch`, `primal`, `dual`,
-`primal_loss`, `dual_loss`, `regularizer`, `relative_gap`, `accuracy` (the rank loss for the
-multilabel losses), `cpu_time` and `wall_time`.
+Training returns a status and an evaluation `history` with the same fields in every
+interface:
+
+- **Status:** `solved`, `no_progress`, `max_epoch` or `failed`.
+- **History fields:** `epoch`, `primal`, `dual`, `primal_loss`, `dual_loss`, `regularizer`,
+  `relative_gap`, `accuracy` (the rank loss for the multilabel losses), `cpu_time` and
+  `wall_time`. Rust exposes history rows as `Evaluation` structs.
 
 Only `status == "solved"` guarantees convergence:
+
 $$P(W) - D(A) + e \le \text{tol} \cdot \max(|P(W)|, |D(A)|),$$
+
 where $P(W)$ is evaluated in `double` at the returned weights, $D(A)$ at the feasible
 projection of the returned duals, and $e$ is a first-order estimate of evaluation rounding.
-If a numerical step fails or the evaluated gap falls below $-e$, training stops with
-`failed` at the last consistent iterate. With a regularizer center $W_0$, $P(W)$ and
-$D(A)$ evaluate the full centered objective directly from $W - W_0$ without cancelling
-$\frac{1}{2}\Vert W_0 \Vert_2^2$.
 
-Array layouts for $n$ examples, $d$ features and $m$ classes: Python returns `weights (d, m)`
-column-major and `dual (n, m)` row-major; Rust returns both row-major (`Model::weights`,
-`Model::dual`) and the history as `Evaluation` structs; MATLAB takes
-features `(d, n)` and returns `W (d, m)` and `A (m, n)`.
+- **Failures:** If a numerical step fails or the evaluated gap falls below $-e$, training
+  stops with `failed` at the last consistent iterate.
+- **Regularizer center:** With a center $W_0$, $P(W)$ and $D(A)$ evaluate the full centered
+  objective directly from $W - W_0$ without cancelling $\frac{1}{2}\Vert W_0 \Vert_2^2$.
+
+### Array layouts
+
+For $n$ examples, $d$ features and $m$ classes, NumPy, Rust, C and C++ share one layout.
+Every array is dense and row-major (C order):
+
+| Array | Shape | Contiguous in memory |
+| --- | --- | --- |
+| Features | `(n, d)` | The `d` features of an example |
+| Weights, regularizer center | `(m, d)` | The weight vector of a class |
+| Duals, scores | `(n, m)` | The `m` values of an example |
+| Gram matrix | `(n, n)` | The kernel values of an example |
+
+- **No copies:** The memory is the same in every interface. A binding hands its arrays to
+  the native library as they are; none is copied, transposed or reordered on the way in
+  or out. NumPy converts only an input of another dtype or one that is not C-contiguous.
+- **Weights:** Row `c` is the weight vector of class `c`, the transpose of the $W$ of the
+  objective. Scores are `X @ weights.T`, and `weights = center + dual.T @ X`.
+- **Kernel fits** have no weight matrix; their scores are `K @ dual` for the kernel `K`
+  `(n_test, n_train)` between test and training examples.
+- **MATLAB** is column-major and sees the same memory as `d`-by-`n` features, `d`-by-`m`
+  weights and `m`-by-`n` duals ([MATLAB.md](MATLAB.md)).
 
 ## Distillation losses
 
 `distillation_loss` and `proximal_distillation_loss` take student and teacher **logits** of the
-same shape and dtype; the teacher receives no gradient. With $p = \mathrm{softmax}(t/T)$ and
+same shape; PyTorch and JAX promote differing floating-point dtypes, while native
+interfaces require matching storage types. The teacher receives no gradient.
+
+With $p = \mathrm{softmax}(t/T)$ and
 $q = \mathrm{softmax}(z/T)$, the student gradient is $(q - p)/T$ (or $(\pi - p)/T$ at the
 Moreau-envelope optimum $\pi = \mathrm{softmax}(u^\star)$ for `proximal_distillation_loss`),
 with no $T^2$ multiplier. Because each entry is formed from a centered log-ratio via `expm1`,
@@ -247,13 +319,60 @@ prox = ProximalDistillationLoss(temperature=4.0, alpha=0.5)(student, teacher)
 (loss + prox).backward()
 ```
 
-In PyTorch, both run on fused Triton kernels on CUDA and the C++ extension on CPU
-(first-order derivatives only). In JAX (`libsdca.jax`), both run on the same Triton
-kernels on CUDA and use the shared CPU kernels where available, with array
-fallbacks. Direct `jvp`/`jacfwd` of these custom-VJP losses raise. Ordinary
-distillation supports reverse-over-reverse and `jax.hessian`; proximal distillation
-supports `jax.hessian` (forward-over-reverse), but reverse-over-reverse is unsupported
-because the array reference solve's dynamic loop cannot be transposed.
+- **PyTorch:** Both run on fused Triton kernels on CUDA and the C++ extension on CPU
+  (first-order derivatives only).
+- **JAX (`libsdca.jax`):** Both run on the same Triton kernels on CUDA and use the shared
+  CPU kernels where available, with array fallbacks. Direct `jvp`/`jacfwd` of these
+  custom-VJP losses raise.
+- **JAX higher-order derivatives:** Ordinary distillation supports reverse-over-reverse and
+  `jax.hessian`. Proximal distillation supports `jax.hessian` (forward-over-reverse), but
+  reverse-over-reverse is unsupported because the array reference solve's dynamic loop
+  cannot be transposed.
+
+## Projections and proximal operators
+
+The coordinate steps of the solver and the hinge and top-*k* losses reduce to small convex
+problems: projections onto simplex-like sets and their entropic counterparts. C++
+(`sdca/prox.h`) and MATLAB (`matsdca_prox`) expose these operators directly; the other
+interfaces use them internally.
+
+Each operator maps a vector $a$ to the minimizer $x$ of its problem. With
+$q(x) = \frac12\langle x, x \rangle - \langle a, x \rangle$ (the Euclidean projection of $a$)
+and $\sigma = \langle 1, x \rangle$:
+
+| Operator | Minimizes | Subject to | Parameters |
+| --- | --- | --- | --- |
+| `knapsack_eq` | $q(x)$ | $\sigma = r$, $l \le x_i \le h$ | `lo`, `hi`, `rhs` |
+| `knapsack_le` | $q(x)$ | $\sigma \le r$, $l \le x_i \le h$ | `lo`, `hi`, `rhs` |
+| `knapsack_le_biased` | $q(x) + \frac{\rho}{2}\sigma^2$ | $\sigma \le r$, $l \le x_i \le h$ | `lo`, `hi`, `rhs`, `rho` |
+| `topk_simplex` | $q(x)$ | $\sigma \le r$, $0 \le x_i \le \sigma / k$ | `k`, `rhs` |
+| `topk_simplex_biased` | $q(x) + \frac{\rho}{2}\sigma^2$ | $\sigma \le r$, $0 \le x_i \le \sigma / k$ | `k`, `rhs`, `rho` |
+| `topk_cone` | $q(x)$ | $0 \le x_i \le \sigma / k$ | `k` |
+| `topk_cone_biased` | $q(x) + \frac{\rho}{2}\sigma^2$ | $0 \le x_i \le \sigma / k$ | `k`, `rho` |
+| `entropy` | $\langle x, \log x \rangle - \langle a, x \rangle$ | $\sigma = r$, $0 \le x_i \le h$ | `hi`, `rhs` |
+| `entropy_norm` | $\frac12\langle x, x \rangle + \langle x, \log x \rangle - \langle a, x \rangle$ | $\sigma = r$, $0 \le x_i \le h$ | `hi`, `rhs` |
+| `topk_entropy` | $\langle x, \log x \rangle + (1 - \sigma)\log(1 - \sigma) - \langle a, x \rangle$ | $\sigma \le 1$, $0 \le x_i \le \sigma / k$ | `k` |
+| `topk_entropy_biased` | $\frac{\alpha}{2}(\langle x, x \rangle + \sigma^2) + \langle x, \log x \rangle + (1 - \sigma)\log(1 - \sigma) - \langle a, x \rangle$ | $\sigma \le 1$, $0 \le x_i \le \sigma / k$ | `k`, `alpha` |
+
+Three operators act on a vector split into two blocks, $a$ of length $p$ and $b$, with
+minimizers $x$ and $y$:
+
+| Operator | Minimizes | Subject to | Parameters |
+| --- | --- | --- | --- |
+| `two_simplex`, `two_simplex_sort` | $\Vert x - a \Vert^2 + \Vert y - b \Vert^2$ | $\langle 1, x \rangle = \langle 1, y \rangle \le r$, $x, y \ge 0$ | `rhs` |
+| `two_entropy` (C++ only) | $\frac{\alpha}{2}\Vert x - a/\alpha - 1/p \Vert^2 + \langle x, \log x \rangle + \frac{\alpha}{2}\Vert y - b/\alpha \Vert^2 + \langle y, \log y \rangle$ | $\langle 1, x \rangle + \langle 1, y \rangle = 1$, $x, y \ge 0$ | `alpha` |
+
+- **Parameters and defaults:** `lo` $l = 0$, `hi` $h = 1$, `rhs` $r = 1$, `rho` $\rho = 1$,
+  `alpha` $\alpha = 1$ and `k` $= 1$. With the defaults `knapsack_eq` is the projection onto
+  the unit simplex.
+- **`two_simplex_sort`** solves the problem of `two_simplex` by sorting.
+- **Lambert function:** the entropic operators with a quadratic term evaluate $W(e^x)$, the
+  solution $w$ of $w + \log w = x$, available as `sdca::lambert_w_exp` and as the elementwise
+  MATLAB operator `lambert_w_exp`.
+- **Calling them:** [CPP.md](CPP.md#projections-and-proximal-operators) and
+  [MATLAB.md](MATLAB.md#proximal-operators). The C ABI, NumPy, PyTorch, JAX and Rust have
+  no projection entry point; their `projection_precision` option
+  ([above](#projection-precision)) selects the arithmetic of the solver's own projections.
 
 ## Threads
 
@@ -276,11 +395,16 @@ worker threads with **bitwise-identical results** for every thread count:
 ## Environment variables
 
 The runtime-compiled extension switches (`SDCA_CPU_EXTENSION`, `SDCA_CUDA_LAUNCHER`,
-`SDCA_JAX_FFI`, `SDCA_JAX_CUDA`) take `auto` (default: compile and cache on first use, or
-fall back with a one-time warning), `on` (`1`: raise `RuntimeError` if unavailable) or `off`
-(`0`). A compiler error leaves `*.build-failed.txt` in the cache, which suppresses
-retries for 24 hours (transient failures are not recorded); delete it to retry. The CUDA
-switches fall back without a warning when Triton is newer than the verified range.
+`SDCA_JAX_FFI`, `SDCA_JAX_CUDA`) take `auto`, `on` (`1`) or `off` (`0`):
+
+- **`auto`** (default) compiles and caches on first use, or falls back with a one-time
+  warning.
+- **`on`** raises `RuntimeError` if unavailable.
+- **`off`** never builds or loads the extension: the slower path runs, without a warning.
+- **Failed builds:** A compiler error leaves `*.build-failed.txt` in the cache, which
+  suppresses retries for 24 hours (transient failures are not recorded); delete it to retry.
+- **Newer Triton:** The CUDA switches fall back without a warning when Triton is newer than
+  the verified range.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -289,7 +413,7 @@ switches fall back without a warning when Triton is newer than the verified rang
 | `SDCA_CUDA_LAUNCHER` | `auto` | `auto \| on \| off`: C++ `cuLaunchKernel` launcher for CUDA kernels (Triton 3.3–3.9) |
 | `SDCA_JAX_FFI` | `auto` | `auto \| on \| off`: XLA FFI custom-call handler for native JAX CPU losses |
 | `SDCA_JAX_CUDA` | `auto` | `auto \| on \| off`: fused Triton kernels of JAX losses on CUDA GPUs (Triton 3.3–3.9; `off` keeps `jax.numpy`) |
-| `SDCA_JAX_CPU_FUSION` | `auto` | `auto \| fenced \| unfenced`: fusion of the JAX entropy and distillation CPU passes, read when a loss is traced; `auto` times both once per machine ([JAX.md](../python/JAX.md#cpu-pass-fusion)) |
+| `SDCA_JAX_CPU_FUSION` | `auto` | `auto \| fenced \| unfenced`: fusion of the JAX entropy and distillation CPU passes, read when a loss is traced; `auto` times both once per machine ([JAX.md](JAX.md#cpu-pass-fusion)) |
 | `SDCA_CACHE_DIR` | `$XDG_CACHE_HOME/libsdca` (`~/.cache/libsdca`) | Cache directory for compiled JAX FFI handlers and `SDCA_JAX_CPU_FUSION=auto` decisions |
 | `TORCH_EXTENSIONS_DIR` | PyTorch cache | Cache directory for compiled PyTorch CPU and CUDA extensions |
 | `OMP_NUM_THREADS` | unset | Caps automatic threads when no OpenMP runtime is loaded |
@@ -299,17 +423,23 @@ switches fall back without a warning when Triton is newer than the verified rang
 | `SDCA_BUILD_NATIVE` | `ON` | Set to `OFF` during `pip install` to build a pure-Python wheel for tensor losses only |
 | `CXX`, `AR`, `CUDA_HOME` | system default | Compiler, archiver, and CUDA toolkit path for native and extension builds |
 
-CMake options (`cmake -D<option>=<value>`): `SDCA_BLAS_BACKEND` (`AUTO|EXTERNAL|BUILTIN`),
-`SDCA_BUILD_C_API` (`OFF`), `SDCA_BUILD_MATLAB` (`OFF`), `SDCA_WARNINGS_AS_ERRORS` (`OFF`),
-`BUILD_TESTING` (`OFF`), `USE_CHRONO` (`ON`), and MKL flags `USE_ILP64` (`ON`),
-`USE_SEQUENTIAL` (`ON`), `USE_THREADING_SUFFIX` (`OFF`).
+CMake options (`cmake -D<option>=<value>`):
+
+| Option | Default |
+| --- | --- |
+| `SDCA_BLAS_BACKEND` | `AUTO` (`AUTO\|EXTERNAL\|BUILTIN`) |
+| `SDCA_BUILD_C_API`, `SDCA_BUILD_MATLAB`, `SDCA_WARNINGS_AS_ERRORS`, `BUILD_TESTING` | `OFF` |
+| `USE_CHRONO` | `ON` |
+| MKL flags `USE_ILP64`, `USE_SEQUENTIAL` | `ON` |
+| MKL flag `USE_THREADING_SUFFIX` | `OFF` |
 
 ## Errors
 
 | Interface | Invalid input or option | Numerical failure |
 | --- | --- | --- |
-| Python (NumPy, scikit-learn, PyTorch) | `ValueError` (or `TypeError`) | `RuntimeError` |
-| JAX | `ValueError` eagerly; `JaxRuntimeError` (`native`) or `nan` (`jax`) under `jit` / `vmap` | `JaxRuntimeError` (`native`) or `nan` (`jax`) |
+| NumPy, scikit-learn | `ValueError` (or `TypeError`) | `RuntimeError`; inspect the status of a returned fit |
+| PyTorch | `TypeError` / `ValueError` for types, shapes and options; invalid data raises on CPU and gives `nan` on CUDA / inside `torch.func` | `RuntimeError` or `nan`, depending on the backend |
+| JAX | `TypeError` / `ValueError` for types, shapes and options; invalid data raises eagerly and gives `nan` rows under `jit` / `vmap` | Failed row computations give `nan` under transformations; see [JAX errors](JAX.md#errors) |
 | Rust | `Error::InvalidArgument` | `Error::Native` |
 | C++ | `std::invalid_argument` | `std::runtime_error` |
 | C | `SDCA_INVALID_ARGUMENT` | `SDCA_FAILURE` (message in `sdca_last_error()`) |

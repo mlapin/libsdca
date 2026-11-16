@@ -298,6 +298,14 @@ static void overflowing_extents(void) {
   rejected(sdca_model_fit(&loss, &o, &e, &in, 3, &t, NULL, NULL, output, previous, history,
                           SIZE_MAX / 10, &result),
            "fit history byte extent overflow");
+  /* Scores: (n, d), (n, num_classes) and (num_classes, d) beyond the addressable bytes. */
+  const size_t extents[][3] = {{n, 3, 1}, {n, 1, 3}, {1, n, 3}};
+  for (size_t i = 0; i < sizeof extents / sizeof extents[0]; ++i) {
+    in = two_examples();
+    in.n = extents[i][0];
+    in.d = extents[i][1];
+    rejected(sdca_model_scores(&in, extents[i][2], scores, output), "scores extent overflow");
+  }
 }
 
 static void overflowing_blas_dimensions(void) {
@@ -316,6 +324,17 @@ static void overflowing_blas_dimensions(void) {
     rejected(sdca_model_fit(&loss, &o, &e, &in, shapes[i][2], &t, NULL, NULL, output, previous,
                             history, 2, &result),
              "fit BLAS integer overflow");
+  }
+  /* Scores are one product: each dimension must fit the BLAS integer, their products need
+   * not (the last two shapes pass that check; their NULL buffers are then rejected). */
+  for (size_t i = 0; i < sizeof shapes / sizeof shapes[0]; ++i) {
+    struct sdca_input in = two_examples();
+    in.n = shapes[i][0];
+    in.d = shapes[i][1];
+    const int status = sdca_model_scores(&in, shapes[i][2], NULL, output);
+    rejected(status, "scores BLAS integer overflow");
+    const int limit = strstr(sdca_last_error(), "BLAS integer limit") != NULL;
+    if (limit != (i < 3)) fail("scores check each dimension against the BLAS integer limit");
   }
 #endif
 }
@@ -574,6 +593,69 @@ static void warm_start(void) {
            "warm duals that do not sum to zero");
 }
 
+/* sdca_model_scores: x weights' of row-major features (n, d) and weights (num_classes, d),
+ * and x dual of a cross-kernel (n, d) and duals (d, num_classes), in both storage types.
+ * The entries are small dyadic numbers, so every sum is exact in any BLAS. */
+static void model_scores(void) {
+  const double x[6] = {1.0, 2.0, -0.5, 0.25, 3.0, -1.0};          /* (3, 2) */
+  const double w[8] = {1.0, 0.0, 0.0, 1.0, -1.0, 2.0, 0.5, 0.5};  /* (4, 2): one row per class */
+  const double a[8] = {1.0, -1.0, 0.0, 2.0, 0.5, 0.0, -2.0, 1.0}; /* (2, 4) */
+  float xf[6], wf[8], af[8], zf[12];
+  double z[12];
+  for (int j = 0; j < 6; ++j) xf[j] = (float)x[j];
+  for (int j = 0; j < 8; ++j) wf[j] = (float)w[j], af[j] = (float)a[j];
+  for (int kernel = 0; kernel < 2; ++kernel) {
+    struct sdca_input in = SDCA_INPUT_INIT;
+    in.kind = kernel ? SDCA_INPUT_KERNEL : SDCA_INPUT_FEATURES;
+    in.n = 3;
+    in.d = 2;
+    in.x = x;
+    if (sdca_model_scores(&in, 4, kernel ? a : w, z) != SDCA_OK || *sdca_last_error())
+      fail("float64 scores");
+    in.dtype = SDCA_DTYPE_FLOAT32;
+    in.x = xf;
+    if (sdca_model_scores(&in, 4, kernel ? af : wf, zf) != SDCA_OK) fail("float32 scores");
+    for (int i = 0; i < 3; ++i)
+      for (int c = 0; c < 4; ++c) {
+        const double expected = kernel ? x[2 * i] * a[c] + x[2 * i + 1] * a[4 + c]
+                                       : x[2 * i] * w[2 * c] + x[2 * i + 1] * w[2 * c + 1];
+        if (z[4 * i + c] != expected) fail("float64 scores are x weights' (x dual)");
+        if ((double)zf[4 * i + c] != expected) fail("float32 scores are x weights' (x dual)");
+      }
+    /* No examples: no buffer but the coefficients is read or written. */
+    in.n = 0;
+    in.x = NULL;
+    if (sdca_model_scores(&in, 4, kernel ? af : wf, NULL) != SDCA_OK) fail("scores of no examples");
+  }
+  /* Rejected calls write no scores. */
+  for (int j = 0; j < 12; ++j) z[j] = 123.0;
+  struct sdca_input in = SDCA_INPUT_INIT;
+  in.n = 3;
+  in.d = 2;
+  in.x = x;
+  rejected(sdca_model_scores(NULL, 4, w, z), "scores NULL input");
+  rejected(sdca_model_scores(&in, 4, NULL, z), "scores NULL coefficients");
+  rejected(sdca_model_scores(&in, 4, w, NULL), "scores NULL output");
+  rejected(sdca_model_scores(&in, 0, w, z), "scores of no classes");
+  struct sdca_input bad = in;
+  bad.x = NULL;
+  rejected(sdca_model_scores(&bad, 4, w, z), "scores NULL x");
+  bad = in;
+  bad.d = 0;
+  rejected(sdca_model_scores(&bad, 4, w, z), "scores of no features");
+  bad = in;
+  bad.kind = 7;
+  rejected(sdca_model_scores(&bad, 4, w, z), "scores of an unknown input kind");
+  bad = in;
+  bad.dtype = SDCA_INTERNAL_DTYPE_FLOAT16;
+  rejected(sdca_model_scores(&bad, 4, w, z), "scores of 16-bit storage");
+  bad = in;
+  bad.size = sizeof bad - 1;
+  rejected(sdca_model_scores(&bad, 4, w, z), "scores of a truncated input struct");
+  for (int j = 0; j < 12; ++j)
+    if (z[j] != 123.0) fail("a rejected scores call writes no output");
+}
+
 /* The float32 storage / float64 work pair: C = 1e40 is normal in double but not in the float
    duals, although norm2 = 1e-10 and C * norm2 = 1e30 are; an update would store duals up to C. */
 static void step_scale_beyond_float(void) {
@@ -683,6 +765,7 @@ int main(void) {
   fit_result_fields();
   seeds();
   warm_start();
+  model_scores();
   target_kinds();
   null_buffers();
   malformed_structs();

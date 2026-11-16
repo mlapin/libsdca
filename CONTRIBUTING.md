@@ -33,12 +33,14 @@ OCTAVE_HOME=<prefix> tests/matlab/run_octave_tests.sh
 
 - **Markers:** `slow` and `long` tests are scheduled first under `--dist worksteal` (CI
   deselects `long`); `serial` tests run without `-n` on an unloaded machine.
-- **Conformance matrix:** `--conformance ci` runs about a tenth of the conformance cells
-  (every loss on the default backends, cross-entropy and the multiclass hinge on every
-  backend, dtype and precision), as CI does; the default runs the full matrix. A manual CI
-  run (*Run workflow*, `conformance: full`) runs the full matrix on the hosted runners and,
-  when cells fail, uploads their records (`SDCA_CONFORMANCE_RECORD`) as an artifact; a
-  reviewed failure set of other hardware is added to `known_failures/` as a variant.
+- **Conformance matrix:** The default runs the full matrix.
+  - `--conformance ci` runs about a tenth of the conformance cells (every loss on the
+    default backends, cross-entropy and the multiclass hinge on every backend, dtype and
+    precision), as CI does.
+  - A manual CI run (*Run workflow*, `conformance: full`) runs the full matrix on the hosted
+    runners and, when cells fail, uploads their records (`SDCA_CONFORMANCE_RECORD`) as an
+    artifact.
+  - A reviewed failure set of other hardware is added to `known_failures/` as a variant.
 - **CUDA:** On a machine with an NVIDIA GPU, install a CUDA build of PyTorch (and
   of JAX); the same pytest command then runs the CUDA tests, which skip otherwise.
   `python tests/python/release_numerics.py --device cuda --output <dir>` also checks the
@@ -91,6 +93,27 @@ OCTAVE_HOME=<prefix> tests/matlab/run_octave_tests.sh
   `rust/tests/api.rs`.
 - **Numerical changes:** Every fix comes with a regression test against an independent
   analytic, `mpmath` or KKT reference. Do not loosen a tolerance to make a test pass.
+
+## Documentation
+
+Keep API guides in `docs/`.
+
+- **Structure:** Use the common structure: installation, a runnable quick start, task
+  examples and reference tables, precision, errors, benchmarks (when measured), and tests.
+  Keep language-specific sections such as C layouts and PyTorch transforms.
+- **Shared contract:** Link to `docs/API.md` for shared definitions and defaults instead of
+  repeating the contract.
+- **Style:** Use short paragraphs and tables for options and results; put longer derivations
+  after the usage examples.
+- **Benchmarks:** Benchmark tables must identify hardware, versions, timing boundaries and
+  their evidence, including slower cases. Do not attribute one binding's timings to another.
+- **Checks:** `python tools/check_docs.py` checks local links and heading anchors and
+  rejects unsupported math commands; `tools/quality.py` runs it in CI. Use `\mathrm{...}`
+  for named math functions.
+- **Absolute links:** The Python and Rust guides also render on PyPI and crates.io, so use
+  absolute links there.
+- **Rust guide:** Cargo packages `docs/RUST.md` as `RUST.md`; the build script feeds the
+  same guide to doctests in both a checkout and an extracted crate.
 
 ## Releases
 

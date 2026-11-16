@@ -62,14 +62,14 @@ class ConvergenceTests:
         rng = np.random.default_rng(52)
         x = rng.normal(size=(40, 8))
         y = np.arange(40) % 4
-        center = rng.normal(size=(8, 4))
+        center = rng.normal(size=(4, 8))
         for dtype in [np.float32, np.float64]:
             solver = Solver("float64", dtype=dtype)
             for c in [None, center]:
                 model = solver.fit(x, y, center=c, max_epoch=0)
                 np.testing.assert_array_equal(model.dual, 0.0)
                 np.testing.assert_array_equal(
-                    model.weights, np.zeros((8, 4)) if c is None else c.astype(solver.dtype)
+                    model.weights, np.zeros((4, 8)) if c is None else c.astype(solver.dtype)
                 )
 
     def test_torch_backend_validation_parity(self, subtests: pytest.Subtests):

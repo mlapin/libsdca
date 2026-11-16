@@ -24,18 +24,24 @@ inline dataset<Input<Data>, Output, eval_test<Result, Output>> make_dataset_test
   return dataset<Input<Data>, Output, eval_test<Result, Output>>(std::move(in), std::move(out));
 }
 
+// Features (num_examples, num_dimensions), row-major, as in the other interfaces.
 template <typename Data>
-inline feature_input<Data> make_input_feature(const size_type num_dimensions,
-                                              const size_type num_examples, const Data* features) {
-  return feature_input<Data>(num_dimensions, num_examples, features);
+inline feature_input<Data> make_input_feature(const size_type num_examples,
+                                              const size_type num_dimensions,
+                                              const Data* features) {
+  return feature_input<Data>(num_examples, num_dimensions, features);
 }
 
+// A kernel (num_examples, num_train_examples), row-major, between examples and the
+// training examples.
 template <typename Data>
-inline kernel_input<Data> make_input_kernel(const size_type num_train_examples,
-                                            const size_type num_examples, const Data* kernel) {
-  return kernel_input<Data>(num_train_examples, num_examples, kernel);
+inline kernel_input<Data> make_input_kernel(const size_type num_examples,
+                                            const size_type num_train_examples,
+                                            const Data* kernel) {
+  return kernel_input<Data>(num_examples, num_train_examples, kernel);
 }
 
+// The Gram matrix (num_examples, num_examples) of the training examples.
 template <typename Data>
 inline kernel_input<Data> make_input_kernel(const size_type num_examples, const Data* kernel) {
   return kernel_input<Data>(num_examples, num_examples, kernel);

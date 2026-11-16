@@ -17,7 +17,7 @@ TEST(SolverContextTest, feature_in_multiclass_out) {
   test_populate_real(n * d, pow_from, pow_to, 1.0f, gen, features);
   test_populate_int<sdca::size_type>(n, 0, m - 1, gen, labels);
 
-  auto ctx = sdca::make_context(sdca::make_input_feature(d, n, &features[0]),
+  auto ctx = sdca::make_context(sdca::make_input_feature(n, d, &features[0]),
                                 sdca::make_output_multiclass(labels.begin(), labels.end(), m),
                                 sdca::make_objective_l2_topk_hinge_beta<Data>(Data(1), 1),
                                 &primal[0], &dual[0]);
@@ -32,7 +32,7 @@ TEST(SolverContextTest, feature_in_multiclass_out) {
 
   sdca::size_type n_tst = n - 5;
   labels.resize(n_tst);
-  ctx.add_test(sdca::make_input_feature(d, n_tst, &features[0]),
+  ctx.add_test(sdca::make_input_feature(n_tst, d, &features[0]),
                sdca::make_output_multiclass(labels.begin(), labels.end(), m));
 
   EXPECT_EQ(static_cast<std::size_t>(1), ctx.test.size());
@@ -67,7 +67,7 @@ TEST(SolverContextTest, feature_in_multilabel_out) {
   std::iota(offsets.begin(), offsets.end(), 0);
 
   auto ctx = sdca::make_context(
-      sdca::make_input_feature(d, n, &features[0]),
+      sdca::make_input_feature(n, d, &features[0]),
       sdca::make_output_multilabel(labels.begin(), labels.end(), offsets.begin(), offsets.end(), m),
       sdca::make_objective_l2_multilabel_hinge<Data>(), &primal[0], &dual[0]);
 
@@ -83,7 +83,7 @@ TEST(SolverContextTest, feature_in_multilabel_out) {
   sdca::size_type n_tst = n - 5;
   labels.resize(n_tst);
   offsets.resize(n_tst + 1);
-  ctx.add_test(sdca::make_input_feature(d, n_tst, &features[0]),
+  ctx.add_test(sdca::make_input_feature(n_tst, d, &features[0]),
                sdca::make_output_multilabel(labels.begin(), labels.end(), offsets.begin(),
                                             offsets.end(), m));
 
@@ -127,7 +127,7 @@ TEST(SolverContextTest, kernel_in_multiclass_out) {
 
   sdca::size_type n_tst = n - 5;
   labels.resize(n_tst);
-  ctx.add_test(sdca::make_input_kernel(n, n_tst, &kernel[0]),
+  ctx.add_test(sdca::make_input_kernel(n_tst, n, &kernel[0]),
                sdca::make_output_multiclass(labels.begin(), labels.end(), m));
 
   EXPECT_EQ(n_tst, ctx.test[0].num_examples());
@@ -172,7 +172,7 @@ TEST(SolverContextTest, kernel_in_multilabel_out) {
   sdca::size_type n_tst = n - 5;
   labels.resize(n_tst);
   offsets.resize(n_tst + 1);
-  ctx.add_test(sdca::make_input_kernel(n, n_tst, &kernel[0]),
+  ctx.add_test(sdca::make_input_kernel(n_tst, n, &kernel[0]),
                sdca::make_output_multilabel(labels.begin(), labels.end(), offsets.begin(),
                                             offsets.end(), m));
 

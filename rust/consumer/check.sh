@@ -8,7 +8,7 @@ echo "SDCA_BLAS=${SDCA_BLAS:-} ($mode)"
 cargo build --quiet
 bin=${CARGO_TARGET_DIR:-target}/debug/sdca-consumer
 needed=$(readelf -d "$bin" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
-# The linker keeps only the CBLAS functions the crate calls (no gemm in this one).
+# The linker keeps only the CBLAS functions the crate calls (gemv and, for the scores, gemm).
 cblas=$(nm "$bin" | grep -c ' T cblas_' || true)
 blas_so=$(grep -E '^lib(c?blas|openblas|blis|mkl)' <<<"$needed" || true)
 case $mode in

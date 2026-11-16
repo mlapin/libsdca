@@ -15,7 +15,7 @@ namespace sdca {
 // float storage in double. W and the scores may be wider than the data
 // (double weights on float features).
 
-// scores = W' x of a dim-by-m column-major W, four columns at a time.
+// scores = W x of the weights W (m, dim), one row per class, four rows at a time.
 template <typename Var, typename Data>
 inline void column_dots(const size_type dim, const size_type m, const Var* W, const Data* x,
                         Var* scores) {
@@ -34,7 +34,7 @@ inline void column_dots(const size_type dim, const size_type m, const Var* W, co
   }
 }
 
-// W -= x delta' on the classes whose delta is nonzero: a coordinate step
+// W -= delta x' on the classes whose delta is nonzero: a coordinate step
 // changes few classes of a hinge block.
 template <typename Var, typename Data>
 inline void rank_one_update(const size_type dim, const size_type m, const Data* x, const Var* delta,
@@ -47,7 +47,7 @@ inline void rank_one_update(const size_type dim, const size_type m, const Data* 
   }
 }
 
-// scores = A k of the m-by-n duals A at a kernel column k: one long gemv, for
+// scores = A' k of the duals A (n, m) at a kernel row k: one long gemv, for
 // the BLAS backend; wider duals than the kernel take the built-in loop.
 template <typename T>
 inline void kernel_dots(const size_type m, const size_type n, const T* A, const T* k, T* scores) {
@@ -65,10 +65,24 @@ inline void kernel_dots(const size_type m, const size_type n, const Var* A, cons
   }
 }
 
+// The scores (n, m) of n examples at once: features x (n, dim) times the
+// transposed weights (m, dim), or a cross-kernel x (n, dim) to dim training
+// examples times their duals (dim, m). One gemm of the BLAS backend in the
+// storage type; every array is row-major and used in place.
+template <typename T>
+inline void batch_scores(const bool kernel, const size_type n, const size_type dim,
+                         const size_type m, const T* x, const T* coefficients, T* scores) {
+  // In BLAS terms the scores are an m-by-n column-major product with the
+  // dim-by-n examples: of the transposed dim-by-m weights, or of the m-by-dim duals.
+  const blas_int M = static_cast<blas_int>(m), D = static_cast<blas_int>(dim);
+  sdca_blas_gemm(M, static_cast<blas_int>(n), D, coefficients, kernel ? M : D, x, D, scores,
+                 kernel ? CblasNoTrans : CblasTrans);
+}
+
 template <typename Int, typename Data, typename Context, typename Var>
 inline void eval_scores(const Int i, const Int num_classes, const feature_input<Data>& in,
                         const Context& ctx, Var* scores) {
-  // Let scores = W' * x_i
+  // Let scores = W * x_i
   column_dots(in.num_dimensions, num_classes, ctx.primal_variables,
               in.features + in.num_dimensions * i, scores);
 }
@@ -76,7 +90,7 @@ inline void eval_scores(const Int i, const Int num_classes, const feature_input<
 template <typename Int, typename Data, typename Context, typename Var>
 inline void eval_scores(const Int i, const Int num_classes, const kernel_input<Data>& in,
                         const Context& ctx, Var* scores) {
-  // Let scores = A * K_i = W' * x_i
+  // Let scores = A' * K_i = W * x_i
   kernel_dots(num_classes, in.num_train_examples, ctx.dual_variables,
               in.kernel + in.num_train_examples * i, scores);
 }

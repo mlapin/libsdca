@@ -239,13 +239,55 @@ fn fit_solves_and_weights_are_x_transpose_dual() {
     for l in 0..2 {
         for j in 0..3 {
             let expected: f64 = (0..4).map(|i| X[i * 2 + l] * model.dual()[i * 3 + j]).sum();
-            assert!((w[l * 3 + j] - expected).abs() < 1e-12);
+            assert!((w[j * 2 + l] - expected).abs() < 1e-12);
         }
     }
     for row in model.dual().chunks(3) {
         assert!(row.iter().sum::<f64>().abs() < 1e-14);
     }
     assert_eq!(model.predict(x()).unwrap().len(), 4);
+}
+
+#[test]
+fn decision_function_is_the_product_with_the_class_rows() {
+    // Scores (n, classes) = X W' for the weights (classes, d), in both storage types.
+    let model = Solver::default().with_c(10.0).fit(x(), &Y).unwrap();
+    let w = model.weights().unwrap();
+    assert_eq!(w.len(), 3 * 2);
+    let scores = model.decision_function(x()).unwrap();
+    assert_eq!(scores.len(), 4 * 3);
+    for i in 0..4 {
+        for j in 0..3 {
+            let expected: f64 = (0..2).map(|l| X[i * 2 + l] * w[j * 2 + l]).sum();
+            assert!((scores[i * 3 + j] - expected).abs() < 1e-14);
+        }
+    }
+    let x32: Vec<f32> = X.iter().map(|&v| v as f32).collect();
+    let matrix = Matrix::new(&x32, 4, 2).unwrap();
+    let model = Solver::default().with_c(10.0).fit(matrix, &Y).unwrap();
+    let w = model.weights().unwrap();
+    let scores = model.decision_function(matrix).unwrap();
+    for i in 0..4 {
+        for j in 0..3 {
+            let expected: f64 = (0..2)
+                .map(|l| f64::from(x32[i * 2 + l]) * f64::from(w[j * 2 + l]))
+                .sum();
+            assert!((f64::from(scores[i * 3 + j]) - expected).abs() < 1e-5);
+        }
+    }
+    // A batch of other examples than the training set, more rows than classes.
+    let batch: Vec<f32> = (0..14).map(|v| (v as f32 * 0.37).sin()).collect();
+    let scores = model
+        .decision_function(Matrix::new(&batch, 7, 2).unwrap())
+        .unwrap();
+    for i in 0..7 {
+        for j in 0..3 {
+            let expected: f64 = (0..2)
+                .map(|l| f64::from(batch[i * 2 + l]) * f64::from(w[j * 2 + l]))
+                .sum();
+            assert!((f64::from(scores[i * 3 + j]) - expected).abs() < 1e-5);
+        }
+    }
 }
 
 #[test]
@@ -1199,7 +1241,7 @@ fn warm_start_feasible_sets() {
 
 #[test]
 fn cold_and_warm_starts_from_a_center() {
-    // Row-major (d, classes).
+    // Row-major (classes, d): one row per class.
     let center = [0.5, -0.25, 0.0, 0.1, 0.2, -0.3];
     let cold = Start::default().with_center(&center);
     let model = Solver::default()
@@ -1215,8 +1257,8 @@ fn cold_and_warm_starts_from_a_center() {
     for l in 0..2 {
         for j in 0..3 {
             let xa: f64 = (0..4).map(|i| X[i * 2 + l] * model.dual()[i * 3 + j]).sum();
-            let w = model.weights().unwrap()[l * 3 + j];
-            assert!((w - center[l * 3 + j] - xa).abs() < 1e-12);
+            let w = model.weights().unwrap()[j * 2 + l];
+            assert!((w - center[j * 2 + l] - xa).abs() < 1e-12);
         }
     }
 }
@@ -1436,11 +1478,15 @@ fn every_objective_solves_at_its_reported_primal() {
             for l in 0..d {
                 for j in 0..m {
                     let xa: f64 = (0..n).map(|r| x[r * d + l] * model.dual()[r * m + j]).sum();
-                    assert!((w[l * m + j] - xa).abs() < 1e-12, "{loss:?}");
+                    assert!((w[j * d + l] - xa).abs() < 1e-12, "{loss:?}");
                 }
             }
             let z: Vec<f64> = (0..n * m)
-                .map(|e| (0..d).map(|l| x[(e / m) * d + l] * w[l * m + e % m]).sum())
+                .map(|e| {
+                    (0..d)
+                        .map(|l| x[(e / m) * d + l] * w[(e % m) * d + l])
+                        .sum()
+                })
                 .collect();
             let scores = Matrix::new(&z, n, m).unwrap();
             let (values, _) = if loss.is_multilabel() {

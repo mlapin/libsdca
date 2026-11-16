@@ -17,7 +17,7 @@ cargo add libsdca                # Rust crate (Rust>=1.74 and a C++11 compiler)
 - Prebuilt wheels: Linux `x86_64` (`manylinux_2_28`) and macOS `arm64` (11+).
 - PyTorch and JAX compile small C++ extensions on first use when a compiler and Python
   headers are present; otherwise they fall back with a one-time warning
-  ([TORCH.md](python/TORCH.md#build-tools)).
+  ([TORCH.md](docs/TORCH.md#build-tools)).
 - Check the selected path: `libsdca.torch.explain_backend(cross_entropy, logits, target)`
   returns `(backend, reason)` for the call `cross_entropy(logits, target)`.
 
@@ -25,15 +25,15 @@ cargo add libsdca                # Rust crate (Rust>=1.74 and a C++11 compiler)
 
 | User goal | API | Guide |
 | --- | --- | --- |
-| Replace `torch.nn.CrossEntropyLoss` (labels or probabilities, weights, label smoothing) | `libsdca.torch.CrossEntropyLoss`, `cross_entropy` | [TORCH.md](python/TORCH.md#replace-pytorch-cross-entropy) |
-| Large-vocabulary head + cross-entropy without `(N, V)` logits | `LinearCrossEntropyLoss`, `linear_cross_entropy` | [TORCH.md](python/TORCH.md#linear-layer-and-cross-entropy-without-the-logits) |
-| Top-*k*, hinge and multilabel PyTorch losses | `TopKCrossEntropyLoss`, `TopKHingeLoss`, `MulticlassHingeLoss`, `MultilabelHingeLoss`, `MultilabelCrossEntropyLoss` | [TORCH.md](python/TORCH.md) |
-| Logit distillation in PyTorch | `DistillationLoss`, `distillation_loss` | [TORCH.md](python/TORCH.md#teacher-logits-and-distillation) |
-| Losses in JAX (`jit`, `grad`, `vmap`) | `libsdca.jax` | [JAX.md](python/JAX.md) |
-| Linear or kernel SVM / softmax classifier (scikit-learn) | `libsdca.sklearn.SDCAClassifier` | [python/README.md](python/README.md#classifier) |
-| Same, with duality-gap history and warm starts | `libsdca.fit(X, y, loss)` with loss objects such as `libsdca.TopKHingeBeta(k=2)` | [python/README.md](python/README.md#training) |
-| Losses and gradients on NumPy arrays | `libsdca.loss_and_grad` | [python/README.md](python/README.md#losses-and-gradients) |
-| Rust, C++, C, MATLAB | crate `libsdca`, headers, `libsdca_c`, `matsdca_*` | [Rust](rust/README.md), [C++](docs/CPP.md), [C](docs/C.md), [MATLAB](docs/MATLAB.md) |
+| Replace `torch.nn.CrossEntropyLoss` (labels or probabilities, weights, label smoothing) | `libsdca.torch.CrossEntropyLoss`, `cross_entropy` | [TORCH.md](docs/TORCH.md#replace-pytorch-cross-entropy) |
+| Large-vocabulary head + cross-entropy without `(N, V)` logits | `LinearCrossEntropyLoss`, `linear_cross_entropy` | [TORCH.md](docs/TORCH.md#linear-layer-and-cross-entropy-without-the-logits) |
+| Top-*k*, hinge and multilabel PyTorch losses | `TopKCrossEntropyLoss`, `TopKHingeLoss`, `MulticlassHingeLoss`, `MultilabelHingeLoss`, `MultilabelCrossEntropyLoss` | [TORCH.md](docs/TORCH.md) |
+| Logit distillation in PyTorch | `DistillationLoss`, `distillation_loss` | [TORCH.md](docs/TORCH.md#teacher-logits-and-distillation) |
+| Losses in JAX (`jit`, `grad`, `vmap`) | `libsdca.jax` | [JAX.md](docs/JAX.md) |
+| Linear or kernel SVM / softmax classifier (scikit-learn) | `libsdca.sklearn.SDCAClassifier` | [docs/PYTHON.md](docs/PYTHON.md#classifier) |
+| Same, with duality-gap history and warm starts | `libsdca.fit(X, y, loss)` with loss objects such as `libsdca.TopKHingeBeta(k=2)` | [docs/PYTHON.md](docs/PYTHON.md#training) |
+| Losses and gradients on NumPy arrays | `libsdca.loss_and_grad` | [docs/PYTHON.md](docs/PYTHON.md#losses-and-gradients) |
+| Rust, C++, C, MATLAB | crate `libsdca`, headers, `libsdca_c`, `matsdca_*` | [Rust](docs/RUST.md), [C++](docs/CPP.md), [C](docs/C.md), [MATLAB](docs/MATLAB.md) |
 
 Loss names, options, defaults and errors are shared across languages:
 [docs/API.md](docs/API.md).
@@ -42,15 +42,17 @@ Loss names, options, defaults and errors are shared across languages:
 
 - **Class axis:** `CrossEntropyLoss` takes classes on `dim=1` like PyTorch; every other
   loss defaults to `dim=-1`. Pass `dim=1` for `(N, C, H, W)` inputs to the others
-  ([TORCH.md](python/TORCH.md#argument-parity)).
-- **Hyperparameters are keyword-only** and belong to their loss: `TopKHingeLoss(k=2)`,
+  ([TORCH.md](docs/TORCH.md#argument-parity)).
+- **Loss parameters** belong to their loss: `TopKHingeLoss(k=2)`,
   `libsdca.TopKHingeBeta(k=2)`; passing a parameter another loss uses is an error.
+  PyTorch/JAX hyperparameters are keyword-only; NumPy loss objects also accept positional
+  arguments.
 - **Distillation** takes raw logits for both inputs and applies no $T^2$ factor
-  ([TORCH.md](python/TORCH.md#teacher-logits-and-distillation)).
+  ([TORCH.md](docs/TORCH.md#teacher-logits-and-distillation)).
 - **Memory:** CUDA losses can reuse the logits buffer for the gradient when nothing else
-  references it ([TORCH.md](python/TORCH.md#memory)).
+  references it ([TORCH.md](docs/TORCH.md#memory)).
 - **Solver objective:** $\frac12\Vert W \Vert_2^2 + C\sum_i \ell_i$ with no intercept; standardize
-  features; for $d \gg n$ pass a Gram matrix ([python/README.md](python/README.md#training),
+  features; for $d \gg n$ pass a Gram matrix ([docs/PYTHON.md](docs/PYTHON.md#training),
   [API.md](docs/API.md#options)).
 - **Convergence:** only `status == "solved"` guarantees the duality gap
   ([API.md](docs/API.md#results)).

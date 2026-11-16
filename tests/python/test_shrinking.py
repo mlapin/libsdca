@@ -146,7 +146,7 @@ def test_float32_digits_reach_float64_tolerances():
     assert model.status == "solved" and relative_gap(model) <= 1e-6
     assert model.weights is not None and model.weights.dtype == model.dual.dtype == np.float32
     w = model.weights.astype(np.float64)
-    z = x.astype(np.float64) @ w
+    z = x.astype(np.float64) @ w.T
     rows = np.arange(len(y))
     h = 1 + z - z[rows, y][:, None]
     h[rows, y] = 0

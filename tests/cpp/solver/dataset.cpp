@@ -85,7 +85,7 @@ TEST(SolverDatasetTest, feature_in_multiclass_out) {
   test_populate_int<sdca::size_type>(n, 0, m - 1, gen, labels);
 
   auto trn_dataset =
-      sdca::make_dataset_train(sdca::make_input_feature(d, n, &features[0]),
+      sdca::make_dataset_train(sdca::make_input_feature(n, d, &features[0]),
                                sdca::make_output_multiclass(labels.begin(), labels.end(), m));
 
   EXPECT_EQ(d, trn_dataset.num_dimensions());
@@ -98,7 +98,7 @@ TEST(SolverDatasetTest, feature_in_multiclass_out) {
       (std::is_same<sdca::eval_train<double, sdca::multiclass_output>, trn_eval_type>::value));
 
   auto tst_dataset =
-      sdca::make_dataset_test(sdca::make_input_feature(d, n, &features[0]),
+      sdca::make_dataset_test(sdca::make_input_feature(n, d, &features[0]),
                               sdca::make_output_multiclass(labels.begin(), labels.end(), m));
 
   EXPECT_EQ(d, tst_dataset.num_dimensions());
@@ -125,7 +125,7 @@ TEST(SolverDatasetTest, feature_in_multilabel_out) {
   std::mt19937 gen(1);
   test_populate_real(n * d, pow_from, pow_to, 1.0f, gen, features);
 
-  auto trn_dataset = sdca::make_dataset_train(sdca::make_input_feature(d, n, &features[0]),
+  auto trn_dataset = sdca::make_dataset_train(sdca::make_input_feature(n, d, &features[0]),
                                               sdca::make_output_multilabel(labels, m));
 
   EXPECT_EQ(d, trn_dataset.num_dimensions());
@@ -138,7 +138,7 @@ TEST(SolverDatasetTest, feature_in_multilabel_out) {
   EXPECT_TRUE(
       (std::is_same<sdca::eval_train<double, sdca::multilabel_output>, trn_eval_type>::value));
 
-  auto tst_dataset = sdca::make_dataset_test(sdca::make_input_feature(d, n, &features[0]),
+  auto tst_dataset = sdca::make_dataset_test(sdca::make_input_feature(n, d, &features[0]),
                                              sdca::make_output_multilabel(labels, m));
 
   EXPECT_EQ(d, tst_dataset.num_dimensions());
@@ -177,7 +177,7 @@ TEST(SolverDatasetTest, kernel_in_multiclass_out) {
       (std::is_same<sdca::eval_train<float, sdca::multiclass_output>, trn_eval_type>::value));
 
   auto tst_dataset = sdca::make_dataset_test<float>(
-      sdca::make_input_kernel(n, n_tst, &kernel[0]),
+      sdca::make_input_kernel(n_tst, n, &kernel[0]),
       sdca::make_output_multiclass(tst_labels.begin(), tst_labels.end(), m));
 
   EXPECT_EQ(n_tst, tst_dataset.num_examples());
@@ -223,7 +223,7 @@ TEST(SolverDatasetTest, kernel_in_multilabel_out) {
   EXPECT_TRUE(
       (std::is_same<sdca::eval_train<float, sdca::multilabel_output>, trn_eval_type>::value));
 
-  auto tst_dataset = sdca::make_dataset_test<float>(sdca::make_input_kernel(n, n_tst, &kernel[0]),
+  auto tst_dataset = sdca::make_dataset_test<float>(sdca::make_input_kernel(n_tst, n, &kernel[0]),
                                                     sdca::make_output_multilabel(tst_labels, m));
 
   EXPECT_EQ(n_tst, tst_dataset.num_examples());

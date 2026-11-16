@@ -213,6 +213,32 @@ inline void sdca_blas_ger(blas_int m, blas_int n, typename detail::blas_scalar<T
     for (blas_int i = 0; i < m; ++i) column[i] += x[i] * scaled;
   }
 }
+namespace detail {
+// C = alpha A' B + beta C for column-major A (k-by-m) and B (k-by-n): each entry is the dot
+// product of two contiguous columns (the scores of a batch of examples), four columns of A
+// sharing the loads of B's.
+template <typename T>
+inline void blas_gemm_dots(blas_int m, blas_int n, blas_int k, const T* a, blas_int lda, const T* b,
+                           blas_int ldb, T* c, typename blas_scalar<T>::type alpha,
+                           typename blas_scalar<T>::type beta) {
+  using Work = typename std::common_type<T, double>::type;
+  for (blas_int j = 0; j < n; ++j) {
+    const T* x = b + std::size_t(j) * std::size_t(ldb);
+    T* out = c + std::size_t(j) * std::size_t(m);
+    for (blas_int i = 0; i < m; i += 4) {
+      Work sums[4] = {};
+      const T* col = a + std::size_t(i) * std::size_t(lda);
+      if (i + 4 <= m)
+        blas_dots<4>(k, col, std::size_t(lda), x, sums);
+      else
+        for (blas_int q = 0; i + q < m; ++q)
+          blas_dots<1>(k, col + std::size_t(q) * std::size_t(lda), 0, x, sums + q);
+      for (blas_int q = 0; q < 4 && i + q < m; ++q)
+        out[i + q] = (beta == T(0) ? T(0) : beta * out[i + q]) + alpha * static_cast<T>(sums[q]);
+    }
+  }
+}
+}  // namespace detail
 template <typename T>
 inline void sdca_blas_gemm(blas_int m, blas_int n, blas_int k, const T* a, blas_int lda, const T* b,
                            blas_int ldb, T* c, CBLAS_TRANSPOSE trans_a = CblasNoTrans,
@@ -221,6 +247,10 @@ inline void sdca_blas_gemm(blas_int m, blas_int n, blas_int k, const T* a, blas_
                            typename detail::blas_scalar<T>::type beta = 0) {
   using Work = typename std::common_type<T, double>::type;
   if (m <= 0 || n <= 0) return;
+  if (trans_a != CblasNoTrans && trans_b == CblasNoTrans && alpha != T(0)) {
+    detail::blas_gemm_dots(m, n, k, a, lda, b, ldb, c, alpha, beta);
+    return;
+  }
   // Contiguous column sums keep the ordinary path cache-friendly. This is
   // a small reference backend, not a replacement for a tuned GEMM kernel.
   Work local[256];

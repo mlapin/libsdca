@@ -72,4 +72,4 @@ CBLAS; the headers need no separate source file.
 
 The crate has no Rust dependencies and needs Rust 1.74+. `build.rs` compiles `src/c_api.cpp`
 with `CXX` (default `c++`) and the built-in BLAS, or links an external CBLAS given by
-`SDCA_BLAS` ([rust/README.md](rust/README.md#building)).
+`SDCA_BLAS` ([docs/RUST.md](docs/RUST.md#building)).

@@ -268,7 +268,7 @@ class StressNativeAbiTests:
             libsdca.coordinate_update(z, [0], previous=np.array([[0.0, 0.0, np.inf]]))
         x = np.ones((1, 1))
         with pytest.raises(ValueError, match="finite"):
-            libsdca.fit(x, [0], num_classes=2, center=np.array([[np.inf, 0.0]]), max_epoch=0)
+            libsdca.fit(x, [0], num_classes=2, center=np.array([[np.inf], [0.0]]), max_epoch=0)
         with pytest.raises(ValueError, match="finite"):
             libsdca.fit(x, [0], num_classes=2, initial_dual=np.array([[np.nan, 7.0]]))
         mask, values, grad = np.array([[1, 0]], np.uint8), np.full(1, 7.0), np.full((1, 2), 7.0)

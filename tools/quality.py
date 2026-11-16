@@ -139,7 +139,7 @@ def check_versions() -> None:
     if _version(r"^date-released: (\S+)$", "CITATION.cff") != changelog.group(2):
         raise SystemExit("CITATION.cff: date-released differs from the CHANGELOG.md date")
     # PyPI and crates.io render these pages once per release, so their links pin its tag.
-    for path in ("pyproject.toml", "python/README.md", "rust/README.md"):
+    for path in ("pyproject.toml", "docs/PYTHON.md", "docs/RUST.md"):
         text = (ROOT / path).read_text()
         links = set(re.findall(r"mlapin/libsdca(?:/blob/| --tag )v(\d[\w.-]*\w)", text))
         links.discard(version)
@@ -152,6 +152,7 @@ def main() -> None:
     parser.add_argument("--fix", action="store_true", help="apply the formatters first")
     parser.add_argument("--skip-tidy", action="store_true", help="skip clang-tidy (slow)")
     args = parser.parse_args()
+    run(sys.executable, "tools/check_docs.py")
     # Prefer the tools installed next to this interpreter.
     os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]
     if args.fix:

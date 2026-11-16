@@ -251,6 +251,8 @@ def _declare(lib: ct.CDLL) -> None:
         # loss, options, execution, input, classes, targets, center, initial, W, A, history,
         # rows, result
         "sdca_model_fit": (i, [p, p, p, p, s, p, p, p, p, p, p, s, p]),
+        # input, classes, coefficients, scores
+        "sdca_model_scores": (i, [p, s, p, p]),
         # options, dtype, n, classes, logits, labels, positive, values, gradients
         "sdca_internal_loss_rows": (i, [p, i, s, s, p, p, p, p, p]),
         # options, dtype, n, classes, logits, labels, ignore_index, weights, values, stats, totals

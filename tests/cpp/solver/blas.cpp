@@ -1,4 +1,5 @@
 #include "sdca/math/blas.h"
+#include "sdca/solver/eval/scores.h"
 #include "test_util.h"
 
 template <typename T>
@@ -96,6 +97,60 @@ void check_blas_matrices() {
 }
 TEST(BlasTest, matrices_float) { check_blas_matrices<float>(); }
 TEST(BlasTest, matrices_double) { check_blas_matrices<double>(); }
+
+// Batch scores of row-major arrays: x (n, d) times the transposed weights (m, d), and a
+// cross-kernel (n, d) times the duals (d, m). Small integers make every sum exact, so the
+// one gemm agrees with plain loops and with the per-example kernels of a fit.
+template <typename T>
+void check_batch_scores() {
+  const sdca::size_type n = 6;
+  // Class counts around the four-column blocks of the built-in backend.
+  const sdca::size_type classes[] = {1, 3, 4, 9}, dimensions[] = {1, 5, 8};
+  for (sdca::size_type m : classes)
+    for (sdca::size_type d : dimensions) {
+      std::vector<T> x(n * d), w(m * d);
+      std::vector<T> a(d * m);
+      auto at = [](sdca::size_type i, sdca::size_type j, sdca::size_type cols) {
+        return i * cols + j;
+      };
+      auto xv = [](sdca::size_type i, sdca::size_type j) { return int((2 * i + 3 * j) % 7) - 3; };
+      auto wv = [](sdca::size_type c, sdca::size_type j) { return int((5 * c + j) % 5) - 2; };
+      auto av = [](sdca::size_type l, sdca::size_type c) { return int((l + 4 * c) % 9) - 4; };
+      for (sdca::size_type i = 0; i < n; ++i)
+        for (sdca::size_type j = 0; j < d; ++j) x[at(i, j, d)] = T(xv(i, j));
+      for (sdca::size_type c = 0; c < m; ++c)
+        for (sdca::size_type j = 0; j < d; ++j) w[at(c, j, d)] = T(wv(c, j));
+      for (sdca::size_type l = 0; l < d; ++l)
+        for (sdca::size_type c = 0; c < m; ++c) a[at(l, c, m)] = T(av(l, c));
+      const T nan = std::numeric_limits<T>::quiet_NaN();
+      std::vector<T> z(n * m, nan), k(z), row(m);
+      sdca::batch_scores(false, n, d, m, x.data(), w.data(), z.data());
+      sdca::batch_scores(true, n, d, m, x.data(), a.data(), k.data());
+      for (sdca::size_type i = 0; i < n; ++i) {
+        for (sdca::size_type c = 0; c < m; ++c) {
+          int features = 0, kernel = 0;
+          for (sdca::size_type j = 0; j < d; ++j) {
+            features += xv(i, j) * wv(c, j);
+            kernel += xv(i, j) * av(j, c);
+          }
+          EXPECT_EQ(z[at(i, c, m)], T(features));
+          EXPECT_EQ(k[at(i, c, m)], T(kernel));
+        }
+        const T* example = x.data() + d * i;
+        sdca::column_dots(d, m, w.data(), example, row.data());
+        for (sdca::size_type c = 0; c < m; ++c) EXPECT_EQ(row[at(0, c, m)], z[at(i, c, m)]);
+        sdca::kernel_dots(m, d, a.data(), example, row.data());
+        for (sdca::size_type c = 0; c < m; ++c) EXPECT_EQ(row[at(0, c, m)], k[at(i, c, m)]);
+      }
+      // No examples: nothing is written.
+      z.assign(z.size(), T(42));
+      sdca::batch_scores(false, 0, d, m, x.data(), w.data(), z.data());
+      sdca::batch_scores(true, 0, d, m, x.data(), a.data(), z.data());
+      for (T value : z) EXPECT_EQ(value, T(42));
+    }
+}
+TEST(BlasTest, batch_scores_float) { check_batch_scores<float>(); }
+TEST(BlasTest, batch_scores_double) { check_batch_scores<double>(); }
 
 #if defined(BLAS_BUILTIN) && !defined(__FAST_MATH__)
 TEST(BlasTest, builtin_nonfinite_and_zero_coefficients) {

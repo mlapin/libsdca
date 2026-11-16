@@ -502,7 +502,8 @@ void rebuild_label_entries(D* a, std::size_t n, std::size_t k, const int64_t* la
   }
 }
 
-// W = center + x' a (d, k) column-major, accumulated in double and rounded once.
+// The weights (k, d), row c = center_c + sum_i a_ic x_i, accumulated in double and rounded
+// once.
 template <typename D>
 void primal_of_dual(const D* x, const D* a, const D* center, std::size_t n, std::size_t d,
                     std::size_t k, std::size_t threads, D* w) {
@@ -768,7 +769,7 @@ struct fit_request {
           sdca::make_context(sdca::make_input_kernel(n, x), std::move(out), std::move(obj), dual);
       solve(ctx);
     } else {
-      auto ctx = sdca::make_context(sdca::make_input_feature(d, n, x), std::move(out),
+      auto ctx = sdca::make_context(sdca::make_input_feature(n, d, x), std::move(out),
                                     std::move(obj), weights, dual, center);
       solve(ctx);
     }
@@ -1121,6 +1122,32 @@ int sdca_model_fit(const sdca_loss* loss, const sdca_fit_options* options,
     result->status = r.status;
     result->epochs = r.epochs;
     result->history_rows = r.history_rows;
+  });
+}
+
+int sdca_model_scores(const sdca_input* input, size_t k, const void* coefficients, void* scores) {
+  return protect([&] {
+    const sdca_input in = read_struct(input, "input", default_input);
+    if (in.kind != SDCA_INPUT_FEATURES && in.kind != SDCA_INPUT_KERNEL)
+      invalid("Unknown input kind");
+    check_dtype(in.dtype);
+    if (in.d < 1 || k < 1) invalid("Invalid score dimensions");
+    const std::size_t n = in.n, d = in.d, size = storage_size(in.dtype);
+    // One product: each dimension, not the element counts, must fit the BLAS integer.
+    check_blas_sizes({n, d, k});
+    extent(extent(n, d), size);
+    extent(extent(n, k), size);
+    extent(extent(d, k), size);
+    check_buffers({coefficients});
+    if (n == 0) return;
+    check_buffers({in.x, scores});
+    const bool kernel = in.kind == SDCA_INPUT_KERNEL;
+    if (in.dtype == SDCA_DTYPE_FLOAT64)
+      sdca::batch_scores(kernel, n, d, k, static_cast<const double*>(in.x),
+                         static_cast<const double*>(coefficients), static_cast<double*>(scores));
+    else
+      sdca::batch_scores(kernel, n, d, k, static_cast<const float*>(in.x),
+                         static_cast<const float*>(coefficients), static_cast<float*>(scores));
   });
 }
 

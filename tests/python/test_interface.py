@@ -77,12 +77,12 @@ class InterfaceTests:
             ker = libsdca.fit(Kernel(x @ x.T), y, C=c, tol=1e-11)
             assert m.status == "solved"
             assert m.weights is not None and ker.weights is None and ker.kernel
-            np.testing.assert_allclose(m.weights, ref.x.reshape(4, 3), atol=5e-6)
+            np.testing.assert_allclose(m.weights.T, ref.x.reshape(4, 3), atol=5e-6)
             np.testing.assert_allclose(
                 m.decision_function(x), ker.decision_function(x @ x.T), atol=2e-5
             )
-            np.testing.assert_allclose(m.weights, x.T @ m.dual, atol=2e-14)
-            assert abs(fun(m.weights.ravel())[0] - ref.fun) < 1e-9
+            np.testing.assert_allclose(m.weights, m.dual.T @ x, atol=2e-14)
+            assert abs(fun(m.weights.T.ravel())[0] - ref.fun) < 1e-9
 
     def test_collapse_is_fixed(self):
         for precision, dtype, gap in [
@@ -187,7 +187,7 @@ class InterfaceTests:
                 )
                 assert m.history["epoch"][-1] == m.epochs
                 assert m.weights is not None
-                np.testing.assert_allclose(m.weights, center + x.T @ m.dual, atol=1e-15)
+                np.testing.assert_allclose(m.weights, center + m.dual.T @ x, atol=1e-15)
                 if eval_epoch == 0:
                     assert len(m.history["epoch"]) == 1
 

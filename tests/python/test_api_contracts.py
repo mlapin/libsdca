@@ -202,7 +202,7 @@ class VocabularyContractTests:
         assert model.status == "solved" and model.loss == CrossEntropy()
         assert model.weights is not None
         np.testing.assert_allclose(model.predict_proba(x).sum(axis=1), 1.0, atol=1e-12)
-        z = x @ model.weights
+        z = x @ model.weights.T
         step = libsdca.coordinate_update(z, Probabilities(q), C=2.0)
         np.testing.assert_allclose(step.sum(axis=1), 0.0, atol=1e-14)
         dv, dg = libsdca.loss_and_grad(z, z, Distillation())
@@ -337,7 +337,7 @@ class BoundaryContractTests:
         center = np.ones((3, 3))
         warm = libsdca.fit(x, y, center=center, initial_dual=model.dual, max_epoch=0)
         assert warm.weights is not None
-        np.testing.assert_allclose(warm.weights, center + x.T @ model.dual, atol=1e-15)
+        np.testing.assert_allclose(warm.weights, center + model.dual.T @ x, atol=1e-15)
 
     def test_types_and_values(self, subtests: pytest.Subtests):
         x, y = [[1.0]], [0]
@@ -477,16 +477,17 @@ class BoundaryContractTests:
 
 class ModelContractTests:
     def test_prediction(self):
-        weights = np.array([[1.0, 1.0, 0.0], [0.0, -1.0, 1.0]])
+        dual = np.array([[1.0, 1.0, 0.0], [0.0, -1.0, 1.0]])
+        weights = np.ascontiguousarray(dual.T)  # (num_classes, d): one row per class
         x = np.array([[1.0, 0.0], [0.0, 2.0]])
         common: dict[str, Any] = dict(
             loss=CrossEntropy(), C=1.0, num_classes=3, status="solved", epochs=1, history={}
         )
         feature = Model(kernel=False, weights=weights, dual=np.zeros((2, 3)), **common)
         np.testing.assert_array_equal(feature.predict(x), [0, 2])
-        np.testing.assert_array_equal(feature.decision_function(x), x @ weights)
-        kernel = Model(kernel=True, weights=None, dual=weights, **common)
-        np.testing.assert_array_equal(kernel.decision_function(x), x @ weights)
+        np.testing.assert_array_equal(feature.decision_function(x), x @ weights.T)
+        kernel = Model(kernel=True, weights=None, dual=dual, **common)
+        np.testing.assert_array_equal(kernel.decision_function(x), x @ dual)
         assert kernel.score(x, [0, 2]) == 1.0
         with pytest.raises(TypeError):
             Model(weights, weights)  # pyright: ignore[reportCallIssue]  # no defaults
@@ -519,7 +520,7 @@ class NativeAbiContractTests:
         options = _make(_FitOptions, max_epoch=1, eval_epoch=1)
         self.keep += (data, options)
         a = np.full((1, 3), 7.0)
-        w = np.full((1, 3), 7.0)
+        w = np.full((3, 1), 7.0)
         self.fit_outputs = (a, w)
         z_, t = z.ctypes.data, ct.byref(targets)
         return {
@@ -566,6 +567,57 @@ class NativeAbiContractTests:
             call = self.calls(ct.byref(loss), ct.byref(execution))["sdca_loss_evaluate"]
             self.assert_error("sdca_loss_evaluate", message, *call)
             np.testing.assert_array_equal(self.outputs[0], 7.0)
+
+    def test_fit_shares_the_callers_buffers_without_reordering(self):
+        # Weights (num_classes, d) and duals (n, num_classes), row-major, as fit returns them.
+        rng = np.random.default_rng(3)
+        x = rng.normal(size=(12, 5))
+        model = libsdca.fit(x, np.arange(12) % 3, tol=1e-10)
+        assert model.weights is not None
+        assert model.weights.shape == (3, 5) and model.weights.flags.c_contiguous
+        assert model.dual.shape == (12, 3) and model.dual.flags.c_contiguous
+        np.testing.assert_allclose(model.weights, model.dual.T @ x, atol=1e-13)
+        # A C-contiguous center of the storage dtype is passed in place.
+        center = rng.normal(size=(3, 5))
+        cold = libsdca.fit(x, np.arange(12) % 3, center=center, max_epoch=0)
+        np.testing.assert_array_equal(cold.weights, center)
+        with pytest.raises(ValueError, match=r"center must have shape \(3, 5\)"):
+            libsdca.fit(x, np.arange(12) % 3, center=center.T)
+
+    def test_model_scores(self, subtests: pytest.Subtests):
+        rng = np.random.default_rng(5)
+        for dtype, code, tol in [(np.float64, 1, 1e-14), (np.float32, 0, 1e-5)]:
+            x = rng.normal(size=(7, 5)).astype(dtype)
+            weights = rng.normal(size=(3, 5)).astype(dtype)  # (num_classes, d)
+            dual = rng.normal(size=(5, 3)).astype(dtype)  # (n_train, num_classes)
+            for kind, coefficients, expected in [(0, weights, x @ weights.T), (1, dual, x @ dual)]:
+                with subtests.test(dtype=dtype, kind=kind):
+                    scores = np.full((7, 3), 7.0, dtype)
+                    data = _make(_Input, kind=kind, dtype=code, n=7, d=5, x=x.ctypes.data)
+                    args = (ct.byref(data), 3, coefficients.ctypes.data, scores.ctypes.data)
+                    assert self.lib.sdca_model_scores(*args) == 0
+                    np.testing.assert_allclose(scores, expected, rtol=tol, atol=tol)
+                    # No rows: nothing is read or written.
+                    empty = _make(_Input, kind=kind, dtype=code, n=0, d=5)
+                    assert self.lib.sdca_model_scores(ct.byref(empty), 3, args[2], None) == 0
+                    np.testing.assert_allclose(scores, expected, rtol=tol, atol=tol)
+        scores = np.full((7, 3), 7.0)
+        for what, data, classes, coefficients, message in [
+            ("kind", _make(_Input, kind=9, n=7, d=5, x=x.ctypes.data), 3, weights, "input kind"),
+            ("dtype", _make(_Input, dtype=9, n=7, d=5, x=x.ctypes.data), 3, weights, "dtype"),
+            ("d", _make(_Input, n=7, d=0, x=x.ctypes.data), 3, weights, "dimensions"),
+            ("classes", _make(_Input, n=7, d=5, x=x.ctypes.data), 0, weights, "dimensions"),
+            ("x", _make(_Input, n=7, d=5), 3, weights, "must not be NULL"),
+            ("coefficients", _make(_Input, n=7, d=5, x=x.ctypes.data), 3, None, "must not be NULL"),
+        ]:
+            with subtests.test(what=what):
+                pointer = None if coefficients is None else coefficients.ctypes.data
+                self.assert_error(
+                    "sdca_model_scores", message, ct.byref(data), classes, pointer,
+                    scores.ctypes.data,
+                )  # fmt: skip
+                np.testing.assert_array_equal(scores, 7.0)
+        self.assert_error("sdca_model_scores", "must not be NULL", None, 3, None, None)
 
     def test_history_rows(self):
         lib = self.lib

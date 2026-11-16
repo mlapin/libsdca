@@ -10,7 +10,8 @@ struct train {
   sdca::solver_status& status;
   template <typename Objective>
   void operator()(Objective objective) const {
-    // Features: dimensions x examples, column-major (examples x dimensions, row-major).
+    // Features (examples, dimensions), row-major; weights (classes, dimensions), dual
+    // (examples, classes).
     double features[] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     double weights[9] = {}, dual[9] = {};
     std::vector<int> labels = {0, 1, 2};

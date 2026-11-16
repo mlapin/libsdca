@@ -193,7 +193,7 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
             if hasattr(self, "coef_"):
                 del self.coef_
         else:
-            weights = model.weights.T
+            weights = model.weights
             self.coef_ = weights[1:] - weights[:1] if len(classes) == 2 else weights
         self.dual_coef_ = model.dual.T
         self.n_iter_ = model.epochs

@@ -1,8 +1,9 @@
 """The NumPy interface of the native library: losses, coordinate steps and training.
 
-Arrays use conventional Python layouts: X (n, d), W (d, m) and the duals A (n, m) for m
-classes. The objective is 0.5 * ||W - center||^2 + C * sum_i loss(X[i] @ W, y[i]); there is
-no implicit intercept (append a constant feature for a regularized one).
+Arrays are C-contiguous and shared with the native library without copies: X (n, d), the
+weights W (m, d), one row per class, and the duals A (n, m) for m classes. The objective
+is 0.5 * ||W - center||^2 + C * sum_i loss(W @ X[i], y[i]); there is no implicit intercept
+(append a constant feature for a regularized one).
 """
 
 from __future__ import annotations
@@ -309,8 +310,8 @@ def _storage(a: np.ndarray, precision: object) -> tuple[type[np.floating], int]:
     return storage, _WORK[work]
 
 
-def _cast(a: np.ndarray, storage: type[np.floating], fortran: bool = False) -> FloatArray:
-    return np.require(a, dtype=storage, requirements=["F" if fortran else "C", "A"])
+def _cast(a: np.ndarray, storage: type[np.floating]) -> FloatArray:
+    return np.require(a, dtype=storage, requirements=["C", "A"])
 
 
 def _dtype(a: np.ndarray) -> int:
@@ -612,7 +613,8 @@ class Model:
         C: The loss weight.
         num_classes: The number of classes m.
         kernel: Whether the model was trained on a Gram matrix (Kernel input).
-        weights: Primal weights W (d, m) in the storage dtype; None for a kernel.
+        weights: Primal weights W (m, d) in the storage dtype, one row per class; None
+            for a kernel.
         dual: Dual variables A (n, m) in the storage dtype.
         status: One of STATUS; only "solved" guarantees the duality gap.
         epochs: Number of epochs run.
@@ -634,8 +636,7 @@ class Model:
         """Scores (n_test, m) of features x (n_test, d), or of the cross-kernel
         K(test, train) (n_test, n_train) for a kernel model."""
         a = _dense(x, "x")
-        coefficients = self.dual if self.kernel else self.weights
-        assert coefficients is not None
+        coefficients = self.dual if self.weights is None else self.weights.T
         columns = coefficients.shape[0]
         if a.ndim != 2 or a.shape[1] != columns:
             raise ValueError(f"x must have shape (n_test, {columns})")
@@ -712,13 +713,13 @@ def fit(
         eval_epoch: Epochs between evaluations (0: evaluate only at the end); up to two more
             fall between where the gap's trend reaches tol.
         eval_on_start: Also evaluate before the first epoch.
-        recompute_primal: Rebuild W = center + X.T @ A at each evaluation (features).
+        recompute_primal: Rebuild W = center + A.T @ X at each evaluation (features).
         shrinking: What the epochs of the hinge losses leave out: "auto" (the default,
             "both"), "off", "heuristic", "safe" or "both" (docs/API.md#shrinking). The
             other losses update every class of every example and take "auto" only.
         seed: The order of the examples in the epochs, an integer in [0, 2**64).
         num_classes: Number of classes (>= 2); None infers it from y.
-        center: Center (d, m) of the regularizer (features only); None is zero.
+        center: Center (m, d) of the regularizer (features only); None is zero.
         initial_dual: Warm start (n, m), usually model.dual of an earlier fit; the library
             checks it against the objective's feasible set and builds W from it.
         precision: Working precision, as in loss_and_grad; with float32 storage, "float64"
@@ -785,16 +786,16 @@ def _warm_start(
     storage: type[np.floating],
     sizes: tuple[int, int, int],
 ) -> tuple[FloatArray | None, FloatArray | None]:
-    """fit's center (d, m) and initial_dual (n, m) in the storage dtype (sizes: n, d, m),
+    """fit's center (m, d) and initial_dual (n, m) in the storage dtype (sizes: n, d, m),
     or None."""
     n, d, classes = sizes
     c0 = None
     if center is not None:
         if kernel:
             raise ValueError("center applies to feature input only")
-        c0 = _cast(_dense(center, "center"), storage, fortran=True)
-        if c0.shape != (d, classes):
-            raise ValueError(f"center must have shape ({d}, {classes})")
+        c0 = _cast(_dense(center, "center"), storage)
+        if c0.shape != (classes, d):
+            raise ValueError(f"center must have shape ({classes}, {d})")
     a0 = None
     if initial_dual is not None:
         a0 = _cast(_dense(initial_dual, "initial_dual"), storage)
@@ -830,7 +831,7 @@ def _train(
         history = np.empty((rows, len(HISTORY)), np.float64)
     except (MemoryError, ValueError) as error:
         raise ValueError("max_epoch / eval_epoch is too large for the history") from error
-    weights = None if kernel else np.empty((d, classes), storage, order="F")
+    weights = None if kernel else np.empty((classes, d), storage)
     dual = np.empty((n, classes), storage)
     data = _make(
         _Input,

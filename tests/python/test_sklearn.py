@@ -31,7 +31,7 @@ class ModuleFunctionTests:
                 assert model.weights is not None
                 assert model.weights.dtype == dtype
                 np.testing.assert_array_equal(model.weights, ref.weights)
-                z = x.astype(dtype) @ model.weights
+                z = x.astype(dtype) @ model.weights.T
                 values, grad = libsdca.loss_and_grad(z, y, TopKCrossEntropy(2))
                 expected = libsdca.loss_and_grad(
                     z, y, TopKCrossEntropy(2), precision=np.dtype(dtype).name
@@ -165,7 +165,7 @@ class ClassifierTests:
         np.testing.assert_allclose(clf.decision_function(x), x @ clf.coef_[0], rtol=1e-12)
         weights = clf.model_.weights
         assert weights is not None
-        np.testing.assert_array_equal(clf.coef_[0], weights[:, 1] - weights[:, 0])
+        np.testing.assert_array_equal(clf.coef_[0], weights[1] - weights[0])
 
     def test_log_proba_keeps_the_confident_class_below_zero(self):
         clf = self.Classifier(tol=1e-8).fit([[-1.0], [1.0]], [0, 1])
