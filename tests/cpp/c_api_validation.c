@@ -39,17 +39,15 @@ static void null_buffers(void) {
                                 missing == 3 ? NULL : output),
              "loss NULL buffer");
   for (int missing = 0; missing < 4; ++missing)
-    rejected(sdca_update_objective(&options, 2, 3, missing == 0 ? NULL : scores,
-                                   missing == 1 ? NULL : labels, NULL,
-                                   missing == 2 ? NULL : previous, 1.0,
-                                   missing == 3 ? NULL : output),
+    rejected(sdca_update_objective(
+                 &options, 2, 3, missing == 0 ? NULL : scores, missing == 1 ? NULL : labels, NULL,
+                 missing == 2 ? NULL : previous, 1.0, missing == 3 ? NULL : output),
              "update NULL buffer");
   options = fit_options();
   for (int missing = 0; missing < 6; ++missing)
-    rejected(sdca_fit(&options, 2, 1, 3, missing == 0 ? NULL : scores,
-                      missing == 1 ? NULL : labels, NULL, NULL, missing == 2 ? NULL : output,
-                      missing == 3 ? NULL : previous, missing == 4 ? NULL : history, 2,
-                      missing == 5 ? NULL : &result),
+    rejected(sdca_fit(&options, 2, 1, 3, missing == 0 ? NULL : scores, missing == 1 ? NULL : labels,
+                      NULL, NULL, missing == 2 ? NULL : output, missing == 3 ? NULL : previous,
+                      missing == 4 ? NULL : history, 2, missing == 5 ? NULL : &result),
              "fit NULL buffer");
 }
 
@@ -60,9 +58,9 @@ static void malformed_structs(void) {
   rejected(sdca_loss_gradient(NULL, 2, 3, scores, positive, values, output), "loss NULL options");
   rejected(sdca_update_objective(NULL, 2, 3, scores, labels, NULL, previous, 1.0, output),
            "update NULL options");
-  rejected(sdca_fit(NULL, 2, 1, 3, scores, labels, NULL, NULL, output, previous, history, 2,
-                    &result),
-           "fit NULL options");
+  rejected(
+      sdca_fit(NULL, 2, 1, 3, scores, labels, NULL, NULL, output, previous, history, 2, &result),
+      "fit NULL options");
   const size_t sizes[2] = {sizeof options - sizeof(int), sizeof options + 8};
   for (size_t i = 0; i < 2; ++i) {
     sized.size = sizes[i];
@@ -85,9 +83,9 @@ static void malformed_offsets(void) {
   struct sdca_options options = SDCA_OPTIONS_DEFAULT;
   options.loss = SDCA_MULTILABEL_CROSS_ENTROPY;
   for (size_t i = 0; i < sizeof offsets / sizeof offsets[0]; ++i)
-    rejected(sdca_update_objective(&options, 2, 3, scores, labels, offsets[i], previous, 1.0,
-                                   output),
-             "non-increasing or overflowing offsets");
+    rejected(
+        sdca_update_objective(&options, 2, 3, scores, labels, offsets[i], previous, 1.0, output),
+        "non-increasing or overflowing offsets");
 }
 
 static void overflowing_extents(void) {
@@ -256,11 +254,11 @@ static void in_place_gradient(void) {
       int status = sdca_cross_entropy_forward(&options, dtype, N, K, z, target, -100, weights,
                                               row_values, stats, totals);
       if (status == SDCA_OK)
-        status = sdca_cross_entropy_backward(&options, dtype, N, K, z, target, -100, weights,
-                                             stats, scale, 1, separate);
+        status = sdca_cross_entropy_backward(&options, dtype, N, K, z, target, -100, weights, stats,
+                                             scale, 1, separate);
       if (status == SDCA_OK)
-        status = sdca_cross_entropy_backward(&options, dtype, N, K, z, target, -100, weights,
-                                             stats, scale, 1, z);
+        status = sdca_cross_entropy_backward(&options, dtype, N, K, z, target, -100, weights, stats,
+                                             scale, 1, z);
       if (status != SDCA_OK || memcmp(z, separate, N * K * size) != 0) {
         ++failures;
         fprintf(stderr, "FAIL: in-place gradient dtype %d precision %d (%d, %s)\n", dtype,
@@ -285,9 +283,45 @@ static void step_scale_beyond_float(void) {
            "distillation update C beyond the data type");
 }
 
+static void abort_on_row(void* context, size_t begin, size_t end) {
+  (void)context;
+  (void)begin;
+  (void)end;
+  ++failures;
+  fputs("FAIL: sdca_run_rows called callback on empty range\n", stderr);
+}
+
+static void mark_rows(void* context, size_t begin, size_t end) {
+  unsigned char* seen = (unsigned char*)context;
+  size_t i;
+  for (i = begin; i < end; ++i) seen[i] = 1;
+}
+
+static void run_rows_bounds_and_empty(void) {
+  unsigned char seen[8] = {0};
+  size_t i;
+  rejected(sdca_run_rows(1, 1, 1, NULL, NULL), "null row callback");
+  if (sdca_run_rows(0, 1000, 8, abort_on_row, NULL) != SDCA_OK) {
+    ++failures;
+    fputs("FAIL: sdca_run_rows rejected empty batch\n", stderr);
+  }
+  if (sdca_run_rows(8, 1000, 100000, mark_rows, seen) != SDCA_OK) {
+    ++failures;
+    fprintf(stderr, "FAIL: sdca_run_rows uncapped threads (%s)\n", sdca_last_error());
+  }
+  for (i = 0; i < 8; ++i) {
+    if (seen[i] != 1) {
+      ++failures;
+      fputs("FAIL: sdca_run_rows missed row under capped threads\n", stderr);
+      break;
+    }
+  }
+}
+
 int main(void) {
   in_place_gradient();
   step_scale_beyond_float();
+  run_rows_bounds_and_empty();
   precision_pairs();
   projection_modes();
   fit_result_fields();
@@ -309,8 +343,8 @@ int main(void) {
   /* Optional kernel weights and single-label offsets remain nullable. */
   struct sdca_options kernel = fit_options();
   kernel.kernel = 1;
-  if (sdca_fit(&kernel, 2, 1, 3, scores, labels, NULL, NULL, NULL, previous, history, 2,
-               &result) != SDCA_OK ||
+  if (sdca_fit(&kernel, 2, 1, 3, scores, labels, NULL, NULL, NULL, previous, history, 2, &result) !=
+          SDCA_OK ||
       strcmp(sdca_last_error(), "") != 0) {
     ++failures;
     fprintf(stderr, "FAIL: optional NULL buffers (%s)\n", sdca_last_error());

@@ -4,11 +4,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/cpp-tests
-blas="${SDCA_BLAS_LIBRARY:--l:libblas.so.3}"
+default_blas=-l:libblas.so.3
+if [[ "$(uname -s)" == Darwin ]]; then
+  default_blas=-lblas
+fi
+blas="${SDCA_BLAS_LIBRARY:-$default_blas}"
 if [[ "$blas" == /* ]]; then
   export LD_LIBRARY_PATH="$(dirname "$blas")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-compiler_flags=(-std=c++11 -DBLAS_DEFAULT_LOCAL_HEADER -DSDCA_VERSION='"0.3.0-test"'
+compiler_flags=(-std=c++11 -DBLAS_DEFAULT_LOCAL_HEADER -DSDCA_VERSION='"test"'
   -Iinclude -Itests/cpp -Ivendor/googletest/googletest/include -Ivendor/googletest/googletest)
 if [[ "${1:-}" == "--sanitize" ]]; then
   g++ "${compiler_flags[@]}" -O1 -g -fno-omit-frame-pointer \

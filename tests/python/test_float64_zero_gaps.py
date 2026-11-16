@@ -1,8 +1,8 @@
 """float64 logits [0] * p + [-gap] * (C - p) (the first p positive) at gaps 700 to 752, where
 the losses and entries become float64 subnormals and then zero, against 60-digit references.
 
-Every entry is within the release budget (numerics.md, how it is verified: 64 output eps plus
-one subnormal quantum), with the CPU extension on and off. Beyond the spread of normal
+Every entry is within the release budget (64 output eps plus one subnormal
+quantum), with the CPU extension on and off. Beyond the spread of normal
 exponentials (-708) the boolean-mask rows once summed exp(z - max) of every competitor, each
 rounded into subnormals first: the extension's loss and positive entries were off by up to
 2e4 quanta at 1,000 classes, and the native library's rows of two positives by up to 124.

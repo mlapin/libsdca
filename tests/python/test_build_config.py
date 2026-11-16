@@ -117,25 +117,30 @@ class BuildConfigTests:
             command = run.call_args.args
             assert command[command.index("--fail-under-line") + 1] == "90"
 
-    def test_quality_versions_cover_changelog_and_c_header(self, subtests: pytest.Subtests):
+    def test_quality_versions_cover_every_copy(self, subtests: pytest.Subtests):
         root = Path(__file__).resolve().parents[2]
         tool = load_module("quality_tool_test", root / "tools/quality.py")
+        bump = load_module("bump_version_test", root / "tools/bump_version.py")
         tool.check_versions()
         files = [
-            "CHANGELOG.md", "CMakeLists.txt", "docs/C.md", "include/sdca/c_api.h",
-            "matlab/make.m", "pyproject.toml", "python/build.py", "python/libsdca/__init__.py",
-            "rust/Cargo.toml", "setup.py", "CITATION.cff", "python/README.md", "rust/README.md",
+            "VERSION", "CHANGELOG.md", "pyproject.toml", "python/libsdca/__init__.py",
+            "rust/Cargo.toml", "CITATION.cff", "python/README.md", "rust/README.md",
+            "include/sdca/c_api.h", "CMakeLists.txt", "python/libsdca/_core.py", "rust/src/solver.rs",
         ]  # fmt: skip
-        version = tool._version(r'^version = "([^"]+)"', "pyproject.toml")
+        version = (root / "VERSION").read_text().strip()
         heading = tool._version(rf"^(## {re.escape(version)} \(.*\))$", "CHANGELOG.md")
         for path, old, new in [
+            ("VERSION", version, "9.9.9"),
             ("CHANGELOG.md", heading, "## 9.9.9 (2026-01-01)"),
             ("CHANGELOG.md", heading, f"## {version} (2026-13-01)"),
-            ("include/sdca/c_api.h", f'e.g. "{version}"', 'e.g. "9.9.9"'),
+            ("rust/Cargo.toml", f'version = "{version}"', 'version = "9.9.9"'),
+            ("python/libsdca/__init__.py", f'= "{version}"', '= "9.9.9"'),
             ("CITATION.cff", f"version: {version}", "version: 9.9.9"),
             ("CITATION.cff", "date-released: ", "date-released: 1999-01-01 # "),
             ("python/README.md", f"libsdca/blob/v{version}/", "libsdca/blob/v9.9.9/"),
             ("rust/README.md", f"--tag v{version}", "--tag v9.9.9"),
+            ("rust/src/solver.rs", "const ABI_VERSION: c_int = ", "const ABI_VERSION: c_int = 9"),
+            ("CHANGELOG.md", heading, "## Unreleased"),
         ]:
             with subtests.test(path=path, new=new), tempfile.TemporaryDirectory() as directory:
                 copy = Path(directory)
@@ -145,8 +150,14 @@ class BuildConfigTests:
                 target = copy / path
                 assert old in target.read_text()
                 target.write_text(target.read_text().replace(old, new, 1))
-                with patch.object(tool, "ROOT", copy), pytest.raises((SystemExit, ValueError)):
-                    tool.check_versions()
+                with patch.object(tool, "ROOT", copy):
+                    with pytest.raises((SystemExit, ValueError)):
+                        tool.check_versions()
+                    if new == "## Unreleased":
+                        bump.bump("9.9.9", "2026-01-02", root=copy)
+                        tool.check_versions()
+                        assert (copy / "VERSION").read_text() == "9.9.9\n"
+                        assert "## 9.9.9 (2026-01-02)" in (copy / "CHANGELOG.md").read_text()
 
     def test_installed_runner_rejects_cached_source_import(self, subtests: pytest.Subtests):
         runner = load_module("installed_runner_test", Path(__file__).with_name("conftest.py"))

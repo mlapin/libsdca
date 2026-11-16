@@ -95,7 +95,8 @@ named! {
         Auto = 0, "auto",
         /// Every class of every example in every epoch.
         Off = 1, "off",
-        /// Between full passes (every tenth epoch), skip the examples whose
+        /// Between full passes (after `eval_epoch` full passes of work, at most
+        /// 50 epochs), skip the examples whose
         /// last step left their duals unchanged and step an example on its
         /// classes of nonzero dual.
         Heuristic = 2, "heuristic",

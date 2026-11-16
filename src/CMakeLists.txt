@@ -20,6 +20,7 @@ if(SDCA_BUILD_MATLAB AND Matlab_FOUND)
   add_definitions(
     -DMEX_PROX="${MEX_PROX}"
     -DMEX_SOLVE="${MEX_SOLVE}"
+    -DMEX_LOSS="${MEX_LOSS}"
     )
 
   matlab_add_mex(

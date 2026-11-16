@@ -17,8 +17,8 @@ fn data(n: usize, d: usize, classes: usize) -> (Vec<f64>, Vec<usize>) {
 }
 
 fn check<T: Real + Into<f64>>(objective: Objective, x: &[T], y: &[usize], d: usize) -> String {
-    // Real is sealed to f32/f64. Both default to f64 working arithmetic,
-    // but primal/dual storage rounding still follows the element type.
+    // Real is sealed to f32/f64. Each defaults to working arithmetic of its own
+    // type, and primal/dual storage rounding follows the element type.
     let wide = std::mem::size_of::<T>() == std::mem::size_of::<f64>();
     let (n, classes) = (y.len(), 4);
     let tol = if wide { 1e-8 } else { 1e-4 };

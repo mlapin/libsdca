@@ -3,7 +3,7 @@
 
 TEST(SolverContextTest, feature_in_multiclass_out) {
   typedef float Data;
-  typedef double Result;
+  typedef float Result;
 
   sdca::size_type n = 50, m = 3, d = 5, pow_from = 0, pow_to = 1;
   std::vector<Data> features;
@@ -48,7 +48,7 @@ TEST(SolverContextTest, feature_in_multiclass_out) {
 
 TEST(SolverContextTest, feature_in_multilabel_out) {
   typedef float Data;
-  typedef double Result;
+  typedef float Result;
 
   sdca::size_type n = 50, m = 3, d = 5, pow_from = 0, pow_to = 1;
   std::vector<Data> features;

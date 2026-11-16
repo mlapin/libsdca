@@ -65,15 +65,6 @@ def test_integer_entropy(subtests: pytest.Subtests):
                 z = logits(rows, classes)
                 assert _entropy.covers(z.device, rows, classes) == fused
                 assert _entropy.fused(z) == fused  # pyright: ignore[reportArgumentType]
-                # precision="float32" (explicit) takes the fused float32 entropy or float64.
-                path = sdca_torch._indexed_entropy_path(
-                    z,  # pyright: ignore[reportArgumentType]
-                    target(rows),  # pyright: ignore[reportArgumentType]
-                    "cross_entropy",
-                    1,
-                    explicit=True,
-                )
-                assert path == fused
     # Without the kernel (no Triton or no NVIDIA GPU) nothing is fused.
     with mock.patch.object(_entropy, "_kernel", lambda: None):
         assert not _entropy.fused(logits(1, 2))  # pyright: ignore[reportArgumentType]

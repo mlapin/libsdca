@@ -30,7 +30,7 @@
 //! The element type of the data, f64 or f32, selects the storage; the
 //! `precision` option selects the working arithmetic of [`fit`],
 //! [`coordinate_update`] and [`loss_and_grad`]. Its default, `None`, is
-//! [`Real::DEFAULT_PRECISION`] ([`Precision::Float64`] for both f64 and f32).
+//! [`Real::DEFAULT_PRECISION`] ([`Precision::Float32`] for f32, [`Precision::Float64`] for f64).
 //! `Some(Precision::Float32)` computes f32 data in float, accurate to float
 //! rounding of the scores: the entropy steps are faster, the hinge steps are
 //! not. Requesting `Precision::Float32` on f64 data is an

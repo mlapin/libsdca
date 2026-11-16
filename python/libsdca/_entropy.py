@@ -23,6 +23,11 @@ class _Context(Protocol):
 
 def _power(e: torch.Tensor) -> torch.Tensor:
     """2**e exactly, of integers e in [-1022, 1023]."""
+    if _ops.transformed():
+        # Older torch.func cannot batch dtype reinterpretation views. Use
+        # exp2: torch 2.1 ldexp forms integer powers in float32, while CUDA
+        # pow can differ by one ULP even for exactly representable powers.
+        return torch.exp2(e.to(torch.float64))
     return ((e.to(torch.int64) + 1023) << 52).view(torch.float64)
 
 

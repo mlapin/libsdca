@@ -129,6 +129,8 @@ class VocabularyContractTests:
         )
         assert Solver().lib.sdca_history_fields() == len(HISTORY)
         assert Solver().lib.sdca_abi_version() == ABI_VERSION
+        # A stale native library with the same ABI would otherwise load silently.
+        assert Solver().version == libsdca.__version__
         assert HISTORY[:3] == ("epoch", "primal", "dual")
         assert list(PRECISIONS) == ["float32", "float64"]
 
@@ -257,10 +259,16 @@ class BoundaryContractTests:
             {"num_classes": True},
             {"max_epoch": True},
             {"eval_epoch": False},
+            {"C": True},
+            {"gamma": True},
         ]
         for bad in invalid:
             with subtests.test(bad=bad), pytest.raises(ValueError):
                 solver.fit([[1.0]], [0], **bad)
+        bad_options: list[dict[str, Any]] = [{"gamma": True}, {"alpha": True}]
+        for bad in bad_options:
+            with subtests.test(bad=bad), pytest.raises(ValueError):
+                libsdca.loss_and_grad([[0.0, 1.0]], [0], "topk_hinge_alpha", **bad)
 
     def test_coordinate_update_output_is_valid_warm_start(self):
         rng = np.random.default_rng(2026)

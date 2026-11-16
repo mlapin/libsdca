@@ -1,8 +1,8 @@
 name: CI
 on:
-  # Pushes to main or master and pull requests, each run once.
+  # Pushes to the main branches and pull requests, each run once.
   push:
-    branches: [main, master]
+    branches: [main, master, integration]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: '3.10'
       # Install pinned linters/formatters (ruff, clang-format, clang-tidy, basedpyright, lizard) and scientific stubs.
-      - run: python -m pip install -r requirements-dev.txt numpy scipy mpmath scikit-learn jax
+      - run: python -m pip install -r requirements-dev.txt numpy scipy mpmath matplotlib scikit-learn jax
       # Install CPU PyTorch so basedpyright can resolve torch types across the package and tests.
       - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       # Run ruff, clang-format, basedpyright, version consistency, complexity ceiling, and clang-tidy.
@@ -193,8 +193,6 @@ jobs:
       - run: CXX=c++ python python/build.py --blas-backend EXTERNAL
       # Run the core NumPy and scikit-learn test suite in parallel across workers.
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core
-      # Run the serial thread-scaling tests on macOS arm64.
-      - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group core -m serial
       # Run the PyTorch CPU test suite (including the Apple Clang CPU extension) in parallel.
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group torch -m 'not long'
 

@@ -18,13 +18,12 @@ import ctypes
 import functools
 import math
 import re
-import warnings
 from collections.abc import Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any
 
-from . import _extensions
+from . import _extensions, _triton_build
 
 ENV = "SDCA_CUDA_LAUNCHER"
 # The fused kernels need Triton 3.3: 3.2 aborts compiling float64 to bfloat16 stores.
@@ -39,6 +38,18 @@ POINTER, INT32 = 8, 4
 ROWS = 2**28
 
 
+class _Torch:
+    """torch, imported on first use: the kernel modules also compile for JAX without it."""
+
+    def __getattr__(self, name: str) -> Any:
+        import torch
+
+        return getattr(torch, name)
+
+
+torch: Any = _Torch()
+
+
 def device_guard(tensor: Any) -> AbstractContextManager[None]:
     """Select a CUDA tensor's device for a direct launch, preserving the caller's.
 
@@ -47,7 +58,10 @@ def device_guard(tensor: Any) -> AbstractContextManager[None]:
     """
     import torch
 
-    return torch.cuda.device(tensor.device) if tensor.is_cuda else nullcontext()
+    if tensor.is_cuda:
+        _triton_build.ensure_compiler()
+        return torch.cuda.device(tensor.device)
+    return nullcontext()
 
 
 def _release(version: str) -> tuple[int, int] | None:
@@ -176,7 +190,7 @@ def handles(kernels: Sequence[tuple[Any, tuple[int, ...]]], *extra: int) -> Any:
 
 
 def _warn(message: str) -> None:
-    warnings.warn(f"libsdca: {message}", RuntimeWarning, stacklevel=3)
+    _extensions.warn(f"libsdca: {message}")
 
 
 @functools.cache

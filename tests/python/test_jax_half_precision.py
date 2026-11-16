@@ -1,9 +1,9 @@
 """float16/bfloat16 logits in libsdca.jax against high-precision references.
 
 References are computed at the represented 16-bit inputs: the float64 native losses
-(libsdca.loss_and_grad, within 64 float64 eps of 100-digit values, numerics.md) and the
+(libsdca.loss_and_grad, within 64 float64 eps of 100-digit values) and the
 120- and 80-digit distillation references of test_distillation_references. The envelope is
-the PyTorch one of numerics.md: one rounding to the output dtype, plus (float32 work) 100
+the PyTorch one of docs/API.md (Known limits): one rounding to the output dtype, plus (float32 work) 100
 float32 eps of max(|loss|, 1) and 2,000 float32 eps of the row's largest gradient entry,
 plus one subnormal quantum of the gradient dtype. float64 work (precision="float64") keeps
 64 float64 eps of each budget instead. float32 work sums the rows in float32: reduced values
@@ -87,7 +87,7 @@ def _run(f: Any, z: jax.Array, reduction: str) -> tuple[np.ndarray, np.ndarray, 
 def assert_envelope(
     z: jax.Array,
     value: jax.Array,
-    gradient: jax.Array,
+    gradient: jax.Array | None,
     ref_value: np.ndarray,
     ref_gradient: np.ndarray,
     reduced: float,
@@ -95,7 +95,7 @@ def assert_envelope(
     message: str,
 ) -> None:
     assert value.dtype == jnp.float32, message
-    assert gradient.dtype == z.dtype, message
+    assert gradient is None or gradient.dtype == z.dtype, message
     wide = precision == "float64"
     if wide:
         reduced = 0.0
@@ -105,6 +105,8 @@ def assert_envelope(
     v, r = np.asarray(value, np.float64), np.asarray(ref_value, np.float64)
     bound = out.eps * np.abs(r) + value_work * np.maximum(np.abs(r), 1) + reduced + out.tiny
     assert np.all(np.abs(v - r) <= bound), f"{message} value {v} vs {r}"
+    if gradient is None:
+        return
     g, rg = np.asarray(gradient, np.float64), ref_gradient
     big = np.abs(rg).max(-1, keepdims=True)
     quantum = float(dtype.tiny) * float(dtype.eps)

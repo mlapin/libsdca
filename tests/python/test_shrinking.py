@@ -130,7 +130,9 @@ def test_float32_digits_reach_float64_tolerances():
     preprocessing = pytest.importorskip("sklearn.preprocessing")
     x, y = datasets.load_digits(return_X_y=True)
     x = preprocessing.StandardScaler().fit_transform(x).astype(np.float32)
-    model = libsdca.fit(x, y, "multiclass_hinge", C=1.0, tol=1e-6, max_epoch=4000)
+    model = libsdca.fit(
+        x, y, "multiclass_hinge", C=1.0, tol=1e-6, max_epoch=4000, precision="float64"
+    )
     assert model.status == "solved" and relative_gap(model) <= 1e-6
     assert model.weights is not None and model.weights.dtype == model.dual.dtype == np.float32
     w = model.weights.astype(np.float64)

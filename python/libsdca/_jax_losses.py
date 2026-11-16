@@ -9,12 +9,13 @@ from __future__ import annotations
 import functools
 import math
 from collections.abc import Callable
-from typing import cast
 
 import jax
 import jax.numpy as jnp
 from jax import lax
 from jax.typing import DTypeLike
+
+from ._jax_compat import nextafter, optimization_barrier
 
 _INT = jnp.int32
 # Smooth hinges solve from this many of the largest margins, and from all of them only when a
@@ -58,7 +59,7 @@ def _cpu() -> bool:
 def _float32_top_k(x: jax.Array, k: int) -> tuple[jax.Array, jax.Array]:
     # The fence keeps XLA:CPU (jaxlib 0.6) from moving the slice of the result into a
     # conditional, which turns top_k into a sort of whole rows (50 times slower).
-    values, index = lax.optimization_barrier(lax.top_k(x, k))
+    values, index = optimization_barrier(lax.top_k(x, k))
     return values, index
 
 
@@ -107,7 +108,7 @@ def over(x: jax.Array, scalar: float) -> jax.Array:
     if math.frexp(scalar)[0] == 0.5 and float(info.tiny) <= min(scalar, 1 / scalar):
         return x if scalar == 1 else x * jnp.asarray(1 / scalar, x.dtype)
     shift = 64 if scalar < 2.0**-1000 else 0
-    divisor = lax.optimization_barrier(jnp.asarray(scalar * 2.0**shift, x.dtype))
+    divisor = optimization_barrier(jnp.asarray(scalar * 2.0**shift, x.dtype))
     quotient = x / divisor
     return quotient * 2.0**shift if shift else quotient
 
@@ -583,45 +584,18 @@ def _hinge_scores(
     work: DTypeLike,
     objective: str,
     k: int,
-    first: tuple[jax.Array, jax.Array] | None = None,
-    positive_of: Callable[[], jax.Array] | None = None,
-) -> tuple[tuple[jax.Array, ...], Callable[[], jax.Array] | None]:
-    """_hinge_topk from the k largest scores z (and the next), with margins at those only, and
-    for k = 1 a finer test of the rows that do not hold.
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """The k > 1 largest margins from their scores, with a check for rounded ties.
 
-    Margins grow with the scores, so the k largest scores (ties at the lowest index) have the k
-    largest margins, unless rounding makes the k-th margin equal to that of a smaller score:
-    held is false for those rows. The scores at and below the k-th then have smaller margins
-    when the next candidate's does, or when it ties the k-th score and the next smaller score
-    has a smaller margin. For k = 1 held tests the next smaller representable score, and the
-    finer test the next smaller score of the row (another pass). first: the largest masked
-    score and its first class, for k = 1 (else the plain maximum and a pass for the class,
-    which the losses alone skip); positive_of: positive anew, for the finer test (a
-    conditional's branch would otherwise take a copy of positive)."""
-    masked = jnp.where(positive, -jnp.inf, z)
-    recheck: Callable[[], jax.Array] | None = None
-    if k == 1:
-        if first is None:
-            top, order = masked.max(-1, keepdims=True), row_first_max(masked)[1]
-        else:
-            top, order = first
-        h = _margin(top.astype(work), z0)
-        held = _margin(jnp.nextafter(top, -jnp.inf).astype(work), z0) < h
-
-        def below() -> jax.Array:
-            again = masked if positive_of is None else jnp.where(positive_of(), -jnp.inf, z)
-            smaller = jnp.where(again < top, again, -jnp.inf).max(-1, keepdims=True)
-            return _margin(smaller.astype(work), z0) < h
-
-        recheck = below
-    else:
-        scores, order = top_k(masked, k + 1)
-        h = _margin(scores.astype(work), z0)
-        smaller = _margin(jnp.nextafter(scores[:, k - 1 : k], -jnp.inf).astype(work), z0)
-        tie = scores[:, k : k + 1] == scores[:, k - 1 : k]
-        held = (h[:, k : k + 1] < h[:, k - 1 : k]) | (tie & (smaller < h[:, k - 1 : k]))
-        h, order = h[:, :k], order[:, :k]
-    return _hinge_entries(h, order, held, objective, k), recheck
+    held is false where a smaller score may have the same rounded margin as the
+    k-th. Those rows use the full top-k margin calculation.
+    """
+    scores, order = top_k(jnp.where(positive, -jnp.inf, z), k + 1)
+    h = _margin(scores.astype(work), z0)
+    smaller = _margin(nextafter(scores[:, k - 1 : k], -jnp.inf).astype(work), z0)
+    tie = scores[:, k : k + 1] == scores[:, k - 1 : k]
+    held = (h[:, k : k + 1] < h[:, k - 1 : k]) | (tie & (smaller < h[:, k - 1 : k]))
+    return _hinge_entries(h[:, :k], order[:, :k], held, objective, k)
 
 
 def _smooth_single(
@@ -741,7 +715,7 @@ def _residual(
     inv_q = 1 / q
     linear = s / (alpha + inv_q)
     r = linear / (1 + (linear * inv_q) / (2 * (1 + alpha * q)))
-    r = jnp.minimum(jnp.maximum(r, lo), jnp.nextafter(q, jnp.zeros_like(q)))
+    r = jnp.minimum(jnp.maximum(r, lo), nextafter(q, jnp.zeros_like(q)))
     low, high = jnp.broadcast_to(lo, r.shape), jnp.broadcast_to(q, r.shape)
     floor = (alpha + inv_q) * float(info.tiny)
     for _ in range(steps):
@@ -917,8 +891,8 @@ def _recover_tiny_tail(
     origin = jnp.where(tiny, block.other_max, 0.0)
     terms = jnp.exp(jnp.where(block.positive | ~tiny, -jnp.inf, block.v - origin))
     half = jnp.exp(jnp.where(tiny, gap, 0.0) / 2)
-    mass = half * cast(jax.Array, lax.optimization_barrier(half * _sum(terms)))
-    hidden = cast(jax.Array, lax.optimization_barrier(half * terms))
+    mass = half * optimization_barrier(half * _sum(terms))
+    hidden = optimization_barrier(half * terms)
     recovered = jnp.where(block.positive, mass, -hidden * half)
     return jnp.where(tiny[:, 0], mass[:, 0], value), jnp.where(tiny, recovered, a)
 
@@ -957,7 +931,7 @@ def proximal_entropy(
     cross = -logs.sum(-1) * block.q[:, 0]
     # The sum can overflow while its mean is representable. Preserve ordinary
     # rounding, and keep XLA from moving this exceptional scaling past the sum.
-    scaled = -lax.optimization_barrier(logs * block.q).sum(-1)
+    scaled = -optimization_barrier(logs * block.q).sum(-1)
     cross = jnp.where(jnp.isfinite(cross), cross, scaled)
     value = cross + ((alpha * a) * a).sum(-1) / 2
     value, a = _recover_tiny_tail(block, value, a)
@@ -1053,8 +1027,8 @@ def _topk_hinge(
     positive_of: Callable[[], jax.Array] | None = None,
 ) -> tuple[jax.Array, jax.Array]:
     """The nonsmooth top-k hinge loss (in work) and gradient (in the dtype of z) of scores z,
-    target scores z0 (in work) and their classes label; first and positive_of as in
-    _hinge_scores."""
+    target scores z0 (in work) and their classes label. first is the largest masked
+    score and its first class for k = 1; positive_of can rebuild the label mask."""
     dtype, position = z.dtype, jnp.arange(z.shape[-1])
 
     def gradient_of(order: jax.Array, entries: jax.Array) -> jax.Array:
@@ -1068,6 +1042,14 @@ def _topk_hinge(
         else:
             gradient = _put(jnp.zeros_like(z), order, stored)
         return jnp.where(position == label, total, gradient)
+
+    if k == 1:
+        # Select scores, not rounded unit margins. This also avoids a full-row
+        # fallback when tiny but distinct scores all have the same rounded margin.
+        top, order = first if first is not None else row_first_max(jnp.where(positive, -jnp.inf, z))
+        value = jnp.maximum(_margin(top.astype(work), z0), 0)
+        gradient = gradient_of(order, (value > 0).astype(work))
+        return jnp.where(invalid[:, 0], jnp.nan, value[:, 0]), jnp.where(invalid, jnp.nan, gradient)
 
     if not _cpu():
         # Every margin, without the conditionals that spare that pass on the CPU.
@@ -1094,20 +1076,14 @@ def _topk_hinge(
 
         # The k largest margins are those of the k largest scores, whichever classes
         # tie: only the subgradient may need every margin.
-        scores, recheck = _hinge_scores(z, z0, positive, work, objective, k, first, positive_of)
-        value, order, entries, held = scores
+        value, order, entries, held = _hinge_scores(z, z0, positive, work, objective, k)
 
         def candidates() -> tuple[jax.Array, jax.Array]:
             return order.astype(_INT), entries
 
-        def finer() -> tuple[jax.Array, jax.Array]:
-            assert recheck is not None
-            return lax.cond((recheck() | invalid).all(), candidates, every)
-
-        # The branches choose the k classes; the gradient is written outside them, where
-        # XLA fuses it with its uses.
-        fallback = every if recheck is None else finer
-        gradient = gradient_of(*lax.cond((held | invalid).all(), candidates, fallback))
+        # The branches choose the k classes; the gradient is written outside them,
+        # where XLA fuses it with its uses.
+        gradient = gradient_of(*lax.cond((held | invalid).all(), candidates, every))
     return value, gradient
 
 
@@ -1139,7 +1115,7 @@ def loss_and_gradient(
     w = z.astype(work)
     # Opaque to XLA, which would multiply by the reciprocal of a constant divisor (infinite
     # for gamma below 5.6e-309, 0 * inf = nan) instead of dividing.
-    gamma, cap, alpha, log_alpha = lax.optimization_barrier(scalars)
+    gamma, cap, alpha, log_alpha = optimization_barrier(scalars)
     position = jnp.arange(z.shape[-1])
     if target.ndim == 1:
         # Labels need no pass over a mask: out of range, they mark no class.

@@ -7,7 +7,10 @@
  * Every computing function returns SDCA_OK, SDCA_INVALID_ARGUMENT for invalid
  * inputs or options, or SDCA_FAILURE for a failed computation; then
  * sdca_last_error() describes the failure (thread-local; cleared by the next
- * success). Arrays are row-major: features x (n, d), a Gram matrix (n, n),
+ * success). A fit whose coordinate steps fail numerically returns SDCA_OK with
+ * result->status SDCA_STATUS_FAILED. A cold-start fit that returns an error
+ * may have zeroed w and the duals (the kernel and step-scale checks run after
+ * initialization). Arrays are row-major: features x (n, d), a Gram matrix (n, n),
  * scores z and dual variables (n, num_classes); the weights w and the center
  * are (d, num_classes) column-major. Labels are zero-based; a label set lists
  * sorted labels without duplicates, with offsets (n + 1) delimiting the rows.
@@ -60,9 +63,9 @@ extern "C" {
 
 /* shrinking: what the epochs of fit leave out for the hinge objectives (the
  * entropy objectives update every class of every example). HEURISTIC: between
- * full passes (every tenth epoch and the first), skip the examples whose last
- * step left their duals unchanged and step a single-label example on its
- * classes of nonzero dual. SAFE: leave out for good the zero duals that the
+ * full passes (after eval_epoch full passes of work, at most 50 epochs), skip
+ * the examples whose last step left their duals unchanged and step a
+ * single-label example on its classes of nonzero dual. SAFE: leave out for good the zero duals that the
  * certified gap proves zero at the optimum (gap-safe screening; single-label
  * hinges on features). BOTH: the two. AUTO: the default, BOTH. Every
  * evaluation, and so the certificate of SOLVED, covers every example. */
@@ -128,8 +131,10 @@ struct sdca_options {
   int projection_precision; /* all: SDCA_PROJECTION_* [FLOAT64] */
   size_t num_threads;       /* all: for fit the evaluations [SDCA_THREADS_DEFAULT] */
   size_t max_epoch;         /* fit: [1000] */
-  size_t eval_epoch;        /* fit: evaluate every eval_epoch >= 1 epochs, and up to
-                               twice between where the gap's trend reaches tol [10] */
+  size_t eval_epoch;        /* fit: evaluate after eval_epoch >= 1 full passes of work
+                               (every eval_epoch epochs without shrinking, at most 50
+                               apart), and up to twice between where the gap's trend
+                               reaches tol [10] */
   double tol;               /* fit: the relative duality gap to reach, tol >= 0 [1e-3] */
   int eval_on_start;        /* fit: also evaluate before the first epoch [0] */
   int recompute_primal;     /* fit: rebuild w = center + x' a at each evaluation [1] */
@@ -171,7 +176,7 @@ struct sdca_fit_result {
 
 /* SDCA_ABI_VERSION of the library; compare it with the header's first. */
 int sdca_abi_version(void);
-/* The library version, e.g. "0.3.1"; a static string. */
+/* The library version (the VERSION file at build time); a static string. */
 const char* sdca_version(void);
 /* The message of this thread's last failed call, "" after a success; valid
  * until the thread's next computing call. */
@@ -187,7 +192,8 @@ size_t sdca_history_fields(void);
  * labels: at least one per row, exactly one for the top-k and multiclass
  * losses, and a negative class for multilabel_hinge and proximal_cross_entropy.
  * gamma and alpha are finite. SDCA_FLOAT32 computes in float, in double where
- * float cannot hold gamma, alpha or a row's spread. */
+ * float cannot hold gamma, alpha or a row's spread, and for the smoothed hinges
+ * (gamma > 0) as SDCA_FLOAT32_FLOAT64. */
 int sdca_loss_gradient(const struct sdca_options* options, size_t n, size_t num_classes,
                        const void* z, const uint8_t* positive, double* values, void* gradients);
 
@@ -269,8 +275,9 @@ enum sdca_dtype {
  * n >= 0 and num_classes >= 2, and read the options size, precision and
  * num_threads (sdca_loss_gradient_rows also its loss options). precision
  * selects the working arithmetic only: SDCA_FLOAT32 float (not for float64
- * storage), SDCA_FLOAT32_FLOAT64 and SDCA_FLOAT64 double. Conversions into
- * 16-bit storage round to nearest even, once. */
+ * storage; sdca_loss_gradient_rows takes double for the smoothed hinges),
+ * SDCA_FLOAT32_FLOAT64 and SDCA_FLOAT64 double. Conversions into 16-bit
+ * storage round to nearest even, once. */
 
 /* Cross-entropy of integer labels (n) as torch.nn.functional.cross_entropy:
  * rows whose label equals ignore_index are neither read nor checked; the
@@ -293,7 +300,8 @@ int sdca_cross_entropy_forward(const struct sdca_options* options, int dtype, si
  * w[label] times the derivative of its loss, rounded once into dtype, zero
  * where ignored; scale_stride is 0 (one scale) or 1 (one per row). z, labels,
  * ignore_index, class_weights and precision must be those of the forward call
- * that gave stats (z is not checked again). Double arithmetic gives the
+ * that gave stats (z and scale are not checked: a nonfinite scale gives NaN
+ * gradients, as a nonfinite upstream gradient does). Double arithmetic gives the
  * gradients of sdca_entropy_gradient. SDCA_FLOAT32 takes the competitors'
  * entries as squared float halves, exp((z_j - maximum) / 2)^2 times the row
  * factor, in double where that factor exceeds the float range, and the target
@@ -318,6 +326,14 @@ int sdca_loss_gradient_rows(const struct sdca_options* options, int dtype, size_
                             size_t num_classes, const void* z, const int64_t* labels,
                             const uint8_t* positive, double* values, void* gradients);
 
+/* Synchronous row scheduling for native extension kernels. The callback processes
+ * [begin, end); context remains valid until this call returns. It may be called
+ * concurrently, and must not call back into this scheduler. num_threads follows
+ * SDCA_THREADS_DEFAULT / SDCA_NUM_THREADS, as the loss APIs. */
+typedef void (*sdca_row_callback)(void* context, size_t begin, size_t end);
+int sdca_run_rows(size_t rows, size_t work_per_row, size_t num_threads, sdca_row_callback callback,
+                  void* context);
+
 /* distillation_loss of student and teacher logits (n, num_classes), both in
  * dtype, at temperature T (finite, positive): values (n) the cross-entropy
  * H(p, q) per row of p = softmax(teacher / T) and q = softmax(student / T),
@@ -331,7 +347,8 @@ int sdca_distillation_forward(const struct sdca_options* options, int dtype, siz
                               double temperature, double* values, double* stats);
 
 /* gradients (n, num_classes) in dtype: row i is scale[i * scale_stride] (q -
- * p) / T, rounded once into dtype; scale_stride is 0 or 1. student, teacher,
+ * p) / T, rounded once into dtype; scale_stride is 0 or 1 (scale is not
+ * checked, as in sdca_cross_entropy_backward). student, teacher,
  * temperature and precision must be those of the forward call that gave
  * stats. The gradient sums to zero (q - p from the log-ratio log(q / p):
  * equal logits give zero). */

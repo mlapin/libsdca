@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <stdexcept>
 #include <string>
@@ -8,6 +9,64 @@
 #include "sdca/loss.h"
 #include "sdca/prox.h"
 #include "test_util.h"
+
+TEST(NumericalRegression, distillation_work_precision_matches_storage_and_keeps_fp64_option) {
+  const std::size_t n = 101;
+  std::vector<float> student(n), teacher(n), automatic(n), narrow(n), wide(n);
+  std::vector<long double> p(n), q(n);
+  long double ps = 0, qs = 0;
+  for (std::size_t j = 0; j < n; ++j) {
+    student[j] = float(std::sin(double(j)) * 3);
+    teacher[j] = float(std::cos(double(j)) * 2);
+    p[j] = std::exp(static_cast<long double>(teacher[j]) / 2);
+    q[j] = std::exp(static_cast<long double>(student[j]) / 2);
+    ps += p[j];
+    qs += q[j];
+  }
+  const double v = sdca::distillation_loss(n, student.data(), teacher.data(), 2, automatic.data());
+  const double vf =
+      sdca::distillation_loss<float, float>(n, student.data(), teacher.data(), 2, narrow.data());
+  const double vd =
+      sdca::distillation_loss<float, double>(n, student.data(), teacher.data(), 2, wide.data());
+  EXPECT_EQ(v, vf);
+  EXPECT_EQ(automatic, narrow);
+  EXPECT_NE(v, vd);  // The working-type argument must affect ordinary float rows.
+  long double reference = 0;
+  double scale = 0, error = 0, wide_error = 0;
+  for (std::size_t j = 0; j < n; ++j) {
+    p[j] /= ps;
+    q[j] /= qs;
+    reference -= p[j] * std::log(q[j]);
+    const double gradient = double((q[j] - p[j]) / 2);
+    scale = std::max(scale, std::abs(gradient));
+    error = std::max(error, std::abs(double(automatic[j]) - gradient));
+    wide_error = std::max(wide_error, std::abs(double(wide[j]) - gradient));
+  }
+  EXPECT_LE(error, 32 * double(std::numeric_limits<float>::epsilon()) * scale);
+  EXPECT_LE(wide_error, double(std::numeric_limits<float>::epsilon()) * scale);
+  EXPECT_NEAR(v, double(reference), 16 * std::numeric_limits<float>::epsilon());
+  EXPECT_LT(std::abs(vd - double(reference)), std::abs(v - double(reference)));
+  sdca::distillation_loss(n, student.data(), student.data(), 2, automatic.data());
+  for (float entry : automatic) EXPECT_EQ(entry, 0);
+}
+
+#ifndef __FAST_MATH__
+TEST(NumericalRegression, distillation_float_work_promotes_extreme_rows_and_temperatures) {
+  const float largest = std::numeric_limits<float>::max();
+  const float student[] = {largest, -largest, 0}, teacher[] = {0, largest, -largest};
+  for (double temperature : {1.0, 1e30, 1e40}) {
+    float gradient[3], expected[3];
+    const double value = sdca::distillation_loss(3, student, teacher, temperature, gradient);
+    const double reference =
+        sdca::distillation_loss<float, double>(3, student, teacher, temperature, expected);
+    EXPECT_TRUE(std::isfinite(value));
+    EXPECT_EQ(value, reference);
+    for (int j = 0; j < 3; ++j) EXPECT_EQ(gradient[j], expected[j]);
+  }
+  const float invalid[] = {0, std::numeric_limits<float>::infinity(), 1};
+  EXPECT_THROW(sdca::distillation_loss(3, invalid, teacher), std::invalid_argument);
+}
+#endif
 
 // The losses by index 0-8: each hinge nonsmooth (gamma = 0), then smoothed.
 static std::pair<sdca::loss_kind, bool> loss_case(int i) {
@@ -573,6 +632,28 @@ TEST(NumericalRegression, native_loss_values_match_objectives) {
   }
 }
 
+// Float work forms the smoothed hinges' margins and gradient entries in double (as the C
+// API and the MATLAB gateway's 'single'): the <float, float> result is the <float, double> one.
+TEST(NumericalRegression, float_work_smoothed_hinges_take_double_entries) {
+  const std::size_t n = 1000;
+  std::vector<float> z(n), single(n), wide(n);
+  for (std::size_t j = 0; j < n; ++j) z[j] = float(std::sin(0.37 * double(j)) * 3);
+  const sdca::loss_kind kinds[] = {
+      sdca::loss_kind::multiclass_hinge, sdca::loss_kind::topk_hinge_alpha,
+      sdca::loss_kind::topk_hinge_beta, sdca::loss_kind::multilabel_hinge};
+  for (sdca::loss_kind kind : kinds) {
+    const std::size_t p = kind == sdca::loss_kind::multilabel_hinge ? 3 : 1;
+    for (double gamma : {0.01, 1.0, 100.0}) {
+      const double a =
+          sdca::loss_and_gradient<float, float>(kind, n, p, z.data(), single.data(), 5, gamma);
+      const double b =
+          sdca::loss_and_gradient<float, double>(kind, n, p, z.data(), wide.data(), 5, gamma);
+      EXPECT_EQ(a, b);
+      EXPECT_TRUE(single == wide);
+    }
+  }
+}
+
 TEST(NumericalRegression, topk_coordinate_kkt_randomized) {
   std::mt19937 generator(91);
   std::normal_distribution<double> normal(0, 1);
@@ -788,7 +869,9 @@ TEST(NumericalRegression, entropy_probabilities_at_large_scale_wrong_scores) {
     sdca::l2_entropy<double, double>(1).update_dual_variables(n, 1., a.data(), z.data());
     double denominator = std::exp(a[0]) + double(n - 1) * std::exp(a[1]);
     for (std::size_t j = 1; j < n; ++j) EXPECT_NEAR(a[j], -std::exp(a[j]) / denominator, 1e-15);
-    EXPECT_NEAR(std::accumulate(a.begin(), a.end(), 0.), 0., 1e-15);
+    sdca::detail::compensated_sum<double> sum;
+    for (double x : a) sum.add(x);
+    EXPECT_NEAR(sum.value(), 0., 1e-15);
   }
 }
 
@@ -1253,21 +1336,21 @@ bool same_bits(T a, T b) {
   return (a == b && std::signbit(a) == std::signbit(b)) || (std::isnan(a) && std::isnan(b));
 }
 
-// The top-1 hinge as single_target_loss computed it before hinge_label: every competitor's
-// compensated margin in T, topk_hinge_loss at k = 1, the target entry a compensated sum.
+// Independent reference: form every compensated margin for the loss, but choose
+// the subgradient from the original scores. Rounding must not introduce a false tie.
 template <typename T, typename Data>
 double full_hinge_row(std::size_t n, std::size_t label, const Data* z, Data* gradient) {
   std::vector<T> h, a(n - 1, T(0));
-  for (std::size_t j = 0; j < n; ++j)
-    if (j != label) h.push_back(sdca::detail::margin(T(z[j]), T(z[label])));
-  const double value = sdca::detail::topk_hinge_loss(false, n - 1, h.data(), 1, a.data());
-  sdca::detail::compensated_sum<double> sum;
-  for (std::size_t j = 0, q = 0; j < n; ++j) {
+  std::size_t winner = label == 0 ? 1 : 0;
+  for (std::size_t j = 0; j < n; ++j) {
     if (j == label) continue;
-    sum.add(double(a[q]));
-    gradient[j] = Data(a[q++]);
+    h.push_back(sdca::detail::margin(T(z[j]), T(z[label])));
+    if (z[j] > z[winner]) winner = j;
   }
-  gradient[label] = Data(-sum.value());
+  const double value = sdca::detail::topk_hinge_loss(false, n - 1, h.data(), 1, a.data());
+  std::fill(gradient, gradient + n, Data(0));
+  if (value > 0) gradient[winner] = Data(1);
+  gradient[label] = Data(value > 0 ? -1 : -0.0);
   return value;
 }
 
@@ -1307,15 +1390,16 @@ void check_hinge_label_rows() {
         SCOPED_TRACE("n=" + std::to_string(n) + " offset=" + std::to_string(offset) +
                      " trial=" + std::to_string(trial));
         const double reference = full_hinge_row<double>(n, label, z.data(), expected.data());
-        EXPECT_TRUE(same_bits(sdca::hinge_label_loss(n, label, z.data()), reference));
-        expect_same_row(sdca::hinge_label_loss(n, label, z.data(), g.data()), reference, g,
-                        expected);
+        EXPECT_TRUE(same_bits(sdca::hinge_label_loss<Data, double>(n, label, z.data()), reference));
+        expect_same_row(sdca::hinge_label_loss<Data, double>(n, label, z.data(), g.data()),
+                        reference, g, expected);
         first[0] = z[label];
         for (std::size_t j = 0, q = 1; j < n; ++j)
           if (j != label) first[q++] = z[j];
         std::vector<Data> permuted(n);
         for (auto kind : {sdca::loss_kind::multiclass_hinge, sdca::loss_kind::topk_hinge_beta}) {
-          const double value = sdca::loss_and_gradient(kind, n, 1, first.data(), permuted.data());
+          const double value =
+              sdca::loss_and_gradient<Data, double>(kind, n, 1, first.data(), permuted.data());
           for (std::size_t j = 0, q = 1; j < n; ++j)
             g[j] = j == label ? permuted[0] : permuted[q++];
           expect_same_row(value, reference, g, expected);
@@ -1334,7 +1418,39 @@ TEST(NumericalRegression, hinge_label_rows_match_label_first_losses) {
   check_hinge_label_rows<float>();
 }
 
-TEST(NumericalRegression, hinge_label_keeps_wider_scores_in_pruning_bound) {
+TEST(NumericalRegression, hinge_label_supports_in_place_gradient) {
+  for (std::size_t n : {3UL, 17UL, 1000UL, 32000UL}) {
+    std::vector<float> scores(n, -100.f);
+    scores[0] = 0.f;
+    scores[1] = std::ldexp(1.f, -60);
+    scores[n - 1] = std::ldexp(2.f, -60);
+    std::vector<float> expected(n, 0.f);
+    expected[0] = -1.f;
+    expected[n - 1] = 1.f;
+    sdca::hinge_label_loss(n, 0, scores.data(), scores.data());
+    EXPECT_EQ(scores, expected);
+  }
+}
+
+TEST(NumericalRegression, hinge_distinct_scores_do_not_become_ties) {
+  for (int exponent : {-29, -60, -100}) {
+    const std::vector<double> z = {0., std::ldexp(1., exponent), std::ldexp(2., exponent)};
+    std::vector<double> gradient(3);
+    for (auto kind : {sdca::loss_kind::multiclass_hinge, sdca::loss_kind::topk_hinge_alpha,
+                      sdca::loss_kind::topk_hinge_beta}) {
+      sdca::loss_and_gradient(kind, z.size(), 1, z.data(), gradient.data());
+      EXPECT_EQ(gradient, (std::vector<double>{-1., 0., 1.}));
+      const std::vector<float> f(z.begin(), z.end());
+      std::vector<float> g(3);
+      sdca::loss_and_gradient<float, float>(kind, f.size(), 1, f.data(), g.data());
+      EXPECT_EQ(g, (std::vector<float>{-1.f, 0.f, 1.f}));
+      sdca::loss_and_gradient<float, double>(kind, f.size(), 1, f.data(), g.data());
+      EXPECT_EQ(g, (std::vector<float>{-1.f, 0.f, 1.f}));
+    }
+  }
+}
+
+TEST(NumericalRegression, hinge_label_keeps_wider_scores) {
   using L = long double;
   if (std::numeric_limits<L>::digits <= std::numeric_limits<double>::digits) return;
   // The largest score rounds upward in double. A double pruning floor can then exceed

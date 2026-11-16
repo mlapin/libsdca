@@ -10,6 +10,7 @@
 #include <type_traits>
 #include "sdca/math/compensated.h"
 #include "sdca/math/distillation.h"
+#include "sdca/math/distillation_rows.h"
 #include "sdca/math/entropy.h"
 #include "sdca/prox/topk_entropy.h"
 #include "sdca/prox/topk_simplex.h"
@@ -194,48 +195,34 @@ double smooth_topk_hinge_loss(bool beta, std::size_t m, const T* h, std::size_t 
   return double(value);
 }
 
-// The nonsmooth top-1 hinge max(0, max 1 + z_j - z_label) over j != label: topk_hinge_loss
-// at k = 1 over the others in index order, with the target entry single_target_loss gives.
-// A margin is within eps (|z_j| + |z_label| + 1) of 1 + z_j - z_label, so the competitors
-// more than 4 eps (|top| + |z_label| + 1) below the largest score top have smaller margins
-// than its: the first largest margin is that of the others (all of them where the bound is
-// not finite). competitor is max_except(n, z, label); gradient, if non-null, receives the
-// subgradient.
+// The nonsmooth top-1 hinge: select the first largest competitor before adding the
+// unit margin. Distinct scores can have equal rounded margins, even in double work;
+// choosing the first such margin would not be a subgradient at the represented scores.
+// competitor is max_except(n, z, label); gradient, if non-null, receives the subgradient.
 template <typename Data, typename T>
 double hinge_label(std::size_t n, std::size_t label, const Data* z, Data competitor,
                    Data* gradient) {
-  const T target = T(z[label]);
-  // Keep a wider score's low bits: rounding its maximum up to double could exclude it.
-  using Wide = typename std::common_type<T, double>::type;
-  const Wide largest = Wide(competitor);
-  const Wide eps = Wide(std::numeric_limits<T>::epsilon());
-  const Wide floor = largest - 4 * eps * (std::abs(largest) + std::abs(Wide(target)) + 1);
-  // The least Data at or above the floor: z_j >= floor exactly where z_j >= limit.
-  Data limit = -std::numeric_limits<Data>::infinity();
-  if (std::isfinite(floor)) {
-    const bool below = Wide(-floor) > Wide(std::numeric_limits<Data>::max());
-    limit = below ? std::numeric_limits<Data>::lowest() : Data(floor);
-    if (Wide(limit) < floor) limit = std::nextafter(limit, std::numeric_limits<Data>::infinity());
-  }
-  std::size_t best = label == 0 ? 1 : 0;
-  T top = margin(T(z[best]), target);
-  for (std::size_t j = 0; j < n;) {
-    j = next_reaching(j, n, z, limit);
-    for (const std::size_t end = std::min(n, j + row_lanes); j < end; ++j) {
-      if (j == label || !(z[j] >= limit)) continue;
-      const T h = margin(T(z[j]), target);
-      if (h > top) {
-        top = h;
-        best = j;
+  const T value = std::max(T(0), margin(T(competitor), T(z[label])));
+  if (gradient) {
+    std::size_t best = n;
+    if (value > 0) {
+      for (std::size_t j = 0; j < n;) {
+        j = next_reaching(j, n, z, competitor);
+        bool found = false;
+        for (const std::size_t end = std::min(n, j + row_lanes); j < end; ++j)
+          if (j != label && z[j] == competitor) {
+            best = j;
+            found = true;
+            break;
+          }
+        if (found) break;
       }
     }
-  }
-  const T value = std::max(T(0), top);
-  if (gradient) {
+    // Finish reading scores before writing gradients: this supports aliasing and
+    // keeps the input scan contiguous instead of interleaving a full-row write.
     std::fill(gradient, gradient + n, Data(0));
-    if (value > 0) gradient[best] = Data(1);
-    using Sum = typename std::common_type<T, double>::type;
-    gradient[label] = Data(-Sum(value > 0 ? 1 : 0));
+    if (best < n) gradient[best] = Data(1);
+    gradient[label] = Data(value > 0 ? -1 : -0.0);
   }
   return double(value);
 }
@@ -302,7 +289,7 @@ inline bool valid_loss_arguments(std::size_t n, std::size_t p, std::size_t k, do
 
 // cross_entropy of the scores z with the single label z[label], as
 // loss_and_gradient with that label first. gradient may be null (the loss alone).
-template <typename Data, typename Result = double>
+template <typename Data, typename Result = Data>
 double entropy_label_loss(std::size_t n, std::size_t label, const Data* z, Data* gradient) {
   if (n < 2 || label >= n) throw std::invalid_argument("Invalid loss dimensions or parameters");
   using T = typename std::common_type<Data, Result>::type;
@@ -492,7 +479,7 @@ double topk_entropy_label(std::size_t n, std::size_t label, const Data* z, std::
 // entropy's where no cap binds (the competitors' largest softmax share is at most 1 / k),
 // else the closed form of their k largest (the m largest capped at 1 / k, the others sharing
 // 1 - m / k by softmax). terms, if given, holds n values of common_type<Data, Result>.
-template <typename Data, typename Result = double>
+template <typename Data, typename Result = Data>
 double topk_entropy_label_loss(std::size_t n, std::size_t label, const Data* z, std::size_t k,
                                Data* gradient,
                                typename std::common_type<Data, Result>::type* terms = nullptr) {
@@ -508,7 +495,7 @@ double topk_entropy_label_loss(std::size_t n, std::size_t label, const Data* z, 
 // The nonsmooth top-1 hinge (multiclass_hinge; topk_hinge_alpha and topk_hinge_beta
 // at k = 1) of the n scores z with the label z[label]: loss_and_gradient with that
 // label first, without permuting z. gradient, if non-null, receives the subgradient.
-template <typename Data, typename Result = double>
+template <typename Data, typename Result = Data>
 double hinge_label_loss(std::size_t n, std::size_t label, const Data* z, Data* gradient = nullptr) {
   if (n < 2 || label >= n) throw std::invalid_argument("Invalid loss dimensions or parameters");
   using T = typename std::common_type<Data, Result>::type;
@@ -519,15 +506,25 @@ double hinge_label_loss(std::size_t n, std::size_t label, const Data* z, Data* g
                                       gradient);
 }
 
+namespace detail {
+// Whether kind is a hinge loss smoothed by gamma > 0.
+inline bool smooth_hinge(loss_kind kind, double gamma) {
+  return gamma > 0 && (kind == loss_kind::multiclass_hinge || kind == loss_kind::topk_hinge_alpha ||
+                       kind == loss_kind::topk_hinge_beta || kind == loss_kind::multilabel_hinge);
+}
+}  // namespace detail
+
 // Unregularized loss of the scores z and its gradient (a subgradient for the
 // nonsmooth hinge losses) at z, not at an SDCA block's updated scores. The
 // first p of the n scores are the labels; k is the top-k parameter (ignored
 // by the losses without topk in the name), gamma >= 0 the smoothing of the hinges (0: nonsmooth) and
 // alpha the proximal step of proximal_cross_entropy. The arithmetic is common_type<Data, Result>; float
 // arithmetic falls back to double where float cannot hold gamma, alpha or the
-// score spread. mode selects how the smoothed multilabel hinge projects.
+// score spread, and the smoothed hinges (gamma > 0) form their margins and gradient
+// entries in double (in float they lose the per-entry bound next to the projection
+// threshold). mode selects how the smoothed multilabel hinge projects.
 // Throws std::invalid_argument for invalid sizes or parameters.
-template <typename Data, typename Result = double>
+template <typename Data, typename Result = Data>
 double loss_and_gradient(loss_kind kind, std::size_t n, std::size_t p, const Data* z,
                          Data* gradient, std::size_t k = 1, double gamma = 0, double alpha = 1,
                          const projection_precision mode = projection_precision::float64) {
@@ -535,7 +532,8 @@ double loss_and_gradient(loss_kind kind, std::size_t n, std::size_t p, const Dat
     throw std::invalid_argument("Invalid loss dimensions or parameters");
   if (kind == loss_kind::multiclass_hinge) k = 1;  // as cross_entropy, it has no top-k
   using T = typename std::common_type<Data, Result>::type;
-  if (!detail::loss_fits<T>(n, z, gamma, alpha))
+  const bool narrow = std::numeric_limits<T>::digits < std::numeric_limits<double>::digits;
+  if ((narrow && detail::smooth_hinge(kind, gamma)) || !detail::loss_fits<T>(n, z, gamma, alpha))
     return loss_and_gradient<Data, double>(kind, n, p, z, gradient, k, gamma, alpha, mode);
   std::fill(gradient, gradient + n, Data(0));
   switch (kind) {
@@ -563,14 +561,44 @@ double loss_and_gradient(loss_kind kind, std::size_t n, std::size_t p, const Dat
   throw std::invalid_argument("Unknown loss kind");
 }
 
+namespace detail {
+// Float storage and work use the native tensor API's kernels. Unsupported scalar
+// ranges and extreme rows retain the double algorithm below.
+inline bool float_distillation(std::size_t n, const float* student, const float* teacher,
+                               double temperature, float* gradient, double& value) {
+  const double tiny = static_cast<double>(std::numeric_limits<float>::min());
+  if (!(tiny <= temperature && temperature <= 1 / tiny)) return false;
+  detail::entropy_buffer<float> work(3 * n);
+  double stats[tensor::distillation_stats];
+  const int status =
+      tensor::distillation_forward_kernel(tensor::float32(), n, student, teacher, temperature,
+                                          work.data(), &value, gradient ? stats : nullptr);
+  if (status == tensor::row_nonfinite) throw std::invalid_argument("Logits must be finite");
+  if (status != tensor::row_float) return false;
+  if (gradient)
+    tensor::distillation_backward_kernel(tensor::float32(), n, student, teacher, temperature, stats,
+                                         1.0, work.data(), gradient);
+  return true;
+}
+
+template <typename Data>
+bool float_distillation(std::size_t, const Data*, const Data*, double, Data*, double&) {
+  return false;
+}
+}  // namespace detail
+
 // distillation_loss H(softmax(teacher / temperature), softmax(student / temperature))
 // of the n student and teacher logits, and its gradient (q - p) / temperature
 // with respect to student if gradient is non-null.
-template <typename Data, typename Result = double>
+template <typename Data, typename Result = Data>
 double distillation_loss(std::size_t n, const Data* student, const Data* teacher,
                          double temperature = 1.0, Data* gradient = nullptr) {
   if (n < 2 || !student || !teacher || !(std::isfinite(temperature) && temperature > 0))
     throw std::invalid_argument("Invalid loss dimensions or parameters");
+  double value;
+  if (std::is_same<Result, float>::value &&
+      detail::float_distillation(n, student, teacher, temperature, gradient, value))
+    return value;
   detail::entropy_buffer<double> work(gradient ? 7 * n : 6 * n);
   double* w = work.data();
   for (std::size_t j = 0; j < n; ++j) {
@@ -588,7 +616,7 @@ double distillation_loss(std::size_t n, const Data* student, const Data* teacher
   return row.loss;
 }
 
-template <typename Data, typename Result = double>
+template <typename Data, typename Result = Data>
 double distillation_loss_and_gradient(std::size_t n, const Data* student, const Data* teacher,
                                       Data* gradient, double temperature = 1.0) {
   if (!gradient) throw std::invalid_argument("Invalid loss dimensions or parameters");
@@ -598,7 +626,7 @@ double distillation_loss_and_gradient(std::size_t n, const Data* student, const 
 // proximal_distillation_loss min_u H(softmax(teacher / temperature), softmax(u))
 // + |u - student / temperature|^2 / (2 alpha), and its gradient (pi - p) / temperature
 // with respect to student if gradient is non-null.
-template <typename Data, typename Result = double>
+template <typename Data, typename Result = Data>
 double proximal_distillation_loss(std::size_t n, const Data* student, const Data* teacher,
                                   double temperature = 1.0, double alpha = 1.0,
                                   Data* gradient = nullptr) {
@@ -625,7 +653,7 @@ double proximal_distillation_loss(std::size_t n, const Data* student, const Data
   return loss;
 }
 
-template <typename Data, typename Result = double>
+template <typename Data, typename Result = Data>
 double proximal_distillation_loss_and_gradient(std::size_t n, const Data* student,
                                                const Data* teacher, Data* gradient,
                                                double temperature = 1.0, double alpha = 1.0) {

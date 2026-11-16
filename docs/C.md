@@ -24,7 +24,7 @@ Without CMake, compile `src/c_api.cpp` directly with any C++11 compiler:
 ```bash
 c++ -std=c++11 -O2 -shared -fPIC -pthread -fno-fast-math -ffp-contract=off \
   -fvisibility=hidden -fvisibility-inlines-hidden -DBLAS_BUILTIN \
-  '-DSDCA_VERSION="0.3.1"' -Iinclude src/c_api.cpp -o libsdca_c.so
+  "-DSDCA_VERSION=\"$(cat VERSION)\"" -Iinclude src/c_api.cpp -o libsdca_c.so
 ```
 
 ## Usage
@@ -49,7 +49,8 @@ if (sdca_fit(&options, n, d, num_classes, x, labels, NULL, NULL, w, a,
 - **Status and errors:** Functions return `SDCA_OK` (`0`), `SDCA_INVALID_ARGUMENT`, or
   `SDCA_FAILURE`, setting a thread-local message read by `sdca_last_error()`. A failed
   coordinate step during `sdca_fit` stops cleanly with `SDCA_STATUS_FAILED` in
-  `result.status` and leaves the last consistent iterate.
+  `result.status` and leaves the last consistent iterate. A cold-start `sdca_fit` that
+  returns an error may already have zeroed `w` and the duals; keep a copy if you reuse them.
 - **Layouts:** Features `(n, d)`, Gram matrices `(n, n)`, scores `(n, num_classes)` and
   duals `(n, num_classes)` are row-major; weights and regularizer centers `(d, num_classes)`
   are column-major.
@@ -59,14 +60,15 @@ if (sdca_fit(&options, n, d, num_classes, x, labels, NULL, NULL, w, a,
 - **Targets:** Single-label targets are 0-based `int64_t` indices with `offsets = NULL`.
   Multilabel targets pass sorted, duplicate-free class indices delimited by `n + 1` offsets
   (or an `(n, num_classes)` `0/1` mask for `sdca_loss_gradient`).
-- **Precision (`options.precision`):** `SDCA_FLOAT32` (`float` data and arithmetic),
+- **Precision (`options.precision`):** `SDCA_FLOAT32` (`float` data and arithmetic; the
+  loss entry points form the smoothed hinges' margins and gradient entries in `double`),
   `SDCA_FLOAT32_FLOAT64` (`float` data, `double` arithmetic and iterate), or `SDCA_FLOAT64`
   (`double` data and arithmetic). Loss values and `history` (`history_rows >= max_epoch / eval_epoch + 2`,
   `sdca_history_fields()` columns) are always `double`.
 
 ## Tensor entry points
 
-Used by the Python and JAX bindings to evaluate losses directly on tensor buffers across
+Used by the NumPy, PyTorch, JAX and Rust bindings to evaluate losses directly on tensor buffers across
 `SDCA_DTYPE_FLOAT32`, `_FLOAT64`, `_FLOAT16`, and `_BFLOAT16` (16-bit values passed as raw
 `uint16_t` bits):
 

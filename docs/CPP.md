@@ -35,9 +35,13 @@ output specification (`multiclass_output(m, labels)`), and objective (such as
   `(n, d)` in NumPy/C); weights `W` are column-major `(d, m)`; duals `A` store each
   example's `m`-class block contiguously (`m`-by-`n` column-major). Labels are 0-based.
 - **Precision (`<Data, Result>`):** `Data` sets buffer storage (`float` or `double`);
-  `Result` sets working arithmetic and the solver iterate (`<float, double>` keeps internal
+  `Result` defaults to `Data` for loss functions and objective factories and sets working
+  arithmetic and the solver iterate (`<float, double>` keeps internal
   `double` copies in `context.primal_variables` and `context.dual_variables`, rounding into
-  your `float` buffers at each evaluation; [API.md](API.md#precision)).
+  your `float` buffers at each evaluation; [API.md](API.md#precision)). Factory arguments
+  deduce `Result` when supplied: use `<float, float>` explicitly if a double literal
+  parameter should be converted to float work. `loss_and_gradient`
+  with `float` work forms the smoothed hinges' margins and gradient entries in `double`.
 - **Convergence:** Inspect `context.status == sdca::solver_status::solved`; reaching
   `max_epoch` is not a convergence certificate.
 
@@ -49,5 +53,5 @@ output specification (`multiclass_output(m, labels)`), and objective (such as
   Invalid parameters throw `std::invalid_argument`; numerical failures throw
   `std::runtime_error`.
 - **Proximal operators (`include/sdca/prox.h`):** Operate in place on mutable iterator
-  ranges (`prox_knapsack`, `prox_two_simplex`, `prox_topk_simplex`, `prox_topk_cone`,
-  `prox_entropy`, `prox_topk_entropy`, `lambert_w_exp`).
+  ranges (`prox_knapsack_eq`, `prox_knapsack_le`, `prox_two_simplex`, `prox_topk_simplex`,
+  `prox_topk_cone`, `prox_entropy`, `prox_topk_entropy`).

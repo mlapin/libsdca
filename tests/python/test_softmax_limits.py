@@ -297,7 +297,7 @@ class SoftmaxLimitTests:
                         )
 
     def test_precision_table_of_the_numerical_notes(self, subtests: pytest.Subtests):
-        # numerics.md, "PyTorch loss precision": logits [0, -gap], target 0, upstream 1 (a
+        # Logits [0, -gap], target 0, upstream 1 (a
         # GradScaler's 65504 for float16). The table lists the 100-digit loss and target
         # gradient rounded to the output dtypes; libsdca is within one unit of them with
         # float64 work and within 8 float32 eps more with float32 exponentials (default).
@@ -335,7 +335,7 @@ class SoftmaxLimitTests:
                             assert abs(result.item() - ref) <= (unit + extra) * abs(ref)
 
     def test_hinge_keeps_a_tiny_margin(self, subtests: pytest.Subtests):
-        # numerics.md: multiclass_hinge of [1, 1e-8] in float32 is 1e-8 (PyTorch's margin
+        # multiclass_hinge of [1, 1e-8] in float32 is 1e-8 (PyTorch's margin
         # 1 + 1e-8 - 1, formed in float32, is 0).
         tiny = torch.tensor(1e-8, dtype=torch.float32).item()
         eps = torch.finfo(torch.float32).eps

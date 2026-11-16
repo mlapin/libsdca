@@ -17,7 +17,12 @@ inline void evaluate_dataset(const Context& ctx, Dataset& d, solver_scratch<Data
                              size_type id = 0) {
   auto& eval = eval_begin(d);
   typedef typename std::decay<decltype(eval.primal_loss)>::type Work;
-  eval_dataset(ctx, d, eval_objective<Work>(ctx.objective), eval);
+  try {
+    eval_dataset(ctx, d, eval_objective<Work>(ctx.objective), eval);
+  } catch (...) {
+    d.evals.pop_back();
+    throw;
+  }
   reporting::eval_created(eval, id);
 }
 

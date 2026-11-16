@@ -21,7 +21,7 @@ from libsdca.torch import (
 HALF = (torch.float16, torch.bfloat16)
 EPS32 = torch.finfo(torch.float32).eps
 # float32 work: values within 100 float32 eps of max(|loss|, 1), gradient entries within 2000
-# eps of the row's largest entry (top-k entropy's float32 threshold solve), as numerics.md.
+# eps of the row's largest entry (top-k entropy's float32 threshold solve), as docs/API.md, Known limits.
 VALUE_EPS, ROW_EPS = 100, 2000
 # (loss, target kind, k, gamma): integer targets ("index") or boolean masks ("mask").
 CASES = [

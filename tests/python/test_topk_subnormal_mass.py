@@ -101,7 +101,7 @@ def test_all_capped_mean_of_scores_near_finfo_max(
     ],
 )
 def test_all_capped_mean_beyond_double_double_limit(device: str, backend: str, extension: str):
-    # LIMIT (docs/numerics.md): differences at 2^200, 2^100 and 1 lose the 1 in the
+    # LIMIT (docs/API.md, Known limits): differences at 2^200, 2^100 and 1 lose the 1 in the
     # double-double mean (exact 1/4); the documented result is log 5, not worse.
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA required")

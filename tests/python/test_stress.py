@@ -92,13 +92,14 @@ class StressEntropyTests:
         ]:
             value, _ = solver.loss_and_grad(z, target, "proximal_cross_entropy", alpha=alpha)
             assert abs(value[0] / expected - 1) <= 1e-13
-        # 100-class equal-competitor row at alpha = 1e300 stays within 32 eps.
+        # 100-class equal-competitor row at alpha = 1e300: the threshold near log(alpha) holds
+        # the gradient to 32 eps; the value, about alpha |gradient|^2 / 2, to twice that.
         z100 = [[0.0] + [1.0] * 99]
         v100, g100 = solver.loss_and_grad(z100, [0], "proximal_cross_entropy", alpha=1e300)
         ref_v100 = 2.3624605285888881e-295
         ref_g0 = -6.829457899398158e-298
         eps = np.finfo(np.float64).eps
-        assert abs(v100[0] - ref_v100) / ref_v100 / eps <= 32
+        assert abs(v100[0] - ref_v100) / ref_v100 / eps <= 64
         assert abs(g100[0, 0] - ref_g0) / abs(ref_g0) / eps <= 32
 
     def test_topk_single_solve_around_split_threshold(self):

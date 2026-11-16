@@ -1,7 +1,9 @@
 # JAX losses
 
 `libsdca.jax` provides classification and distillation losses as JAX functions that
-compose with `jit`, `grad` and `vmap` (`pip install 'libsdca[jax]'`):
+compose with `jit`, `grad` and `vmap`. Install `libsdca[jax]` for CPU, or
+`libsdca[jax-cuda]` for Linux NVIDIA GPUs (CUDA 13 runtime and Triton included;
+Python 3.11+ and NVIDIA driver 580+):
 
 ```python
 import jax
@@ -37,22 +39,46 @@ See [API.md](../docs/API.md#loss-definitions) and
 
 | Loss | `backend="auto"` selection | Derivatives |
 | --- | --- | --- |
-| `cross_entropy`, `multilabel_cross_entropy`, `topk_cross_entropy` ($k=1$) | `"jax"` on all devices | Any order |
-| Other `LOSSES` | `"jax"` on GPU/TPU and on CPU for $\le 16{,}384$ scores when required arithmetic (`jax_enable_x64` or `precision="float32"`) is enabled (except `proximal_cross_entropy`); otherwise `"native"` | First order (reverse) |
+| `cross_entropy`, `multilabel_cross_entropy`, `topk_cross_entropy` ($k=1$) | Shared Triton kernels on CUDA; `"jax"` on CPU/TPU | Any order |
+| Other `LOSSES` | Shared Triton kernels on CUDA; `"jax"` on TPU and on CPU for calls of $\le 16{,}384$ logit entries in total when its arithmetic is available (`jax_enable_x64` or `precision="float32"`, except `proximal_cross_entropy`); otherwise `"native"` | First order (reverse) |
 
-- **`"jax"`:** Pure `jax.numpy` / XLA operations with no host round trip and full
-  `jax.export` support. Entropy and distillation losses use fused variadic row reductions
-  on CPU. Non-entropy losses use `float64` by default (requiring `jax_enable_x64=True`) or
-  `float32` when `precision="float32"`.
-- **`"native"`:** Calls the C++ library with a custom VJP on CPU threads
-  (`SDCA_NUM_THREADS`). On CPU it compiles a zero-copy XLA FFI custom call on first use
-  (`SDCA_JAX_FFI` in [API.md](../docs/API.md#environment-variables)), falling back to
-  `jax.pure_callback` without a C++ compiler or on GPU/TPU.
-- **Subnormal and GPU tail limits:** XLA on CPU flushes subnormal inputs and outputs to
-  zero across all backends, so CPU values vanish below the normal limit (`exp(-87.3)` in
-  `float32`, `exp(-708.4)` in `float64`). On GPU, default `float32` work can lose
-  individually underflowed exponentials before their sum is formed (`precision="float64"`
-  retains them; [aggregate-tail limits](../docs/numerics.md#aggregate-tail-limitations)).
+- **CUDA (`"auto"`):** Runs the same fused Triton kernels as `libsdca.torch`, as one XLA FFI
+  call under `jit`, `grad`, `vmap` and `jax.export` (pass
+  `disabled_checks=[jax.export.DisabledSafetyCheck.custom_call("libsdca_cuda_kernels")]`; the
+  export holds kernels for the exporting GPU's architecture). Per-row results match PyTorch.
+  Linux wheels include the handler; without Triton 3.3–3.9 the losses keep `jax.numpy`
+  (`SDCA_JAX_CUDA`; with a one-time warning when Triton is missing or older). CPU-committed
+  arguments stay on the CPU.
+- **`"jax"`:** Pure `jax.numpy` / XLA, with no host round trip and full `jax.export` support.
+  Losses that default to `float64` work need `jax_enable_x64=True` here: without it,
+  `backend="auto"` takes the native library and `backend="jax"` raises.
+- **`"native"`:** Calls the C++ library with a custom VJP on CPU threads. On CPU it compiles
+  a zero-copy XLA FFI handler on first use (`SDCA_JAX_FFI`, no PyTorch needed), else falls
+  back to `jax.pure_callback`. Native work can be `float64` without `jax_enable_x64`.
+- **Subnormals:** XLA on CPU flushes subnormal inputs and outputs to zero, so CPU losses and
+  gradient entries below `exp(-87.3)` (`float32`) or `exp(-708.4)` (`float64`) are `0`. Sums of
+  many individually underflowing exponentials are still kept (`float32` cross-entropy over
+  1,000 classes 90 below the target returns `8.19e-37`).
+
+JAX 0.4.35 is supported with `jit`, `grad` and `vmap`; the shared native kernels need a JAX
+that exposes `jax.ffi`. See [environment variables](../docs/API.md#environment-variables) for
+the switches above.
+
+## CPU pass fusion
+
+On a multithreaded CPU, the array paths of `cross_entropy`, `multilabel_cross_entropy`,
+`topk_cross_entropy` ($k=1$) and both distillation losses above $16{,}384$ logit entries read the
+scores in several passes, either fused into one XLA program or *fenced* into separate passes
+that each run on every thread. `SDCA_JAX_CPU_FUSION` selects the variant:
+
+- **`auto`** (default): the first trace of a loss times both variants once at 4096 × 1024
+  (proximal distillation follows a fixed rule instead),
+  keeps the fenced one unless the unfenced one takes at most 0.85 of its time, and caches the
+  decision in `SDCA_CACHE_DIR` per CPU, thread setting, dtype and library version.
+- **`fenced`** or **`unfenced`**: forces one variant.
+
+The variants differ only in summation order. The setting is read when a loss is traced; call
+`jax.clear_caches()` after changing it.
 
 ## Targets and validation
 
@@ -65,16 +91,13 @@ the same shape as `logits`. Concrete (untraced) calls validate inputs eagerly an
 
 ## Distillation
 
-`distillation_loss` and `proximal_distillation_loss` evaluate soft-target cross-entropy
-and its Moreau envelope on student and teacher logits in `jax.numpy`. The teacher receives
-no gradient, and equal logits produce an **exact zero gradient**. `temperature` and `alpha`
-are static under `jit`; loss values have dtype `promote(logits.dtype, float32)` and
-gradients keep `logits.dtype`. Reverse-over-reverse and `jax.hessian` are supported.
+`distillation_loss` and `proximal_distillation_loss` take student and teacher logits; the
+teacher receives no gradient and equal logits give an **exact zero gradient**. `temperature`
+and `alpha` are static under `jit`. Ordinary distillation supports reverse-over-reverse and
+`jax.hessian`; proximal distillation supports `jax.hessian` (forward-over-reverse) only.
 
 ## Tests
 
 ```bash
-python -m pytest -n auto tests/python --group jax
+python -m pytest -n auto tests/python --group jax   # from a source checkout
 ```
-
-See [performance.md](../docs/performance.md#jax) for CPU and A100 benchmarks.

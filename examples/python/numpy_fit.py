@@ -40,8 +40,8 @@ softmax = np.exp(u - u.max(axis=1, keepdims=True))
 softmax /= softmax.sum(axis=1, keepdims=True)
 assert np.allclose(A / C, np.eye(4)[y[:5]] - softmax, atol=1e-10)
 
-# float32 storage solves in float64 by default; precision="float32" is faster.
-fast = libsdca.fit(X.astype(np.float32), y, precision="float32")
+# float32 storage solves in float32 by default; precision="float64" keeps double iterates.
+fast = libsdca.fit(X.astype(np.float32), y)
 assert fast.weights is not None
 print("float32:", fast.weights.dtype, fast.status)
 

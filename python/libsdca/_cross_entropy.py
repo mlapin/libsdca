@@ -432,13 +432,9 @@ def cross_entropy(
             "use backend='torch' otherwise"
         )
     labels = target.masked_fill(ignored, 0).reshape(-1)
+    z = input.movedim(dim, -1).reshape(-1, classes)
     if checked:
-        mod._raise_failed(
-            [
-                (~mod._finite(input), "logits must be finite floating-point values"),
-                (((labels < 0) | (labels >= classes)).any(), "Target index out of range"),
-            ]
-        )
+        z = _checked_rows(z, labels, ignored.reshape(-1))
     safe_labels = labels.clamp(0, classes - 1)
     row_weight = (
         torch.ones_like(labels, dtype=torch.float64)
@@ -453,10 +449,26 @@ def cross_entropy(
             valid_w = torch.isfinite(weight).all() & (weight >= 0).all()
             bad_row = bad_row | ~valid_w
         row_weight = row_weight.masked_fill(bad_row, math.nan)
-    z = input.movedim(dim, -1).reshape(-1, classes)
     entropy = _TransformedEntropy if transformed else _WeightedEntropy
     value = entropy.apply(z, labels, row_weight, ignored.reshape(-1), reduction)[0]
     return value.reshape(shape) if reduction == "none" else value
+
+
+def _checked_rows(z: torch.Tensor, labels: torch.Tensor, ignored: torch.Tensor) -> torch.Tensor:
+    """z (rows, classes) after the CPU value checks, with zero ignored rows if they are
+    nonfinite: as the native losses, ignored rows may hold any values and get zero gradients."""
+    mod, counted = _torch(), z
+    if bool(ignored.any()):
+        counted = z[~ignored]
+        if not bool(mod._finite(z[ignored])):
+            z = z.masked_fill(ignored[:, None], 0)
+    mod._raise_failed(
+        [
+            (~mod._finite(counted), "logits must be finite floating-point values"),
+            (((labels < 0) | (labels >= z.shape[1])).any(), "Target index out of range"),
+        ]
+    )
+    return z
 
 
 _FAST_DTYPES = (torch.float32, torch.bfloat16, torch.float16, torch.float64)

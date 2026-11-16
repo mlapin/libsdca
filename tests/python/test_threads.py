@@ -179,7 +179,7 @@ class ThreadTests:
         z[5, (labels[5] + 1) % C] -= 2000  # a derivative below double's normal range
         for dtype in (np.float64, np.float32):
             x = z.astype(dtype)
-            v1, g1 = Solver(dtype=dtype).loss_and_grad(x, labels, num_threads=1)
+            v1, g1 = Solver("float64", dtype=dtype).loss_and_grad(x, labels, num_threads=1)
             for threads in THREADS:
                 with subtests.test(dtype=dtype, threads=threads):
                     values, stats = _entropy_forward(x, labels, threads, True)

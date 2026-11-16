@@ -2,7 +2,7 @@
 # The check fails on a function missing here and on an entry back within the limits.
 python/libsdca/_cross_entropy.py cross_entropy
 python/libsdca/_torch_distill.h distillation_stats
-python/libsdca/_torch_distill.h prox_distillation_row
+python/libsdca/_cpu_prox_distill.h sdca_cpu::prox_distillation_solve
 python/libsdca/_torch_prox.h prox_entropy_row
 python/libsdca/_torch_topk_hinge.h multilabel_row_forward
 python/libsdca/_torch_topk_hinge.h topk_backward

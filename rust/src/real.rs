@@ -65,19 +65,19 @@ pub(crate) mod sealed {
 
 /// The element types of the data, f32 or f64; sealed.
 pub trait Real: Copy + Default + PartialOrd + fmt::Debug + sealed::Sealed {
-    /// The precision of an option `precision: None`: Float64 for both f64 and f32.
+    /// The precision of an option `precision: None`: the input type (Float32 for f32, Float64 for f64).
     ///
     /// ```
     /// use libsdca::{Precision, Real};
     ///
     /// assert_eq!(f64::DEFAULT_PRECISION, Precision::Float64);
-    /// assert_eq!(f32::DEFAULT_PRECISION, Precision::Float64);
+    /// assert_eq!(f32::DEFAULT_PRECISION, Precision::Float32);
     /// ```
     const DEFAULT_PRECISION: Precision;
 }
 
 impl Real for f32 {
-    const DEFAULT_PRECISION: Precision = Precision::Float64;
+    const DEFAULT_PRECISION: Precision = Precision::Float32;
 }
 
 impl Real for f64 {

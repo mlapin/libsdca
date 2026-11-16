@@ -2,7 +2,7 @@
 scores) and DistillationLoss and distillation_loss (cross-entropy to a
 teacher's softmax). CPU losses run in the CPU extension (built on first use,
 _cpu_entropy) or the native library (_cpu), CUDA losses in fused Triton kernels;
-the tensor backend runs every loss on any device, and its entropy has higher
+the tensor backend runs every loss on either device, and its entropy has higher
 derivatives.
 """
 
@@ -110,9 +110,32 @@ def _value_dtype(logits: torch.Tensor) -> torch.dtype:
     return torch.promote_types(logits.dtype, torch.float32)
 
 
-def _working(logits: torch.Tensor, precision: str | None) -> str | None:
-    """The precision a call computes in: None is float32 for float16/bfloat16 logits."""
-    return "float32" if precision is None and logits.dtype in _HALF else precision
+def _working(logits: torch.Tensor, precision: str | None, prox_kernel: bool = False) -> str | None:
+    """The precision a call computes in: None is float32 for float16/bfloat16 logits, and for
+    float32 logits on a proximal_cross_entropy kernel (its float32 kernels meet the proximal
+    bound; CUDA k=1 hinges instead use _hinge_fp32, while tensor and native paths keep float64)."""
+    if precision is None and (
+        logits.dtype in _HALF or (prox_kernel and logits.dtype == torch.float32)
+    ):
+        return "float32"
+    return precision
+
+
+def _device_working(
+    logits: torch.Tensor, z: torch.Tensor, canonical: str | None, objective: str, fused: bool
+) -> str | None:
+    """_working of a call off the CPU kernels: float32 logits of proximal_cross_entropy take
+    float32 on its kernel (fused, where the kernel covers the rows of class-last z)."""
+    kernel = objective == "proximal_cross_entropy" and fused
+    return _working(
+        logits, canonical, kernel and _prox_kernel(z.reshape(-1, z.shape[-1])) is not None
+    )
+
+
+def _contract(logits: torch.Tensor, canonical: str | None) -> str | None:
+    """precision="float32" of non-float64 logits is None: both promise float32 work and take
+    the same (fastest) route; float64 logits keep "float32" for its error."""
+    return None if canonical == "float32" and logits.dtype != torch.float64 else canonical
 
 
 def _check_precision(logits: torch.Tensor, precision: object) -> str | None:
@@ -268,9 +291,15 @@ class _Loss(_SavedGradient):
         return value
 
 
+def _check_device(t: torch.Tensor) -> None:
+    if not (t.is_cpu or t.is_cuda):
+        raise ValueError(f"libsdca losses take CPU or CUDA tensors, not {t.device.type}")
+
+
 def _check_tensors(logits: torch.Tensor, target: torch.Tensor) -> None:
     if not isinstance(logits, torch.Tensor) or logits.ndim < 1:
         raise ValueError("logits must be a tensor with a class dimension")
+    _check_device(logits)
     if not logits.is_floating_point():
         raise ValueError("logits must be finite floating-point values")
     if not isinstance(target, torch.Tensor):
@@ -356,14 +385,15 @@ def sdca_loss(
         loss: One of libsdca.LOSSES.
         backend: "auto" (on the CPU the CPU extension, else the native
             library; fused kernels on CUDA; else torch), "native" (the native
-            library, CPU tensors) or "torch" (tensor operations on any device).
+            library, CPU tensors) or "torch" (tensor operations, CPU or CUDA).
         k: Top-k parameter in [1, classes-1]; only the topk losses use it.
         gamma: Hinge smoothing, finite and >= 0 (0: nonsmooth).
         alpha: proximal_cross_entropy step, finite and positive.
         reduction: "none", "sum" or "mean".
         dim: Class dimension of logits.
-        precision: None (the default of the dtype), "float32" or "float64"
-            (or a matching dtype object); see TORCH.md for what each guarantees.
+        precision: None or "float32" (float32 work for 16- and 32-bit logits, the
+            same route), "float64" (or a matching dtype object); see TORCH.md for what
+            each guarantees.
 
     Returns:
         Per-example losses (logits.shape without dim) or their reduction.
@@ -391,6 +421,7 @@ def _bound_loss(
     precision: object,
 ) -> torch.Tensor:
     """sdca_loss of the loss bound in entry (named loss)."""
+    _untransformed(loss)
     if _has_dtensor(logits, target):
         return _call_with_dtensors(
             sdca_loss,
@@ -416,6 +447,15 @@ def _bound_loss(
     )
 
 
+def _untransformed(name: str) -> None:
+    """Raise inside torch.func transforms, which only cross_entropy supports."""
+    if _ops.transformed():
+        raise ValueError(
+            f"{name} does not support torch.func transforms (grad, vmap, jacrev, ...); "
+            "use torch.autograd, or cross_entropy, which does"
+        )
+
+
 def _resolved_loss(
     logits: torch.Tensor,
     target: torch.Tensor,
@@ -432,6 +472,7 @@ def _resolved_loss(
     """sdca_loss of a tensor-backend kind, with checked tensors and canonical precision.
 
     k is the k of the kind; given_k, the k the caller passed, is the one checked."""
+    canonical = _contract(logits, canonical)
     fast = _fast_cpu_loss(
         logits, target, objective, backend, k, gamma, alpha, reduction, dim, canonical, given_k
     )
@@ -491,6 +532,7 @@ def _fast_cpu_loss(
         and type(given_k) is int
         and 1 <= given_k < classes
         and type(gamma) is float
+        and type(alpha) is float
         and 0.0 <= gamma < math.inf
         and 0.0 < alpha < math.inf
     ):
@@ -535,6 +577,16 @@ def _ordinary_cpu(
     )
 
 
+def _hinge_fp32(logits: torch.Tensor, canonical: str | None, gamma: float, classes: int) -> bool:
+    """Shared dispatch/diagnostics policy; the kernel guards each tile's score range, while
+    host dispatch promotes when C * gamma can overflow the float32 Michelot sum."""
+    return (
+        canonical != "float64"
+        and logits.dtype != torch.float64
+        and (gamma == 0 or _float32_holds(logits, gamma, gamma * classes, check_spread=False))
+    )
+
+
 def _device_loss(
     logits: torch.Tensor,
     z: torch.Tensor,
@@ -549,23 +601,29 @@ def _device_loss(
     backend: str,
 ) -> torch.Tensor:
     """The fused CUDA kernels ("auto") or tensor operations ("torch", or beyond the kernels)
-    on any device, of class-last scores z."""
+    on CPU or CUDA, of class-last scores z."""
     shape, classes = z.shape[:-1], z.shape[-1]
     fused = backend != "torch"
     # Fused CUDA entropy (integer targets or boolean masks) uses float32 exponentials + float64
     # row statistics by default for non-float64 logits, and full float64 when
     # precision="float64" or logits are float64.
-    # The fused hinges work in float64 unless an explicit precision="float32" selects tensors.
-    explicit = canonical == "float32"
-    work = _working(logits, canonical)
-    indexed = fused and target.dtype == torch.int64 and not explicit
+    # CUDA k=1 hinges follow the requested work precision.
+    work = _device_working(logits, z, canonical, objective, fused)
+    indexed = fused and target.dtype == torch.int64
     labels_fit = target.shape == shape and reduction in ("none", "sum", "mean")
-    if _indexed_entropy_path(z, target, objective, k, explicit, fused):
+    if _indexed_entropy_path(target, objective, k):
         return _device_entropy(logits, z, target, reduction, canonical, fused)
     if indexed and k == 1 and objective in _hinge.SMOOTH and labels_fit:
         flat = _flat(z)
         if _hinge.covers(flat):
-            value = _hinge.hinge(flat, _labels(target), objective, reduction, gamma)
+            value = _hinge.hinge(
+                flat,
+                _labels(target),
+                objective,
+                reduction,
+                gamma,
+                _hinge_fp32(logits, canonical, gamma, flat.shape[1]),
+            )
             return value.reshape(shape) if reduction == "none" else value
     if _multilabel.applies(objective, logits, target, classes, backend, canonical, reduction):
         flat = _flat(z)
@@ -612,8 +670,7 @@ def _device_entropy(
                 (((target < 0) | (target >= classes)).any(), "Target index out of range"),
             ]
         )
-    explicit = canonical == "float32"
-    fp32 = canonical != "float64" and logits.dtype != torch.float64 if fused else explicit
+    fp32 = fused and canonical != "float64" and logits.dtype != torch.float64
     value = _indexed_entropy(flat, _labels(target), reduction, fp32=fp32, is_fused=fused)
     return value.reshape(shape) if reduction == "none" else value
 
@@ -712,7 +769,7 @@ def _loss_plan(
 ) -> _CpuPlan:
     """The generic loss kernel: the extension's proximal_cross_entropy, else the native
     library."""
-    work = _working(logits, canonical)
+    work = _working(logits, canonical, objective == "proximal_cross_entropy" and extension)
     working = _tensor_arithmetic(objective, logits, work)
     if objective == "proximal_cross_entropy" and extension:
         implementation = _cpu.EXTENSION
@@ -804,29 +861,11 @@ _MULTILABEL_HINGE = _KINDS["multilabel_hinge"]
 _PROXIMAL_CROSS_ENTROPY = _KINDS["proximal_cross_entropy"]
 
 
-def _indexed_entropy_path(
-    z: torch.Tensor,
-    target: torch.Tensor,
-    objective: str,
-    k: int,
-    explicit: bool,
-    fused: bool = True,
-) -> bool:
-    """Integer-target entropy (or top-1 entropy) of class-last z in float64 or the fused float32
-    kernels (where fused). Default float16/bfloat16 work without those kernels keeps the float64
-    path, whose storage-limit guarantees the float32 tensor entropy lacks."""
-    if target.dtype != torch.int64 or not (
+def _indexed_entropy_path(target: torch.Tensor, objective: str, k: int) -> bool:
+    """Integer-target entropy (or top-1 entropy): the fused float32 kernels where they apply,
+    else float64 (whose storage-limit guarantees the float32 tensor entropy lacks)."""
+    return target.dtype == torch.int64 and (
         objective == "cross_entropy" or (objective == "topk_cross_entropy" and k == 1)
-    ):
-        return False
-    if not explicit:
-        return True
-    return (
-        fused
-        and z.is_cuda
-        and z.shape[-1] <= _entropy.CLASSES
-        and z.numel() <= z.shape[-1] * _entropy._cuda_launch.ROWS
-        and _entropy._kernel() is not None
     )
 
 
@@ -853,16 +892,12 @@ def _explain_topk(
     return "torch", f"tensor operations: the fused top-k kernels need Triton 3.3, {why}"
 
 
-def _unfused(objective: str, hinge: bool, fp32: bool, target: torch.Tensor) -> str:
+def _unfused(objective: str, hinge: bool, target: torch.Tensor) -> str:
     """Why a call takes the tensor operations; hinge: a k = 1 hinge the CUDA kernels skip."""
     if hinge:
         return "the fused k = 1 hinges need Triton 3.3 and at most 2**28 rows"
     if objective in _hinge.SMOOTH or objective == "topk_cross_entropy":
-        return (
-            "fused paths need int64 targets, no precision='float32' and k = 1 (on CUDA also k > 1)"
-        )
-    if objective == "cross_entropy" and fp32 and target.dtype == torch.int64:
-        return "float32 work fuses integer entropy only on CUDA with Triton"
+        return "fused paths need int64 targets and k = 1 (on CUDA also k > 1)"
     return f"{objective} has no fused integer-target path"
 
 
@@ -889,7 +924,8 @@ def explain_backend(
     objective, kind_k, gamma = _tensor_kind(loss, k, gamma)
     if backend not in ("auto", "native", "torch"):
         raise ValueError("Unknown backend")
-    canonical = _check_precision(logits, precision)
+    _check_device(logits)
+    canonical = _contract(logits, _check_precision(logits, precision))
     if _has_dtensor(logits, target):
         _dtensor_mesh(logits, target)
         if backend == "native" and logits.device.type != "cpu":
@@ -904,18 +940,17 @@ def explain_backend(
     _check_options(k, gamma, 1.0, classes)
     k = kind_k
     flat = z.reshape(-1, classes)
-    work = _working(logits, canonical)
+    work = _device_working(logits, flat, canonical, objective, backend != "torch")
     if flat.device.type == "cpu":
         plan = _cpu_plan(logits, shape, target, objective, backend, k, reduction, canonical)
         if plan is not None:
             return plan.backend, plan.reason
     if backend == "native":
         raise ValueError("Native losses require CPU tensors; use backend='torch' on other devices")
-    explicit = canonical == "float32"
     if backend == "torch":
-        return _explain_torch(z, flat, target, objective, k, explicit, work)
-    indexed = target.dtype == torch.int64 and not explicit and target.shape == shape
-    if target.shape == shape and _indexed_entropy_path(z, target, objective, k, explicit):
+        return _explain_torch(z, flat, target, objective, k, work)
+    indexed = target.dtype == torch.int64 and target.shape == shape
+    if target.shape == shape and _indexed_entropy_path(target, objective, k):
         if _fused_entropy(flat):
             kernel = _entropy._kernel()
             assert kernel is not None
@@ -929,7 +964,11 @@ def explain_backend(
         kernel = _hinge._kernel()
         assert kernel is not None
         code = kernel._REDUCTIONS[reduction]
-        return _fused_cuda(kernel.launcher(flat, code, _hinge.SMOOTH[objective]), "float64")
+        fp32 = _hinge_fp32(logits, canonical, gamma, flat.shape[1])
+        return _fused_cuda(
+            kernel.launcher(flat, code, _hinge.SMOOTH[objective], fp32),
+            "float32" if fp32 else "float64",
+        )
     reason = _multilabel.explain(objective, logits, target, classes, backend, canonical, reduction)
     if reason is not None:
         return reason
@@ -945,7 +984,7 @@ def explain_backend(
             "triton",
             f"proximal_cross_entropy runs one Triton kernel (Python launch, {arithmetic})",
         )
-    why = _unfused(objective, fast and flat.is_cuda, work == "float32", target)
+    why = _unfused(objective, fast and flat.is_cuda, target)
     return "torch", f"tensor operations in {arithmetic}: {why}"
 
 
@@ -955,11 +994,10 @@ def _explain_torch(
     target: torch.Tensor,
     objective: str,
     k: int,
-    explicit: bool,
     work: str | None,
 ) -> tuple[str, str]:
     """explain_backend of backend="torch": the tensor operations on every device."""
-    entropy = _indexed_entropy_path(z, target, objective, k, explicit, fused=False)
+    entropy = _indexed_entropy_path(target, objective, k)
     if target.shape == z.shape[:-1] and entropy:
         return "torch", "integer entropy in float64 tensor operations (backend='torch')"
     arithmetic = _tensor_arithmetic(objective, flat, work)
@@ -1061,6 +1099,7 @@ class SDCALoss(nn.Module):
                 dim=self.dim,
                 precision=self.precision,
             )
+        _untransformed(self.loss)
         _check_tensors(logits, target)
         return _resolved_loss(
             logits,
@@ -1318,6 +1357,7 @@ def distillation_loss(
     Raises:
         ValueError: For invalid inputs or options.
     """
+    _untransformed("distillation_loss")
     fast = _fast_distillation(student, teacher, temperature, reduction, dim, precision)
     if fast is not None:
         return fast
@@ -1387,6 +1427,7 @@ def _check_distillation(
         raise ValueError("Student and teacher must have matching shape, device, and dtype")
     if not student.is_floating_point():
         raise ValueError("Logits must be finite floating-point tensors")
+    _check_device(student)
     double = _check_precision(student, precision) == "float64"
     if not math.isfinite(temperature) or temperature <= 0:
         raise ValueError("temperature must be finite and positive")
@@ -1509,6 +1550,7 @@ def proximal_distillation_loss(
     The first-order gradient is identically zero at equal represented student and teacher logits.
     alpha is finite and positive; other arguments, the result and errors as in distillation_loss.
     """
+    _untransformed("proximal_distillation_loss")
     if _has_dtensor(student, teacher):
         return _call_with_dtensors(
             proximal_distillation_loss,

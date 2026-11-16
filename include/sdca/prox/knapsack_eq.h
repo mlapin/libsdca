@@ -7,7 +7,7 @@
 #include "sdca/utility/scratch.h"
 
 /*
- * Based on the Algorithm 3.1 in Kiwiel, K. C.,
+ * Based on the variable fixing algorithm of Kiwiel, K. C.,
  * "Variable fixing algorithms for the continuous quadratic knapsack problem.",
  * Journal of Optimization Theory and Applications 136.3 (2008): 445-458.
  */
@@ -18,7 +18,7 @@ namespace detail {
 
 // The thresholds of the fixed sets [first, m_first) at hi and [m_last, last)
 // at lo: the free mass is recomputed in Accum (wider than the data) relative
-// to the smallest free score (Lemma 5.3 of Kiwiel), within the bounds of the
+// to the smallest free score (Kiwiel), within the bounds of the
 // fixed sets. remaining is the mass left for the free set.
 template <typename Work, typename Accum, typename Result, typename Iterator>
 inline thresholds<Result, Iterator> knapsack_eq_finish(Iterator first, Iterator last,

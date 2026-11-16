@@ -195,10 +195,17 @@ class solver {
     }
   }
 
+  // An evaluation that throws here ends the solve as failed, as in an epoch.
   void end_solve() {
     ctx_.solve_time.stop();
     if (!is_evaluated_) {
-      evaluate_solution();
+      try {
+        evaluate_solution();
+      } catch (const std::exception& e) {
+        ctx_.eval_time.stop();
+        if (ctx_.status != solver_status::failed) reporting::solver_stop_step_failed(e);
+        ctx_.status = solver_status::failed;
+      }
     }
 
     reporting::end_solve(ctx_);

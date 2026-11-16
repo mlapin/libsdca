@@ -19,7 +19,41 @@ struct throwing_entropy : sdca::l2_entropy<Data, Result> {
   }
 };
 
+// An objective whose evaluation throws, as the hinge projections do on nonfinite scores.
+template <typename Data, typename Result>
+struct throwing_evaluation : sdca::l2_topk_hinge<Data, Result> {
+  throwing_evaluation() : sdca::l2_topk_hinge<Data, Result>(1, 1) {}
+  template <typename D, typename R>
+  explicit throwing_evaluation(const throwing_evaluation<D, R>&) : throwing_evaluation() {}
+  template <typename Int>
+  Result primal_loss(Int, Data*) const {
+    throw std::invalid_argument("evaluation rejected");
+  }
+};
+
 }  // namespace
+
+TEST(SolverValidation, a_failed_evaluation_ends_with_failed_and_no_partial_row) {
+  sdca::logging::set_level(sdca::logging::level::none);
+  for (bool eval_on_start : {false, true}) {
+    double x[] = {1, 2, 0, 1}, a[] = {0, 0, 0, 0}, w[4] = {};
+    std::vector<sdca::size_type> labels = {0, 1};
+    auto ctx =
+        sdca::make_context(sdca::make_input_feature(2, 2, x), sdca::multiclass_output(2, labels),
+                           throwing_evaluation<double, double>(), a, w);
+    ctx.criteria.max_epoch = 3;
+    ctx.criteria.eval_epoch = 1;
+    ctx.criteria.eval_on_start = eval_on_start;
+    if (eval_on_start) {
+      // An evaluation before the first epoch is part of the input checks.
+      EXPECT_THROW(sdca::make_solver(ctx).solve(), std::invalid_argument);
+    } else {
+      EXPECT_NO_THROW(sdca::make_solver(ctx).solve());
+      EXPECT_EQ(sdca::solver_status::failed, ctx.status);
+    }
+    EXPECT_EQ(0u, ctx.train.evals.size());
+  }
+}
 
 TEST(SolverValidation, any_failed_step_ends_with_failed_and_an_evaluation) {
   sdca::logging::set_level(sdca::logging::level::none);

@@ -24,20 +24,25 @@ struct Kernel {
 };
 
 // Handles from _cuda_launch.handles (a CPU int64 tensor): forward, block partials,
-// multi-block finish, one-launch finish and backward kernels, then rows per partial
+// multi-block finish, one-launch finish and backward kernels, optionally two rescue
+// kernels for adaptive distillation, then rows per partial
 // block, maximum rows of the one-launch reduction and (when present) the backward
 // column block.
 struct Kernels {
   Kernel fwd, part, finish, direct, bwd;
   int64_t block, direct_rows, b_bwd, fwd_rows, bwd_rows;
+  Kernel rescue_fwd, rescue_bwd;
 };
 
 Kernels unpack(const at::Tensor& handles) {
   TORCH_CHECK(handles.device().is_cpu() && handles.scalar_type() == at::kLong &&
                   handles.is_contiguous() &&
-                  (handles.numel() == 17 || handles.numel() == 18 || handles.numel() == 20),
+                  (handles.numel() == 17 || handles.numel() == 18 || handles.numel() == 20 ||
+                   handles.numel() == 26),
               "unexpected Triton kernel handles");
   const int64_t* h = handles.data_ptr<int64_t>();
+  const bool rescue = handles.numel() == 26;
+  const int offset = rescue ? 21 : 15;
   auto kernel = [&](int i) {
     return Kernel{static_cast<uint64_t>(h[3 * i]), static_cast<int>(h[3 * i + 1]),
                   static_cast<int>(h[3 * i + 2])};
@@ -47,11 +52,13 @@ Kernels unpack(const at::Tensor& handles) {
           kernel(2),
           kernel(3),
           kernel(4),
-          h[15],
-          h[16],
-          handles.numel() >= 18 ? h[17] : 0,
-          handles.numel() == 20 ? h[18] : 1,
-          handles.numel() == 20 ? h[19] : 1};
+          h[offset],
+          h[offset + 1],
+          handles.numel() >= 18 ? h[offset + 2] : 0,
+          handles.numel() >= 20 ? h[offset + 3] : 1,
+          handles.numel() >= 20 ? h[offset + 4] : 1,
+          rescue ? kernel(5) : Kernel{},
+          rescue ? kernel(6) : Kernel{}};
 }
 
 // args holds the kernel's own arguments, then two null pointers for Triton's global
@@ -533,6 +540,7 @@ std::tuple<at::Tensor, at::Tensor> distillation_cuda_forward(
   void* zero_ptr = nullptr;
   void* fwd_args[] = {&s_ptr, &t_ptr, &temp_ptr, &st_ptr, &n, &zero_ptr, &zero_ptr};
   launch_triton(stream, k.fwd, (n + k.fwd_rows - 1) / k.fwd_rows, 1, fwd_args);
+  if (k.rescue_fwd.function) launch_triton(stream, k.rescue_fwd, n, 1, fwd_args);
   auto out = at::empty(reduction == 0 ? at::IntArrayRef{student.size(0)} : at::IntArrayRef{},
                        student.options().dtype(value_type(student)));
   reduce_rows(stream, k, st_ptr, out.data_ptr(), n);
@@ -561,6 +569,7 @@ at::Tensor distillation_cuda_backward(const at::Tensor& student_in, const at::Te
   int32_t n = rows(student);
   void* bwd_args[] = {&s_ptr, &t_ptr, &temp_ptr, &st_ptr, &u_ptr, &g_ptr, &n, &zero_ptr, &zero_ptr};
   launch_triton(stream, k.bwd, (n + k.bwd_rows - 1) / k.bwd_rows, 1, bwd_args);
+  if (k.rescue_bwd.function) launch_triton(stream, k.rescue_bwd, n, 1, bwd_args);
   return grad;
 }
 

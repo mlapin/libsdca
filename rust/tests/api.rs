@@ -105,7 +105,7 @@ fn precision_must_match_the_data_type() {
         "does not match f64 data",
     );
     assert_eq!(f64::DEFAULT_PRECISION, Precision::Float64);
-    assert_eq!(f32::DEFAULT_PRECISION, Precision::Float64);
+    assert_eq!(f32::DEFAULT_PRECISION, Precision::Float32);
 }
 
 #[test]
@@ -134,8 +134,8 @@ fn f32_data_trains_in_every_precision() {
     )
     .unwrap();
     let default = train(None);
-    assert_eq!(default.dual(), train(Some(Precision::Float64)).dual());
-    for model in [default, train(Some(Precision::Float32))] {
+    assert_eq!(default.dual(), train(Some(Precision::Float32)).dual());
+    for model in [default, train(Some(Precision::Float64))] {
         assert_eq!(model.status(), Status::Solved);
         assert_eq!(model.predict(x32).unwrap(), exact.predict(x()).unwrap());
     }
@@ -427,7 +427,7 @@ fn float32_and_float64_compute_on_f32_storage() {
         )
         .unwrap()
     };
-    assert_eq!(update(None), update(Some(Precision::Float64)));
+    assert_eq!(update(None), update(Some(Precision::Float32)));
     for precision in [Precision::Float32, Precision::Float64] {
         let a = update(Some(precision));
         let error = a
@@ -757,7 +757,24 @@ fn projection_precision_is_float64_by_default_and_extended_agrees() {
             fit(x(), &sets, &opts).unwrap()
         })
         .collect();
-    let close = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(u, v)| (u - v).abs() < 1e-12);
+    // Where long double is double (Apple arm64, MSVC), the extended solver rounds differently
+    // from the float64 one and the fits stop at different certified points: each within
+    // sqrt(2 gap) of the optimum, as the objective is 1-strongly convex in W.
+    let radius = |m: &Model<f64>| {
+        let last = |name| *m.history().get(name).unwrap().last().unwrap();
+        (2.0 * (last("relative_gap") * last("primal").abs()).max(0.0)).sqrt()
+    };
+    let narrow = cfg!(any(
+        target_env = "msvc",
+        all(target_vendor = "apple", target_arch = "aarch64")
+    ));
+    let tolerance = if narrow {
+        radius(&fits[0]) + radius(&fits[1])
+    } else {
+        1e-12
+    };
+    assert!(fits.iter().all(|m| m.status() == Status::Solved));
+    let close = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(u, v)| (u - v).abs() <= tolerance);
     assert!(close(
         fits[0].weights().unwrap(),
         fits[1].weights().unwrap()
@@ -775,7 +792,8 @@ fn projection_precision_is_float64_by_default_and_extended_agrees() {
             loss_and_grad(Matrix::new(&z, 2, 3).unwrap(), &sets[..2], &opts).unwrap()
         })
         .collect();
-    assert!(close(&losses[0].0, &losses[1].0) && close(&losses[0].1, &losses[1].1));
+    let close_loss = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(u, v)| (u - v).abs() <= 1e-12);
+    assert!(close_loss(&losses[0].0, &losses[1].0) && close_loss(&losses[0].1, &losses[1].1));
 }
 
 #[test]
@@ -1086,6 +1104,7 @@ fn stress_cases_match_independent_oracles() {
             &UpdateOptions {
                 objective: obj,
                 gamma: width,
+                precision: Some(Precision::Float64),
                 ..Default::default()
             },
         )

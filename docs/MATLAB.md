@@ -49,6 +49,9 @@ scores = model.W' * Xtest;            % m-by-n_test
 `max_cpu_time` and `max_wall_time` (seconds, `0` = unlimited), `log_level` (`'none'`,
 `'warning'`, `'info'`, `'verbose'`, `'debug'`), and `log_format` (`'short_f'`,
 `'short_e'`, `'long_f'`, `'long_e'`). Setting `eval_epoch = 0` evaluates only at the end.
+Unlike the other interfaces, `precision` defaults to `'double'` for `single` input as well;
+`'single'` selects float work for `single` input (`double` input keeps `double` steps and
+losses).
 
 Passing cell arrays `{Xtrn, Xval}` and `{Ytrn, Yval}` trains on the first dataset and
 evaluates all datasets at each check (`model.test`). Passing `opts.initial_dual = model.A`
@@ -56,7 +59,7 @@ warm-starts from a previous dual solution.
 
 The returned `model` struct contains `W` (`d`-by-`m`, feature input only), `A` (`m`-by-`n`),
 `status` (only `'solved'` certifies the gap), `epoch`, `relative_gap`, `cpu_time`,
-`wall_time`, `train` (evaluation history), `test`, and the options used
+`wall_time`, `train` (evaluation history), `test` (with cell-array datasets), and the options used
 (`matsdca_fit('help')` prints full usage).
 
 ## Losses and gradients
@@ -80,7 +83,7 @@ projected = matsdca_prox(A, struct('prox', 'knapsack'));         % columns onto 
 projected = matsdca_prox(A, struct('prox', 'topk_entropy_biased', 'k', 2));
 ```
 
-`matsdca_prox('help')` lists all supported operators (`knapsack`, `two_simplex`,
+`matsdca_prox('help', 'prox')` lists all supported operators (`knapsack`, `two_simplex`,
 `topk_simplex`, `topk_cone`, `entropy`, `topk_entropy`, `lambert_w_exp`, ...). `opts.precision`
 selects working arithmetic (`'float32'` / `'single'`, `'float64'` / `'double'`, or
 `'long_double'`) independently of the input array class.

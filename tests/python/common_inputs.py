@@ -19,7 +19,7 @@ Tolerances are in epsilons of the working arithmetic, relative to the scale of a
 one rounding to the output dtype (TORCH.md: 16-bit gradients one unit of their dtype plus
 2000 float32 eps). Nonsmooth hinge rows at a kink or with tied selections have several
 subgradients: their gradients are not compared. test_torch_common_inputs.py runs a fixed
-sample.
+deterministic sample of these cases.
 """
 
 from __future__ import annotations

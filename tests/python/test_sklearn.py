@@ -27,15 +27,15 @@ class ModuleFunctionTests:
         for dtype in (np.float64, np.float32):
             with subtests.test(dtype=dtype):
                 model = libsdca.fit(x.astype(dtype), y, tol=1e-6)
-                ref = Solver("float64", dtype=dtype).fit(x.astype(dtype), y, tol=1e-6)
+                inferred = Solver(dtype=dtype)
+                assert inferred.precision == np.dtype(dtype).name
+                ref = inferred.fit(x.astype(dtype), y, tol=1e-6)
                 assert model.weights is not None
                 assert model.weights.dtype == dtype
                 np.testing.assert_array_equal(model.weights, ref.weights)
                 z = x.astype(dtype) @ model.weights
                 values, grad = libsdca.loss_and_grad(z, y, "topk_cross_entropy", k=2)
-                expected = Solver("float64", dtype=dtype).loss_and_grad(
-                    z, y, "topk_cross_entropy", k=2
-                )
+                expected = Solver(dtype, dtype=dtype).loss_and_grad(z, y, "topk_cross_entropy", k=2)
                 np.testing.assert_array_equal(values, expected[0])
                 assert grad.dtype == dtype
                 assert libsdca.coordinate_update(z, y, C=0.5).dtype == dtype

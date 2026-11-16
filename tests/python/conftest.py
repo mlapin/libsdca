@@ -9,6 +9,7 @@ Under pytest-xdist (-n) each worker gets an equal share of the CPUs as OMP_NUM_T
 (unless set), the CPU extension is built once before the workers start, tests marked slow
 or long start first (one per worker under --dist worksteal), and tests marked serial are
 deselected: run them in a second pass, -m serial without -n. CI passes -m "not long".
+SDCA_JAX_CPU_FUSION is "fenced" unless set.
 """
 
 from __future__ import annotations
@@ -27,7 +28,9 @@ HERE = Path(__file__).resolve().parent
 SOURCE = HERE.parents[1] / "python"
 GROUPS = ("core", "torch", "jax")
 # Tests of source-tree helpers, not of the installed package.
-SOURCE_ONLY = {"test_build_config.py"}
+SOURCE_ONLY = {
+    "test_build_config.py",
+}
 SERIAL = "serial: needs the machine to itself (timing); deselected under -n, run with -m serial"
 SLOW = "slow: takes about a minute on a loaded machine; started first under -n"
 LONG = "long: over a minute on a 4-CPU runner; started first under -n, CI deselects it"
@@ -98,6 +101,9 @@ def pytest_configure(config: pytest.Config) -> None:
     workers = int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1"))
     if hasattr(config, "workerinput") and "OMP_NUM_THREADS" not in os.environ:
         os.environ["OMP_NUM_THREADS"] = str(max(1, available_cpus() // workers))
+    # One fusion of the JAX CPU passes for every machine (auto would time both under the
+    # load of the tests); its tests force each, and a run may set the other.
+    os.environ.setdefault("SDCA_JAX_CPU_FUSION", "fenced")
     config.addinivalue_line("markers", SERIAL)
     config.addinivalue_line("markers", SLOW)
     config.addinivalue_line("markers", LONG)
@@ -158,6 +164,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         config.hook.pytest_deselected(items=serial)
     kept = [item for item in items if not item.get_closest_marker("serial")]
     items[:] = slow_first(kept, int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1")))
+
+
+@pytest.fixture(autouse=True)
+def _seeded_torch() -> None:
+    """The same global torch draws in every test, whatever ran before it on the worker."""
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        torch.manual_seed(0)
 
 
 @pytest.fixture(autouse=True)

@@ -165,11 +165,16 @@ def check_reduction(reduce: types.ModuleType, device: str, sizes: list[int]) -> 
 
 
 def _fused(
-    z: torch.Tensor, y: torch.Tensor, loss: str, reduction: str, gamma: float = 0.5
+    z: torch.Tensor,
+    y: torch.Tensor,
+    loss: str,
+    reduction: str,
+    gamma: float = 0.5,
+    precision: str | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x = z.detach().clone().requires_grad_()
     loss, gamma = _case(loss, gamma)
-    value = sdca_loss(x, y, loss, gamma=gamma, reduction=reduction)
+    value = sdca_loss(x, y, loss, gamma=gamma, reduction=reduction, precision=precision)
     value.backward(torch.full_like(value, 0.75))
     assert x.grad is not None
     return value.detach(), x.grad
@@ -289,6 +294,46 @@ class LauncherGateTests:
             # on raises instead.
             with _setting("on"), pytest.raises(RuntimeError, match="no nvcc"):
                 _cuda_launch.status()
+
+    def test_file_system_failure_is_not_recorded(self, tmp_path: Path):
+        """A build that fails on the file system (not the compiler) warns in every process and
+        leaves no record."""
+        triton = types.SimpleNamespace(__version__="3.5.0")
+        failing = mock.patch(
+            "torch.utils.cpp_extension.load", side_effect=OSError("No space left on device")
+        )
+        tools = mock.patch.object(_extensions, "missing_tools", return_value=None)
+        modules = mock.patch.dict(sys.modules, {"triton": triton})
+        directory = mock.patch.dict(os.environ, {"TORCH_EXTENSIONS_DIR": str(tmp_path)})
+        with failing, tools, modules, directory, _setting("auto"):
+            for _ in range(2):
+                _cuda_launch.status.cache_clear()
+                with pytest.warns(RuntimeWarning, match="in this process"):
+                    host, reason = _cuda_launch.status()
+                assert host is None and "No space left on device" in reason
+                assert not _cuda_launch.failure_record("3.5.0").exists()
+
+    def test_existing_build_that_does_not_load_is_not_recorded(self, tmp_path: Path):
+        """A cached build that no longer imports warns in every process that it could not be
+        loaded, names the directory to delete and leaves no record."""
+        triton = types.SimpleNamespace(__version__="3.5.0")
+        tools = mock.patch.object(_extensions, "missing_tools", return_value=None)
+        build = mock.patch.object(_extensions, "_build")
+        modules = mock.patch.dict(sys.modules, {"triton": triton})
+        directory = mock.patch.dict(os.environ, {"TORCH_EXTENSIONS_DIR": str(tmp_path)})
+        with tools, build as built, modules, directory, _setting("auto"):
+            cached = _extensions.build_directory(_cuda_launch._extension("3.5.0"))
+            cached.mkdir()
+            (cached / f"{cached.name}.so").write_bytes(b"not a library")
+            for _ in range(2):
+                _cuda_launch.status.cache_clear()
+                with pytest.warns(RuntimeWarning, match="could not be loaded") as caught:
+                    host, reason = _cuda_launch.status()
+                assert host is None and f"delete {cached} to build it again" in reason
+                assert "did not build" not in reason
+                assert "in this process" in str(caught[0].message)
+                assert not _cuda_launch.failure_record("3.5.0").exists()
+            built.assert_not_called()
 
     def test_missing_tools_hint_once(self):
         triton = types.SimpleNamespace(__version__="3.5.0")
@@ -590,6 +635,8 @@ class FusedLaunchTests:
         assert entropy._compiled.cache_info().maxsize == _cuda_launch.CACHE
 
     def test_large_batch(self):
+        # This tight float64-reference check requests double work explicitly.
+        # Default fp32 work is checked against its contract in conformance.
         # More rows than one reduction block of blocks: the finish loop runs twice.
         n = 2**22 + 3
         z, y = self._data(n, 3, torch.float32)
@@ -598,7 +645,7 @@ class FusedLaunchTests:
             name, reason = explain_backend(z, y, _case(loss)[0], gamma=_case(loss)[1])
             assert name in ("cuda-launcher", "triton"), reason
             for reduction in ("mean", "sum", "none"):
-                value, grad = _fused(z, y, loss, reduction)
+                value, grad = _fused(z, y, loss, reduction, precision="float64")
                 ref_value, ref_grad = _reference(z, y, loss, reduction)
                 message = f"{loss} {reduction}"
                 rtol = 2e-6 if loss == "cross_entropy" else 2e-7
@@ -608,7 +655,7 @@ class FusedLaunchTests:
                 torch.testing.assert_close(
                     grad.double(), ref_grad, rtol=rtol, atol=1e-30, msg=message
                 )
-                again, _ = _fused(z, y, loss, reduction)
+                again, _ = _fused(z, y, loss, reduction, precision="float64")
                 assert torch.equal(value, again), message
 
     def test_large_batch_reduction_boundaries(self):
@@ -686,12 +733,12 @@ class FusedLaunchTests:
         assert name == ("cuda-launcher" if host is not None else "triton"), reason
         mask = F.one_hot(y, 6).bool()
         assert explain_backend(z, mask)[0] == name
-        assert explain_backend(z.float(), mask, precision="float32")[0] == "torch"
+        assert explain_backend(z.float(), mask, precision="float32")[0] == name
         assert explain_backend(z, y, "topk_hinge_beta", k=2)[0] == name
         # precision="float32" takes non-float64 logits, as in sdca_loss.
         single = z.float()
         assert explain_backend(single, y, precision="float32")[0] == name
-        assert explain_backend(single, y, "topk_hinge_alpha", precision="float32")[0] == "torch"
+        assert explain_backend(single, y, "topk_hinge_alpha", precision="float32")[0] == name
         with pytest.raises(ValueError, match="precision"):
             explain_backend(z, y, precision="float32")
         assert explain_backend(z, y, "proximal_cross_entropy")[0] == "triton"

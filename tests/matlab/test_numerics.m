@@ -163,13 +163,17 @@ on=matsdca_fit(X,y,struct('log_level','none','eval_epoch',5,'max_epoch',5));
 off=matsdca_fit(X,y,struct('log_level','none','eval_epoch',5,'max_epoch',5,'recompute_primal',false));
 assert(on.recompute_primal && ~off.recompute_primal && isequal(on.A, off.A));
 assert(on.train(end).dual == off.train(end).dual);
-% projection_precision: 'float64' by default, 'extended' agrees to rounding.
+% Projection work may change the solver trajectory; both fits certify the same minimizer.
 n=numel(y); M=full(sparse(y(:)',1:n,1,3,n)); M(sub2ind(size(M),mod(y(:)',3)+1,1:n))=1;
 o=struct('log_level','none','objective','multilabel_hinge','gamma',.5,'epsilon',1e-10);
 m64=matsdca_fit(X,sparse(M),o);
 mext=matsdca_fit(X,sparse(M),setfield(o,'projection_precision','extended'));
 assert(strcmp(m64.projection_precision,'float64') && strcmp(mext.projection_precision,'extended'));
-assert(max(abs(m64.W(:)-mext.W(:))) < 1e-12);
+assert(strcmp(m64.status,'solved') && strcmp(mext.status,'solved'));
+e64=m64.train(end); eext=mext.train(end);
+r64=sqrt(2*max(0,e64.relative_gap)*max(abs([e64.primal e64.dual])));
+rext=sqrt(2*max(0,eext.relative_gap)*max(abs([eext.primal eext.dual])));
+assert(norm(m64.W(:)-mext.W(:)) <= r64+rext+32*eps*max(1,norm(m64.W(:))));
 zm=[.3 -1; -.8 .4; 1.2 .2; .1 .5]; mm=logical([1 0; 1 1; 0 0; 0 0]);
 lo=struct('loss','multilabel_hinge','gamma',.5);
 [v64,g64]=matsdca_loss(zm,mm,lo);

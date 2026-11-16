@@ -471,7 +471,8 @@ def _single_target(
     if objective in ("topk_hinge_alpha", "topk_hinge_beta"):
         masked = h.masked_fill(positive, -math.inf)
         if k == 1:
-            top, order = masked.max(dim=-1, keepdim=True)
+            _, order = z.masked_fill(positive, -math.inf).max(dim=-1, keepdim=True)
+            top = masked.gather(-1, order)
         elif not masked.is_cuda and k + 1 <= masked.shape[-1]:
             top1, order1 = masked.topk(k + 1, dim=-1)
             if bool((top1[:, k - 1] > top1[:, k]).all()):

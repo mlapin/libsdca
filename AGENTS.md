@@ -7,8 +7,9 @@ examples are in the [README](README.md#quick-start) and the linked guides.
 
 ```bash
 pip install libsdca              # NumPy solver and losses (numpy>=1.23)
-pip install 'libsdca[torch]'     # PyTorch losses (torch>=2.1, installs ninja)
-pip install 'libsdca[jax]'       # JAX losses (jax>=0.4.35)
+pip install 'libsdca[torch]'     # PyTorch losses (torch>=2.1)
+pip install 'libsdca[jax]'       # JAX CPU losses (jax>=0.4.35)
+pip install 'libsdca[jax-cuda]'  # JAX CUDA losses (Linux, NVIDIA driver 580+)
 pip install 'libsdca[sklearn]'   # SDCAClassifier (scikit-learn>=1.6)
 cargo add libsdca                # Rust crate (Rust>=1.74 and a C++11 compiler)
 ```
@@ -17,6 +18,8 @@ cargo add libsdca                # Rust crate (Rust>=1.74 and a C++11 compiler)
 - PyTorch and JAX compile small C++ extensions on first use when a compiler and Python
   headers are present; otherwise they fall back with a one-time warning
   ([TORCH.md](python/TORCH.md#build-tools)).
+- Check the selected path: `libsdca.torch.explain_backend(logits, target, "cross_entropy")`
+  returns `(backend, reason)`.
 
 ## Which API to use
 
@@ -29,7 +32,11 @@ cargo add libsdca                # Rust crate (Rust>=1.74 and a C++11 compiler)
 | Losses in JAX (`jit`, `grad`, `vmap`) | `libsdca.jax` | [JAX.md](python/JAX.md) |
 | Linear or kernel SVM / softmax classifier (scikit-learn) | `libsdca.SDCAClassifier` | [python/README.md](python/README.md#classifier) |
 | Same, with duality-gap history and warm starts | `libsdca.fit` | [python/README.md](python/README.md#training) |
+| Losses and gradients on NumPy arrays | `libsdca.loss_and_grad` | [python/README.md](python/README.md#losses-and-gradients) |
 | Rust, C++, C, MATLAB | crate `libsdca`, headers, `libsdca_c`, `matsdca_*` | [Rust](rust/README.md), [C++](docs/CPP.md), [C](docs/C.md), [MATLAB](docs/MATLAB.md) |
+
+Loss names, options, defaults and errors are shared across languages:
+[docs/API.md](docs/API.md).
 
 ## Pitfalls
 
@@ -48,9 +55,24 @@ cargo add libsdca                # Rust crate (Rust>=1.74 and a C++11 compiler)
   [API.md](docs/API.md#options)).
 - **Convergence:** only `status == "solved"` certifies the duality gap
   ([API.md](docs/API.md#results)).
+- **Precision:** `precision=None` follows the storage dtype (16-bit inputs use `float32`
+  work); pass `precision="float64"` for double work ([API.md](docs/API.md#precision),
+  [known limits](docs/API.md#known-limits)).
 
-## Further documentation
+## Working in this repository
 
-- Loss formulas, options and environment variables: [docs/API.md](docs/API.md)
-- Numerics and known limits: [docs/numerics.md](docs/numerics.md)
-- Performance: [docs/performance.md](docs/performance.md)
+| Path | Contents |
+| --- | --- |
+| `include/sdca/` | Header-only C++11 core (`solver.h`, `loss.h`, `prox.h`, `c_api.h`) |
+| `src/c_api.cpp` | C ABI used by Python and Rust |
+| `python/libsdca/` | Python package (NumPy, scikit-learn, PyTorch, JAX) |
+| `rust/`, `matlab/`, `src/matlab/` | Rust crate and MATLAB/Octave gateways |
+| `tests/`, `examples/` | Test suites and runnable examples |
+
+```bash
+pip install -e '.[test-torch,test-jax]'
+python -m pytest -n auto tests/python --group core   # core, torch, jax or all
+python tools/quality.py --skip-tidy
+```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) lists the full checks; `VERSION` holds the version.

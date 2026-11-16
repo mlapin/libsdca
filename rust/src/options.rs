@@ -27,8 +27,9 @@ pub struct FitOptions<'a, T> {
     pub num_classes: Option<usize>,
     /// The epoch limit.
     pub max_epoch: usize,
-    /// Epochs between evaluations (>= 1); up to two more fall between where
-    /// the gap's trend reaches tol.
+    /// Full passes of work between evaluations (>= 1): epochs without
+    /// shrinking, at most 50 epochs apart with it; up to two more fall between
+    /// where the gap's trend reaches tol.
     pub eval_epoch: usize,
     /// Relative duality gap of success; 0 disables gap-based success.
     pub tol: f64,

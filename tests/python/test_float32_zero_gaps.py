@@ -1,12 +1,11 @@
 """float32 logits [0, -gap, ..., -gap] (target 0) at gaps 80 to 112, where the loss and the
 target entry become float32 subnormals and then zero, against 100-digit references.
 
-Every entry is within the release budget (numerics.md, how it is verified: 64 output eps plus
-one subnormal quantum), with the CPU extension on and off. The float32-exponential top-k rows
+Every entry is within the release budget (64 output eps plus one subnormal
+quantum), with the CPU extension on and off. The float32-exponential top-k rows
 once summed their float32 competitor entries into the target entry: below exp(-87.3) those
 lose bits and from a gap of 104 they vanish, so at 1,000 classes the target entry was off by
-up to 2x near 103.9 and zero from 104 where cross_entropy keeps it to 110.94 (ranges report
-§3.5); the native library's k = C - 1 rows summed their stored entries likewise.
+up to 2x near 103.9 and zero from 104 where cross_entropy keeps it to 110.94; the native library's k = C - 1 rows summed their stored entries likewise.
 """
 
 import functools
@@ -105,8 +104,8 @@ def _first_zero(name: str, path: str) -> tuple[float, float]:
 def test_topk_target_entry_vanishes_with_cross_entropys(path: str):
     lo, hi = _first_zero("topk_cross_entropy k=5", path)
     assert (lo, hi) == _first_zero("cross_entropy", path)
-    # One rounding of the reference: nonzero below, zero at the first zero (110.9375 on the
-    # 1/16 grid of the ranges report).
+    # One rounding of the reference: nonzero below, zero at the first zero (110.9375 on a
+    # 1/16 grid).
     half = mp.mpf(TINY) * EPS / 2
     assert abs(_reference(lo, 1000)[1]) > half >= abs(_reference(hi, 1000)[1])
     assert math.ceil(hi * 16) / 16 == 110.9375

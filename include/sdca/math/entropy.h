@@ -974,11 +974,11 @@ struct entropy_block_solver {
         }
       }
     }
-    Sum sum(0);
+    row_sum<Data, Sum> sum;
     for (Int j = 0; j < n; ++j) {
-      if (j != pivot) sum += Sum(out[j]);
+      if (j != pivot) sum.add(Sum(out[j]));
     }
-    out[pivot] = Data(-sum);
+    out[pivot] = Data(-sum.value());
   }
 };
 
@@ -1055,20 +1055,23 @@ Result entropy_prox_loss_ptr(Int n, Int p, Result alpha, const Result* v, Result
   block.expanded = expanded.data();
   const Result dt = block.solve();
   block.duals(Result(1), dt, out);
-  Result cross(0), penalty(0);
+  // Summed in double: a float sum of n terms drifts by O(n) float eps.
+  using Sum = typename std::common_type<Result, double>::type;
+  Result cross(0);
+  detail::row_sum<Result, Sum> penalty;
   for (Int j = 0; j < p; ++j) cross -= block.label_log_probability(dt, j);
   // duals() recovered the one-label mass even if the root residual underflowed.
   if (p == 1 && out[0] <= Result(0.5)) cross = -std::log1p(-out[0]);
   // alpha out_j first: out_j^2 can underflow where the product does not.
-  for (Int j = 0; j < n; ++j) penalty += (alpha * out[j]) * out[j];
+  for (Int j = 0; j < n; ++j) penalty.add(Sum(alpha * out[j]) * Sum(out[j]));
   if (!std::isfinite(cross)) {
     // A finite mean need not have a representable unnormalized sum. Keep the
     // ordinary accumulation unchanged; divide each term only on overflow.
     cross = Result(0);
     for (Int j = 0; j < p; ++j) cross -= block.label_log_probability(dt, j) / Result(p);
-    return cross + penalty / 2;
+    return Result(Sum(cross) + penalty.value() / 2);
   }
-  return cross / Result(p) + penalty / 2;
+  return Result(Sum(cross / Result(p)) + penalty.value() / 2);
 }
 
 // Working precision of an SDCA entropy block update, chosen by the caller

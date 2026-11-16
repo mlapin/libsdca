@@ -7,13 +7,18 @@ from __future__ import annotations
 
 import math
 import os
+from typing import TYPE_CHECKING
 
-import torch
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
 
 from . import _cuda_launch
+
+if TYPE_CHECKING:
+    import torch
+else:
+    from ._cuda_launch import torch
 
 if os.environ.get("TRITON_INTERPRET") == "1":
     # The interpreter (CPU, for tests) has no libdevice.

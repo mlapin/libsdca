@@ -8,7 +8,7 @@ from scipy.optimize import minimize
 
 # Whether long double extends double (x87, binary128). Where it is double (Apple
 # arm64), the extended retries have the range of double: beyond it a block raises
-# (docs/numerics.md, platform ranges).
+# (docs/API.md, Known limits).
 _LONG_DOUBLE = np.finfo(np.longdouble)
 WIDE_LONG_DOUBLE = _LONG_DOUBLE.nmant >= 63 and _LONG_DOUBLE.maxexp > 1024
 
@@ -91,7 +91,7 @@ def topk_entropy_reference(scores: np.ndarray, y: int, k: int):
 
 class TopkReferenceTests:
     def test_alpha_hinge_excludes_the_target_zero_margin(self, subtests: pytest.Subtests):
-        # Proposition 11's reduced non-target convention: top2([1, -3])
+        # The reduced non-target convention: top2([1, -3])
         # averages to -1, so alpha and its gamma=1 smoothing are both zero.
         # Including the target's zero margin would instead give .5 and .25.
         for storage, precision in (

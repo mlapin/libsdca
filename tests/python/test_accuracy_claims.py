@@ -1,4 +1,4 @@
-"""Independent regressions for the measured accuracy limits in docs/numerics.md."""
+"""Independent regressions for the measured accuracy limits in docs/API.md (Known limits)."""
 
 import mpmath as mp
 import numpy as np

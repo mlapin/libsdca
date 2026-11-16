@@ -824,6 +824,7 @@ def _check(
         raise ValueError("bias must have shape (classes,)")
     if any(t.device != hidden.device for t in tensors):
         raise ValueError("hidden, weight, target and bias must be on the same device")
+    _torch()._check_device(hidden)
     if weight.shape[0] < 2:
         raise ValueError("At least two classes are required")
     shape = hidden.shape[:-1]

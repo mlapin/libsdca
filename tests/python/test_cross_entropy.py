@@ -119,6 +119,24 @@ class CrossEntropyTests:
                 value.sum().backward()
                 torch.testing.assert_close(z.grad, torch.zeros_like(z))
 
+    def test_ignored_rows_may_be_nonfinite(self, subtests: pytest.Subtests):
+        z = torch.randn(4, 5, dtype=torch.double)
+        z[1, 2], z[2, 0] = float("inf"), float("nan")
+        y = torch.tensor([0, -100, -100, 3])
+        for weight in (None, torch.linspace(0.5, 2, 5, dtype=torch.double)):
+            for reduction in ("none", "sum", "mean"):
+                with subtests.test(weight=weight is not None, reduction=reduction):
+                    results = []
+                    for backend in ("native", "torch"):
+                        x = z.clone().requires_grad_()
+                        value = cross_entropy(x, y, weight, reduction=reduction, backend=backend)
+                        results.append((value, torch.autograd.grad(value.sum(), x)[0]))
+                    torch.testing.assert_close(results[1], results[0])
+                    assert not bool(results[1][1][1:3].any())
+        z[0, 1] = float("inf")
+        with pytest.raises(ValueError, match="finite"):
+            cross_entropy(z, y, backend="torch")
+
     def test_zero_weight_mean_matches_pytorch(self):
         z = torch.randn(2, 3, dtype=torch.double, requires_grad=True)
         y = torch.tensor([0, -100])

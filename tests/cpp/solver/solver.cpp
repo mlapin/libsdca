@@ -411,7 +411,7 @@ static void test_screening_is_safe(const Objective<double, double>& objective) {
     for (sdca::size_type c = 0; c < m; ++c) {
       if (!classes[m * i + c]) continue;
       ++marked;
-      EXPECT_LE(std::abs(best[m * i + c]), 1e-7) << where << " example " << i << " class " << c;
+      EXPECT_LE(std::abs(best[m * i + c]), 1e-9) << where << " example " << i << " class " << c;
     }
   EXPECT_GT(marked, 0UL) << where;
   EXPECT_GT(std::count(examples.begin(), examples.end(), char(1)), 0) << where;

@@ -26,6 +26,28 @@ struct named_case {
 
 std::atomic<int> failures(0);
 
+void visit_rows(void* context, std::size_t begin, std::size_t end) {
+  auto* visits = static_cast<std::atomic<unsigned>*>(context);
+  for (std::size_t row = begin; row < end; ++row) ++visits[row];
+}
+
+void add_scheduler(std::vector<named_case>& cases) {
+  for (std::size_t n : {std::size_t(0), std::size_t(1), std::size_t(137)})
+    cases.push_back({"row scheduler " + std::to_string(n),
+                     [n](std::size_t threads, bytes& out) {
+                       std::atomic<unsigned> visits[137];
+                       for (auto& count : visits) count = 0;
+                       const int code = sdca_run_rows(n, 1000, threads, visit_rows, visits);
+                       for (std::size_t row = 0; row < 137; ++row) {
+                         const unsigned count = visits[row].load();
+                         if (count != (row < n ? 1u : 0u)) ++failures;
+                         out.push_back(static_cast<unsigned char>(count));
+                       }
+                       return code;
+                     },
+                     bytes()});
+}
+
 std::uint32_t next(std::uint32_t& state) {
   state = state * 1664525u + 1013904223u;
   return state >> 8;
@@ -341,6 +363,8 @@ int main() {
 #endif
   const inputs narrow(37, 10), wide_rows(23, 70), fit_data(64, 6);
   std::vector<named_case> cases;
+  if (sdca_run_rows(1, 1, 1, nullptr, nullptr) != SDCA_INVALID_ARGUMENT) ++failures;
+  add_scheduler(cases);
   add_cases(narrow, cases);
   add_cases(wide_rows, cases);
   add_fits(fit_data, 6, cases);

@@ -1,22 +1,43 @@
 # Changelog
 
-## 0.3.1 (2026-11-12)
+## 0.3.1 (2026-11-16)
 
-- **CUDA hinges:** For `C <= 128`, the fused multiclass, smooth and top-*k* hinge kernels pack
-  several rows per CTA, as the top-*k* cross-entropy kernels already do. Forward plus backward
-  on an A100 (`bfloat16`): `multiclass_hinge` at `262144 × 10` takes `0.20` ms (was `0.52`),
-  the smooth hinge `0.27` ms (was `2.21`), and `topk_hinge_alpha` ($k = 5$) `0.17` ms (was
-  `2.76`). Values and gradients are unchanged, and wider rows keep the existing kernels.
-- **Name and description:** The project is described everywhere by the technical report's
-  title, *libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks*
-  (README, PyPI, crates.io, module docs), and report links go to
-  <https://mlapin.github.io/libsdca/report/>.
-- **Citation:** `CITATION.cff` and the README cite the technical report and the TPAMI 2018
-  paper; softmax collapse is credited to Prieto et al. (2025).
-- **Docs:** Fixed GitHub math rendering, wide tables and line wrapping.
-- **Packaging:** The crate is published through crates.io Trusted Publishing, and
-  `tools/quality.py` checks the `CITATION.cff` version and date and the release-pinned links
-  of the PyPI and crates.io pages.
+- **JAX on CUDA:** `libsdca.jax` runs the same fused Triton kernels as PyTorch for every
+  loss (Linux wheels include the handler), falling back to `jax.numpy` with a warning.
+- **Shared CPU distillation:** PyTorch and JAX use the same fused CPU row kernels for
+  distillation in all four dtypes; JAX proximal distillation uses the shared native solver.
+  An overflowing native proximal-distillation loss now returns `+inf` with a finite
+  gradient instead of `nan`.
+- **`float32` work by default:** NumPy, scikit-learn, Rust and the C++ loss helpers default
+  to `float32` work for `float32` inputs; `precision="float64"` keeps double work. Proximal
+  cross-entropy and CUDA top-1 hinges use `float32` work for 16- and 32-bit inputs, promoting
+  rows that need double ([API.md](docs/API.md#precision)).
+- **Hinge ties:** Nonsmooth top-1 hinges select the largest represented score before forming
+  the margin, so tiny score gaps no longer round to ties.
+- **Aggregate tails:** CUDA distillation, proximal distillation and multilabel
+  cross-entropy, and the JAX array losses, keep sums of individually underflowing
+  exponentials.
+- **Faster CUDA paths:** Adaptive distillation kernels and packed short hinge rows.
+- **JAX CPU fusion:** `SDCA_JAX_CPU_FUSION=auto` times fused and fenced array programs once
+  per machine and caches the choice ([JAX.md](python/JAX.md#cpu-pass-fusion)).
+- **Packaging:** JAX-only installs no longer need PyTorch; the `torch` extra works with
+  PyTorch 2.1; transient build failures no longer suppress retries for 24 hours. The
+  version is read from one `VERSION` file.
+- **Clearer errors:** PyTorch losses other than `cross_entropy` raise `ValueError` inside
+  `torch.func` transforms, and all losses raise `ValueError` for tensors other than CPU or
+  CUDA (MPS failed with a `TypeError`). `gamma` and `alpha` reject booleans. Fallback
+  warnings point at the calling line.
+- **Fixes:** `cross_entropy(..., backend="torch")` accepts nonfinite logits in ignored rows,
+  as the other backends do. A solve whose final evaluation throws ends as `failed` instead
+  of raising. The JAX CPU build falls back to portable flags when the native-ISA probe fails.
+  `float64` proximal cross-entropy compensates its row sums: on 4,097–32,768 classes, values
+  and gradients were up to `95×` the error bound and are now within it.
+- **Docs and citation:** The README starts with the installation and shows the same two losses
+  in every interface; [TORCH.md](python/TORCH.md#benchmarks) lists CUDA benchmarks;
+  `CITATION.cff` prefers the TPAMI 2018 paper.
+- **Known limits:** [API.md](docs/API.md#known-limits) lists the recorded `float64`
+  cancellation errors (below `5e-17` absolute) and the behavior of finite rows at
+  `±finfo.max`.
 
 ## 0.3.0 (2026-11-09)
 
@@ -28,11 +49,10 @@
   gateways sharing one set of objective, option and status names ([API.md](docs/API.md)).
 - **Numerical stability:** Losses and gradients preserve tiny probability tails down to the
   subnormal limit (avoiding softmax collapse), and distillation gradients are exact zero at
-  equal logits ([numerics](docs/numerics.md),
-  [known limits](docs/numerics.md#aggregate-tail-limitations)).
+  equal logits ([known limits](docs/API.md#known-limits)).
 - **Fused CUDA and CPU kernels:** On an A100 (`8192 × 32000` and `8192 × 128256`),
   cross-entropy takes `0.93–0.98×` `torch.compile` time (`0.33–0.41×` eager), top-5
-  cross-entropy `0.23–0.26×`, and distillation `0.62–0.81×` ([performance](docs/performance.md)).
+  cross-entropy `0.23–0.26×`, and distillation `0.62–0.81×`.
 - **Certified convergence:** `status == "solved"` requires the duality gap of the returned
   weights and the feasible projection of the returned duals, evaluated in `double` with a
   first-order rounding estimate, to meet
@@ -78,11 +98,11 @@
 - **Single rounding:** 16-bit gradients are scaled by the upstream cotangent and reduction
   factor in working precision before a single rounding to the output dtype, and hinge / top-*k*
   target gradients are formed from the unrounded competitor sum.
-- **Double iterate for `float32` fits (`precision="float64"` default):** Keeps internal
+- **Optional double iterate for `float32` fits (`precision="float64"`):** Keeps internal
   solver weights and duals in `double` (`8(d + n)m` bytes) and rounds once at each
   evaluation so `float32` fits reach `float64` gap tolerances down to `float32` output
   rounding (`3.5e-7` on `digits`; pass `precision="float32"` for pure `float32` speed and
-  memory; [numerics.md](docs/numerics.md#what-each-precision-guarantees)).
+  memory).
 - **Compensated reductions & hardened projections:** Compensated sums in multilabel
   cross-entropy and distillation, warm-start residual preservation at large score offsets,
   and checked `float64` / extended-precision `multilabel_hinge` projections

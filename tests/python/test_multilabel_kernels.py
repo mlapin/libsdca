@@ -250,6 +250,85 @@ def interpreter_check(small: bool = True, chunks: tuple[int, ...] = (16, 4)) -> 
     check_small_losses(entropy)
 
 
+def far_tail_rows(classes: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Two positives at 0 beside negatives at -100 (subnormal float32 terms), at -110 (zero
+    terms), alternating -70 and -100 (near and far terms in one sum, rescanned when
+    streamed), at -100 behind a negative maximum at 1 (a row with the direct residual), at
+    -30 (no far term), and at -160 (subnormal even at gap + 64)."""
+    z = torch.full((6, classes), -100.0)
+    z[1] = -110
+    z[2, 2::2] = -70
+    z[3, 2] = 1
+    z[4] = -30
+    z[5] = -160
+    z[:, :2] = 0
+    mask = torch.zeros(6, classes, dtype=torch.bool)
+    mask[:, :2] = True
+    return z, mask
+
+
+def exact_entropy(
+    z: torch.Tensor, mask: torch.Tensor, weights: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Float64 roundings of exact losses and weighted gradients (80 digits)."""
+    loss = torch.empty(z.shape[0], dtype=torch.float64)
+    grad = torch.empty(z.shape, dtype=torch.float64)
+    with localcontext() as context:
+        context.prec = 80
+        for r, (row, flags) in enumerate(zip(z.tolist(), mask.tolist(), strict=True)):
+            top = Decimal(max(row))
+            e = {v: (Decimal(v) - top).exp() for v in set(row)}
+            total = sum((e[v] for v in row), Decimal(0))
+            p = sum(flags)
+            mean = sum((Decimal(v) for v, f in zip(row, flags, strict=True) if f), Decimal(0)) / p
+            loss[r] = float(top + total.ln() - mean)
+            w = Decimal(weights[r].item())
+            g = {
+                (v, f): w * (e[v] / total - (Decimal(1) / p if f else 0))
+                for v, f in set(zip(row, flags, strict=True))
+            }
+            grad[r] = torch.tensor([float(g[v, f]) for v, f in zip(row, flags, strict=True)])
+    return loss, grad
+
+
+def check_far_tail(
+    entropy: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], Any], classes: int
+) -> None:
+    """entropy(z, mask, weights) -> unreduced float32 values, gradient on far_tail_rows: within
+    64 float32 eps (and 2^-149) of the exact entries. The 2^100 weight lifts the positives'
+    gradients, sums of far terms, into the normal float32 range."""
+    z, mask = far_tail_rows(classes)
+    weights = torch.full((z.shape[0],), 2.0**100, dtype=torch.float64)
+    value, gradient = entropy(z, mask, weights)
+    for name, actual, exact in zip(
+        ("loss", "gradient"), (value, gradient), exact_entropy(z, mask, weights), strict=True
+    ):
+        error = (actual.double().cpu() - exact).abs()
+        bad = error > 64 * EPS32 * exact.abs() + 2.0**-149
+        rows = bad.reshape(z.shape[0], -1).any(-1).nonzero().flatten().tolist()
+        assert not rows, f"{name} C={classes}: rows {rows}"
+
+
+def interpreter_far_tail_check() -> None:
+    """check_far_tail (CPU tensors) in a register tile of all five rows, in streamed rows with
+    their rescan, and in the online scan with _residuals."""
+    from libsdca import _triton_multilabel as kernels
+    from libsdca import _triton_reduce as reduce
+
+    reduce.BLOCK, reduce.DIRECT_ROWS, reduce.DIRECT_BLOCK = 16, 64, 8
+
+    def entropy(z: torch.Tensor, mask: torch.Tensor, weights: torch.Tensor) -> Any:
+        out, stats = kernels.forward(z, mask, "cross_entropy", "none", 1.0, True)
+        return out, kernels.backward(z, mask, stats, weights, "cross_entropy", "none", 1.0, True)
+
+    for chunk, online in ((16, False), (4, False), (16, True)):
+        kernels._CHUNK, kernels._BACKWARD = chunk, 16
+        kernels._ONLINE, kernels._ONLINE_MIN = (16, 4), 16 if online else 2**62
+        tile = kernels._rows_per_cta(16, "cross_entropy") > 1
+        assert (tile, kernels._online(16, "cross_entropy", True)) == (chunk == 16, online)
+        check_far_tail(entropy, 16)
+
+
 def _kernel_available() -> bool:
     return torch.cuda.is_available() and _multilabel._kernel() is not None
 
@@ -283,7 +362,11 @@ class FusedMultilabelTests:
         for objective in OBJECTIVES + ("multilabel_cross_entropy",):
             name, gamma = _public(objective)
             assert explain_backend(z, mask, name, gamma=gamma)[0] in ("cuda-launcher", "triton")
-            assert explain_backend(z, mask, name, gamma=gamma, precision="float32")[0] == "torch"
+            # precision="float32" is float32 work: the kernels of None.
+            assert explain_backend(z, mask, name, gamma=gamma, precision="float32")[0] in (
+                "cuda-launcher",
+                "triton",
+            )
 
     def test_float64_matches_native_and_exact(self):
         for z, mask in cases(self.generator):
@@ -308,6 +391,41 @@ class FusedMultilabelTests:
                     message = f"exact {objective} {gamma} {z} {mask}"
                     for a, e in zip((value, gradient), expected, strict=True):
                         torch.testing.assert_close(a, e, **tol, msg=message)
+
+    def test_float32_far_tail_sums(self):
+        """Two positives at 0 beside C - 2 negatives at -gap: with float32 exponentials, each
+        negative term is subnormal (or zero) while their sum, the positives' gradient
+        -(C - 2) e / (2 den), is not. Short rows, chunked rows and the online scan."""
+        eps, quantum = torch.finfo(torch.float32).eps, 2.0**-149
+        for classes in (63, 129, 4097, 32769):
+            for gap in (80, 90, 100, 104, 108, 110):
+                z = torch.full((1, classes), -float(gap))
+                z[0, :2] = 0
+                mask = torch.zeros(1, classes, dtype=torch.bool)
+                mask[0, :2] = True
+                value, gradient = self.fused(z, mask, "cross_entropy", 1.0, "none", torch.ones(1))
+                with localcontext() as context:
+                    context.prec = 40
+                    e = Decimal(-gap).exp()
+                    den = 2 + (classes - 2) * e
+                    expected = {
+                        "loss": (value[0], den.ln()),
+                        "positive": (gradient[0, 0], -(classes - 2) * e / (2 * den)),
+                        "negative": (gradient[0, -1], e / den),
+                    }
+                for name, (actual, exact_value) in expected.items():
+                    error = abs(Decimal(actual.item()) - exact_value)
+                    budget = Decimal(64 * eps) * abs(exact_value) + Decimal(quantum)
+                    assert error <= budget, f"{name} C={classes} gap={gap}: {actual.item()!r}"
+
+    @pytest.mark.parametrize("classes", [16, 4097, 32769])
+    def test_float32_far_tail_rows(self, classes: int):
+        """check_far_tail in a register tile, streamed rows and the online scan."""
+
+        def entropy(z: torch.Tensor, mask: torch.Tensor, weights: torch.Tensor) -> Any:
+            return self.fused(z, mask, "cross_entropy", 1.0, "none", weights)
+
+        check_far_tail(entropy, classes)
 
     def test_all_positive_entropy_and_invalid_masks(self):
         z = torch.tensor([[0.0, 1e-10, -1e-10], [20.0, 20.0, -20.0]], dtype=torch.float64)
@@ -552,6 +670,10 @@ class InterpreterTests:
         interpreter.run(
             f"import test_multilabel_kernels as t\nt.interpreter_check(chunks=({chunk},))\n"
         )
+
+    def test_far_tail_in_the_interpreter(self):
+        """Far-tail float32 sums on CPU tensors: register tile, streamed rows, online scan."""
+        interpreter.run("import test_multilabel_kernels as t\nt.interpreter_far_tail_check()\n")
 
 
 def test_dispatch_takes_float32_exponentials_by_default():

@@ -224,14 +224,14 @@ if AVAILABLE:
 
     @torch.library.custom_op("libsdca::hinge", mutates_args=(), device_types="cuda")
     def _hinge(
-        logits: Tensor, target: Tensor, reduction: str, smooth: bool, gamma: float
+        logits: Tensor, target: Tensor, reduction: str, smooth: bool, gamma: float, fp32: bool
     ) -> tuple[Tensor, Tensor]:
         from . import _triton_hinge as kernel
 
         code = kernel._REDUCTIONS[reduction]
-        host, handles = kernel.launcher(logits, code, smooth)
+        host, handles = kernel.launcher(logits, code, smooth, fp32)
         if host is None:
-            return kernel.forward(logits, target, reduction, smooth, gamma)
+            return kernel.forward(logits, target, reduction, smooth, gamma, fp32)
         g = kernel._gamma(logits.device, gamma)
         return host.hinge_cuda_forward(logits, target, g, code, handles)
 
@@ -244,12 +244,13 @@ if AVAILABLE:
         reduction: str,
         smooth: bool,
         gamma: float,
+        fp32: bool,
     ) -> Tensor:
         from . import _triton_hinge as kernel
 
-        host, handles = kernel.launcher(logits, kernel._REDUCTIONS[reduction], smooth)
+        host, handles = kernel.launcher(logits, kernel._REDUCTIONS[reduction], smooth, fp32)
         if host is None:
-            return kernel.backward(logits, target, stats, upstream, reduction, smooth, gamma)
+            return kernel.backward(logits, target, stats, upstream, reduction, smooth, gamma, fp32)
         _context(logits)
         g = kernel._gamma(logits.device, gamma)
         return host.hinge_cuda_backward(logits, target, stats, upstream, g, handles)
@@ -269,10 +270,11 @@ if AVAILABLE:
             None,
             None,
             None,
+            None,
         )
 
     def _hinge_rule(ctx: Any, upstream: Tensor | None, _: Any) -> tuple[Tensor | None, ...]:
-        return (None,) * 5 if upstream is None else _hinge_gradient(ctx, upstream)
+        return (None,) * 6 if upstream is None else _hinge_gradient(ctx, upstream)
 
     _register(_hinge, _hinge_backward, _hinge_fake, _empty_like, _hinge_rule)
 
@@ -516,8 +518,10 @@ def weighted_entropy(
     return op(logits, target, weight, ignore_index, reduction, fp32)[0]
 
 
-def hinge(logits: Tensor, target: Tensor, reduction: str, smooth: bool, gamma: float) -> Tensor:
-    return torch.ops.libsdca.hinge(logits, target, reduction, smooth, gamma)[0]
+def hinge(
+    logits: Tensor, target: Tensor, reduction: str, smooth: bool, gamma: float, fp32: bool = False
+) -> Tensor:
+    return torch.ops.libsdca.hinge(logits, target, reduction, smooth, gamma, fp32)[0]
 
 
 def topk(

@@ -8,15 +8,21 @@ Quotients by gamma are float64 divisions (div.rn.f64), never a reciprocal that a
 gamma would overflow.
 """
 
+from __future__ import annotations
+
 import functools
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import torch
 import triton
 import triton.language as tl
 
 from . import _cuda_launch, _triton_reduce
+
+if TYPE_CHECKING:
+    import torch
+else:
+    from ._cuda_launch import torch
 
 _P, _I = _cuda_launch.POINTER, _cuda_launch.INT32
 
@@ -94,19 +100,49 @@ else:
 
 
 @triton.jit
-def _exp_difference(x, origin, half: tl.constexpr = False):
-    """Float32 exponential of a represented difference, retaining its rounding residual."""
+def _difference(x, origin):
+    """Float32 x - origin and its rounding residual."""
     gap = x - origin
     rounded = gap - x
     low = (x - (gap - rounded)) + (-origin - rounded)
     # Beyond this range the float32 exponential (or squared half) is zero. Also
     # discard the undefined residual of an overflowing finite-score difference.
-    low = tl.where(tl.abs(gap) < 256, low, 0.0)
+    return gap, tl.where(tl.abs(gap) < 256, low, 0.0)
+
+
+@triton.jit
+def _exp_difference(x, origin, half: tl.constexpr = False):
+    """Float32 exponential of a represented difference, retaining its rounding residual."""
+    gap, low = _difference(x, origin)
     if half:
         gap, low = gap * 0.5, low * 0.5
     value = _exp(gap)
     # |low| <= 2^-16 here: exp(low) = 1 + low to substantially better than float eps.
     return value + value * low
+
+
+# Float32 exponentials below exp(-87.3) = 2^-126 are subnormal or zero, losing under
+# C * 2^-126 of a row's sum: under 2^-36 of a sum of C * 2^-90 or more. Streamed rows with a
+# positive maximum and a negative take smaller negative sums again (_far_negatives); register
+# tiles of rows with a positive maximum take every sum with _shifted_exp. Tails hold the
+# runner-up's 1. The rescan also takes rows whose negatives lie on average between about 62.4
+# (exp(-62.4) = 2^-90) and 87.3 below the runner-up, whose float32 sums were accurate.
+_FAR_SUM = tl.constexpr(2.0**-90)
+
+
+@triton.jit
+def _shifted_exp(x, origin):
+    """_exp_difference, taking far gaps (below -80), whose float32 exponentials approach the
+    subnormal range, at gap + 128 (exact for |gap| < 512, at most exp(48)). Returns the
+    exponentials, the far flags, and exp(-128) in float64, which scales the far ones.
+
+    exp(gap + 128) is itself subnormal (or flushed) below a gap of about -215.3 and zero below
+    about -232. Those terms sum to under C * 2^-310, which reaches the float32 range (2^-149)
+    in a gradient only with an upstream weight above 2^161 / C, beyond float32 (2^128)."""
+    gap, low = _difference(x, origin)
+    far = gap < -80
+    value = _exp(gap + tl.where(far, 128.0, 0.0))
+    return value + value * low, far, tl.full([], 2.572209372642415e-56, tl.float64)
 
 
 @triton.jit
@@ -122,6 +158,23 @@ def _load(Z, M, row, k, C: tl.constexpr, FP32: tl.constexpr):
     z = _work(tl.load(Z + row * C + k, valid, other=0), FP32)
     pos = (tl.load(M + row * C + k, valid, other=0) != 0) & valid
     return z, pos, valid, valid & ((z - z) == 0)
+
+
+@triton.jit(noinline=True)
+def _far_negatives(
+    Z, M, row, second_w, index, C: tl.constexpr, B: tl.constexpr, FP32: tl.constexpr
+):
+    """A row's float64 sum of exp(z - second_w) over its negatives but index, far terms
+    included (a call, keeping the streamed kernels' loops as they compile without it)."""
+    j = tl.arange(0, B)
+    lane = tl.zeros([B], tl.float64)
+    for start in range(0, C, B):
+        k = start + j
+        z, pos, valid, finite = _load(Z, M, row, k, C, FP32)
+        value, far, unit = _shifted_exp(z, second_w)
+        e = tl.where(valid & (k != index) & ~pos, value, 0.0)
+        lane += e.to(tl.float64) * tl.where(far, unit, 1.0)
+    return tl.sum(lane, 0)
 
 
 @triton.jit
@@ -238,11 +291,14 @@ def _entropy_rows_forward(
     ordinary = FP32 & top_negative
     other = valid & (j != index[:, None])
     e = _exp(tl.where(other, z - second_w[:, None], -float("inf")))
+    e64 = e.to(tl.float64)
     if FP32:
         if tl.max((~ordinary).to(tl.int32), 0) > 0:
-            e_comp = tl.where(other, _exp_difference(z, second_w[:, None]), 0.0)
-            e = tl.where(ordinary[:, None], e, e_comp)
-    e64 = e.to(tl.float64)
+            value, far, unit = _shifted_exp(z, second_w[:, None])
+            far = far & ~ordinary[:, None]
+            e = tl.where(ordinary[:, None], e, tl.where(other, value, 0.0))
+            e64 = e.to(tl.float64) * tl.where(far, unit, 1.0)
+            e = tl.where(far, 0.0, e)  # far entries are at exp(gap + 128): float64 sums only
     tail = scale * tl.sum(e64, 1)
     raw_gap = top_w[:, None] - z
     scaled_gap = tl.where(
@@ -349,7 +405,11 @@ def _entropy_forward(
                 differences += tl.where(pos, centered, 0.0).to(tl.float64)
         gap, differences = tl.sum(gap, 0), tl.sum(differences, 0)
         tail = scale * tl.sum(lane_tail, 0)
-        negatives = scale * tl.sum(lane_negatives, 0) + tl.where(top_negative, 1.0, 0.0)
+        negative_sum = tl.sum(lane_negatives, 0)
+        if FP32 and not ordinary:
+            if (negative_sum < _FAR_SUM * C) & (count < C):
+                negative_sum = _far_negatives(Z, M, row, second_w, index, C, B, FP32)
+        negatives = scale * negative_sum + tl.where(top_negative, 1.0, 0.0)
         den = 1 + tail
         anchor = tl.load(Z + row * C + tl.minimum(first, C - 1)).to(tl.float64)
         code = _code(nonfinite, count, C, False)
@@ -965,7 +1025,10 @@ def _residuals(
         differences += tl.where(pos, centered, 0.0).to(tl.float64)
     gap, differences = tl.sum(gap, 0), tl.sum(tl.reshape(differences, [B]), 0)
     tail = scale * tl.sum(lane_tail, 0)
-    negatives = scale * tl.sum(lane_negatives, 0) + tl.where(top_negative, 1.0, 0.0)
+    negative_sum = tl.sum(lane_negatives, 0)
+    if (negative_sum < _FAR_SUM * C) & (count < C) & ~ordinary:
+        negative_sum = _far_negatives(Z, M, row, second_w, index, C, B, True)
+    negatives = scale * negative_sum + tl.where(top_negative, 1.0, 0.0)
     den = 1 + tail
     anchor = tl.load(Z + row * C + tl.minimum(first, C - 1)).to(tl.float64)
     code = _code(nonfinite, count, C, False)

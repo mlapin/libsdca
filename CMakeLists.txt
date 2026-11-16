@@ -1,12 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
-project(libsdca)
-
-set(libsdca_MAJOR_VERSION 0)
-set(libsdca_MINOR_VERSION 3)
-set(libsdca_PATCH_VERSION 1)
-set(libsdca_VERSION
-  ${libsdca_MAJOR_VERSION}.${libsdca_MINOR_VERSION}.${libsdca_PATCH_VERSION}
-  )
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" libsdca_VERSION LIMIT_COUNT 1)
+project(libsdca VERSION ${libsdca_VERSION})
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS VERSION)
 add_definitions(-DSDCA_VERSION="${libsdca_VERSION}")
 
 # Whether to use <chrono>
@@ -300,8 +295,7 @@ target_compile_features(libsdca INTERFACE cxx_std_11)
 target_include_directories(libsdca INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include> ${SDCA_BLAS_INCLUDE_DIRS})
-target_compile_definitions(libsdca INTERFACE ${SDCA_BLAS_DEFINITIONS}
-  SDCA_VERSION="${libsdca_VERSION}")
+target_compile_definitions(libsdca INTERFACE ${SDCA_BLAS_DEFINITIONS})
 if(USE_CHRONO)
   target_compile_definitions(libsdca INTERFACE SDCA_USE_CHRONO)
 else()

@@ -64,8 +64,11 @@ def check_complexity() -> None:
         raise SystemExit("Complexity check failed:\n" + "\n".join(failures))
 
 
-def gcc_toolchain() -> list[str]:
-    """Point clang-tidy at the active GCC's standard library."""
+def compiler_toolchain() -> list[str]:
+    """Point standalone clang-tidy at the platform's C++ standard library."""
+    if sys.platform == "darwin":
+        sdk = subprocess.check_output(["xcrun", "--show-sdk-path"], text=True).strip()
+        return ["-isysroot", sdk, "-isystem", str(Path(sdk) / "usr/include/c++/v1")]
     compiler = shlex.split(os.environ.get("CXX", "c++"))
     crt = subprocess.check_output([*compiler, "-print-file-name=crtbegin.o"], text=True).strip()
     directory = Path(crt).parent
@@ -73,7 +76,7 @@ def gcc_toolchain() -> list[str]:
 
 
 def check_tidy() -> None:
-    toolchain = gcc_toolchain()
+    toolchain = compiler_toolchain()
     for backend in ("BLAS_BUILTIN", "BLAS_DEFAULT_LOCAL_HEADER"):
         for source in ("src/c_api.cpp", "tests/cpp/regression.cpp"):
             run(
@@ -101,8 +104,10 @@ def _version(pattern: str, path: str) -> str:
 
 
 def check_versions() -> None:
-    """One version in CMake, the packages and builders, the C header, the changelog, the
-    citation, and the release links of the package pages."""
+    """The copies of VERSION that cannot read it (tools/bump_version.py rewrites them): the
+    changelog, the crate, the Python package, the citation and the package-page links; and
+    one SDCA_ABI_VERSION in the header, the shared library, Python and Rust."""
+    version = (ROOT / "VERSION").read_text().strip()
     heading = r"^## (\S+) \((\d{4}-\d{2}-\d{2})\)$"
     changelog = re.search(heading, (ROOT / "CHANGELOG.md").read_text(), re.M)
     if changelog is None:
@@ -110,34 +115,36 @@ def check_versions() -> None:
     date.fromisoformat(changelog.group(2))
     found = {
         "CHANGELOG.md": changelog.group(1),
-        "include/sdca/c_api.h": _version(r'version, e\.g\. "([^"]+)"', "include/sdca/c_api.h"),
-        "docs/C.md": _version(r"SDCA_VERSION=\"([^\"]+)\"", "docs/C.md"),
-        "CMakeLists.txt": ".".join(
-            _version(rf"libsdca_{part}_VERSION (\d+)", "CMakeLists.txt")
-            for part in ("MAJOR", "MINOR", "PATCH")
-        ),
-        "pyproject.toml": _version(r'^version = "([^"]+)"', "pyproject.toml"),
         "rust/Cargo.toml": _version(r'^version = "([^"]+)"', "rust/Cargo.toml"),
-        "setup.py": _version(r"SDCA_VERSION[^0-9]*([0-9.]+)", "setup.py"),
-        "python/build.py": _version(r"SDCA_VERSION[^0-9]*([0-9.]+)", "python/build.py"),
-        "matlab/make.m": _version(r"LIBSDCA_VERSION = '([^']+)'", "matlab/make.m"),
         "python/libsdca/__init__.py": _version(
             r'^__version__ = "([^"]+)"', "python/libsdca/__init__.py"
         ),
         "CITATION.cff": _version(r"^version: (\S+)$", "CITATION.cff"),
     }
-    if len(set(found.values())) != 1:
-        raise SystemExit(f"Versions differ: {found}")
+    stale = {path: found for path, found in found.items() if found != version}
+    if stale:
+        raise SystemExit(f"VERSION is {version}, but {stale}")
+    abi = {
+        "include/sdca/c_api.h": _version(
+            r"^#define SDCA_ABI_VERSION (\d+)$", "include/sdca/c_api.h"
+        ),
+        "CMakeLists.txt": _version(
+            r"OUTPUT_NAME sdca_c VERSION (\d+) SOVERSION \1\b", "CMakeLists.txt"
+        ),
+        "python/libsdca/_core.py": _version(r"^ABI_VERSION = (\d+)", "python/libsdca/_core.py"),
+        "rust/src/solver.rs": _version(r"^const ABI_VERSION: c_int = (\d+);", "rust/src/solver.rs"),
+    }
+    if len(set(abi.values())) != 1:
+        raise SystemExit(f"SDCA_ABI_VERSION differs: {abi}")
     if _version(r"^date-released: (\S+)$", "CITATION.cff") != changelog.group(2):
         raise SystemExit("CITATION.cff: date-released differs from the CHANGELOG.md date")
     # PyPI and crates.io render these pages once per release, so their links pin its tag.
-    version = changelog.group(1)
     for path in ("pyproject.toml", "python/README.md", "rust/README.md"):
         text = (ROOT / path).read_text()
-        stale = set(re.findall(r"mlapin/libsdca(?:/blob/| --tag )v(\d[\w.-]*\w)", text))
-        stale.discard(version)
-        if stale:
-            raise SystemExit(f"{path}: links to v{', v'.join(sorted(stale))}, not v{version}")
+        links = set(re.findall(r"mlapin/libsdca(?:/blob/| --tag )v(\d[\w.-]*\w)", text))
+        links.discard(version)
+        if links:
+            raise SystemExit(f"{path}: links to v{', v'.join(sorted(links))}, not v{version}")
 
 
 def main() -> None:

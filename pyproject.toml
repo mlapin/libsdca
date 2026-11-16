@@ -1,10 +1,15 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = [
+  "setuptools>=77",
+  # Build the handler against the oldest supported CUDA JAX FFI ABI (0.1).
+  "jaxlib==0.7.2; sys_platform == 'linux' and python_version >= '3.11' and python_version < '3.14'",
+  "jaxlib>=0.8.0; sys_platform == 'linux' and python_version >= '3.14'",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "libsdca"
-version = "0.3.1"
+dynamic = ["version"]
 description = "Accurate and fast classification losses for SDCA and neural networks: cross-entropy, top-k, multiclass and multilabel SVM, and distillation losses as fused PyTorch and JAX layers and SDCA solvers"
 readme = "python/README.md"
 license = "MIT"
@@ -57,6 +62,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Scientific/Engineering :: Mathematics",
   "Topic :: Software Development :: Libraries :: Python Modules",
@@ -65,11 +71,13 @@ classifiers = [
 dependencies = ["numpy>=1.23"]
 
 [project.optional-dependencies]
-torch = ["torch>=2.1", "ninja"]
+# Older supported PyTorch extension tools import pkg_resources, removed in setuptools 81.
+torch = ["torch>=2.1", "ninja", "setuptools>=77,<81", "ziglang>=0.13,<0.18; sys_platform == 'linux'"]
 jax = ["jax>=0.4.35"]
+jax-cuda = ["jax[cuda13]>=0.7.2; sys_platform == 'linux'", "jax>=0.4.35; sys_platform != 'linux'", "triton>=3.3; sys_platform == 'linux'"]
 sklearn = ["scikit-learn>=1.6"]
 test = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath"]
-test-torch = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "torch>=2.1", "ninja", "scikit-learn>=1.6"]
+test-torch = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "torch>=2.1", "ninja", "setuptools>=77,<81", "scikit-learn>=1.6"]
 test-jax = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "jax>=0.4.35"]
 coverage = ["coverage[toml]>=7"]
 
@@ -80,6 +88,9 @@ Documentation = "https://github.com/mlapin/libsdca#documentation"
 Source = "https://github.com/mlapin/libsdca"
 Changelog = "https://github.com/mlapin/libsdca/blob/v0.3.1/CHANGELOG.md"
 Issues = "https://github.com/mlapin/libsdca/issues"
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
 
 [tool.cibuildwheel]
 # One py3-none wheel per platform (see setup.py), built and tested on one Python:
@@ -103,9 +114,8 @@ addopts = ["--strict-markers", "--strict-config"]
 target-version = "py310"
 line-length = 100
 include = [
-  "python/*.py", "python/libsdca/*.py", "tests/python/*.py", "tools/*.py",
-  "examples/python/*.py",
-  "sdca_build.py", "setup.py",
+  "python/*.py", "python/libsdca/*.py", "tests/python/**/*.py", "tools/*.py",
+  "examples/python/*.py", "sdca_build.py", "setup.py",
 ]
 extend-exclude = ["vendor", "build"]
 
@@ -128,6 +138,7 @@ max-complexity = 15
 "python/build.py" = ["E402"]
 # Test closures are called within the iteration that defines them.
 "tests/python/test_*.py" = ["B023", "C90"]
+"tests/python/release_numerics.py" = ["B023", "C90"]
 
 [tool.basedpyright]
 # Current PyTorch needs Python 3.10 to type-check.

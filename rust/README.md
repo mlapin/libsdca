@@ -70,18 +70,19 @@ rust/package.sh                     # builds rust/target/package/libsdca-<versio
 
 ## Precision
 
-`f64` inputs always compute in `double` (`Precision::Float64`). For `f32` inputs, the
-default `Precision::Float64` keeps working arithmetic and `fit`'s internal iterate in
-`double` and rounds the returned `Model<f32>` arrays once at each evaluation
-([numerics](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/numerics.md#known-limits));
-pass `precision: Some(Precision::Float32)` for faster `f32` entropy steps:
+Working precision follows the input type: `Precision::Float32` for `f32` and
+`Precision::Float64` for `f64`. Set `precision: Some(Precision::Float64)` to keep an
+`f32` fit's internal iterate in `double` for tighter convergence; the returned
+`Model<f32>` arrays retain their storage type. This costs `8(d + n)m` extra bytes
+and can slow fitting. Both modes certify the returned model in `double`
+([precision](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#precision)).
 
 ```rust
 use libsdca::{fit, FitOptions, Matrix, Precision};
 
 fn main() -> libsdca::Result<()> {
     let x = Matrix::new(&[1.0f32, 0.0, 0.0, 1.0, -1.0, -1.0], 3, 2)?;
-    let options = FitOptions { precision: Some(Precision::Float32), ..Default::default() };
+    let options = FitOptions { precision: Some(Precision::Float64), ..Default::default() };
     let model = fit(x, &[0, 1, 2], &options)?;
     println!("{:?}", model.weights());
     Ok(())

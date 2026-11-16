@@ -9,7 +9,7 @@ of the stored competitors) collects their rounding: 1.6% of the largest entry he
 upstream), both CPU paths (SDCA_CPU_EXTENSION on and off) and CUDA where available,
 default and float64 precision.
 The Triton kernels run the same checks in Triton's CPU interpreter (TRITON_INTERPRET=1) on a
-few rows under a 2^-12 upstream; triton_check(n=4096) runs them on a CUDA device.
+few rows under a 2^-12 upstream; triton_check also runs directly on CUDA at N = 4096.
 
 The envelope is that of test_half_precision.py: one rounding of each entry (one unit of the
 logits dtype, plus one subnormal quantum), and with float32 work 2,000 float32 eps of the
@@ -153,7 +153,7 @@ def _rows(upstream: torch.Tensor, reduction: str, n: int) -> torch.Tensor:
 def triton_check(n: int = 4, c: int = C, reductions: tuple[str, ...] = REDUCTIONS) -> None:
     """The Triton kernels' 16-bit gradients against the native float64 results, every
     reduction under a 2^-12 upstream (most float16 entries subnormal); run in the interpreter
-    (float16) by HalfGradientKernelTests; call it with n = 4096 on CUDA for both dtypes."""
+    (float16) by HalfGradientKernelTests and on CUDA (both dtypes) at n = 4096."""
     from libsdca import (
         _triton_distillation,
         _triton_entropy,
@@ -314,6 +314,6 @@ class HalfGradientKernelTests:
     @pytest.mark.parametrize("reduction", REDUCTIONS)
     def test_triton_kernels_in_the_interpreter(self, reduction: str):
         """The Triton kernels' control flow and rounding on CPU tensors (skips without
-        Triton)."""
+        Triton); CUDA runs call triton_check directly."""
         call = f"t.triton_check(reductions=({reduction!r},))"
         interpreter.run(f"import test_half_gradient_rounding as t\n{call}\n")

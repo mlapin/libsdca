@@ -1,5 +1,6 @@
 """Storage extremes must not turn finite inputs into invalid working scores."""
 
+import gc
 import itertools
 
 import numpy as np
@@ -177,6 +178,8 @@ class PrecisionRangeTests:
                     evaluate()
                     evaluate()
                 torch.cuda.current_stream().wait_stream(stream)
+                # Collect earlier tests' cyclic graphs before entering capture.
+                gc.collect()
                 graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph):
                     value, gradient = evaluate()

@@ -689,11 +689,12 @@ class TopkDispatchTests:
             name, reason = explain_backend(z, y, _public(loss)[0], gamma=_public(loss)[1], k=33)
             assert name == "torch"
             assert "k <= 32" in reason
+            # precision="float32" is float32 work: the kernels of None.
             assert (
                 explain_backend(
                     z, y, _public(loss)[0], gamma=_public(loss)[1], k=2, precision="float32"
                 )[0]
-                == "torch"
+                == fused_name
             )
             mask = F.one_hot(y, 40).bool()
             assert (

@@ -6,6 +6,12 @@ import ctypes
 import ctypes.util
 import os
 import shlex
+from pathlib import Path
+
+
+def version() -> str:
+    """The release version, from the VERSION file next to this script."""
+    return (Path(__file__).resolve().parent / "VERSION").read_text().strip()
 
 
 def enabled(name: str, default: bool = True) -> bool:

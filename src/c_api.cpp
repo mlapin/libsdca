@@ -794,6 +794,28 @@ int sdca_entropy_gradient(const sdca_options*, std::size_t, std::size_t, const v
   return protect([] { throw std::logic_error("Losses are not built against these headers"); });
 }
 #endif
+int sdca_run_rows(std::size_t rows, std::size_t work_per_row, std::size_t num_threads,
+                  sdca_row_callback callback, void* context) {
+  return protect([&] {
+    if (!callback) throw std::invalid_argument("row callback must not be null");
+    if (rows == 0) return;
+    const std::size_t requested = sdca::detail::requested_threads(num_threads);
+    const std::size_t team =
+        std::min<std::size_t>(requested ? requested : sdca::detail::automatic_threads(), 4096);
+    const std::size_t cpus = requested ? team : team / (sdca::detail::parallel_calls().load() + 1);
+    const std::size_t threads = std::min(rows, cpus);
+    const auto apply = [&](std::size_t begin, std::size_t end) { callback(context, begin, end); };
+    // Fused kernels use the same small-call cutoff as the tensor adapter. Their
+    // callbacks can batch adjacent rows into SIMD lanes, so probing single rows
+    // overestimates their cost and gives unstable thread decisions.
+    if (threads < 2 || static_cast<double>(rows) * work_per_row < 4096 ||
+        sdca::detail::in_parallel_rows() || (requested == 0 && sdca::detail::in_openmp_parallel()))
+      apply(0, rows);
+    else
+      sdca::detail::parallel_tasks(0, rows, threads, team, apply);
+  });
+}
+
 int sdca_abi_version() { return SDCA_ABI_VERSION; }
 const char* sdca_version() { return SDCA_VERSION; }
 const char* sdca_last_error() { return last_error.c_str(); }

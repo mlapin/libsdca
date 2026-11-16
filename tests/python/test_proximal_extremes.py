@@ -1,6 +1,7 @@
 """Independent proximal limits for finite means and unsupported centered spreads."""
 
 import contextlib
+import gc
 import itertools
 from unittest import mock
 
@@ -177,6 +178,9 @@ class ProximalExtremeTests:
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
             _tensor_prox.proximal_entropy(x, mask, 1.0)
+            # Newer Torch skips pre-capture collection by default. Do not let
+            # unreachable graphs from earlier tests be finalized during capture.
+            gc.collect()
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
                 value, gradient = _tensor_prox.proximal_entropy(x, mask, 1.0)

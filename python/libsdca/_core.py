@@ -213,7 +213,10 @@ def _kind_of(entry: _Entry, k: int, gamma: float) -> tuple[str, int, float]:
     k of multiclass_hinge is 1 whatever the given k."""
     exact = type(gamma) is float or type(gamma) is int
     if not (exact and 0 <= gamma < math.inf) and (
-        not isinstance(gamma, Real) or not math.isfinite(gamma) or not gamma >= 0
+        isinstance(gamma, bool | np.bool_)
+        or not isinstance(gamma, Real)
+        or not math.isfinite(gamma)
+        or not gamma >= 0
     ):
         raise ValueError("gamma must be finite and nonnegative")
     kind, smooth, multiclass = entry
@@ -261,14 +264,14 @@ def _topk_hinge_name(variant: str) -> str:
 
 def _check_options(k: int, gamma: float, alpha: float, classes: int) -> None:
     """The loss options of the tensor layers, before any computation."""
-    fast = type(k) is int and 1 <= k < classes and type(gamma) is float
+    fast = type(k) is int and 1 <= k < classes and type(gamma) is float and type(alpha) is float
     if fast and 0.0 <= gamma < math.inf and 0.0 < alpha < math.inf:
         return
     if isinstance(k, bool) or not isinstance(k, Integral) or not 1 <= int(k) < classes:
         raise ValueError("k must be an integer in [1, classes-1]")
-    if not math.isfinite(gamma) or not gamma >= 0:
+    if isinstance(gamma, bool | np.bool_) or not math.isfinite(gamma) or not gamma >= 0:
         raise ValueError("gamma must be finite and nonnegative")
-    if not math.isfinite(alpha) or alpha <= 0:
+    if isinstance(alpha, bool | np.bool_) or not math.isfinite(alpha) or alpha <= 0:
         raise ValueError("alpha must be finite and positive")
 
 
@@ -503,7 +506,11 @@ def _positive(value: float, name: str) -> None:
     # By the bits: a thread that reads subnormals as zero (an XLA:CPU host callback) would
     # find 1e-310 <= 0.
     try:
-        bits = struct.unpack("<q", struct.pack("<d", value))[0]
+        bits = (
+            0
+            if isinstance(value, bool | np.bool_)
+            else struct.unpack("<q", struct.pack("<d", value))[0]
+        )
     except (struct.error, TypeError):
         bits = 0
     if not 0 < bits < 0x7FF0000000000000:
@@ -690,6 +697,9 @@ def _declare(lib: ct.CDLL) -> None:
     # options, dtype, n, classes, student, teacher, temperature, alpha, values, gradients
     lib.sdca_proximal_distillation_rows.argtypes = [p, i, s, s, p, p, f, f, p, p]
     lib.sdca_proximal_distillation_rows.restype = i
+    if hasattr(lib, "sdca_run_rows"):
+        lib.sdca_run_rows.argtypes = [s, s, s, p, p]
+        lib.sdca_run_rows.restype = i
 
 
 @dataclass(frozen=True, eq=False)
@@ -814,7 +824,8 @@ class Solver:
 
     Args:
         precision: Working precision, one of PRECISIONS ("float32" or
-            "float64", or a matching dtype object). float32 losses compute in
+            "float64", or a matching dtype object); None follows dtype (float64
+            when both are omitted). float32 losses compute in
             double where float cannot hold gamma, alpha or a row's score spread.
         dtype: Storage dtype (np.float32 or np.float64); defaults to the dtype
             matching precision.
@@ -829,14 +840,16 @@ class Solver:
 
     def __init__(
         self,
-        precision: object = "float64",
+        precision: object = None,
         *,
         dtype: npt.DTypeLike | None = None,
         library: str | os.PathLike[str] | None = None,
     ) -> None:
         try:
             prec = _canonical_precision(precision)
-        except ValueError as error:
+            if prec is None:
+                prec = _canonical_precision(np.dtype(dtype) if dtype is not None else np.float64)
+        except (TypeError, ValueError) as error:
             raise ValueError(f"precision must be one of {', '.join(PRECISIONS)}") from error
         if prec is None:
             raise ValueError(f"precision must be one of {', '.join(PRECISIONS)}")
@@ -1326,7 +1339,7 @@ def _solver(x: object, precision: object) -> Solver:
     if precision is None and type(x) is np.ndarray:
         fp32 = _FLOAT_STORAGE.get(x.dtype)
         if fp32 is not None:
-            return _default("float64", fp32)
+            return _default("float32" if fp32 else "float64", fp32)
     prec = _canonical_precision(precision)
     _check_native_storage(x)
     dtype_name = str(getattr(x, "dtype", ""))
@@ -1336,7 +1349,7 @@ def _solver(x: object, precision: object) -> Solver:
         storage = np.float64
     else:
         storage = np.float32 if prec == "float32" else np.float64
-    work = "float64" if prec is None else prec
+    work = ("float32" if storage is np.float32 else "float64") if prec is None else prec
     if (work, storage) not in _PRECISION_CODES:
         raise ValueError("float64 inputs require precision='float64' or None")
     return _default(work, storage is np.float32)
@@ -1404,7 +1417,8 @@ def fit(
             set, the label entry of single-label rows is rebuilt so that
             rows sum to zero exactly, and W = center + X.T @ initial_dual.
         shrinking: What the epochs of the hinge objectives leave out:
-            "heuristic" skips, between full passes every tenth epoch, the
+            "heuristic" skips, between full passes (after eval_epoch full
+            passes of work, at most 50 epochs), the
             examples whose last step left their duals unchanged and steps an
             example on its classes of nonzero dual (liblinear-style
             shrinking); "safe" leaves out for good the zero duals that the
@@ -1414,7 +1428,7 @@ def fit(
             whatever the value, and every evaluation, so the "solved"
             certificate, covers every example.
         precision: Working precision, one of PRECISIONS ("float32" or
-            "float64", or a matching dtype); defaults to "float64" while
+            "float64", or a matching dtype); defaults to the input dtype while
             keeping the storage dtype of X.
 
     Returns:
@@ -1479,7 +1493,7 @@ def loss_and_grad(
         projection_precision: "float64" or "extended", as in fit; it affects
             only the smooth multilabel_hinge values.
         precision: Working precision, one of PRECISIONS ("float32" or
-            "float64", or a matching dtype); defaults to "float64" while
+            "float64", or a matching dtype); defaults to the input dtype while
             keeping the storage dtype of logits.
 
     Returns:
@@ -1526,7 +1540,7 @@ def distillation_loss_and_grad(
         alpha: Proximal step >= 0 (0: plain distillation, > 0: proximal distillation).
         num_threads: Threads for the rows, as in loss_and_grad.
         precision: Working precision, one of PRECISIONS ("float32" or "float64",
-            or a matching dtype); defaults to "float64" while keeping the storage
+            or a matching dtype); defaults to the input dtype while keeping the storage
             dtype of student.
 
     Returns:
@@ -1573,7 +1587,7 @@ def _entropy_forward(
 
     The native call checks finiteness and labels; the row statistics only if asked.
     """
-    solver = _solver(logits, None)
+    solver = _solver(logits, "float64")
     values = np.empty(len(logits), np.float64)
     statistics = np.empty((len(logits), ENTROPY_STATS), np.float64) if stats else None
     options = _options(precision=solver.code, num_threads=_threads(num_threads))
@@ -1598,7 +1612,7 @@ def _entropy_gradient(
     out: FloatArray,
 ) -> None:
     """out = scale[:, None] * the gradient of _entropy_forward, rounded once."""
-    solver = _solver(logits, None)
+    solver = _solver(logits, "float64")
     options = _options(precision=solver.code, num_threads=_threads(num_threads))
     solver._call(
         "sdca_entropy_gradient",
@@ -1860,7 +1874,7 @@ def coordinate_update(
         projection_precision: "float64" or "extended", as in fit; it affects
             only the multilabel_hinge steps.
         precision: Working precision, one of PRECISIONS ("float32" or
-            "float64", or a matching dtype); defaults to "float64" while
+            "float64", or a matching dtype); defaults to the input dtype while
             keeping the storage dtype of logits.
 
     Returns:

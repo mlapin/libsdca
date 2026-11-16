@@ -1,26 +1,23 @@
 # libsdca for Python
 
-Accurate and fast classification losses for SDCA and neural networks: multiclass, top-*k*,
-multilabel, and soft-target losses as fused PyTorch and JAX loss layers, NumPy functions,
-and SDCA solvers for linear and kernel SVMs and softmax classifiers with a scikit-learn
-estimator
-(`cross_entropy`, `topk_cross_entropy`, `multiclass_hinge`, `topk_hinge_alpha`,
-`topk_hinge_beta`, `multilabel_hinge`, `multilabel_cross_entropy`, `distillation`;
-[project page](https://mlapin.github.io/libsdca/),
+A fast and accurate implementation of classification losses: cross-entropy, multiclass and
+multilabel SVM hinges, top-*k* losses and knowledge distillation, as PyTorch and JAX loss
+layers, NumPy functions, and SDCA solvers for linear and kernel classifiers with a
+scikit-learn estimator ([project page](https://mlapin.github.io/libsdca/),
 [technical report](https://mlapin.github.io/libsdca/report/)).
 
 The native C++ library loads via `ctypes`. Prebuilt wheels for Linux `x86_64` and macOS
 `arm64` require no compiler and depend only on NumPy; `import libsdca` does not import
-PyTorch, scikit-learn or JAX until used. All losses preserve tiny confident-prediction
-losses and gradients down to the output dtype's subnormal underflow and produce exact zero
-distillation gradients at equal logits ([numerics](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/numerics.md),
-[known limits](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/numerics.md#known-limits)).
+PyTorch, scikit-learn or JAX until used. Small losses and gradients of confident
+predictions are kept down to the output dtype's subnormal range (XLA:CPU flushes
+subnormals to zero), and distillation gradients are exactly zero at equal logits ([known limits](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#known-limits)).
 
 ```bash
 pip install libsdca              # NumPy interface
 pip install 'libsdca[sklearn]'   # scikit-learn estimator SDCAClassifier
 pip install 'libsdca[torch]'     # PyTorch loss layers
-pip install 'libsdca[jax]'       # JAX loss functions
+pip install 'libsdca[jax]'       # JAX CPU loss functions
+pip install 'libsdca[jax-cuda]'  # JAX CUDA losses (Linux, NVIDIA driver 580+)
 ```
 
 | Task | Entry point |
@@ -50,8 +47,8 @@ print(clf.predict(X[:5]), clf.score(X, y))
 checks that pass invalid Gram matrices to `kernel="precomputed"`) and supports `Pipeline`,
 `clone`, `cross_val_score`, `GridSearchCV`, arbitrary sortable labels, `predict_proba` /
 `predict_log_proba` (for `cross_entropy`), and precomputed Gram matrices. Fitted attributes:
-`classes_`, `coef_ (n_classes, n_features)`, `dual_coef_ (n_classes, n_samples)`,
-`n_features_in_`, `n_iter_`, `status_`, `history_`, and `model_`.
+`classes_`, `coef_ (n_classes, n_features)` (`None` for precomputed kernels), `dual_coef_
+(n_classes, n_samples)`, `n_features_in_`, `n_iter_`, `status_`, `history_`, and `model_`.
 
 ## Training
 
@@ -78,7 +75,7 @@ for all objectives and options:
 | `shrinking` | `"auto"` | Active-set shrinking and gap-safe screening for hinges ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#shrinking)) |
 | `projection_precision` | `"float64"` | `"float64"` (checked double) or `"extended"` ([API.md](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#projection-precision)) |
 | `kernel`, `center`, `initial_dual` | `False`, `None`, `None` | Gram matrix `(n, n)` input, regularizer center $W_0$, and warm-start duals |
-| `precision` | `"float64"` | Working arithmetic and solver iterate (`"float64"` or `"float32"`) |
+| `precision` | storage dtype | Working arithmetic and solver iterate (`"float32"` or `"float64"`) |
 
 `Model` exposes `weights (d, m)` (`None` for kernels), `dual (n, m)`, `status` (only
 `"solved"` certifies the duality gap), `epochs`, `history`, and `params`.
@@ -90,12 +87,14 @@ values, gradients = libsdca.loss_and_grad(scores, y_int, "topk_hinge_beta", k=2,
 ```
 
 - `loss_and_grad(logits, target, loss="cross_entropy", *, k=1, gamma=0.0, alpha=1.0, num_threads=None, projection_precision="float64", precision=None)`
-  computes per-row losses `(n,)` and gradients `(n, m)` for any objective or
-  `proximal_cross_entropy`.
+  computes per-row losses `(n,)` and gradients `(n, m)` for any name in `libsdca.LOSSES`
+  (the label objectives and `proximal_cross_entropy`).
 - `distillation_loss_and_grad` and `proximal_distillation_loss_and_grad` evaluate logit
   distillation and its Moreau envelope.
 - `coordinate_update(logits, y, objective="cross_entropy", *, previous=None, C=1.0, norm2=1.0, ...)`
   performs one exact SDCA dual block step.
+- `Solver(precision=None, *, dtype=None, library=None)` pins one precision and native library
+  for repeated `fit`, `loss_and_grad` and `coordinate_update` calls.
 
 Row loops parallelize across `num_threads` threads (`None` uses `SDCA_NUM_THREADS` or
 automatic CPU detection; `1` runs serially) with bitwise-identical results
@@ -105,16 +104,16 @@ automatic CPU detection; `1` runs serially) with bitwise-identical results
 ## Precision
 
 Outputs (`weights`, `dual`, `gradients`) keep the input array's `float32` or `float64`
-dtype; loss values are `float64`. For `float32` inputs, the default `precision="float64"`
-keeps the solver iterate in `double` (`8(d + n)m` bytes) so convergence does not stall
-above `1e-5`; pass `precision="float32"` for `1.6–1.9×` faster `cross_entropy` fits
-([support matrix](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#precision),
-[PyTorch precision](https://github.com/mlapin/libsdca/blob/v0.3.1/python/TORCH.md#precision)).
+dtype; loss values are `float64`. Working precision follows the input dtype by default.
+For `float32` inputs, `precision="float64"` keeps the solver iterate in `double` for tighter
+convergence, at the cost of `8(d + n)m` extra bytes and slower fits. Both modes check the
+returned model's duality gap in `double`
+([support matrix](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/API.md#precision)).
 
 ```python
 X32 = X.astype(np.float32)
-model = libsdca.fit(X32, y_int)                        # float32 arrays, double solve (default)
-fast = libsdca.fit(X32, y_int, precision="float32")    # float32 arrays, float32 solve
+model = libsdca.fit(X32, y_int)                        # float32 arrays and working iterate
+exact = libsdca.fit(X32, y_int, precision="float64")   # float32 arrays, double working iterate
 ```
 
 ## PyTorch drop-in cross-entropy
@@ -131,8 +130,7 @@ target = torch.randint(5, (32,))
 CrossEntropyLoss()(logits, target).backward()
 ```
 
-See [TORCH.md](https://github.com/mlapin/libsdca/blob/v0.3.1/python/TORCH.md#replace-pytorch-cross-entropy)
-and [performance.md](https://github.com/mlapin/libsdca/blob/v0.3.1/docs/performance.md).
+See [TORCH.md](https://github.com/mlapin/libsdca/blob/v0.3.1/python/TORCH.md#replace-pytorch-cross-entropy).
 
 ## Building from source and testing
 

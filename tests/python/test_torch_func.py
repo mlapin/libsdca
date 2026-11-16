@@ -107,3 +107,31 @@ class TorchFuncTests:
         z, y, _ = inputs(device)
         with pytest.raises(ValueError, match="torch.func"):
             torch.func.grad(lambda t: cross_entropy(t, y, backend="native"))(z)
+
+
+def test_other_losses_raise():
+    import libsdca
+
+    z, y, _ = inputs("cpu")
+    y = y.clamp(min=0)
+    losses = {
+        "topk_cross_entropy": lambda t: libsdca.topk_cross_entropy(t, y, k=2),
+        "topk_hinge_beta": lambda t: libsdca.TopKHingeLoss(k=1)(t, y),
+        "distillation_loss": lambda t: libsdca.distillation_loss(t, z),
+        "proximal_distillation_loss": lambda t: libsdca.proximal_distillation_loss(t, z),
+    }
+    for name, loss in losses.items():
+        for transform in (torch.func.grad, torch.func.vmap):
+            with pytest.raises(ValueError, match=f"{name} does not support torch.func"):
+                transform(loss)(z)
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_transformed_power_normal_boundaries(device: str):
+    from libsdca._entropy import _power
+
+    exponents = torch.arange(-1022, 1024, dtype=torch.int64, device=device)
+    expected = _power(exponents)
+    actual = torch.func.vmap(_power)(exponents)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    assert torch.isfinite(actual).all() and (actual > 0).all()

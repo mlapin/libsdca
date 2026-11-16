@@ -43,10 +43,10 @@ inline void test_objective_simple(Result c, std::size_t k, Result gamma, Maker m
 
 template <typename Data, typename Result>
 inline void test_objective_l2_entropy_topk() {
-  auto maker_default = []() -> sdca::l2_entropy_topk<Data, double> {
+  auto maker_default = []() -> sdca::l2_entropy_topk<Data, Data> {
     return sdca::make_objective_l2_entropy_topk<Data>();
   };
-  test_objective_default<Data, double>(maker_default);
+  test_objective_default<Data, Data>(maker_default);
 
   Result c = static_cast<Result>(3.14);
   std::size_t k = 2;
@@ -58,10 +58,10 @@ inline void test_objective_l2_entropy_topk() {
 
 template <typename Data, typename Result>
 inline void test_objective_l2_hinge_topk() {
-  auto maker_default = []() -> sdca::l2_hinge_topk<Data, double> {
+  auto maker_default = []() -> sdca::l2_hinge_topk<Data, Data> {
     return sdca::make_objective_l2_hinge_topk<Data>();
   };
-  test_objective_default<Data, double>(maker_default);
+  test_objective_default<Data, Data>(maker_default);
 
   Result c = static_cast<Result>(3.14);
   std::size_t k = 2;
@@ -73,10 +73,10 @@ inline void test_objective_l2_hinge_topk() {
 
 template <typename Data, typename Result>
 inline void test_objective_l2_topk_hinge() {
-  auto maker_default = []() -> sdca::l2_topk_hinge<Data, double> {
+  auto maker_default = []() -> sdca::l2_topk_hinge<Data, Data> {
     return sdca::make_objective_l2_topk_hinge<Data>();
   };
-  test_objective_default<Data, double>(maker_default);
+  test_objective_default<Data, Data>(maker_default);
 
   Result c = static_cast<Result>(3.14);
   std::size_t k = 2;
@@ -88,10 +88,10 @@ inline void test_objective_l2_topk_hinge() {
 
 template <typename Data, typename Result>
 inline void test_objective_l2_hinge_topk_smooth() {
-  auto maker_default = []() -> sdca::l2_hinge_topk_smooth<Data, double> {
+  auto maker_default = []() -> sdca::l2_hinge_topk_smooth<Data, Data> {
     return sdca::make_objective_l2_hinge_topk_smooth<Data>();
   };
-  test_objective_default<Data, double>(maker_default);
+  test_objective_default<Data, Data>(maker_default);
 
   Result c = static_cast<Result>(3.14), gamma = static_cast<Result>(2.72);
   std::size_t k = 2;
@@ -103,10 +103,10 @@ inline void test_objective_l2_hinge_topk_smooth() {
 
 template <typename Data, typename Result>
 inline void test_objective_l2_topk_hinge_smooth() {
-  auto maker_default = []() -> sdca::l2_topk_hinge_smooth<Data, double> {
+  auto maker_default = []() -> sdca::l2_topk_hinge_smooth<Data, Data> {
     return sdca::make_objective_l2_topk_hinge_smooth<Data>();
   };
-  test_objective_default<Data, double>(maker_default);
+  test_objective_default<Data, Data>(maker_default);
 
   Result c = static_cast<Result>(3.14), gamma = static_cast<Result>(2.72);
   std::size_t k = 2;
