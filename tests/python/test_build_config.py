@@ -133,7 +133,7 @@ class BuildConfigTests:
         guide.write_text(f"# JAX\n\n## Quick start\n\n[technical report]({report})\n")
         tool.check_docs(tmp_path)
         guide.write_text(f"# JAX\n\n## Quick start\n\n[Table 12]({report}#table-12)\n")
-        with pytest.raises(SystemExit, match=r"docs/JAX.md:5: link to the report without"):
+        with pytest.raises(SystemExit, match=r"docs/JAX.md:5: link the report as a whole"):
             tool.check_docs(tmp_path)
         guide.write_text("# JAX\n\n## Renamed\n")
         with pytest.raises(SystemExit, match="missing heading"):
@@ -156,6 +156,89 @@ class BuildConfigTests:
             stream.write("\n[Broken after code](missing.md)\n")
         with pytest.raises(SystemExit, match="missing local target"):
             tool.check_docs(tmp_path)
+
+    def test_documentation_links_in_a_checkout(self, tmp_path: Path):
+        tool = load_module(
+            "docs_checkout_test", Path(__file__).resolve().parents[2] / "tools/check_docs.py"
+        )
+        notes = "/".join(("private", "notes.md"))  # the public export rejects the literal path
+        files = {
+            "VERSION": "1.2.0\n",
+            "docs/API.md": "# API\n\n### The `solved` certificate\n\n## Options {#opts}\n",
+            "docs/PYTHON.md": "# Python\n",
+            "include/sdca/loss.h": "\n",
+            notes: "[API](../docs/API.md#the-solved-certificate)\n",
+        }
+        for name, text in files.items():
+            (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / name).write_text(text)
+        git = ["git", "-C", str(tmp_path)]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "add", "."], check=True)
+        repository = "https://github.com/mlapin/libsdca/blob"
+        good = [
+            "[A](docs/API.md#the-solved-certificate) [B](docs/API.md#opts) [C](include/sdca/)",
+            "[D](/include/sdca/loss.h) `[code](missing.md)` [E][e] [F]\n\n[e]: docs/API.md\n"
+            "[f]: <docs/API.md#api>",
+            f"[G]({repository}/master/docs/API.md#api) [H]({repository}/v1.2.0/include/sdca)",
+            "[$x$][e] [I](https://example.org/a_(b)) <https://example.org>",
+        ]
+        bad = {
+            "[A](docs/api.md)": "missing local target docs/api.md",
+            "[A](docs/API.md#solved-certificate)": "missing heading",
+            "[A][missing]": r"undefined reference link \[A\]\[missing\]",
+            "![A](figures/a.png)": "missing local target figures/a.png",
+            '<a href="docs/NONE.md">A</a>': "missing local target docs/NONE.md",
+            "[A](../outside.md)": "link leaves the repository",
+            f"[A]({notes})": "public file links outside the public tree",
+            f"[A]({repository}/main/docs/API.md)": "the public default branch is master",
+            f"[A]({repository}/master/docs/NONE.md)": "missing repository target",
+            f"[A]({repository}/v1.2.0/docs/API.md#none)": "missing heading",
+            "[A](ftp://example.org)": "unsupported link scheme",
+        }
+        readme = tmp_path / "README.md"
+        readme.write_text("\n".join(good) + "\n")
+        tool.check_docs(tmp_path)
+        for link, message in bad.items():
+            readme.write_text(f"# Guide\n\n{link}\n")
+            with pytest.raises(SystemExit, match=f"README.md:3: {message}"):
+                tool.check_docs(tmp_path)
+        readme.write_text("# Guide\n")
+        (tmp_path / "docs/PYTHON.md").write_text("[API](API.md)\n")
+        with pytest.raises(SystemExit, match="relative link in a guide rendered on a package"):
+            tool.check_docs(tmp_path)
+        (tmp_path / "docs/PYTHON.md").write_text("[API](#python)\n# Python\n")
+        tool.check_docs(tmp_path)
+
+    def test_documentation_external_links(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+        tool = load_module(
+            "docs_external_test", Path(__file__).resolve().parents[2] / "tools/check_docs.py"
+        )
+        (tmp_path / "README.md").write_text(
+            "[A](https://example.org/a) [B](https://example.org/b#part) "
+            "[C](https://example.org/c) [D](https://example.org/$release/d)\n"
+        )
+        (tmp_path / "VERSION").write_text("9.0.0\n")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs/RUST.md").write_text(
+            "[R](https://github.com/mlapin/libsdca/blob/v9.0.0/docs/RUST.md)\n"
+        )
+        answers = {
+            "https://example.org/a": (200, None),
+            "https://example.org/b#part": (200, "missing anchor"),
+            "https://example.org/c": (403, "HTTP 403"),
+            "https://github.com/mlapin/libsdca/tree/v9.0.0": (404, "HTTP 404"),
+        }
+        with patch.object(tool, "request", side_effect=answers.__getitem__) as request:
+            with pytest.raises(SystemExit) as failure:
+                tool.check_docs(tmp_path, external=True)
+        assert sorted(call.args[0] for call in request.call_args_list) == sorted(answers)
+        assert "README.md:1: missing anchor https://example.org/b#part" in str(failure.value)
+        assert "example.org/c" not in str(failure.value)  # a refusal is only a warning
+        assert "v9.0.0" not in str(failure.value)  # an untagged release is only a warning
+        warnings = capsys.readouterr().err
+        assert "the host refuses scripted requests (HTTP 403) https://example.org/c" in warnings
+        assert "v9.0.0 is not on GitHub yet; 1 links to it (docs/RUST.md:1, ...)" in warnings
 
     def test_quality_versions_cover_every_copy(self, subtests: pytest.Subtests):
         root = Path(__file__).resolve().parents[2]
