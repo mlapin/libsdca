@@ -1,5 +1,8 @@
 # MATLAB and Octave interface
 
+[All guides](https://github.com/mlapin/libsdca/blob/master/docs/README.md) ·
+[Shared API reference](https://github.com/mlapin/libsdca/blob/master/docs/API.md)
+
 Three MEX gateways wrap the C++ headers:
 
 | Function | Purpose |
@@ -13,7 +16,7 @@ unknown option field, or a parameter that the loss does not take, is an error. L
 1-based. `matsdca_fit('help')`, `matsdca_loss('help')` and `matsdca_prox('help')` print the
 full reference.
 
-## Building
+## Installation
 
 From MATLAB in the repository root:
 
@@ -35,12 +38,24 @@ With GNU Octave (compiles with `mkoctfile` and runs `test_numerics.m` and `demo.
 OCTAVE_HOME=<prefix> tests/matlab/run_octave_tests.sh
 ```
 
+## Quick start
+
+```matlab
+X = [1 0 -1; 0 1 -1];       % features-by-examples
+Y = [1 2 3];                % labels start at 1
+model = matsdca_fit(X, Y);
+[~, predicted] = max(model.W' * X);
+disp(model.status);
+disp(predicted);
+```
+
 ## Training
 
-Features `X` are column-major `d`-by-`n` (`single` or `double`); a Gram matrix is `n`-by-`n`
-with `opts.kernel = true`. The single-label losses take a `double` vector of labels in
-`1:m`; the multilabel losses take an `m`-by-`n` sparse (`double` or `logical`) or `logical`
-label matrix whose nonzero entries mark each example's labels.
+- **Features:** `X` is column-major `d`-by-`n` (`single` or `double`); a Gram matrix is
+  `n`-by-`n` with `opts.kernel = true`.
+- **Single-label losses** take a `double` vector of labels in `1:m`.
+- **Multilabel losses** take an `m`-by-`n` sparse (`double` or `logical`) or `logical` label
+  matrix whose nonzero entries mark each example's labels.
 
 ```matlab
 model = matsdca_fit(X, Y);                                        % cross_entropy, C = 1
@@ -80,17 +95,24 @@ starts at $W_0 + X A^\top$, computed in `double`.
 Passing cell arrays `{Xtrn, Xval}` and `{Ytrn, Yval}` trains on the first data set and
 evaluates every data set at each evaluation (`model.test`).
 
-The returned `model` struct holds `W` (`d`-by-`m`, features only) and `A` (`m`-by-`n`) in the
-class of `X`; the loss and options used (`loss`, `C`, `k`, `gamma`, `kernel`, `tol`,
-`max_epoch`, `eval_epoch`, `eval_on_start`, `recompute_primal`, `shrinking`,
-`projection_precision`, `seed`, `num_threads`, `precision`, each where it applies);
-`num_classes`, `num_examples` and `num_features`; `status` (`'solved'`, `'no_progress'`,
-`'max_epoch'` or `'failed'`; only `'solved'` guarantees the gap), `epochs`,
-`relative_gap`, `cpu_time` and `wall_time`; `history`, one entry per evaluation with the
-fields of [API.md](API.md#results) (`epoch`, `primal`, `dual`, `primal_loss`, `dual_loss`,
-`regularizer`, `relative_gap`, `accuracy` (the rank loss of the multilabel losses),
-`cpu_time`, `wall_time`); and with cell arrays `test`, one row per evaluation and one column
-per further data set (`accuracy`, `primal_loss`).
+### Results
+
+| Field | Meaning |
+| --- | --- |
+| `W`, `A` | `d`-by-`m` weights (features only), `m`-by-`n` duals; both keep the class of `X` |
+| `loss`, `C`, and option fields | Configuration used by the fit, where applicable |
+| `num_classes`, `num_examples`, `num_features` | Problem dimensions |
+| `status`, `epochs` | Stop reason and completed epochs; only `'solved'` guarantees the gap |
+| `relative_gap`, `cpu_time`, `wall_time` | Final gap and elapsed time |
+| `history` | One entry per evaluation; shared [history fields](API.md#results) |
+| `test` | With cell-array inputs, one row per evaluation and one column per further dataset, holding `accuracy` and `primal_loss` |
+
+### Precision and errors
+
+Storage follows `X` (`single` or `double`). `precision='float64'` keeps double working
+iterates for single input; see [precision](API.md#precision). Invalid inputs raise
+`LIBSDCA:*` errors. A fit can return a model with `status='failed'` after a numerical
+failure; always inspect `status` before relying on convergence.
 
 ## Losses and gradients
 
@@ -105,13 +127,16 @@ per further data set (`accuracy`, `primal_loss`).
 
 `matsdca_loss` takes every loss of [API.md](API.md#loss-definitions) and the options `loss`,
 `k`, `gamma`, `alpha`, `temperature`, `projection_precision`, `precision` and
-`num_threads`, each only where the loss takes it. Targets: 1-based `double` labels for the
-single-label losses and `proximal_cross_entropy`; an `m`-by-`n` `logical` or sparse label
-matrix for the multilabel losses (`multilabel_hinge` needs a negative class in every
-example); teacher logits of the size and class of the scores for `distillation` and
-`proximal_distillation`. `precision` defaults to the class of the scores (`'float32'` for
-`single`); `proximal_distillation` computes in `double`. The gradients have the class of
-the scores.
+`num_threads`, each only where the loss takes it.
+
+| Losses | Targets |
+| --- | --- |
+| Single-label losses, `proximal_cross_entropy` | 1-based `double` labels |
+| Multilabel losses | An `m`-by-`n` `logical` or sparse label matrix (`multilabel_hinge` needs a negative class in every example) |
+| `distillation`, `proximal_distillation` | Teacher logits of the size and class of the scores |
+
+`precision` defaults to the class of the scores (`'float32'` for `single`);
+`proximal_distillation` computes in `double`. The gradients have the class of the scores.
 
 ## Proximal operators
 
@@ -120,8 +145,28 @@ projected = matsdca_prox(A, struct('prox', 'knapsack'));         % columns onto 
 projected = matsdca_prox(A, struct('prox', 'topk_entropy_biased', 'k', 2));
 ```
 
-`matsdca_prox('help', 'prox')` lists all supported operators (`knapsack`, `two_simplex`,
-`topk_simplex`, `topk_cone`, `entropy`, `topk_entropy`, `lambert_w_exp`, ...). Its options
-are `prox`, `lo`, `hi`, `rhs`, `rho`, `alpha`, `k`, `p` and `precision`: `'float32'`,
-`'float64'` or `'long_double'` working arithmetic, by default the class of `A`; the output
-keeps the class of `A`.
+`matsdca_prox(A, opts)` applies `opts.prox` to each column of `A` and returns the result;
+`A` is not modified. It takes every operator of
+[API.md](API.md#projections-and-proximal-operators) except `two_entropy`, and the
+elementwise `lambert_w_exp`. `knapsack` (the default) is a synonym of `knapsack_eq`.
+`matsdca_prox('help', 'prox')` prints the problems.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `prox` | `'knapsack'` | The operator |
+| `lo`, `hi` | `0`, `1` | Bounds of the knapsack and entropy operators (`lo <= hi`, finite) |
+| `rhs` | `1` | Right-hand side of the sum constraint (nonnegative, except for the knapsack operators) |
+| `rho` | `1` | Weight of the biased operators (nonnegative) |
+| `alpha` | `1` | Weight of the quadratic term in `topk_entropy_biased` (positive) |
+| `k` | `1` | The `k` of the top-*k* operators, in `1:m` for `m` rows |
+| `p` | `1` | Length of the first block in `two_simplex` and `two_simplex_sort`, in `1:m-1` |
+| `precision` | class of `A` | `'float32'`, `'float64'` or `'long_double'` working arithmetic; the output keeps the class of `A` |
+
+`A` must be finite; an unknown option is an error.
+
+## Benchmarks
+
+The [solver benchmarks](https://github.com/mlapin/libsdca/blob/master/docs/PYTHON.md#benchmarks)
+compare the shared solver through Python with scikit-learn. They help choose between
+feature and kernel inputs; they do not measure this binding's call overhead.
+No separate end-to-end timings for this interface are published here.

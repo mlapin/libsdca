@@ -226,6 +226,12 @@ extern "C" {
         history_rows: usize,
         result: *mut FitResult,
     ) -> c_int;
+    pub fn sdca_model_scores(
+        input: *const Input,
+        num_classes: usize,
+        coefficients: *const c_void,
+        scores: *mut c_void,
+    ) -> c_int;
     pub fn sdca_abi_version() -> c_int;
     pub fn sdca_version() -> *const c_char;
     pub fn sdca_last_error() -> *const c_char;

@@ -1,8 +1,31 @@
 # PyTorch loss layers
 
+[All guides](https://github.com/mlapin/libsdca/blob/master/docs/README.md) ·
+[Shared API reference](https://github.com/mlapin/libsdca/blob/master/docs/API.md)
+
 `libsdca.torch` provides the classification losses as differentiable PyTorch functions and
 modules (`pip install 'libsdca[torch]'`), on CPU and CUDA tensors in `float16`, `bfloat16`,
-`float32` and `float64`:
+`float32` and `float64`.
+
+## Installation
+
+```bash
+pip install 'libsdca[torch]'
+```
+
+## Quick start
+
+```python
+import torch
+from libsdca.torch import CrossEntropyLoss, TopKHingeLoss
+
+logits = torch.randn(16, 10, requires_grad=True)
+labels = torch.randint(0, 10, (16,))
+CrossEntropyLoss()(logits, labels).backward()
+TopKHingeLoss(k=2)(logits, labels).backward()
+```
+
+## Losses
 
 | Loss | Module | Function | Own options | Target |
 | --- | --- | --- | --- | --- |
@@ -17,33 +40,37 @@ modules (`pip install 'libsdca[torch]'`), on CPU and CUDA tensors in `float16`, 
 | Logit distillation | `DistillationLoss` | `distillation_loss` | `temperature=1.0` | teacher logits |
 | Proximal distillation | `ProximalDistillationLoss` | `proximal_distillation_loss` | `temperature=1.0`, `alpha=1.0` | teacher logits |
 
-Every loss also takes `reduction="mean"` (`"none"`, `"sum"`), `backend="auto"` and
-`precision=None`, and all but the cross-entropies the class dimension `dim=-1`. The
-single-label losses besides cross-entropy take `weight=None` and `ignore_index=None` too.
+The losses also take these common options:
+
+| Option | Default | Taken by |
+| --- | --- | --- |
+| `reduction` | `"mean"` (`"none"`, `"sum"`) | Every loss |
+| `backend` | `"auto"` | Every loss |
+| `precision` | `None` | Every loss |
+| `dim` (the class dimension) | `-1` | All but `cross_entropy` and `linear_cross_entropy` |
+| `weight`, `ignore_index` | `None` | The single-label losses besides cross-entropy |
+
 Hyperparameters are keyword-only (modules mirror `torch.nn`: `CrossEntropyLoss(weight)`).
+
 Labels are class indices of any integer dtype; the multilabel losses take boolean masks of
 the logits' shape, and a target of the other kind raises `TypeError`.
-
-```python
-import torch
-from libsdca.torch import CrossEntropyLoss, TopKHingeLoss
-
-logits = torch.randn(16, 10, requires_grad=True)
-labels = torch.randint(0, 10, (16,))
-CrossEntropyLoss()(logits, labels).backward()
-TopKHingeLoss(k=2)(logits, labels).backward()
-```
 
 ## Build tools
 
 On first use, `libsdca` compiles small C++ extensions against the installed PyTorch for its
-fastest CPU and CUDA paths. This needs a C++17 compiler with OpenMP (`build-essential` on
-Debian/Ubuntu, Xcode Command Line Tools on macOS), Python headers (`python3-dev`; included
-in conda and uv-managed Pythons) and, on GPU, the CUDA headers. `libsdca[torch]` installs
-`ninja` and, on Linux, a standalone Zig C compiler that Triton 3.4+ uses when the host has
-none. Without build tools every loss still runs, on the prebuilt native library (CPU) or
-Triton (CUDA), after a one-time warning; `SDCA_CPU_EXTENSION=off` and
-`SDCA_CUDA_LAUNCHER=off` silence it ([environment variables](../docs/API.md#environment-variables)).
+fastest CPU and CUDA paths. This needs:
+
+- a C++17 compiler with OpenMP (`build-essential` on Debian/Ubuntu, Xcode Command Line Tools
+  on macOS);
+- Python headers (`python3-dev`; included in conda and uv-managed Pythons);
+- on GPU, the CUDA headers.
+
+`libsdca[torch]` installs `ninja` and, on Linux, a standalone Zig C compiler that Triton
+3.4+ uses when the host has none.
+
+Without build tools every loss still runs, on the prebuilt native library (CPU) or Triton
+(CUDA), after a one-time warning; `SDCA_CPU_EXTENSION=off` and `SDCA_CUDA_LAUNCHER=off`
+silence it ([environment variables](API.md#environment-variables)).
 
 ## Replace PyTorch cross-entropy
 
@@ -82,23 +109,25 @@ print(loss.item(), logits.grad)  # 2.061e-9, [[-2.061e-9, 2.061e-9]]
 
 Integer labels without smoothing take the fused kernels; smoothing and probability targets
 work in `float32` for 16- and 32-bit logits (`float64` for `float64` logits or
-`precision="float64"`). The other losses place classes on `dim=-1` (pass `dim=1` for
-`(N, C, H, W)`).
+`precision="float64"`).
+
+The other losses place classes on `dim=-1` (pass `dim=1` for `(N, C, H, W)`).
 
 ## Class weights and ignored labels
 
 `topk_cross_entropy`, the multiclass and top-*k* hinges and `proximal_cross_entropy` take
 `weight` (`(C,)`, finite and nonnegative) and `ignore_index` (default `None`: no label is
-ignored) with PyTorch's cross-entropy rule: each example's loss is multiplied by the weight
-of its label, ignored examples contribute nothing (their logits are not read), and the mean
-divides by the sum of the label weights. Without either option the call is the fused
-kernel's.
+ignored) with PyTorch's cross-entropy rule:
+
+- each example's loss is multiplied by the weight of its label;
+- ignored examples contribute nothing (their logits are not read);
+- the mean divides by the sum of the label weights.
+
+Without either option the call is the fused kernel's.
 
 ## Linear layer and cross-entropy without the logits
 
-`linear_cross_entropy(hidden, weight, target, bias=None, *, class_weight=None,
-ignore_index=-100, reduction="mean", label_smoothing=0.0, backend="auto", precision=None,
-chunk_bytes=None, recompute=False)` and `LinearCrossEntropyLoss` evaluate
+`linear_cross_entropy` and `LinearCrossEntropyLoss` evaluate
 `cross_entropy(F.linear(hidden, weight, bias), target)` in row chunks without materializing
 the `(N, V)` logits:
 
@@ -110,16 +139,26 @@ loss = linear_cross_entropy(hidden, model.lm_head.weight, labels)    # labels (B
 loss.backward()
 ```
 
-- **Chunking and memory:** Rows stream in chunks of `chunk_bytes` (default: `256 MiB` of logits
-  or `2048` rows, whichever is more; at least `8192` rows on CUDA BF16). For `"mean"` / `"sum"`
-  on BF16/FP32/FP64, forward accumulates `grad_hidden`, `grad_weight` and `grad_bias` in
-  `float32` (`float64` for `float64`) at upstream derivative `1` (3 GEMMs total; peak extra
-  memory is `grad_hidden`, the parameter gradients and one chunk). With `recompute=True`,
-  `reduction="none"`, or `float16`, backward recomputes each chunk's logits (4 GEMMs total;
-  nothing saved between forward and backward).
+The function's signature:
+
+```text
+linear_cross_entropy(hidden, weight, target, bias=None, *, class_weight=None,
+                     ignore_index=-100, reduction="mean", label_smoothing=0.0,
+                     backend="auto", precision=None, chunk_bytes=None, recompute=False)
+```
+
+- **Chunking:** Rows stream in chunks of `chunk_bytes` (default: `256 MiB` of logits or
+  `2048` rows, whichever is more; at least `8192` rows on CUDA BF16).
+- **Gradients in forward:** For `"mean"` / `"sum"` on BF16/FP32/FP64, forward
+  accumulates `grad_hidden`, `grad_weight` and `grad_bias` in `float32` (`float64` for
+  `float64`) at upstream derivative `1` (3 GEMMs total; peak extra memory is `grad_hidden`,
+  the parameter gradients and one chunk).
+- **Recomputed logits:** With `recompute=True`, `reduction="none"`, or `float16`,
+  backward recomputes each chunk's logits (4 GEMMs total; nothing saved between forward and
+  backward).
 - **Label smoothing** composes the per-example losses with the target logits and one
-  matrix-vector product, still without the logits. **Probability targets** have the logits'
-  size, and compute the logits in full.
+  matrix-vector product, still without the logits.
+- **Probability targets** have the logits' size, and compute the logits in full.
 - **Precision and `GradScaler`:** Pass `recompute=True` when using a `GradScaler` that must
   recover subnormal gradient tails that would underflow `float32` at unit scale during
   forward.
@@ -154,27 +193,30 @@ Loss values have dtype `promote(logits.dtype, float32)`; gradients keep `logits.
 
 | `precision` | Working arithmetic |
 | --- | --- |
-| `None` (default), `"float32"` | `float32` work for 16- and 32-bit logits, with `float64` row statistics and promotion of rows `float32` cannot hold ([API.md](../docs/API.md#precision)); `float64` for `float64` logits (`"float32"` raises) |
+| `None` (default), `"float32"` | `float32` work for 16- and 32-bit logits, with `float64` row statistics and promotion of rows `float32` cannot hold ([API.md](API.md#precision)); `float64` for `float64` logits (`"float32"` raises) |
 | `"float64"` | `float64` throughout, rounded once to the output dtype |
 
 16-bit logits halve memory traffic; arithmetic runs in `float32` or `float64`
-([known limits](../docs/API.md#known-limits)).
+([known limits](API.md#known-limits)).
 
 ## Errors
 
-Wrong types raise `TypeError` (a non-tensor, integer logits, a boolean target for a
-single-label loss, `k=2.0`); bad values, shapes and options raise `ValueError` (`k=0`,
-`precision="fp32"` or `torch.float16`), in constructors as in calls. Data values are checked where it costs no synchronization: on the CPU nonfinite
-logits, labels out of range and invalid class weights raise `ValueError`; on CUDA and inside
-`torch.func` transforms the affected examples (or a reduction) are `NaN`.
+- **Arguments:** Wrong types raise `TypeError` (a non-tensor, integer logits, a boolean
+  target for a single-label loss, `k=2.0`); bad values, shapes and options raise
+  `ValueError` (`k=0`, `precision="fp32"` or `torch.float16`), in constructors as in calls.
+- **Data values** are checked where it costs no synchronization:
+  - on the CPU, nonfinite logits, labels out of range and invalid class weights raise
+    `ValueError`;
+  - on CUDA and inside `torch.func` transforms, the affected examples (or a reduction) are
+    `NaN`.
 
 ## Memory
 
-On CUDA (the C++ launcher), backward for `cross_entropy` and the hinge, top-*k* and
-multilabel losses (not distillation or the proximal losses) overwrites the logits tensor in
-place when no other reference holds it (`loss = criterion(net(x), y)` or `del logits` before
-`loss.backward()`; PyTorch 2.10 or later). On CPU, peak extra memory is one gradient-sized
-tensor.
+- **CUDA (the C++ launcher):** Backward for `cross_entropy` and the hinge, top-*k* and
+  multilabel losses (not distillation or the proximal losses) overwrites the logits tensor
+  in place when no other reference holds it (`loss = criterion(net(x), y)` or `del logits`
+  before `loss.backward()`; PyTorch 2.10 or later).
+- **CPU:** Peak extra memory is one gradient-sized tensor.
 
 ## Compilation and transformations
 
@@ -204,14 +246,21 @@ criterion(student_logits, teacher_logits).backward()
 
 Both inputs are raw logits; the teacher receives no gradient, no $T^2$ factor is applied,
 and equal student and teacher logits produce an **exact zero gradient**
-([API.md](../docs/API.md#distillation-losses)). A teacher of another floating-point dtype
+([API.md](API.md#distillation-losses)). A teacher of another floating-point dtype
 is promoted with the student's.
 
 ## Benchmarks
 
-Forward and backward on an NVIDIA A100 with PyTorch 2.15, against PyTorch implementations of
-the same losses (`F.cross_entropy` for cross-entropy), eager and compiled alone with
-`torch.compile`; median times in ms:
+Forward and backward on an **NVIDIA A100-SXM4-40GB**, PyTorch 2.15.
+
+- **Setup:** These are the November 2026 pre-0.4.0 kernel measurements retained by the 0.4.0
+  release; they are not a rerun of its new API options.
+- **Baselines** implement the same objectives (`F.cross_entropy` for CE), eager and compiled
+  alone with `torch.compile`.
+- **Timing:** Times are medians in **ms**, measured with CUDA events after warm-up;
+  compilation is excluded.
+- **Evidence:** See the [technical report](https://mlapin.github.io/libsdca/report/) for
+  the full table and the measurement protocol.
 
 | Loss | Logits | dtype | `libsdca` | `torch.compile` | Eager PyTorch |
 | --- | --- | --- | ---: | ---: | ---: |
@@ -220,9 +269,19 @@ the same losses (`F.cross_entropy` for cross-entropy), eager and compiled alone 
 | Multiclass hinge | 4096 × 32000 | `bfloat16` | 0.53 | 1.99 | 6.52 |
 | Multiclass hinge | 4096 × 32000 | `float32` | 0.78 | 3.66 | 9.33 |
 | Smoothed multiclass hinge | 4096 × 32000 | `float32` | 2.88 | 24.34 | 41.92 |
+| Multilabel cross-entropy | 4096 × 32000 | `bfloat16` | 1.00 | 0.96 | 4.14 |
+| Multilabel cross-entropy | 4096 × 32000 | `float32` | 1.49 | 1.63 | 7.42 |
+| Distillation | 4096 × 32000 | `bfloat16` | 1.92 | 3.43 | 4.39 |
+| Distillation | 4096 × 32000 | `float32` | 2.87 | 5.75 | 9.03 |
 
-The `bfloat16` multiclass hinge needs 250 MiB of extra memory at its peak, against 750 MiB
-compiled and 1,375 MiB eager.
+- **Inputs:** Logits are `3 × N(0, 1)` in every row. Multilabel CE uses about 1% positive
+  labels. Distillation uses `temperature=2` and correlated teachers
+  (`student + 0.5 × N(0, 1)`). Smoothed hinge uses `gamma=0.5`.
+- **Coverage:** These timings do not cover weights or label smoothing.
+- **Results:** Compiled PyTorch is slightly faster for the BF16 multilabel row; small
+  differences should not be generalized to other shapes or hardware.
+- **Memory:** The `bfloat16` multiclass hinge needs 250 MiB of extra memory at its peak,
+  against 750 MiB compiled and 1,375 MiB eager.
 
 ## Tests
 

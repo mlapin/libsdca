@@ -117,6 +117,46 @@ class BuildConfigTests:
             command = run.call_args.args
             assert command[command.index("--fail-under-line") + 1] == "90"
 
+    def test_documentation_links_and_math(self, tmp_path: Path):
+        root = Path(__file__).resolve().parents[2]
+        tool = load_module("docs_tool_test", root / "tools/check_docs.py")
+        tool.check_docs(root)
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "README.md").write_text("[Guide](docs/JAX.md#quick-start)\n")
+        guide = tmp_path / "docs/JAX.md"
+        guide.write_text("# JAX\n\n## Quick start\n\n$\\mathrm{softmax}(z)$\n")
+        tool.check_docs(tmp_path)
+        guide.write_text("# JAX\n\n## Quick start\n\n$\\operatorname{softmax}(z)$\n")
+        with pytest.raises(SystemExit, match=r"docs/JAX.md:5: unsupported math"):
+            tool.check_docs(tmp_path)
+        report = "https://mlapin.github.io/libsdca/report/"
+        guide.write_text(f"# JAX\n\n## Quick start\n\n[technical report]({report})\n")
+        tool.check_docs(tmp_path)
+        guide.write_text(f"# JAX\n\n## Quick start\n\n[Table 12]({report}#table-12)\n")
+        with pytest.raises(SystemExit, match=r"docs/JAX.md:5: link to the report without"):
+            tool.check_docs(tmp_path)
+        guide.write_text("# JAX\n\n## Renamed\n")
+        with pytest.raises(SystemExit, match="missing heading"):
+            tool.check_docs(tmp_path)
+        guide.unlink()
+        with pytest.raises(SystemExit, match="missing local target"):
+            tool.check_docs(tmp_path)
+
+    def test_documentation_code_links_and_duplicate_headings(self, tmp_path: Path):
+        tool = load_module(
+            "docs_fences_test", Path(__file__).resolve().parents[2] / "tools/check_docs.py"
+        )
+        (tmp_path / "README.md").write_text(
+            "# Guide\n\n## Example\n\n## Example\n\n"
+            "[Second](#example-1)\n\n```python\n[not_a_link](missing.md)\n```\n"
+            "\n[After code](#guide)\n"
+        )
+        tool.check_docs(tmp_path)
+        with (tmp_path / "README.md").open("a") as stream:
+            stream.write("\n[Broken after code](missing.md)\n")
+        with pytest.raises(SystemExit, match="missing local target"):
+            tool.check_docs(tmp_path)
+
     def test_quality_versions_cover_every_copy(self, subtests: pytest.Subtests):
         root = Path(__file__).resolve().parents[2]
         tool = load_module("quality_tool_test", root / "tools/quality.py")
@@ -124,7 +164,7 @@ class BuildConfigTests:
         tool.check_versions()
         files = [
             "VERSION", "CHANGELOG.md", "pyproject.toml", "python/libsdca/__init__.py",
-            "rust/Cargo.toml", "CITATION.cff", "python/README.md", "rust/README.md",
+            "rust/Cargo.toml", "CITATION.cff", "docs/PYTHON.md", "docs/RUST.md",
             "include/sdca/c_api.h", "CMakeLists.txt", "python/libsdca/_core.py", "rust/src/ffi.rs",
         ]  # fmt: skip
         version = (root / "VERSION").read_text().strip()
@@ -137,8 +177,8 @@ class BuildConfigTests:
             ("python/libsdca/__init__.py", f'= "{version}"', '= "9.9.9"'),
             ("CITATION.cff", f"version: {version}", "version: 9.9.9"),
             ("CITATION.cff", "date-released: ", "date-released: 1999-01-01 # "),
-            ("python/README.md", f"libsdca/blob/v{version}/", "libsdca/blob/v9.9.9/"),
-            ("rust/README.md", f"--tag v{version}", "--tag v9.9.9"),
+            ("docs/PYTHON.md", f"libsdca/blob/v{version}/", "libsdca/blob/v9.9.9/"),
+            ("docs/RUST.md", f"--tag v{version}", "--tag v9.9.9"),
             (
                 "rust/src/ffi.rs",
                 "pub const ABI_VERSION: c_int = ",

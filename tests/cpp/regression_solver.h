@@ -542,7 +542,7 @@ void expect_zero_row_solved(const Objective& obj, const Output& out) {
       gram[i * n + j] = x[i * d] * x[j * d] + x[i * d + 1] * x[j * d + 1];
   std::vector<double> a(n * m), w(d * m);
   EXPECT_EQ(sdca::solver_status::solved,
-            solve_tightly(sdca::make_context(sdca::make_input_feature(d, n, x.data()), Output(out),
+            solve_tightly(sdca::make_context(sdca::make_input_feature(n, d, x.data()), Output(out),
                                              Objective(obj), w.data(), a.data())))
       << obj.to_string();
   EXPECT_NEAR(0, std::accumulate(a.begin(), a.begin() + m, 0.0), 1e-15);
@@ -575,7 +575,7 @@ TEST(NumericalRegression, zero_norm_rows_reach_the_optimum) {
   // The zero row of entropy: c (e_y - 1/m), with its label in place.
   double x[] = {0, 1}, w[2] = {}, a[4] = {};
   std::vector<sdca::size_type> y2 = {1, 0};
-  auto ctx = sdca::make_context(sdca::make_input_feature(1, 2, x), sdca::multiclass_output(2, y2),
+  auto ctx = sdca::make_context(sdca::make_input_feature(2, 1, x), sdca::multiclass_output(2, y2),
                                 sdca::l2_cross_entropy<double, double>(1), w, a);
   ctx.criteria.tol = 1e-12;
   ctx.criteria.eval_epoch = 1;
@@ -589,7 +589,7 @@ TEST(NumericalRegression, failed_step_ends_the_solve_as_failed) {
   double x[] = {1, 2}, a[] = {0, 0, 0}, w[6] = {};
   std::vector<sdca::size_type> labels = {2};
   auto ctx =
-      sdca::make_context(sdca::make_input_feature(2, 1, x), sdca::multiclass_output(3, labels),
+      sdca::make_context(sdca::make_input_feature(1, 2, x), sdca::multiclass_output(3, labels),
                          failing_entropy<double, double>(), w, a);
   ctx.criteria.eval_epoch = 1;
   sdca::make_solver(ctx).solve();
@@ -1263,7 +1263,7 @@ TEST(NumericalRegression, distillation_losses_and_solver_certify_gap) {
   const double q[] = {0.8, 0.1, 0.1, 0.1, 0.8, 0.1, 0.1, 0.1, 0.8};
   double w[6] = {0}, a[9] = {0};
   auto ctx =
-      sdca::make_context(sdca::make_input_feature(2, 3, x), sdca::make_output_distribution(3, 3, q),
+      sdca::make_context(sdca::make_input_feature(3, 2, x), sdca::make_output_distribution(3, 3, q),
                          sdca::make_objective_l2_distillation<double>(2.0), w, a);
   ctx.criteria.tol = 1e-8;
   sdca::make_solver(ctx).solve();

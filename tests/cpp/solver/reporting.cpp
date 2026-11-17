@@ -147,7 +147,7 @@ TEST(ReportingTest, context_and_log_levels) {
   double x[] = {1, 2}, a[4] = {}, w[2] = {};
   std::vector<sdca::size_type> labels = {0, 1};
   auto ctx =
-      sdca::make_context(sdca::make_input_feature(1, 2, x), sdca::multiclass_output(2, labels),
+      sdca::make_context(sdca::make_input_feature(2, 1, x), sdca::multiclass_output(2, labels),
                          sdca::make_objective_l2_cross_entropy<double>(), w, a);
   EXPECT_EQ("none", ctx.status_name());
   EXPECT_FALSE(ctx.is_kernel());

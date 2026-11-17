@@ -3,11 +3,13 @@
 //!
 //! A [`Loss`] carries its parameters. [`Solver`] trains it into a [`Model`] by
 //! stochastic dual coordinate ascent, minimizing
-//! `0.5 ||W||^2 + c sum_i loss(x_i W, y_i)` (no intercept) until the relative
+//! `0.5 ||W||^2 + c sum_i loss(W x_i, y_i)` (no intercept) until the relative
 //! duality gap reaches `tol`, and takes single coordinate steps;
 //! [`Loss::loss_and_grad`] evaluates losses and their gradients. Matrices are
 //! row-major [`Matrix`] views: features X (n, d) or a Gram matrix ([`Input`]),
-//! scores (n, classes), duals A (n, classes) and weights W (d, classes).
+//! scores (n, classes), duals A (n, classes) and weights W (classes, d), one
+//! weight vector per class. The native library reads and writes these buffers
+//! in place: no array is copied or reordered.
 //! [`Targets`] are labels, label sets, target distributions or teacher logits.
 //!
 //! ```
@@ -62,7 +64,7 @@ pub use targets::Targets;
 
 /// Compiles the README examples as doctests.
 #[cfg(doctest)]
-#[doc = include_str!("../README.md")]
+#[doc = include_str!(concat!(env!("OUT_DIR"), "/guide.md"))]
 pub struct ReadmeDoctests;
 
 /// The version of the native library.

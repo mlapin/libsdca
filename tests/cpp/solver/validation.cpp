@@ -171,13 +171,13 @@ TEST(SolverValidation, evaluations_are_identical_for_every_thread_count) {
       std::vector<sdca::size_type> labels = y, test_labels = y,
                                    kernel_labels(y.begin(), y.begin() + nk);
       auto ctx = sdca::make_context(
-          sdca::make_input_feature(d, n, X.data()), sdca::multiclass_output(m, labels),
+          sdca::make_input_feature(n, d, X.data()), sdca::multiclass_output(m, labels),
           sdca::l2_topk_hinge_alpha<float, double>(1, 2), W.data(), A.data());
       if (prox) ctx.primal_initial = W0.data();
       ctx.criteria.max_epoch = 2;
       ctx.criteria.eval_epoch = 1;
       ctx.criteria.num_threads = threads;
-      ctx.add_test(sdca::make_input_feature(d, n, X.data()),
+      ctx.add_test(sdca::make_input_feature(n, d, X.data()),
                    sdca::multiclass_output(m, test_labels));
       sdca::make_solver(ctx).solve();
       auto kctx = sdca::make_context(sdca::make_input_kernel(nk, K.data()),

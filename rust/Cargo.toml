@@ -9,12 +9,12 @@ authors = ["Max Lapin"]
 homepage = "https://mlapin.github.io/libsdca/"
 documentation = "https://github.com/mlapin/libsdca#documentation"
 repository = "https://github.com/mlapin/libsdca"
-readme = "README.md"
+readme = "../docs/RUST.md"
 keywords = ["sdca", "svm", "cross-entropy", "top-k", "machine-learning"]
 categories = ["science", "mathematics", "algorithms", "api-bindings"]
 links = "sdca"
 build = "build.rs"
-include = ["build.rs", "src/**", "tests/**", "examples/**", "native/**", "README.md", "LICENSE"]
+include = ["build.rs", "src/**", "tests/**", "examples/**", "native/**", "LICENSE"]
 
 [dependencies]
 

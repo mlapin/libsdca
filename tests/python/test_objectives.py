@@ -179,7 +179,7 @@ class ObjectiveTests:
 
     def primal(self, objective: str, w: np.ndarray, gamma: float):
         values, _ = self.solver.loss_and_grad(
-            self.x @ w, self.target(objective), objective, k=self.k, gamma=gamma
+            self.x @ w.T, self.target(objective), objective, k=self.k, gamma=gamma
         )
         return 0.5 * np.sum(w**2) + self.C * values.sum()
 
@@ -258,7 +258,7 @@ class ObjectiveTests:
         assert round(abs(resumed.history["primal"][0] - partial.history["primal"][-1]), 7) == 0
         assert resumed.history["primal"][-1] < partial.history["primal"][-1]
         assert resumed.weights is not None
-        np.testing.assert_allclose(resumed.weights, self.x.T @ resumed.dual, rtol=1e-10, atol=1e-12)
+        np.testing.assert_allclose(resumed.weights, resumed.dual.T @ self.x, rtol=1e-10, atol=1e-12)
         again = self.solver.fit(
             self.x, self.y, C=self.C, initial_dual=resumed.dual, tol=1e-8, **every
         )
@@ -345,9 +345,9 @@ class ObjectiveTests:
                 kernel = self.solver.fit(gram, self.target(objective), kernel=True, **opts)
                 assert (model.status, kernel.status) == ("solved", "solved")
                 assert model.weights is not None
-                np.testing.assert_allclose(model.weights, self.x.T @ model.dual, atol=1e-12)
+                np.testing.assert_allclose(model.weights, model.dual.T @ self.x, atol=1e-12)
                 np.testing.assert_allclose(
-                    self.x @ model.weights, kernel.decision_function(gram), rtol=1e-3, atol=1e-3
+                    self.x @ model.weights.T, kernel.decision_function(gram), rtol=1e-3, atol=1e-3
                 )
                 warm = self.solver.fit(
                     self.x, self.target(objective), initial_dual=model.dual, **opts
@@ -462,7 +462,7 @@ class ObjectiveTests:
         center = np.ones((3, 3), np.float32)
         warm = s.fit(x, y, center=center, initial_dual=model.dual, max_epoch=0)
         assert warm.weights is not None
-        np.testing.assert_allclose(warm.weights, center + x.T @ model.dual, atol=1e-7)
+        np.testing.assert_allclose(warm.weights, center + model.dual.T @ x, atol=1e-7)
         for invalid in (
             lambda a: a.__setitem__((0, 0), a[0, 0] + 0.01),  # not zero-sum
             lambda a: a.__setitem__((0, 1), -a[0, 1]),  # wrong sign
@@ -547,4 +547,4 @@ class ObjectiveTests:
             model = solver.fit(x, target, C=c, tol=1e-9, max_epoch=3000, **options)
             assert model.status == "solved"
             assert model.weights is not None
-            assert abs(fun(model.weights.ravel())[0] - ref.fun) <= 1e-7
+            assert abs(fun(model.weights.T.ravel())[0] - ref.fun) <= 1e-7

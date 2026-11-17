@@ -31,10 +31,10 @@
  * SDCA_STATUS_FAILED and the last consistent iterate.
  *
  * Arrays are dense and row-major, in the storage type of a dtype argument:
- * scores (n, num_classes), features x (n, d), a Gram matrix (n, n) and dual
- * variables (n, num_classes); the weights W and a regularizer center are
- * (d, num_classes) column-major (num_classes rows of d). Class labels are
- * 0-based. Required pointers must be non-NULL and their buffers large enough
+ * scores (n, num_classes), features x (n, d), a Gram matrix (n, n), dual
+ * variables (n, num_classes), and weights and a regularizer center
+ * (num_classes, d), one weight vector per class. The library reads and writes
+ * these buffers in place, without copies. Class labels are 0-based. Required pointers must be non-NULL and their buffers large enough
  * for their shapes; the library rejects NULL pointers and extents that
  * overflow, but cannot check a buffer's capacity. Inputs must not overlap
  * outputs unless stated.
@@ -290,9 +290,9 @@ size_t sdca_max_extent(void);
  *   0.5 ||W - center||^2 + c sum_i loss(x_i' W, target_i)
  * over W (features) or the dual alone (a Gram matrix), with n >= 1, d >= 1
  * and num_classes >= 2. Outputs: dual (n, num_classes) and, for features,
- * weights (d, num_classes) with W = center + x' dual (NULL for a Gram matrix),
- * in the dtype of the input. center (d, num_classes) may be NULL (zero; NULL
- * for a Gram matrix). initial_dual (n, num_classes) starts the fit from these
+ * weights (num_classes, d), the transpose of W = center + x' dual with one
+ * row per class (NULL for a Gram matrix), in the dtype of the input. center
+ * (num_classes, d) may be NULL (zero; NULL for a Gram matrix). initial_dual (n, num_classes) starts the fit from these
  * duals (NULL: zeros), which must be feasible for the objective (checked to
  * the tolerances of docs/API.md; single-label rows get the label entry that
  * makes them sum to zero exactly); the library builds the starting W = center +
@@ -309,6 +309,16 @@ int sdca_model_fit(const struct sdca_loss* loss, const struct sdca_fit_options* 
                    size_t num_classes, const struct sdca_targets* targets, const void* center,
                    const void* initial_dual, void* weights, void* dual, double* history,
                    size_t history_rows, struct sdca_fit_result* result);
+
+/* The scores (n, num_classes) of a fitted model at the n rows of input, in
+ * its dtype: features x (n, d) with coefficients = weights (num_classes, d)
+ * give x weights'; a cross-kernel x (n, d) between the n examples and the d
+ * training examples (kind KERNEL) with coefficients = dual (d, num_classes)
+ * gives x dual. One matrix product (gemm) of the linked BLAS in the storage
+ * type; n may be 0. n, d and num_classes must fit the BLAS integer type
+ * (sdca_max_extent). */
+int sdca_model_scores(const struct sdca_input* input, size_t num_classes, const void* coefficients,
+                      void* scores);
 
 /* SDCA_ABI_VERSION of the library; compare it with the header's first. */
 int sdca_abi_version(void);

@@ -1,4 +1,4 @@
-"""Check shared CPU sources and generated storage headers in release archives."""
+"""Check shared CPU sources, storage headers and guides in release archives."""
 
 from __future__ import annotations
 
@@ -66,6 +66,7 @@ def check(path: Path, source: Path) -> dict[str, object]:
         support = source / "tests/python/conformance"
         required = [p for p in support.rglob("*") if p.suffix in {".py", ".json"}]
         required.append(source / "tests/python/release_numerics.py")
+        required.extend((source / "docs").rglob("*.md"))
         for support_path in required:
             name = support_path.relative_to(source).as_posix()
             assert name in content, f"{path.name}: missing installed-test support {name}"

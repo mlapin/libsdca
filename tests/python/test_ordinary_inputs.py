@@ -103,7 +103,7 @@ class OrdinaryInputTests:
         options: dict[str, Any] = dict(k=2, gamma=0.5 if "hinge" in objective else 0.0)
         tight = fit(x, y, objective, tol=1e-10, max_epoch=20000, **options)
         assert tight.status == "solved" and tight.weights is not None
-        best = primal(x, tight.weights, y, objective, 1.0, **options)
+        best = primal(x, tight.weights.T, y, objective, 1.0, **options)
         for dtype in (np.float64, np.float32):
             for order in ("C", "F"):
                 data = np.asarray(x, dtype, order=order)
@@ -112,7 +112,7 @@ class OrdinaryInputTests:
                     message = f"{objective} {dtype} {order} tol={tol}"
                     assert model.status == "solved", message
                     assert model.weights is not None and model.weights.dtype == dtype
-                    value = primal(data, model.weights, y, objective, 1.0, **options)
+                    value = primal(data, model.weights.T, y, objective, 1.0, **options)
                     # The certificate: P(W) - P* <= tol max(|P|, |D|) (here P >= D > 0).
                     assert value - best <= tol * value * (1 + 1e-9), message
                     reported = model.history["primal"][-1]

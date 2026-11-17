@@ -15,7 +15,7 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LINKS = ("pyproject.toml", "python/README.md", "rust/README.md")
+LINKS = ("pyproject.toml", "docs/PYTHON.md", "docs/RUST.md")
 
 
 def substitute(path: str, pattern: str, replacement: str, root: Path) -> None:

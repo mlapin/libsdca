@@ -5,7 +5,7 @@
 Forward and backward on wide rows, timed with CUDA events in alternating blocks. Each case
 first checks that both implementations compute the same loss. Exit 1 when a speedup falls
 below its floor or libsdca needs more peak memory than the compiled reference. The floors
-sit below the recorded speedups (python/TORCH.md, Benchmarks), so a failure means a
+sit below the recorded speedups (docs/TORCH.md, Benchmarks), so a failure means a
 regression, not host noise.
 """
 

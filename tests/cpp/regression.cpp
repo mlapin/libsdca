@@ -356,7 +356,7 @@ TEST(NumericalRegression, failed_step_keeps_the_dual_block_and_weights) {
   const std::vector<double> a0(a, a + 3), w0(w, w + 6);
   std::vector<sdca::size_type> labels = {2};
   auto ctx =
-      sdca::make_context(sdca::make_input_feature(2, 1, x), sdca::multiclass_output(3, labels),
+      sdca::make_context(sdca::make_input_feature(1, 2, x), sdca::multiclass_output(3, labels),
                          failing_entropy<double, double>(), w, a);
   sdca::solver_scratch<double, sdca::feature_input> scratch;
   scratch.init(ctx);
@@ -450,11 +450,11 @@ TEST(NumericalRegression, stopping_and_test_evaluation) {
   sdca::check_stopping_criteria<double, double>(ctx);
   EXPECT_EQ(sdca::solver_status::failed, ctx.status);
   std::vector<sdca::size_type> wrong_y = {0};
-  EXPECT_THROW(ctx.add_test(sdca::make_input_feature(2, 1, x), sdca::multiclass_output(2, wrong_y)),
+  EXPECT_THROW(ctx.add_test(sdca::make_input_feature(1, 2, x), sdca::multiclass_output(2, wrong_y)),
                std::invalid_argument);
   std::vector<double> test_x(100, 1);
   std::vector<sdca::size_type> test_y(100, 0);
-  auto test = sdca::make_dataset_test<double>(sdca::make_input_feature(1, 100, test_x.data()),
+  auto test = sdca::make_dataset_test<double>(sdca::make_input_feature(100, 1, test_x.data()),
                                               sdca::multiclass_output(2, test_y));
   sdca::solver_scratch<double, sdca::feature_input> scratch;
   scratch.init(ctx);
@@ -478,7 +478,7 @@ TEST(NumericalRegression, negative_gap_beyond_rounding_fails) {
   double x[] = {1, 0, 0, 1, 1, 1, -1, 2}, a[12] = {}, w[6] = {};
   std::vector<sdca::size_type> labels = {0, 1, 2, 1};
   auto ctx =
-      sdca::make_context(sdca::make_input_feature(2, 4, x), sdca::multiclass_output(3, labels),
+      sdca::make_context(sdca::make_input_feature(4, 2, x), sdca::multiclass_output(3, labels),
                          overstated_entropy<double, double>(), w, a);
   ctx.criteria.tol = 0;
   ctx.criteria.max_epoch = 500;
@@ -505,7 +505,7 @@ void check_recompute_primal(const bool prox) {
     a[recompute].assign(n * m, 0);
     w[recompute] = prox ? std::vector<Data>(w0, w0 + d * m) : std::vector<Data>(d * m, 0);
     auto ctx = sdca::make_context(
-        sdca::make_input_feature(d, n, x), sdca::multiclass_output(m, labels),
+        sdca::make_input_feature(n, d, x), sdca::multiclass_output(m, labels),
         sdca::l2_cross_entropy<Data, double>(1), w[recompute].data(), a[recompute].data());
     if (prox) ctx.primal_initial = w0;
     ctx.criteria.recompute_primal = recompute == 1;

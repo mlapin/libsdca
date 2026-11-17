@@ -1,8 +1,9 @@
 use crate::error::{invalid, Result};
-use crate::ffi::HISTORY_FIELDS;
+use crate::ffi::{self, HISTORY_FIELDS};
 use crate::loss::Loss;
 use crate::matrix::Matrix;
 use crate::names::Status;
+use crate::native::{call, void};
 use crate::real::Real;
 
 /// One evaluation of the objective during [`crate::Solver::fit`].
@@ -91,13 +92,14 @@ pub struct Model<T> {
 }
 
 impl<T: Real> Model<T> {
-    /// The weights W (d, num_classes), row-major; `None` for a kernel model.
+    /// The weights W (num_classes, d), row-major: one weight vector per
+    /// class, as the native library wrote them; `None` for a kernel model.
     #[must_use]
     pub fn weights(&self) -> Option<&[T]> {
         self.weights.as_deref()
     }
 
-    /// The dual variables A (n, num_classes), row-major; W = center + X' A.
+    /// The dual variables A (n, num_classes), row-major; W = center + A' X.
     #[must_use]
     pub fn dual(&self) -> &[T] {
         &self.dual
@@ -161,13 +163,14 @@ impl<T: Real> Model<T> {
             .map(|weights| weights.len() / self.num_classes)
     }
 
-    /// Scores (n_test, num_classes), accumulated in f64, of features
-    /// (n_test, d), or for a kernel model of the kernel (n_test, n_train)
-    /// between the test and the training examples.
+    /// Scores (n_test, num_classes) of features (n_test, d), or for a kernel
+    /// model of the kernel (n_test, n_train) between the test and the
+    /// training examples: one matrix product (gemm) of the native library's
+    /// BLAS backend in `T`.
     ///
     /// # Errors
     /// [`crate::Error::InvalidArgument`] if the columns of `input` do not match
-    /// the model.
+    /// the model, or a dimension exceeds the BLAS integer limit.
     ///
     /// ```
     /// use libsdca::{Matrix, Solver};
@@ -179,9 +182,12 @@ impl<T: Real> Model<T> {
     /// ```
     pub fn decision_function(&self, input: Matrix<'_, T>) -> Result<Vec<T>> {
         let classes = self.num_classes;
-        // Feature scores X W, kernel scores K A.
-        let right = self.weights.as_deref().unwrap_or(&self.dual);
-        let inner = right.len() / classes;
+        // Feature scores X W', kernel scores K A.
+        let (coefficients, kind) = match &self.weights {
+            Some(weights) => (weights.as_slice(), ffi::INPUT_FEATURES),
+            None => (self.dual.as_slice(), ffi::INPUT_KERNEL),
+        };
+        let inner = coefficients.len() / classes;
         if input.cols() != inner {
             let what = if self.is_kernel() {
                 "training examples"
@@ -193,20 +199,32 @@ impl<T: Real> Model<T> {
                 input.cols()
             ));
         }
-        let mut scores = vec![T::default(); input.rows() * classes];
-        let mut sums = vec![0.0f64; classes];
-        for (i, row) in scores.chunks_exact_mut(classes).enumerate() {
-            sums.fill(0.0);
-            for (&v, w_row) in input.row(i).iter().zip(right.chunks_exact(classes)) {
-                let v = v.f64();
-                for (s, &w) in sums.iter_mut().zip(w_row) {
-                    *s += v * w.f64();
-                }
-            }
-            for (score, &s) in row.iter_mut().zip(&sums) {
-                *score = T::from_f64(s);
-            }
+        let Some(size) = input.rows().checked_mul(classes) else {
+            return invalid("Dimensions exceed the native BLAS integer limit");
+        };
+        let mut scores = vec![T::default(); size];
+        if size == 0 {
+            return Ok(scores);
         }
+        let native_input = ffi::Input {
+            kind,
+            dtype: T::DTYPE_CODE,
+            n: input.rows(),
+            d: inner,
+            x: void(input.data()),
+            ..Default::default()
+        };
+        // SAFETY: input holds (n, inner) entries, the coefficients
+        // (classes, inner) weights or (inner, classes) duals, and scores
+        // (n, classes), as the C ABI documents.
+        call(unsafe {
+            ffi::sdca_model_scores(
+                &native_input,
+                classes,
+                void(coefficients),
+                scores.as_mut_ptr().cast(),
+            )
+        })?;
         Ok(scores)
     }
 

@@ -24,7 +24,7 @@ resumed = libsdca.fit(X, y, hinge, initial_dual=short.dual)  # checked, W built 
 print("warm start:", short.status, "->", resumed.status, resumed.epochs, "more epochs")
 
 # Losses and gradients of any scores (n, classes), per row.
-scores = model.decision_function(X)  # X @ model.weights
+scores = model.decision_function(X)  # X @ model.weights.T
 values, gradients = libsdca.loss_and_grad(scores, y, libsdca.TopKHingeBeta(k=2, gamma=0.5))
 print("mean smooth top-2 hinge", values.mean(), gradients.shape)
 mask = np.zeros(scores.shape, dtype=bool)

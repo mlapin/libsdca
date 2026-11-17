@@ -21,7 +21,7 @@ class CenteredCertificateTests:
                     [0],
                     num_classes=3,
                     C=1.0,
-                    center=[[1e8] * 3],
+                    center=[[1e8]] * 3,
                     eval_on_start=True,
                     max_epoch=0,
                     tol=1e-10,
@@ -47,7 +47,7 @@ class CenteredCertificateTests:
                             [0],
                             num_classes=3,
                             C=1.0,
-                            center=[[offset] * 3],
+                            center=[[offset]] * 3,
                             eval_on_start=True,
                             eval_epoch=1,
                             max_epoch=20,
@@ -55,7 +55,7 @@ class CenteredCertificateTests:
                         )
                         assert model.weights is not None
                         center = mp.mpf(float(np.array(offset, dtype=model.weights.dtype)))
-                        w = [mp.mpf(float(x)) for x in model.weights[0]]
+                        w = [mp.mpf(float(x)) for x in model.weights[:, 0]]
                         primal = sum((x - center) ** 2 for x in w) / 2 + mp.log(
                             sum(mp.exp(x - w[0]) for x in w)
                         )
@@ -94,7 +94,7 @@ class CenteredCertificateTests:
                             [0],
                             num_classes=9,
                             C=1.0,
-                            center=[[offset] * 9],
+                            center=[[offset]] * 9,
                             initial_dual=dual,
                             eval_on_start=True,
                             max_epoch=0,
@@ -130,7 +130,7 @@ class CenteredCertificateTests:
                         initial = (float(exact_c) * (q - p)).astype(dtype)[None, :]
                         target = [0] if positive == 1 else np.array([q > 0])
                         objective = "cross_entropy" if positive == 1 else "multilabel_cross_entropy"
-                        center = (1e16 + 32 * np.arange(classes)).astype(dtype)[None, :]
+                        center = (1e16 + 32 * np.arange(classes)).astype(dtype)[:, None]
                         with subtests.test(
                             precision=precision, dtype=dtype, classes=classes, positive=positive
                         ):
@@ -186,7 +186,9 @@ class CenteredCertificateTests:
                                 exact_c * (qi - pj)
                                 for qi, pj in zip(qq, probabilities, strict=False)
                             ]
-                            g0 = [mp.mpf(float(x)) - mp.mpf(float(center[0, 0])) for x in center[0]]
+                            g0 = [
+                                mp.mpf(float(x)) - mp.mpf(float(center[0, 0])) for x in center[:, 0]
+                            ]
                             reference = -exact_c * sum(
                                 pj * mp.log(pj) for pj in probabilities if pj
                             )

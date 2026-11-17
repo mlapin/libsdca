@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 name = "libsdca"
 dynamic = ["version"]
 description = "Accurate and fast classification losses for SDCA and neural networks: cross-entropy, top-k, multiclass and multilabel SVM, and distillation losses as fused PyTorch and JAX layers and SDCA solvers"
-readme = "python/README.md"
+readme = "docs/PYTHON.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "Max Lapin"}]

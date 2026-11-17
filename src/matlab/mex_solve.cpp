@@ -586,7 +586,7 @@ inline feature_input<Data> make_test_input(const feature_input<Data>& trn_in, co
   if (trn_in.num_dimensions != mxGetM(data)) {
     mex_error(err_id[err_num_dim], err_msg[err_num_dim], static_cast<unsigned long long>(id));
   }
-  return sdca::make_input_feature(mxGetM(data), mxGetN(data), static_cast<Data*>(mxGetData(data)));
+  return sdca::make_input_feature(mxGetN(data), mxGetM(data), static_cast<Data*>(mxGetData(data)));
 }
 
 template <typename Data>
@@ -596,7 +596,7 @@ inline kernel_input<Data> make_test_input(const kernel_input<Data>& trn_in, cons
     mex_error(err_id[err_num_examples], err_msg[err_num_examples],
               static_cast<unsigned long long>(id));
   }
-  return sdca::make_input_kernel(mxGetM(data), mxGetN(data), static_cast<Data*>(mxGetData(data)));
+  return sdca::make_input_kernel(mxGetN(data), mxGetM(data), static_cast<Data*>(mxGetData(data)));
 }
 
 inline multiclass_output make_output(const mxArray* labels, const size_type n,
@@ -782,7 +782,7 @@ inline void set_input(mxArray* plhs[], const mxArray* prhs[], const mxArray* opt
                              sdca::make_input_kernel(mxGetN(data), p_data));
   } else {
     set_output<Data, Result>(plhs, prhs, opts, o, labels,
-                             sdca::make_input_feature(mxGetM(data), mxGetN(data), p_data));
+                             sdca::make_input_feature(mxGetN(data), mxGetM(data), p_data));
   }
 }
 

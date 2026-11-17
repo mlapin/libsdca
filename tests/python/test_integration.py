@@ -28,11 +28,10 @@ class IntegrationTests:
                     assert model.status == "solved"
                     assert kernel.status == "solved"
                     assert model.weights is not None
-                    np.testing.assert_allclose(model.weights, x.T @ model.dual, atol=2e-13)
-                    np.testing.assert_allclose(
-                        x @ model.weights, kernel.decision_function(x @ x.T), atol=2e-4
-                    )
-                    value = solver.loss_and_grad(x @ model.weights, y, objective, k=2, gamma=0.7)[0]
+                    np.testing.assert_allclose(model.weights, model.dual.T @ x, atol=2e-13)
+                    scores = x @ model.weights.T
+                    np.testing.assert_allclose(scores, kernel.decision_function(x @ x.T), atol=2e-4)
+                    value = solver.loss_and_grad(scores, y, objective, k=2, gamma=0.7)[0]
                     primal = 0.5 * np.sum(model.weights**2) + 0.4 * value.sum()
                     assert round(abs(primal - model.history["primal"][-1]), 10) == 0
                     warm = solver.fit(x, y, initial_dual=model.dual, **opts)

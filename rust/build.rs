@@ -87,6 +87,15 @@ fn main() {
     };
     let root = env::var_os("SDCA_SOURCE_DIR").map_or(default, PathBuf::from);
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
+    // Cargo copies the external package readme to RUST.md in the crate archive.
+    let guide = manifest.join("../docs/RUST.md");
+    let guide = if guide.exists() {
+        guide
+    } else {
+        manifest.join("RUST.md")
+    };
+    std::fs::copy(&guide, out.join("guide.md")).expect("copy the Rust guide for doctests");
+    println!("cargo:rerun-if-changed={}", guide.display());
     let (macro_name, flags) = blas();
     let object = out.join("c_api.o");
     let version = env::var("CARGO_PKG_VERSION").unwrap();

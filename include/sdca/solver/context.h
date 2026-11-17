@@ -87,7 +87,7 @@ struct stored_iterate {
 };
 
 /*
- * The iterate of a fit, W (dim-by-m, features only) and the duals (m-by-n),
+ * The iterate of a fit, the weights (m, dim) (features only) and the duals (n, m),
  * is in variable_type: the wider of the data and result types. The caller's buffers (primal_buffer, dual_buffer) hold data_type: with
  * float data and double results the iterate is a double copy, which the
  * solver loads from the buffers at the start of a solve. Each evaluation
@@ -225,10 +225,10 @@ struct solver_context {
   }
 };
 
-// A context on features: the weights W (dim-by-m, column-major) and the duals
-// (m-by-n) are the caller's buffers, which a solve reads at its start and
-// writes at each evaluation; center (dim-by-m, may be null) is the W0 of the
-// regularizer 0.5 ||W - W0||^2 and must outlive the context.
+// A context on features: the weights (m, dim), one row per class, and the
+// duals (n, m), both row-major, are the caller's buffers, which a solve reads
+// at its start and writes at each evaluation; center (m, dim, may be null) is
+// the W0 of the regularizer 0.5 ||W - W0||^2 and must outlive the context.
 template <typename Data, typename Result, typename Output,
           template <typename, typename> class Objective>
 inline solver_context<Data, Result, feature_input, Output, Objective> make_context(
@@ -239,7 +239,7 @@ inline solver_context<Data, Result, feature_input, Output, Objective> make_conte
       dual_variables, primal_variables, center);
 }
 
-// A context on a Gram matrix: the duals (m-by-n) only.
+// A context on a Gram matrix: the duals (n, m) only.
 template <typename Data, typename Result, typename Output,
           template <typename, typename> class Objective>
 inline solver_context<Data, Result, kernel_input, Output, Objective> make_context(
