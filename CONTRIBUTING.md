@@ -107,9 +107,10 @@ Keep API guides in `docs/`.
   after the usage examples.
 - **Benchmarks:** Benchmark tables must identify hardware, versions, timing boundaries and
   their evidence, including slower cases. Do not attribute one binding's timings to another.
-- **Checks:** `python tools/check_docs.py` checks local links and heading anchors and
-  rejects unsupported math commands; `tools/quality.py` runs it in CI. Use `\mathrm{...}`
-  for named math functions.
+- **Checks:** `python tools/check_docs.py` checks every link in the tracked Markdown: the
+  file (with its exact case), the heading anchor and links to this repository on GitHub. It
+  also rejects unsupported math commands; `tools/quality.py` runs it in CI. Use
+  `\mathrm{...}` for named math functions. Add `--external` to request every external URL.
 - **Absolute links:** The Python and Rust guides also render on PyPI and crates.io, so use
   absolute links there.
 - **Rust guide:** Cargo packages `docs/RUST.md` as `RUST.md`; the build script feeds the
@@ -120,6 +121,7 @@ Keep API guides in `docs/`.
 ```bash
 python tools/bump_version.py 0.3.2      # VERSION and its copies; "## Unreleased" gets the date
 python tools/quality.py --skip-tidy     # checks that every copy agrees
+python tools/check_docs.py --external   # every external link answers
 git tag v0.3.2 && git push origin v0.3.2
 ```
 
