@@ -259,6 +259,8 @@ def _cpp_binary() -> Path:
     """The C++ helper, compiled once per source, headers, flags and compiler."""
     from libsdca import _extensions
 
+    if not CPP_SOURCE.is_file():
+        raise Missing("tests/cpp is not in this tree (a source distribution)")
     reason = _extensions.missing_compiler()
     if reason:
         raise Missing(reason)
@@ -293,6 +295,8 @@ def run_cpp(directory: Path) -> str:
 
 def run_rust(directory: Path) -> str:
     """Run the Rust helper on a directory of cases: "" or how it failed."""
+    if not RUST_MANIFEST.is_file():
+        raise Missing("rust/ is not in this tree (a source distribution)")
     cargo = shutil.which("cargo")
     if cargo is None:
         raise Missing("cargo is not on PATH")

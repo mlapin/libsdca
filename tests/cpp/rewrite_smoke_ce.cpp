@@ -280,15 +280,15 @@ void lane_math() {
   for (float f : fs) {
     const float ef = sdca::native::core::exp(F::splat(f))[0];
     const double wf = std::exp(double(f));
-    check(near_exp(ef, wf, 3e-7), "float exp", 0, 0, ef, wf);
+    check(near_exp(ef, wf, 3e-7), "float exp", 0, 0, double(ef), wf);
     const float mf = sdca::native::core::exp_or_expm1(F::splat(f), F::splat(f) != F::splat(f))[0];
-    check(near_exp(mf, wf, 3e-7), "float exp_or_expm1", 0, 0, mf, wf);
+    check(near_exp(mf, wf, 3e-7), "float exp_or_expm1", 0, 0, double(mf), wf);
   }
   const float negative[] = {-INFINITY, -105, -104, -103.5f, -100, -87.4f, -80, -1, 0};
   for (float x : negative) {
     const float e = sdca::native::core::exp(F::splat(x))[0];
     const float nonpositive = sdca::native::core::exp_nonpositive_full(F::splat(x))[0];
-    check(nonpositive == e, "full float exp_nonpositive", 0, 0, nonpositive, e);
+    check(nonpositive == e, "full float exp_nonpositive", 0, 0, double(nonpositive), double(e));
   }
   check(sdca::native::core::log(D::splat(5e-320))[0] == std::log(5e-320) ||
             std::fabs(sdca::native::core::log(D::splat(5e-320))[0] - std::log(5e-320)) < 1e-13,

@@ -64,4 +64,20 @@ if(SDCA_BUILD_C_API)
   add_executable(test_masked_classes masked_classes.cpp)
   target_link_libraries(test_masked_classes PRIVATE sdca_c libsdca)
   add_test(NAME test_masked_classes COMMAND test_masked_classes)
+  # Every entry point of the C ABI from C.
+  add_executable(test_c_api_entry_points c_api_entry_points.c)
+  target_link_libraries(test_c_api_entry_points PRIVATE sdca_c libsdca)
+  if(NOT MSVC)
+    target_link_libraries(test_c_api_entry_points PRIVATE m)
+  endif()
+  add_test(NAME test_c_api_entry_points COMMAND test_c_api_entry_points)
 endif()
+
+# Self-checking kernel tests against naive long double references: the lanes and the losses,
+# the projections, the limits and the contract of the row kernels.
+foreach(smoke ce contract distill float_rows limits projections softmax topk)
+  add_executable(test_smoke_${smoke} rewrite_smoke_${smoke}.cpp)
+  target_link_libraries(test_smoke_${smoke} PRIVATE libsdca)
+  target_compile_options(test_smoke_${smoke} PRIVATE ${SDCA_IEEE_FLAGS})
+  add_test(NAME test_smoke_${smoke} COMMAND test_smoke_${smoke})
+endforeach()
