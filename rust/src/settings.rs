@@ -1,6 +1,6 @@
 use std::num::NonZeroUsize;
 
-use crate::names::{Precision, ProjectionPrecision};
+use crate::names::Precision;
 
 /// The threads of the native row loops: loss evaluations, coordinate steps and
 /// the evaluations and checks of [`crate::Solver::fit`] (whose epochs are
@@ -63,9 +63,11 @@ pub struct Settings {
     pub precision: Option<Precision>,
     /// The threads of the native row loops; [`Threads::FromEnv`] by default.
     pub threads: Threads,
-    /// How the multilabel hinge projections solve (the other losses ignore it);
-    /// [`ProjectionPrecision::Float64`] by default.
-    pub projection_precision: ProjectionPrecision,
+    /// Whether [`crate::Loss::loss_and_grad_with`] refuses invalid rows (NaN or
+    /// +inf scores, invalid rows of masked classes) with
+    /// [`crate::Error::InvalidArgument`]; `false` (the default) gives them NaN
+    /// values and gradients.
+    pub check_rows: bool,
 }
 
 impl Settings {
@@ -83,13 +85,11 @@ impl Settings {
         self
     }
 
-    /// With the projection solver `projection_precision`.
+    /// With invalid rows refused (`true`) or given NaN outputs (`false`, the
+    /// default); see [`Settings::check_rows`].
     #[must_use]
-    pub const fn with_projection_precision(
-        mut self,
-        projection_precision: ProjectionPrecision,
-    ) -> Self {
-        self.projection_precision = projection_precision;
+    pub const fn with_check_rows(mut self, check_rows: bool) -> Self {
+        self.check_rows = check_rows;
         self
     }
 }

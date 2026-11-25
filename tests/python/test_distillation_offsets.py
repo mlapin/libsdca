@@ -5,8 +5,10 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-from test_distillation import evaluate, loss_fn, paths
-from test_distillation_references import reference
+from conformance.references import Loss, evaluate
+from libsdca.torch import distillation_loss
+
+DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 
 
 def offset_rows(dtype: type[np.floating[Any]], classes: int):
@@ -19,18 +21,19 @@ def offset_rows(dtype: type[np.floating[Any]], classes: int):
     return student, teacher
 
 
+@pytest.mark.parametrize("backend", ["kernel", "composed"])
+@pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 @pytest.mark.parametrize("classes", [2, 17, 4097])
 def test_independent_offsets(
-    subtests: pytest.Subtests, dtype: type[np.floating[Any]], classes: int
+    backend: str, device: str, dtype: type[np.floating[Any]], classes: int
 ):
     student, teacher = offset_rows(dtype, classes)
-    expected_value, expected_gradient = reference(student, teacher, 1.0)
+    expected_value, expected_gradient = evaluate(Loss("distillation"), student, teacher=teacher)
     eps = float(np.finfo(dtype).eps)
-    for name, device, context in paths():
-        with subtests.test(path=name), context():
-            x = torch.tensor(student, device=device)
-            t = torch.tensor(teacher, device=device)
-            value, gradient = evaluate(loss_fn(False, 0.0), x, t, 1.0)
-            np.testing.assert_allclose(value.cpu(), expected_value, rtol=64 * eps, atol=0)
-            np.testing.assert_allclose(gradient.cpu(), expected_gradient, rtol=64 * eps, atol=0)
+    x = torch.tensor(student, device=device, requires_grad=True)
+    t = torch.tensor(teacher, device=device)
+    value = distillation_loss(x, t, reduction="none", backend=backend)
+    (gradient,) = torch.autograd.grad(value.sum(), x)
+    np.testing.assert_allclose(value.detach().cpu(), expected_value, rtol=64 * eps, atol=0)
+    np.testing.assert_allclose(gradient.cpu(), expected_gradient, rtol=64 * eps, atol=0)

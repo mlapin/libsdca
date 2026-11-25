@@ -117,7 +117,7 @@ def python_tests(build: Path) -> None:
         "all",
         env=env,
     )
-    env.update(SDCA_CPU_EXTENSION="on", TORCH_EXTENSIONS_DIR=str(build / "torch-extensions"))
+    env.update(SDCA_CPU_EXTENSION="on", SDCA_CACHE_DIR=str(build / "extensions"))
     run(
         sys.executable, "-m", "coverage", "run", "--append", source,
         "-m", "pytest", "-p", "no:cacheprovider", "tests/python", "--group", "torch", env=env,

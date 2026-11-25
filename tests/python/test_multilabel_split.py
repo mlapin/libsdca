@@ -3,9 +3,10 @@
 import functools
 import math
 
-import mpmath as mp
 import pytest
 import torch
+from conformance.references import Block, Loss
+from conformance.references import reference as shared_reference
 from libsdca.torch import Reduction, multilabel_cross_entropy
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
@@ -20,29 +21,41 @@ PATTERNS = (
 )
 
 
+def test_wide_positive_near_softmax_crossing_matches_centered_row() -> None:
+    classes, positives = 32000, 31885
+    scores = torch.zeros((1, classes), device="cuda", dtype=torch.float32)
+    scores[0, 0] = 0.004196599591523409
+    scores[0, 3] = 3
+    mask = torch.arange(classes, device=scores.device)[None, :] < positives
+
+    def first_gradient(x: torch.Tensor, members: torch.Tensor) -> torch.Tensor:
+        x.requires_grad_()
+        value = multilabel_cross_entropy(x, members, reduction="sum")
+        (gradient,) = torch.autograd.grad(value, x)
+        return gradient[0, 0]
+
+    # The extra nonmember contributes exp(-128), below a binary64 ULP of this
+    # partition, and takes the centered path; an unguarded tile misses by many
+    # float32 ulps.
+    centered = first_gradient(
+        torch.nn.functional.pad(scores, (0, 1), value=-128),
+        torch.nn.functional.pad(mask, (0, 1), value=False),
+    )
+    actual = first_gradient(scores, mask)
+    assert centered < 0
+    torch.testing.assert_close(actual, centered, rtol=0, atol=0)
+
+
 @functools.cache
 def reference(dtype: torch.dtype, classes: int, case: int):
+    """The row of a pattern at its width (conformance.references): value and the gradient
+    entries of its first, second and every other class."""
     scores, flags = PATTERNS[case]
-    represented = torch.tensor(scores, dtype=dtype).double().tolist()
-    with mp.workdps(120):
-        z = [mp.mpf(v) for v in represented]
-        counts = [1, 1, classes - 2]
-        top = max(z)
-        e = [mp.exp(v - top) for v in z]
-        den = sum(n * x for n, x in zip(counts, e, strict=True))
-        p = sum(n for n, pos in zip(counts, flags, strict=True) if pos)
-        value = (
-            sum(
-                n * (mp.log(den) + top - v)
-                for n, v, pos in zip(counts, z, flags, strict=True)
-                if pos
-            )
-            / p
-        )
-        gradient = [
-            float(x / den - (mp.mpf(1) / p if pos else 0)) for x, pos in zip(e, flags, strict=True)
-        ]
-        return float(value), gradient
+    z = torch.tensor(scores, dtype=dtype).double().tolist()
+    counts = [1, 1, classes - 2]
+    row = tuple(Block(v, n, f) for v, n, f in zip(z, counts, flags, strict=True))
+    ref = shared_reference(Loss("multilabel_cross_entropy"), row)
+    return float(ref.value), [float(g) for g in ref.gradient]
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])

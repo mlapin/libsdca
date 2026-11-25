@@ -3,15 +3,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <vector>
 
-#include "sdca/math/blas.h"
+#include "sdca/solver/eval/linalg.h"
 #include "sdca/solver/data/input.h"
+#include "sdca/solver/solverdef.h"
 #include "sdca/utility/parallel.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 // The coordinate steps divide by c * norm2: c, and the squared norm and c
 // times it of every nonzero row, must be normal in the data type. A zero row
@@ -48,16 +52,15 @@ struct solver_scratch<Var, feature_input> {
     typedef typename Context::data_type Data;
     const auto& d = ctx.train;
     const size_type n = d.num_examples(), dim = d.num_dimensions();
-    typedef typename std::common_type<Var, double>::type Work;
+    std::vector<double> squares(n);
+    linalg::pair_dots(dim, n, d.in.features, dim, d.in.features, dim, squares.data());
     norms.resize(n);
     scores.resize(d.num_classes());
     variables.resize(d.num_classes());
     classes.resize(d.num_classes());
     part.resize(d.num_classes());
     for (size_type i = 0; i < n; ++i) {
-      const Data* x_i = d.in.features + dim * i;
-      Work norm2;
-      detail::blas_dots<1>(static_cast<blas_int>(dim), x_i, 0, x_i, &norm2);
+      const double norm2 = squares[i];
       const Data stored = static_cast<Data>(norm2);
       if (!std::isfinite(stored))
         throw std::invalid_argument("Feature norms must be finite in the data type");
@@ -67,19 +70,14 @@ struct solver_scratch<Var, feature_input> {
   }
 };
 
-// Tolerances of the training kernel checks, relative to sqrt(K_ii K_jj):
-// symmetry to 1e-5, and |K_ij| <= sqrt(K_ii K_jj) (which a positive
-// semidefinite kernel satisfies) to 1e-3, for the rounding of a computed Gram
-// matrix.
-const double kernel_symmetry_tolerance = 1e-5;
-const double kernel_cauchy_schwarz_tolerance = 1e-3;
-
-// Throws unless the n-by-n kernel has a nonnegative diagonal, is symmetric
-// and satisfies |K_ij| <= sqrt(K_ii K_jj), to the tolerances above. This
-// rejects non-finite entries and grossly indefinite kernels; it does not
-// prove positive semidefiniteness. Blocks of rows run on num_threads threads.
+// Throws unless the n-by-n kernel has a nonnegative diagonal, is symmetric and satisfies
+// |K_ij| <= sqrt(K_ii K_jj), to the tolerances of the criteria (kernel_symmetry,
+// kernel_cauchy_schwarz). This rejects non-finite entries and grossly indefinite kernels; it
+// does not prove positive semidefiniteness. Blocks of rows run on criteria.num_threads.
 template <typename Data>
-inline void check_training_kernel(const size_type n, const Data* K, const std::size_t num_threads) {
+inline void check_training_kernel(const size_type n, const Data* K,
+                                  const stopping_criteria& criteria) {
+  const double symmetry = criteria.kernel_symmetry, cauchy_schwarz = criteria.kernel_cauchy_schwarz;
   std::vector<double> root(n);
   for (size_type i = 0; i < n; ++i) {
     const double diagonal = static_cast<double>(K[n * i + i]);
@@ -97,17 +95,20 @@ inline void check_training_kernel(const size_type n, const Data* K, const std::s
             const double kij = static_cast<double>(K[n * i + j]);
             const double kji = static_cast<double>(K[n * j + i]);
             const double scale = root[i] * root[j];
-            if (!(std::abs(kij - kji) <= kernel_symmetry_tolerance * scale))
-              throw std::invalid_argument(
-                  "Training kernel must be symmetric: |K_ij - K_ji| exceeds 1e-5 sqrt(K_ii K_jj)");
-            if (!(std::abs(kij) <= (1 + kernel_cauchy_schwarz_tolerance) * scale))
+            if (!(std::abs(kij - kji) <= symmetry * scale)) {
+              std::ostringstream text;
+              text << "Training kernel must be symmetric: |K_ij - K_ji| exceeds " << symmetry
+                   << " sqrt(K_ii K_jj)";
+              throw std::invalid_argument(text.str());
+            }
+            if (!(std::abs(kij) <= (1 + cauchy_schwarz) * scale))
               throw std::invalid_argument(
                   "Training kernel must be positive semidefinite: |K_ij| exceeds "
                   "sqrt(K_ii K_jj)");
           }
     }
   };
-  detail::parallel_rows(blocks, block * n, num_threads, rows);
+  ::sdca::detail::parallel_rows(blocks, block * n, criteria.num_threads, rows);
 }
 
 template <typename Var>
@@ -125,11 +126,11 @@ struct solver_scratch<Var, kernel_input> {
     const size_type n = d.in.num_train_examples;
     scores.resize(d.num_classes());
     variables.resize(d.num_classes());
-    check_training_kernel(n, d.in.kernel, ctx.criteria.num_threads);
+    check_training_kernel(n, d.in.kernel, ctx.criteria);
     for (size_type i = 0; i < n; ++i) check_step_scale(d.in.kernel[n * i + i], ctx.objective.c);
   }
 };
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

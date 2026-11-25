@@ -9,8 +9,9 @@
 
 #include "sdca/solver/data/output.h"
 #include "sdca/utility/logging.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 // The arithmetic of the evaluation: at least double, whatever the solver's.
 template <typename Result>
@@ -199,6 +200,6 @@ struct eval_test<Result, multilabel_output> {
   }
 };
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

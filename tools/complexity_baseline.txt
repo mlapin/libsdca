@@ -1,11 +1,4 @@
 # Library functions above the tools/quality.py complexity limits: "<path> <function>".
 # The check fails on a function missing here and on an entry back within the limits.
-python/libsdca/_torch_distill.h distillation_stats
-python/libsdca/_cpu_prox_distill.h sdca_cpu::prox_distillation_solve
-python/libsdca/_torch_prox.h prox_entropy_row
-python/libsdca/_torch_topk_hinge.h multilabel_row_forward
-python/libsdca/_torch_topk_hinge.h topk_backward
-python/libsdca/_torch_topk_hinge.h topk_hinge_row
-python/libsdca/_triton_multilabel.py _smooth_forward
-src/matlab/mex_prox.cpp mex_main
-src/matlab/mex_solve.cpp printHelp
+include/sdca/utility/parallel.h sdca::detail::parallel_rows
+python/libsdca/_torch_cpu.cpp apply

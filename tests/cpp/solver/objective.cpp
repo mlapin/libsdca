@@ -1,4 +1,4 @@
-#include "sdca/solver/objective.h"
+#include "sdca/solver.h"
 #include "test_util.h"
 
 template <typename Data, typename Result, typename Maker>

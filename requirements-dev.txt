@@ -2,6 +2,7 @@
 ruff==0.11.13
 pytest==9.2.0
 pytest-xdist==3.8.0
+hypothesis==6.170.17
 basedpyright==1.40.2
 clang-format==18.1.8
 clang-tidy==18.1.8; sys_platform != "darwin"

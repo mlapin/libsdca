@@ -8,9 +8,8 @@ Runnable examples for each language interface:
 | [cpp/](cpp) | [`train.cpp`](cpp/train.cpp) and [`CMakeLists.txt`](cpp/CMakeLists.txt) linking `libsdca::libsdca` | [docs/CPP.md](../docs/CPP.md) |
 | [c/](c) | [`train.c`](c/train.c) and [`CMakeLists.txt`](c/CMakeLists.txt) linking `libsdca::sdca_c` | [docs/C.md](../docs/C.md) |
 
-Rust and MATLAB examples live with their packages:
-[`rust/examples/train.rs`](../rust/examples/train.rs) and
-[`matlab/demo.m`](../matlab/demo.m).
+The Rust example lives with its package:
+[`rust/examples/train.rs`](../rust/examples/train.rs).
 
 ## Running
 

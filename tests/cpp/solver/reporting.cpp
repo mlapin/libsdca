@@ -28,7 +28,7 @@ void contains(const std::string& text, const std::string& expected) {
 
 #ifndef __FAST_MATH__
 TEST(ReportingTest, gaps_and_elapsed_times) {
-  sdca::eval_train_base<double> e;
+  sdca::native::eval_train_base<double> e;
   EXPECT_EQ(0, e.absolute_gap());
   EXPECT_EQ(0, e.relative_gap());
   for (const auto& pair : {std::make_pair(10., 8.), std::make_pair(-8., -10.)}) {
@@ -174,38 +174,38 @@ TEST(ReportingTest, context_and_log_levels) {
            "cpu_time: 5 (solve: 2, eval: 3), wall_time: 9 (solve: 4, eval: 5)");
 
   sdca::logging::set_level(sdca::logging::level::none);
-  sdca::reporting::begin_solve(ctx);
-  sdca::reporting::end_solve(ctx);
+  sdca::native::reporting::begin_solve(ctx);
+  sdca::native::reporting::end_solve(ctx);
   EXPECT_TRUE(log.output.str().empty());
   sdca::logging::set_level(sdca::logging::level::debug);
-  sdca::reporting::begin_solve(ctx);
-  sdca::reporting::end_solve(ctx);
+  sdca::native::reporting::begin_solve(ctx);
+  sdca::native::reporting::end_solve(ctx);
   contains(log.output.str(), "Solve: ");
   contains(log.output.str(), "Solution: status: solved");
   log.output.str("");
   ctx.epoch = 9;
-  sdca::reporting::end_epoch(ctx, true);
+  sdca::native::reporting::end_epoch(ctx, true);
   EXPECT_TRUE(log.output.str().empty());
-  sdca::reporting::end_epoch(ctx, false);
+  sdca::native::reporting::end_epoch(ctx, false);
   contains(log.output.str(), "epoch: 9, cpu_time: 5 (2 + 3), wall_time: 9 (4 + 5)");
   log.output.str("");
-  sdca::reporting::eval_created(ctx.train.evals.back(), 0);
+  sdca::native::reporting::eval_created(ctx.train.evals.back(), 0);
   contains(log.output.str(), "epoch: 7");
   sdca::eval_test<double, sdca::multiclass_output> test;
-  sdca::reporting::eval_created(test, 2);
+  sdca::native::reporting::eval_created(test, 2);
   contains(log.output.str(), "eval on set #2: primal_loss: 0");
   log.output.str("");
   sdca::logging::set_level(sdca::logging::level::warning);
   ctx.status = sdca::solver_status::max_epoch;
-  sdca::reporting::end_solve(ctx);
+  sdca::native::reporting::end_solve(ctx);
   contains(log.output.str(), "Solve: ");
   contains(log.output.str(), "Solution: status: max_epoch");
-  sdca::reporting::solver_stop_failed(-.5, .001, .01);
+  sdca::native::reporting::solver_stop_failed(-.5, .001, .01);
   contains(log.output.str(),
            "negative duality gap; absolute_gap: -0.5, eps_machine: 0.001, eps_user: 0.01");
   auto before = ctx.train.evals.back();
   before.dual = 2;
   ctx.train.evals.back().dual = 1;
-  sdca::reporting::solver_stop_no_progress(ctx.train.evals.back(), before);
+  sdca::native::reporting::solver_stop_no_progress(ctx.train.evals.back(), before);
   contains(log.output.str(), "dual objective decreased; dual: 1, dual_before: 2, difference: -1");
 }

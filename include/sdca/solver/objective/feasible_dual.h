@@ -4,8 +4,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <limits>
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 // The evaluation's repair of a stored dual block (labels first), in a wider
 // type: storage rounding can break its balance and bounds by an ulp. Feasible
@@ -60,8 +61,9 @@ inline void topk_simplex(const Int n, T* a, const std::size_t k, const T total) 
   a[0] = sum;
 }
 
-// q - a / c on the probability simplex, q uniform on the p labels:
-// a_j <= c / p on the labels, a_j <= 0 elsewhere, sum a = 0.
+// q - a / c on the probability simplex, q uniform on the p labels: a_j <= c / p on the
+// labels, a_j <= 0 elsewhere, sum a = 0 (an excess off the first label, a deficit raising
+// entries below their bounds in order).
 template <typename Int, typename T>
 inline void label_distribution(const Int n, const Int p, T* a, const T c) {
   const T hi = c / T(p);
@@ -74,7 +76,6 @@ inline void label_distribution(const Int n, const Int p, T* a, const T c) {
     a[0] -= sum;
     return;
   }
-  // Raise entries below their bounds by the deficit.
   T deficit = -sum;
   for (Int j = 0; j < n && deficit > 0; ++j) {
     const T room = std::min((j < p ? hi : T(0)) - a[j], deficit);
@@ -111,6 +112,6 @@ inline void two_simplex(const Int n, const Int p, T* a, const T c) {
 }
 
 }  // namespace feasible
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

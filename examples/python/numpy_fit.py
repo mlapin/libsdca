@@ -18,14 +18,14 @@ probabilities = libsdca.fit(X, y).predict_proba(X[:3])  # cross-entropy losses o
 assert np.allclose(probabilities.sum(axis=1), 1)
 
 # Warm start: a short run, then continue from its dual variables.
-hinge = libsdca.TopKHingeAlpha(k=2, gamma=0.5)
+hinge = libsdca.TopKHinge(k=2, variant="alpha", gamma=0.5)
 short = libsdca.fit(X, y, hinge, max_epoch=2, eval_epoch=1)
 resumed = libsdca.fit(X, y, hinge, initial_dual=short.dual)  # checked, W built from it
 print("warm start:", short.status, "->", resumed.status, resumed.epochs, "more epochs")
 
 # Losses and gradients of any scores (n, classes), per row.
 scores = model.decision_function(X)  # X @ model.weights.T
-values, gradients = libsdca.loss_and_grad(scores, y, libsdca.TopKHingeBeta(k=2, gamma=0.5))
+values, gradients = libsdca.loss_and_grad(scores, y, libsdca.TopKHinge(k=2, gamma=0.5))
 print("mean smooth top-2 hinge", values.mean(), gradients.shape)
 mask = np.zeros(scores.shape, dtype=bool)
 mask[np.arange(len(y)), y] = True

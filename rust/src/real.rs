@@ -1,7 +1,5 @@
 use std::fmt;
 
-use crate::error::{invalid, Result};
-use crate::ffi;
 use crate::names::Precision;
 
 pub(crate) mod sealed {
@@ -77,18 +75,4 @@ impl Real for f32 {
 
 impl Real for f64 {
     const DEFAULT_PRECISION: Precision = Precision::Float64;
-}
-
-/// The C ABI precision (enum sdca_precision) of `requested` on storage `T`:
-/// `None` works in the storage type, and f64 data takes Float64 only.
-pub(crate) fn precision_code<T: Real>(requested: Option<Precision>) -> Result<i32> {
-    match requested {
-        None => Ok(ffi::PRECISION_DEFAULT),
-        Some(Precision::Float64) => Ok(ffi::PRECISION_FLOAT64),
-        Some(Precision::Float32) if T::DTYPE_CODE == 0 => Ok(ffi::PRECISION_FLOAT32),
-        Some(precision) => invalid(format!(
-            "Precision::{precision:?} does not match {} data: f64 data takes Precision::Float64 only",
-            std::any::type_name::<T>()
-        )),
-    }
 }

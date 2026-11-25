@@ -1,7 +1,7 @@
 """The NumPy API on ordinary inputs against independent float64 references.
 
 loss_and_grad of every hinge (nonsmooth and smoothed) and cross-entropy against
-loss_references.py, over shapes, storage, precision, target encodings and layouts; every
+conformance.references, over shapes, storage, precision, target encodings and layouts; every
 objective's "solved" fits within tol of the optimum, judged by an independent primal.
 """
 
@@ -9,9 +9,31 @@ from typing import Any
 
 import numpy as np
 import pytest
-from libsdca import OBJECTIVES
-from loss_references import REFERENCED, nonsmooth_gap, primal, reference
+from conformance import references
+from named_losses import OBJECTIVES
 from numpy_api import fit, loss_and_grad
+
+REFERENCED = (
+    "cross_entropy",
+    "multiclass_hinge",
+    "topk_hinge_alpha",
+    "topk_hinge_beta",
+    "multilabel_hinge",
+    "multilabel_cross_entropy",
+)
+
+
+def reference(z: np.ndarray, positive: np.ndarray, loss: str, k: int, gamma: float):
+    return references.evaluate(references.named(loss, k, gamma), z, positive)
+
+
+def nonsmooth_gap(z: np.ndarray, positive: np.ndarray, loss: str, k: int) -> np.ndarray:
+    return references.kinks(references.named(loss, k), z, positive)
+
+
+def primal(x: np.ndarray, w: np.ndarray, y: Any, objective: str, c: float, **options: Any):
+    loss = references.named(objective, options.get("k", 1), options.get("gamma", 0.0))
+    return float(references.primal(loss, x, w, np.asarray(y), c))
 
 
 def targets(loss: str, n: int, m: int, rng: np.random.Generator) -> tuple[np.ndarray, Any]:

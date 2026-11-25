@@ -1,13 +1,14 @@
-//! Raw declarations of include/sdca/c_api.h (ABI version 6): its structs, with
+//! Raw declarations of include/sdca/c_api.h (ABI version 8): its structs, with
 //! `Default` as their `SDCA_*_INIT` initializers, and its entry points.
 use std::ffi::{c_char, c_double, c_int, c_void};
 use std::mem::size_of;
 use std::ptr;
 
 /// SDCA_ABI_VERSION.
-pub const ABI_VERSION: c_int = 6;
+pub const ABI_VERSION: c_int = 7;
 
-/// SDCA_INVALID_ARGUMENT of enum sdca_result.
+/// SDCA_INVALID_ROWS and SDCA_INVALID_ARGUMENT of enum sdca_result.
+pub const INVALID_ROWS: c_int = 1;
 pub const INVALID_ARGUMENT: c_int = -2;
 
 /// SDCA_HISTORY_FIELDS: the columns of a history row.
@@ -36,22 +37,59 @@ pub struct Loss {
     pub kind: c_int,
     pub k: usize,
     pub gamma: c_double,
-    pub alpha: c_double,
     pub temperature: c_double,
-    pub projection_precision: c_int,
+    pub weight: *const c_double,
+    pub label_smoothing: c_double,
+    pub ignore: c_int,
+    pub ignore_index: i64,
 }
 
-impl Default for Loss {
-    /// SDCA_LOSS_INIT.
+/// enum sdca_loss_kind.
+pub const LOSS_CROSS_ENTROPY: c_int = 0;
+pub const LOSS_TOPK_CROSS_ENTROPY: c_int = 1;
+pub const LOSS_MULTICLASS_HINGE: c_int = 2;
+pub const LOSS_TOPK_HINGE_ALPHA: c_int = 3;
+pub const LOSS_TOPK_HINGE_BETA: c_int = 4;
+pub const LOSS_MULTILABEL_HINGE: c_int = 5;
+pub const LOSS_MULTILABEL_CROSS_ENTROPY: c_int = 6;
+pub const LOSS_PROXIMAL_CROSS_ENTROPY: c_int = 7;
+pub const LOSS_DISTILLATION: c_int = 8;
+pub const LOSS_PROXIMAL_DISTILLATION: c_int = 9;
+
+impl Loss {
+    /// SDCA_LOSS_INIT(kind).
+    pub fn init(kind: c_int) -> Self {
+        let proximal = kind == LOSS_PROXIMAL_CROSS_ENTROPY || kind == LOSS_PROXIMAL_DISTILLATION;
+        Self {
+            size: size_of::<Self>(),
+            kind,
+            k: 0,
+            gamma: if proximal { 1.0 } else { 0.0 },
+            temperature: 1.0,
+            weight: std::ptr::null(),
+            label_smoothing: 0.0,
+            ignore: 0,
+            ignore_index: -100,
+        }
+    }
+}
+
+/// struct sdca_loss_report.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct LossReport {
+    pub size: usize,
+    pub invalid_rows: usize,
+    pub first_invalid_row: usize,
+}
+
+impl Default for LossReport {
+    /// SDCA_LOSS_REPORT_INIT.
     fn default() -> Self {
         Self {
             size: size_of::<Self>(),
-            kind: 0,
-            k: 0,
-            gamma: 0.0,
-            alpha: 1.0,
-            temperature: 1.0,
-            projection_precision: 0,
+            invalid_rows: 0,
+            first_invalid_row: 0,
         }
     }
 }
@@ -63,6 +101,8 @@ pub struct Execution {
     pub size: usize,
     pub precision: c_int,
     pub num_threads: usize,
+    pub check_rows: c_int,
+    pub report: *mut LossReport,
 }
 
 impl Default for Execution {
@@ -72,6 +112,8 @@ impl Default for Execution {
             size: size_of::<Self>(),
             precision: PRECISION_DEFAULT,
             num_threads: 0,
+            check_rows: 0,
+            report: ptr::null_mut(),
         }
     }
 }

@@ -1,5 +1,6 @@
 """Torch loss layers and tensor inputs at extreme scores."""
 
+from collections.abc import Callable
 from typing import Any
 
 import libsdca
@@ -29,19 +30,22 @@ class TorchReferenceTests:
         assert "k=2, variant='beta', gamma=0.5" in repr(criterion)
         assert "temperature=2.0" in repr(DistillationLoss(temperature=2.0))
         with pytest.raises(TypeError):  # options are keyword-only
-            TopKHingeLoss(2, "native")  # pyright: ignore[reportCallIssue]
+            TopKHingeLoss(2, "native")
 
     def test_paper_collapse_and_cancellation_low_precision(self):
-        # The tensor path promotes half/bfloat16 work, then stores gradients
-        # in the input dtype. Check represented gradients, including bf16.
-        for dtype, margin in [
-            (torch.bfloat16, 12.0),
-            (torch.float16, 12.0),
-            (torch.float32, 20.0),
-            (torch.float64, 50.0),
+        # The kernels keep the tiny loss and target gradient of a confident row; the composed
+        # path promotes half/bfloat16 work to float32 and rounds float32 and float64 rows as
+        # PyTorch's tensor operations do, so it is checked on the 16-bit rows.
+        for dtype, margin, backend in [
+            (torch.bfloat16, 12.0, "composed"),
+            (torch.float16, 12.0, "composed"),
+            (torch.bfloat16, 12.0, "auto"),
+            (torch.float16, 12.0, "auto"),
+            (torch.float32, 20.0, "auto"),
+            (torch.float64, 50.0, "auto"),
         ]:
             z = torch.tensor([[margin, 0.0, 0.0]], dtype=dtype, requires_grad=True)
-            value = cross_entropy(z, torch.tensor([0]), backend="torch")
+            value = cross_entropy(z, torch.tensor([0]), backend=backend)
             value.backward()
             expected = 2 * np.exp(-margin) / (1 + 2 * np.exp(-margin))
             assert value.item() > 0
@@ -113,7 +117,7 @@ class TorchReferenceTests:
             [[0.3, -0.2, 0.7], [0.1, 0.2, -0.4]], dtype=torch.float64, requires_grad=True
         )
         mask = torch.tensor([[True, False, True], [False, True, False]])
-        for backend in ["native", "torch"]:
+        for backend in ["kernel", "composed"]:
             actual = MultilabelCrossEntropyLoss(backend=backend)(z, mask)
             expected = multilabel_cross_entropy(z, mask, backend=backend)
             torch.testing.assert_close(actual, expected, rtol=0, atol=0)
@@ -139,10 +143,6 @@ class TorchReferenceTests:
             model = solver.fit(torch.tensor(x, requires_grad=True), labels, **options)
             np.testing.assert_array_equal(model.weights, ref.weights)
             np.testing.assert_array_equal(model.predict(torch.tensor(x)), ref.predict(x))
-            values = solver.loss_and_grad(x[:, :3], labels, loss=objective)
-            expected = solver.loss_and_grad(x[:, :3], mask.tolist(), loss=objective)
-            for a, b in zip(values, expected, strict=False):
-                np.testing.assert_array_equal(a, b)
             warm = solver.fit(
                 x, labels, objective=objective, initial_dual=torch.tensor(model.dual), max_epoch=0
             )
@@ -157,3 +157,46 @@ class TorchReferenceTests:
         ]:
             with subtests.test(bad=bad), pytest.raises((ValueError, TypeError)):
                 solver.fit(x, bad, objective="multilabel_cross_entropy")
+
+    @pytest.mark.parametrize(
+        "objective",
+        ["multilabel_cross_entropy", "multilabel_hinge"],
+    )
+    def test_label_sets_match_masks(self, objective: str):
+        x = np.eye(4)[:, :3]
+        labels = [[0, 2], [1], [0, 1], [2]]
+        mask = [
+            [True, False, True],
+            [False, True, False],
+            [True, True, False],
+            [False, False, True],
+        ]
+        values = Solver().loss_and_grad(x, labels, loss=objective)
+        expected = Solver().loss_and_grad(x, mask, loss=objective)
+        for a, b in zip(values, expected, strict=True):
+            np.testing.assert_array_equal(a, b)
+
+
+def test_repeated_matrices_respect_torch_function_mode():
+    """The eager matrix shortcut must leave visible tensor operations visible to a mode."""
+    contiguous = []
+
+    class Observe(torch.overrides.TorchFunctionMode):
+        def __torch_function__(
+            self,
+            func: Callable[..., Any],
+            types: tuple[type, ...],
+            args: tuple[Any, ...] = (),
+            kwargs: dict[str, Any] | None = None,
+        ) -> Any:
+            if func is torch.Tensor.contiguous:
+                contiguous.append(True)
+            return func(*args, **(kwargs or {}))
+
+    z = torch.randn(7, 4).T
+    labels = torch.tensor([0, 1, 2, 3])
+    expected = cross_entropy(z, labels)
+    with Observe():
+        actual = cross_entropy(z, labels)
+    assert contiguous
+    torch.testing.assert_close(actual, expected)

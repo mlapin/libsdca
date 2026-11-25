@@ -7,33 +7,48 @@
 #include <vector>
 
 #include "sdca/solver/data.h"
-#include "sdca/solver/eval/accumulate.h"
 #include "sdca/solver/eval/core.h"
 #include "sdca/solver/eval/dual.h"
+#include "sdca/solver/eval/linalg.h"
 #include "sdca/solver/eval/primal.h"
+#include "sdca/solver/eval/scores.h"
+#include "sdca/solver/solverdef.h"
 #include "sdca/utility/parallel.h"
+#include "sdca/core/reduce.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 /*
- * The evaluation computes, in Work (at least double), the primal objective at
- * the stored model (the weights W, or the duals A of a kernel) and the dual
- * objective at the stored duals A, each block repaired by the objective's
- * feasible_dual. The dual regularizer comes from W0 + X A', recomputed from
- * A, never from the incrementally updated W. Each evaluation bounds its own
- * rounding (eval_train::gap_error), to first order in units of epsilon(Work):
- * a sum of magnitudes times the roundings per term. The objectives' losses
- * are 2c-Lipschitz in the max norm of the scores (their dual blocks have l1
- * norm at most 2c), the entropies less where they are small (loss_slope).
+ * The evaluation computes, in Work (double), the primal objective at the stored model (the
+ * weights W, or the duals A of a kernel) and the dual objective at the stored duals A, each
+ * block repaired by the objective's feasible_dual. The dual regularizer comes from
+ * W0 + X A', recomputed from A, never from the incrementally updated W. Each evaluation
+ * bounds its own rounding (eval_train::gap_error), to first order in units of
+ * epsilon(Work): a sum of magnitudes times the roundings per term. The objectives' losses
+ * are 2c-Lipschitz in the max norm of the scores (their dual blocks have l1 norm at most
+ * 2c), the entropies less where they are small (loss_slope).
  *
- * The examples run on criteria.num_threads threads in fixed ranges whose
+ * The examples run on criteria.num_threads threads in blocks fixed by the sizes alone, whose
  * results add up in order: every count gives the same bits.
  */
+
+// A compensated sum and the sum of its terms' magnitudes, which bounds its rounding.
+struct bounded_sum {
+  core::Neumaier sum;
+  double magnitude = 0;
+  void add(const double x) {
+    sum.add(x);
+    magnitude += std::abs(x);
+  }
+  double value() const { return sum.value(); }
+};
 
 // The objective in the evaluation's arithmetic.
 template <typename Work, typename Data, typename Result,
           template <typename, typename> class Objective>
 inline Objective<Work, Work> eval_objective(const Objective<Data, Result>& obj) {
+  static_assert(std::is_same<Work, double>::value, "the products accumulate in double");
   return Objective<Work, Work>(obj);
 }
 
@@ -55,19 +70,13 @@ inline Work dual_rounding(const Objective& obj, const size_type m, const Work lo
   return static_cast<Work>(m + 2) * std::abs(loss) + 2 * block_l1 * (1 + log_c);
 }
 
-template <typename Work>
-inline Work max_abs(const size_type n, const Work* x) {
-  Work max(0);
-  for (size_type j = 0; j < n; ++j) max = std::max(max, std::abs(x[j]));
-  return max;
-}
-
-// The largest column norm of a dim-by-m matrix.
-template <typename Work, typename Data>
-inline Work max_column_norm(const size_type dim, const size_type m, const Data* w) {
-  Work max(0);
-  for (size_type c = 0; c < m; ++c)
-    max = std::max(max, std::sqrt(dot_chunked<Work>(dim, w + dim * c, w + dim * c)));
+// The largest row norm of the m rows of dim entries of w.
+template <typename Data>
+inline double max_row_norm(const size_type dim, const size_type m, const Data* w) {
+  std::vector<double> squares(m);
+  linalg::pair_dots(dim, m, w, dim, w, dim, squares.data());
+  double max = 0;
+  for (size_type c = 0; c < m; ++c) max = std::max(max, std::sqrt(squares[c]));
   return max;
 }
 
@@ -76,39 +85,47 @@ template <typename Work, typename Data>
 inline std::vector<Work> example_norms(const size_type dim, const size_type n, const Data* X,
                                        const std::size_t num_threads) {
   std::vector<Work> norms(n);
-  detail::parallel_rows(n, dim, num_threads, [&](size_type first, size_type last) {
-    size_type i = first;
-    for (; i + 4 <= last; i += 4) {
-      const Data* x[4] = {X + dim * i, X + dim * (i + 1), X + dim * (i + 2), X + dim * (i + 3)};
-      Work sums[4];
-      dot_chunked4<Work>(dim, x, x, sums);
-      for (size_type q = 0; q < 4; ++q) norms[i + q] = std::sqrt(sums[q]);
-    }
-    for (; i < last; ++i) norms[i] = std::sqrt(dot_chunked<Work>(dim, X + dim * i, X + dim * i));
+  ::sdca::detail::parallel_rows(n, dim, num_threads, [&](size_type first, size_type last) {
+    linalg::pair_dots(dim, last - first, X + dim * first, dim, X + dim * first, dim, &norms[first]);
+    for (size_type i = first; i < last; ++i) norms[i] = std::sqrt(norms[i]);
   });
   return norms;
 }
 
-// Primal losses at the scores that scores(i, z, scratch) writes and whose
-// rounding it returns. Sets eval.primal_loss and the metrics; returns the
-// rounding of the losses.
+// The examples of a block of the evaluation: a multiple of 8 near 2^15 / m, 8 to 64.
+inline size_type eval_block(const size_type m) {
+  const size_type b = 32768 / std::max<size_type>(m, 1);
+  return std::max<size_type>(8, std::min<size_type>(64, b - b % 8));
+}
+
+// Primal losses at the scores that scores.block(first, count, z, error, scratch) writes (the
+// rows of the examples [first, first + count) in class order, and their rounding). Sets
+// eval.primal_loss and the metrics; returns the rounding of the losses.
 template <typename Work, typename Output, typename Objective, typename Evaluation, typename Scores>
 inline Work eval_primal_losses(const size_type n, const Output& out, const Objective& obj,
                                const stopping_criteria& criteria, Evaluation& eval,
                                const Scores& scores) {
-  const size_type m = out.num_classes;
+  const size_type m = out.num_classes, block = eval_block(m), blocks = (n + block - 1) / block;
+  const primal_rows<Output, Objective> rows(out, obj);
   std::vector<Work> loss(n), bound(n), metric(n);
-  detail::parallel_rows(n, scores.cost, criteria.num_threads, [&](size_type first, size_type last) {
-    std::vector<Work> z(m), scratch(scores.scratch_size);
-    for (size_type i = first; i < last; ++i) {
-      const Work score_error = scores(i, z.data(), scratch.data());
-      const Work max_score = max_abs(m, z.data());
-      Work slope(0);
-      loss[i] = eval_primal_loss(i, out, obj, criteria.projection, z.data(), slope, metric[i]);
-      bound[i] = primal_rounding(obj, m, score_error, max_score, loss[i], slope);
-    }
-  });
-  compensated_sum<Work> sum;
+  ::sdca::detail::parallel_rows(
+      blocks, block * scores.cost, criteria.num_threads, [&](size_type b0, size_type b1) {
+        std::vector<Work> z(block * m), error(block), top(block), scratch(scores.scratch_size);
+        for (size_type b = b0; b < b1; ++b) {
+          const size_type first = block * b, count = std::min(block, n - first);
+          scores.block(first, count, z.data(), error.data(), scratch.data());
+          for (size_type e = 0; e < count; ++e) {
+            metric[first + e] = rows.metric(first + e, &z[m * e]);
+            top[e] = linalg::max_abs(m, &z[m * e]);
+          }
+          rows.values(first, count, z.data(), &loss[first]);
+          for (size_type e = 0; e < count; ++e) {
+            const size_type i = first + e;
+            bound[i] = primal_rounding(obj, m, error[e], top[e], loss[i], rows.slope(i, loss[i]));
+          }
+        }
+      });
+  bounded_sum sum;
   Work total(0);
   for (size_type i = 0; i < n; ++i) {
     sum.add(loss[i]);
@@ -119,26 +136,12 @@ inline Work eval_primal_losses(const size_type n, const Output& out, const Objec
   return total + static_cast<Work>(obj.coeff_primal_loss) * sum.magnitude;
 }
 
-// n entries in Work: the entries themselves, or their copy into wide.
-template <typename Work>
-inline const Work* widened(const Work* x, size_type, Work*) {
-  return x;
-}
-template <typename Work, typename T>
-inline const Work* widened(const T* x, const size_type n, Work* wide) {
-  for (size_type j = 0; j < n; ++j) wide[j] = static_cast<Work>(x[j]);
-  return wide;
-}
-
-// Scores W' x_i of weights (dim-by-m, the relative ones of a common center),
-// and their rounding (Cauchy-Schwarz) from the example norms. Narrower
-// weights and inputs are widened to Work once, not in every product (the
-// same products).
+// Scores W' x_i of weights (m rows of dim, the relative ones of a common center), and their
+// rounding (Cauchy-Schwarz) from the example norms.
 template <typename Work, typename Weight, typename Data>
 struct weight_scores {
   size_type dim, m, cost, scratch_size;
-  std::vector<Work> wide;  // narrower weights in Work
-  const Work* weights;
+  const Weight* weights;
   const Data* inputs;  // (n, dim)
   const Work* norms;   // n
   Work steps, max_norm;
@@ -148,25 +151,16 @@ struct weight_scores {
       : dim(dim_),
         m(m_),
         cost(dim_ * m_),
-        scratch_size(std::is_same<Data, Work>::value ? 0 : dim_),
-        wide(std::is_same<Weight, Work>::value ? 0 : dim_ * m_),
-        weights(widened(weights_, dim_ * m_, wide.data())),
+        scratch_size(0),
+        weights(weights_),
         inputs(inputs_),
         norms(norms_.data()),
-        steps(static_cast<Work>(chunk_steps(dim_) + extra_steps)),
-        max_norm(max_column_norm<Work>(dim_, m_, weights)) {}
+        steps(static_cast<Work>(linalg::dot_steps(dim_) + extra_steps)),
+        max_norm(max_row_norm(dim_, m_, weights_)) {}
 
-  Work operator()(const size_type i, Work* z, Work* scratch) const {
-    const Work* x = widened(inputs + dim * i, dim, scratch);
-    const Work* const xs[4] = {x, x, x, x};
-    size_type c = 0;
-    for (; c + 4 <= m; c += 4) {
-      const Work* const w[4] = {weights + dim * c, weights + dim * (c + 1), weights + dim * (c + 2),
-                                weights + dim * (c + 3)};
-      dot_chunked4<Work>(dim, w, xs, z + c);
-    }
-    for (; c < m; ++c) z[c] = dot_chunked<Work>(dim, weights + dim * c, x);
-    return steps * norms[i] * max_norm;
+  void block(const size_type first, const size_type count, Work* z, Work* error, Work*) const {
+    linalg::dots(dim, m, weights, dim, nullptr, count, inputs + dim * first, dim, z, m);
+    for (size_type e = 0; e < count; ++e) error[e] = steps * norms[first + e] * max_norm;
   }
 };
 
@@ -177,28 +171,26 @@ struct feature_dual_sums {
 };
 
 // The repaired blocks of the stored duals (each loss to dual_loss) and
-// H = X A' (dim-by-m, added to), in chunks of examples whose partial sums
-// add to H in order; the entries of H run in parallel over the chunks of a
+// H = X A' (m rows of dim, added to), in chunks of examples whose partial sums
+// add to H in order; the classes of H run in parallel over the chunks of a
 // span (blocks of at most 2^20 entries, or one chunk where X A' has under
 // 2^24 products: a small pass is faster in calls that stay serial).
 template <typename Work, typename Data, typename Output, typename Context, typename Objective>
 inline feature_dual_sums<Work> eval_feature_duals(const Context& ctx, const size_type dim,
                                                   const Output& out, const Objective& obj,
                                                   const Data* X, const std::vector<Work>& norms,
-                                                  compensated_sum<Work>& dual_loss,
-                                                  std::vector<Work>& H) {
+                                                  bounded_sum& dual_loss, std::vector<Work>& H) {
   const std::size_t threads = ctx.criteria.num_threads;
   const size_type m = out.num_classes, n = out.num_examples(), dm = dim * m;
   const size_type chunk = eval_chunk(n);
   const size_type span = static_cast<double>(n) * static_cast<double>(dm) < double(1 << 24)
                              ? chunk
                              : chunk * std::max<size_type>(1, (size_type(1) << 20) / (chunk * m));
-  std::vector<Work> block(std::min(span, n) * m), part(dm, Work(0)), loss(std::min(span, n)),
-      l1(std::min(span, n));
+  std::vector<Work> block(std::min(span, n) * m), loss(std::min(span, n)), l1(std::min(span, n));
   feature_dual_sums<Work> sums;
   for (size_type i0 = 0; i0 < n; i0 += span) {
     const size_type count = std::min(span, n - i0);
-    detail::parallel_rows(count, m, threads, [&](size_type first, size_type last) {
+    ::sdca::detail::parallel_rows(count, m, threads, [&](size_type first, size_type last) {
       for (size_type r = first; r < last; ++r) {
         Work* a = &block[m * r];
         loss[r] = eval_dual_block(i0 + r, out, obj, ctx.dual_variables + m * (i0 + r), a);
@@ -206,27 +198,14 @@ inline feature_dual_sums<Work> eval_feature_duals(const Context& ctx, const size
         for (size_type c = 0; c < m; ++c) l1[r] += std::abs(a[c]);
       }
     });
-    // Entries [first, last) of H: each example of a chunk adds to them in
-    // turn (in order, as one serial pass would), then the chunk adds to H.
-    detail::parallel_rows(dm, count, threads, [&](const size_type first, const size_type last) {
-      for (size_type r0 = 0; r0 < count; r0 += chunk) {
-        for (size_type r = r0; r < std::min(count, r0 + chunk); ++r) {
-          const Data* x = X + dim * (i0 + r);
-          for (size_type e = first; e < last;) {
-            const size_type c = e / dim, j0 = e % dim, j1 = std::min(dim, j0 + (last - e));
-            const Work a = block[m * r + c];
-            Work* p = &part[e] - j0;
-            if (a != 0)
-              for (size_type j = j0; j < j1; ++j) p[j] += static_cast<Work>(x[j]) * a;
-            e += j1 - j0;
-          }
-        }
-        for (size_type e = first; e < last; ++e) {
-          H[e] += part[e];
-          part[e] = 0;
-        }
-      }
-    });
+    // Classes [first, last) of H: each chunk of examples adds its partial sums in turn.
+    ::sdca::detail::parallel_rows(
+        m, count * dim, threads, [&](const size_type first, const size_type last) {
+          std::vector<size_type> rows(chunk);
+          for (size_type r0 = 0; r0 < count; r0 += chunk)
+            linalg::row_sums(dim, m, std::min(chunk, count - r0), X + dim * (i0 + r0), dim,
+                             &block[m * r0], first, last, rows.data(), H.data());
+        });
     for (size_type r = 0; r < count; ++r) {
       const Work x_norm = norms[i0 + r];
       dual_loss.add(loss[r]);
@@ -262,7 +241,7 @@ inline void eval_centered_dataset(const Context& ctx,
   const std::vector<Work> norms = example_norms<Work>(dim, n, X, ctx.criteria.num_threads);
   std::vector<Work> H(dm, Work(0)), G0(dm);
 
-  compensated_sum<Work> dual_loss;
+  bounded_sum dual_loss;
   const feature_dual_sums<Work> s =
       eval_feature_duals(ctx, dim, d.out, obj, X, norms, dual_loss, H);
   eval.dual_loss = dual_loss.value();
@@ -270,18 +249,18 @@ inline void eval_centered_dataset(const Context& ctx,
   for (size_type c = 0; c < m; ++c)
     for (size_type j = 0; j < dim; ++j)
       G0[dim * c + j] = static_cast<Work>(W0[dim * c + j]) - static_cast<Work>(W0[j]);
-  const Work hh = dot_chunked<Work>(dm, &H[0], &H[0]);
+  const Work hh = linalg::dot(dm, &H[0], &H[0]);
   const Work h_norm = std::sqrt(hh);
-  const Work g_norm = std::sqrt(dot_chunked<Work>(dm, &G0[0], &G0[0]));
-  const Work gh = dot_chunked<Work>(dm, &G0[0], &H[0]);
+  const Work g_norm = std::sqrt(linalg::dot(dm, &G0[0], &G0[0]));
+  const Work gh = linalg::dot(dm, &G0[0], &H[0]);
   eval.dual_regularizer = hh / 2 + gh;
   // dH from chunked products, dot products, G0 subtraction, dual repair,
   // and conjugate summation, all in units of epsilon(Work).
   bound +=
       static_cast<Work>(chunk_steps(n) + 2) * (h_norm + g_norm) * std::sqrt(s.x_norm2 * s.a_norm2) +
-      static_cast<Work>(chunk_steps(dm) + 2) * (hh / 2 + g_norm * h_norm) +
+      static_cast<Work>(linalg::dot_steps(dm) + 2) * (hh / 2 + g_norm * h_norm) +
       static_cast<Work>(m + 2) * s.a_l1_x *
-          (max_column_norm<Work>(dim, m, &H[0]) + max_column_norm<Work>(dim, m, &G0[0])) +
+          (max_row_norm(dim, m, &H[0]) + max_row_norm(dim, m, &G0[0])) +
       dual_loss.magnitude;
 
   // Retain the quadratic repair/accumulation term too: its linear part
@@ -300,9 +279,9 @@ inline void eval_centered_dataset(const Context& ctx,
   const typename Context::variable_type* W = ctx.primal_variables;
   std::vector<Work>& E = G0;
   for (size_type j = 0; j < dm; ++j) E[j] = static_cast<Work>(W[j]) - static_cast<Work>(W0[j]);
-  const Work ee = dot_chunked<Work>(dm, &E[0], &E[0]);
+  const Work ee = linalg::dot(dm, &E[0], &E[0]);
   eval.primal_regularizer = ee / 2;
-  bound += static_cast<Work>(chunk_steps(dm) + 2) * ee / 2;
+  bound += static_cast<Work>(linalg::dot_steps(dm) + 2) * ee / 2;
   std::vector<Work>& relative = H;
   for (size_type c = 0; c < m; ++c)
     for (size_type j = 0; j < dim; ++j)
@@ -329,20 +308,19 @@ inline void eval_dataset(const Context& ctx,
   std::vector<Work> V(dm, Work(0));
 
   // Dual: chunks of examples bound the rounding of V's long sums.
-  compensated_sum<Work> dual_loss;
+  bounded_sum dual_loss;
   const feature_dual_sums<Work> s =
       eval_feature_duals(ctx, dim, d.out, obj, X, norms, dual_loss, V);
   eval.dual_loss = dual_loss.value();
-  const Work vv = dot_chunked<Work>(dm, &V[0], &V[0]);
+  const Work vv = linalg::dot(dm, &V[0], &V[0]);
   eval.dual_regularizer = vv / 2;
   // |V||dV| with |dV| <= steps |X||A'|; the scores at V of each block's own
   // rounding; the conjugate losses' sum.
   Work bound =
       s.bound +
       static_cast<Work>(chunk_steps(n) + 2) * std::sqrt(vv) * std::sqrt(s.x_norm2 * s.a_norm2) +
-      static_cast<Work>(chunk_steps(dm)) * vv / 2 +
-      static_cast<Work>(m + 2) * s.a_l1_x * max_column_norm<Work>(dim, m, &V[0]) +
-      dual_loss.magnitude;
+      static_cast<Work>(linalg::dot_steps(dm)) * vv / 2 +
+      static_cast<Work>(m + 2) * s.a_l1_x * max_row_norm(dim, m, &V[0]) + dual_loss.magnitude;
 
   // Let W = X A' on request.
   if (ctx.criteria.recompute_primal)
@@ -351,9 +329,9 @@ inline void eval_dataset(const Context& ctx,
   // Primal at the stored W.
   typedef typename Context::variable_type Weight;
   const Weight* W = ctx.primal_variables;
-  const Work ww = dot_chunked<Work>(dm, W, W);
+  const Work ww = linalg::dot(dm, W, W);
   eval.primal_regularizer = ww / 2;
-  bound += static_cast<Work>(chunk_steps(dm) + 1) * ww / 2;
+  bound += static_cast<Work>(linalg::dot_steps(dm) + 1) * ww / 2;
   bound += eval_primal_losses<Work>(n, d.out, obj, ctx.criteria, eval,
                                     weight_scores<Work, Weight, Data>(dim, m, W, X, norms));
 
@@ -386,31 +364,15 @@ struct kernel_scores {
       : n(n_),
         m(m_),
         cost(n_ * m_ * matrices),
-        scratch_size(2 * m_ * matrices),
+        scratch_size(m_ * matrices),
         gram(gram_),
         steps(static_cast<Work>(chunk_steps(n_) + 1)) {}
 
-  // z = A' K_i and its rounding; magnitude and part are m-vectors of scratch.
+  // z = A' K_i and its rounding; magnitude is an m-vector of scratch.
   template <typename Dual>
-  Work operator()(const size_type i, const Dual* A, Work* z, Work* magnitude, Work* part) const {
-    const Data* k = gram + n * i;
-    const size_type chunk = eval_chunk(n);
-    std::fill(z, z + m, Work(0));
+  Work operator()(const size_type i, const Dual* A, Work* z, Work* magnitude) const {
     std::fill(magnitude, magnitude + m, Work(0));
-    for (size_type l0 = 0; l0 < n; l0 += chunk) {
-      std::fill(part, part + m, Work(0));
-      for (size_type l = l0; l < std::min(n, l0 + chunk); ++l) {
-        const Work kl = static_cast<Work>(k[l]);
-        if (kl == 0) continue;
-        const Dual* a = A + m * l;
-        for (size_type c = 0; c < m; ++c) {
-          const Work product = static_cast<Work>(a[c]) * kl;
-          part[c] += product;
-          magnitude[c] += std::abs(product);
-        }
-      }
-      for (size_type c = 0; c < m; ++c) z[c] += part[c];
-    }
+    linalg::column_sums(n, m, A, gram + n * i, eval_chunk(n), z, magnitude);
     return steps * *std::max_element(magnitude, magnitude + m);
   }
 };
@@ -422,8 +384,10 @@ struct stored_kernel_scores : kernel_scores<Work, Data> {
   stored_kernel_scores(size_type n_, size_type m_, const Dual* A_, const Data* gram_)
       : kernel_scores<Work, Data>(n_, m_, gram_), A(A_) {}
 
-  Work operator()(const size_type i, Work* z, Work* scratch) const {
-    return kernel_scores<Work, Data>::operator()(i, A, z, scratch, scratch + this->m);
+  void block(const size_type first, const size_type count, Work* z, Work* error,
+             Work* scratch) const {
+    for (size_type e = 0; e < count; ++e)
+      error[e] = kernel_scores<Work, Data>::operator()(first + e, A, z + this->m * e, scratch);
   }
 };
 
@@ -465,7 +429,7 @@ struct training_kernel_scores : kernel_scores<Work, Data> {
   training_kernel_scores(size_type n_, size_type m_, const Dual* stored_, const Work* repaired_,
                          const dual_repairs<Work>& repairs_, const Data* gram_, Work* primal_,
                          Work* dual_, Work* bound_)
-      : kernel_scores<Work, Data>(n_, m_, gram_, 2),
+      : kernel_scores<Work, Data>(n_, m_, gram_, 4),
         stored(stored_),
         repaired(repaired_),
         repairs(repairs_),
@@ -487,11 +451,11 @@ struct training_kernel_scores : kernel_scores<Work, Data> {
     return l1 * error + static_cast<Work>(this->m + 1) * magnitude;
   }
 
-  Work operator()(const size_type i, Work* z, Work* scratch) const {
+  Work scores(const size_type i, Work* z, Work* scratch) const {
     const size_type classes = this->m, rows = this->n;
     Work *magnitude = scratch, *part = scratch + classes, *y = scratch + 2 * classes,
          *a = scratch + 3 * classes;
-    const Work error = kernel_scores<Work, Data>::operator()(i, stored, z, magnitude, part);
+    const Work error = kernel_scores<Work, Data>::operator()(i, stored, z, magnitude);
     // y = z + R' K_i, the n-term sums of R' K_i bounded plainly; part holds |R' K_i|.
     const Data* k = this->gram + rows * i;
     std::fill(y, y + classes, Work(0));
@@ -512,6 +476,11 @@ struct training_kernel_scores : kernel_scores<Work, Data> {
         (inner(a, z, error, primal[i]) + inner(repaired + classes * i, y, dual_error, dual[i])) / 2;
     return error;
   }
+
+  void block(const size_type first, const size_type count, Work* z, Work* error,
+             Work* scratch) const {
+    for (size_type e = 0; e < count; ++e) error[e] = scores(first + e, z + this->m * e, scratch);
+  }
 };
 
 // The repaired training duals (n-by-m) of a kernel model; returns the
@@ -522,16 +491,17 @@ inline Work eval_kernel_duals(const Context& ctx, const Objective& obj, std::vec
   const size_type m = ctx.train.num_classes(), n = ctx.train.num_examples();
   A.resize(n * m);
   std::vector<Work> loss(n), bound(n);
-  detail::parallel_rows(n, m, ctx.criteria.num_threads, [&](size_type first, size_type last) {
-    for (size_type i = first; i < last; ++i) {
-      Work* a = &A[m * i];
-      loss[i] = eval_dual_block(i, ctx.train.out, obj, ctx.dual_variables + m * i, a);
-      Work l1(0);
-      for (size_type c = 0; c < m; ++c) l1 += std::abs(a[c]);
-      bound[i] = dual_rounding(obj, m, loss[i], l1);
-    }
-  });
-  compensated_sum<Work> sum;
+  ::sdca::detail::parallel_rows(
+      n, m, ctx.criteria.num_threads, [&](size_type first, size_type last) {
+        for (size_type i = first; i < last; ++i) {
+          Work* a = &A[m * i];
+          loss[i] = eval_dual_block(i, ctx.train.out, obj, ctx.dual_variables + m * i, a);
+          Work l1(0);
+          for (size_type c = 0; c < m; ++c) l1 += std::abs(a[c]);
+          bound[i] = dual_rounding(obj, m, loss[i], l1);
+        }
+      });
+  bounded_sum sum;
   Work total(0);
   for (size_type i = 0; i < n; ++i) {
     sum.add(loss[i]);
@@ -557,7 +527,7 @@ inline void eval_dataset(const Context& ctx,
                                training_kernel_scores<Work, Data, typename Context::variable_type>(
                                    n, m, ctx.dual_variables, A.data(), repairs, d.in.kernel,
                                    primal.data(), dual.data(), terms.data()));
-  compensated_sum<Work> primal_regularizer, dual_regularizer;
+  bounded_sum primal_regularizer, dual_regularizer;
   for (size_type i = 0; i < n; ++i) {
     primal_regularizer.add(primal[i]);
     dual_regularizer.add(dual[i]);
@@ -581,6 +551,6 @@ inline void eval_dataset(const Context& ctx,
   eval_end(m, n, obj, eval);
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

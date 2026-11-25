@@ -30,7 +30,8 @@ for _ in range(200):
 with torch.no_grad():
     teacher_logits = teacher(X)
 
-# Both arguments are logits; the teacher is detached; no T**2 factor is applied.
+# Both arguments are logits; teacher_logits (from no_grad) get no gradient; no T**2 factor is
+# applied.
 distill, hard = DistillationLoss(temperature=4.0), CrossEntropyLoss()
 opt = torch.optim.Adam(student.parameters(), lr=1e-2)
 for step in range(201):
@@ -49,12 +50,13 @@ z = teacher_logits.clone().requires_grad_()
 distillation_loss(z, teacher_logits, temperature=4.0).backward()
 assert torch.count_nonzero(z.grad) == 0
 
-# Proximal distillation: a Moreau envelope that tends to distillation as alpha -> 0.
+# Proximal distillation: a Moreau envelope (step gamma) that tends to distillation as
+# gamma -> 0.
 s = student(X).detach().double()
 t = teacher_logits.double()
 plain = distillation_loss(s, t, temperature=4.0)
-for alpha in (1.0, 1e-2, 1e-6):
-    prox = proximal_distillation_loss(s, t, temperature=4.0, alpha=alpha)
-    print(f"alpha {alpha:7.0e}  proximal {prox.item():.6f}  plain {plain.item():.6f}")
+for gamma in (1.0, 1e-2, 1e-6):
+    prox = proximal_distillation_loss(s, t, temperature=4.0, gamma=gamma)
+    print(f"gamma {gamma:7.0e}  proximal {prox.item():.6f}  plain {plain.item():.6f}")
 torch.testing.assert_close(prox, plain, rtol=1e-4, atol=1e-6)
-print("module form:", ProximalDistillationLoss(temperature=4.0, alpha=0.5)(s, t).item())
+print("module form:", ProximalDistillationLoss(temperature=4.0, gamma=0.5)(s, t).item())

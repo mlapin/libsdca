@@ -1,15 +1,11 @@
 [build-system]
-requires = [
-  "setuptools>=77",
-  # Build the handler against the oldest supported CUDA JAX FFI ABI (0.1).
-  "jaxlib==0.7.2; sys_platform == 'linux' and python_version >= '3.11' and python_version < '3.14'",
-  "jaxlib>=0.8.0; sys_platform == 'linux' and python_version >= '3.14'",
-]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "libsdca"
-dynamic = ["version"]
+# dependencies: setup.py adds the BLAS package of a PACKAGE build (the Linux wheels).
+dynamic = ["version", "dependencies"]
 description = "Accurate and fast classification losses for SDCA and neural networks: cross-entropy, top-k, multiclass and multilabel SVM, and distillation losses as fused PyTorch and JAX layers and SDCA solvers"
 readme = "docs/PYTHON.md"
 license = "MIT"
@@ -68,17 +64,18 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Typing :: Typed",
 ]
-dependencies = ["numpy>=1.23"]
 
 [project.optional-dependencies]
 # Older supported PyTorch extension tools import pkg_resources, removed in setuptools 81.
-torch = ["torch>=2.1", "ninja", "setuptools>=77,<81", "ziglang>=0.13,<0.18; sys_platform == 'linux'"]
+torch = ["torch>=2.1", "setuptools>=77,<81", "ziglang>=0.13,<0.18; sys_platform == 'linux'"]
 jax = ["jax>=0.4.35"]
-jax-cuda = ["jax[cuda13]>=0.7.2; sys_platform == 'linux'", "jax>=0.4.35; sys_platform != 'linux'", "triton>=3.3; sys_platform == 'linux'"]
+# jax-triton 0.5 binds the keyword arrays and jax.Ref operands of triton/launch_jax.py; it needs
+# Python 3.12+ and Triton 3.7+.
+jax-cuda = ["jax[cuda13]>=0.7.2; sys_platform == 'linux'", "jax>=0.4.35; sys_platform != 'linux'", "triton>=3.7; sys_platform == 'linux'", "jax-triton>=0.5; sys_platform == 'linux' and python_version >= '3.12'"]
 sklearn = ["scikit-learn>=1.6"]
 test = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath"]
-test-torch = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "torch>=2.1", "ninja", "setuptools>=77,<81", "scikit-learn>=1.6"]
-test-jax = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "jax>=0.4.35"]
+test-torch = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "hypothesis>=6.136", "torch>=2.1", "setuptools>=77,<81", "scikit-learn>=1.6"]
+test-jax = ["pytest>=9", "pytest-xdist>=3.6", "scipy", "mpmath", "hypothesis>=6.136", "jax>=0.4.35", "optax>=0.2.9"]
 coverage = ["coverage[toml]>=7"]
 
 [project.urls]
@@ -97,11 +94,21 @@ version = {file = "VERSION"}
 # manylinux_2_28 x86_64 and macOS 11+ arm64.
 build = "cp312-*"
 skip = ["*-musllinux_*"]
-# Portable wheels: the built-in BLAS needs no external library.
-# Test with binary dependency wheels only; never compile NumPy or SciPy.
-environment = { SDCA_BLAS_BACKEND = "BUILTIN", PIP_ONLY_BINARY = ":all:" }
+# Tests install binary dependency wheels only (PIP_ONLY_BINARY); never compile NumPy or SciPy.
 test-requires = ["pytest>=9", "scipy", "mpmath", "scikit-learn"]
 test-command = "python -m pytest -p no:cacheprovider {project}/tests/python --group core --installed"
+
+[tool.cibuildwheel.linux]
+# The OpenBLAS of the package scipy-openblas32 (src/native_build.txt), which the wheel requires:
+# the build links it from its own environment (no isolation) and auditwheel leaves it out.
+environment = { SDCA_BLAS_BACKEND = "PACKAGE", PIP_ONLY_BINARY = ":all:" }
+build-frontend = { name = "build", args = ["--no-isolation"] }
+before-build = "python -m pip install 'setuptools>=77' scipy-openblas32"
+repair-wheel-command = "auditwheel repair --exclude libscipy_openblas.so -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+# Accelerate, the system BLAS of every macOS (src/native_build.txt).
+environment = { SDCA_BLAS_BACKEND = "EXTERNAL", PIP_ONLY_BINARY = ":all:" }
 
 [tool.pytest.ini_options]
 minversion = "9.0"
@@ -109,12 +116,13 @@ testpaths = ["tests/python"]
 # Test classes are named *Tests.
 python_classes = ["Test*", "*Tests"]
 addopts = ["--strict-markers", "--strict-config"]
+markers = ["cuda: needs a CUDA device (the GPU session)"]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 100
 include = [
-  "python/*.py", "python/libsdca/*.py", "tests/python/**/*.py", "tools/*.py",
+  "python/*.py", "python/libsdca/**/*.py", "tests/python/**/*.py", "tools/*.py",
   "examples/python/*.py", "sdca_build.py", "setup.py",
 ]
 extend-exclude = ["vendor", "build"]
@@ -163,13 +171,5 @@ reportUnnecessaryCast = "error"
 reportMissingParameterType = "error"
 # Triton kernels may leave parameters unannotated.
 executionEnvironments = [
-  { root = "python/libsdca/_triton_distillation.py", reportMissingParameterType = "none" },
-  { root = "python/libsdca/_triton_entropy.py", reportMissingParameterType = "none" },
-  { root = "python/libsdca/_triton_hinge.py", reportMissingParameterType = "none" },
-  { root = "python/libsdca/_triton_linear.py", reportMissingParameterType = "none" },
-  { root = "python/libsdca/_triton_multilabel.py", reportMissingParameterType = "none" },
-  { root = "python/libsdca/_triton_prox.py", reportMissingParameterType = "none" },
-  { root = "python/libsdca/_triton_reduce.py", reportMissingParameterType = "none" },
-  { root = "python/libsdca/_triton_topk.py", reportMissingParameterType = "none" },
-  { root = "python/libsdca/_triton_weighted_entropy.py", reportMissingParameterType = "none" },
+  { root = "python/libsdca/triton", reportMissingParameterType = "none" },
 ]

@@ -1,11 +1,11 @@
-# C interface
+# libsdca for C
 
 [All guides](https://github.com/mlapin/libsdca/blob/master/docs/README.md) ·
 [Shared API reference](https://github.com/mlapin/libsdca/blob/master/docs/API.md)
 
-`include/sdca/c_api.h` declares the exception-safe C ABI used by the Python and Rust
-bindings and available to any language with a C foreign function interface. Its comments
-are the reference; this page summarizes them.
+`include/sdca/c_api.h` declares the exception-safe C ABI of `libsdca_c`, which the Python and
+Rust bindings use and any language with a C foreign function interface can call. The
+header's comments document every field; this page summarizes them.
 
 ## Installation
 
@@ -23,11 +23,13 @@ find_package(libsdca CONFIG REQUIRED)
 target_link_libraries(my_program PRIVATE libsdca::sdca_c)
 ```
 
-Without CMake, compile `src/c_api.cpp` directly with any C++11 compiler:
+Without CMake, compile `src/c_api.cpp` with the flags of `src/native_build.txt` (every
+instruction set of the CPU is in the one translation unit, chosen at run time); add
+`-DBLAS_DEFAULT_LOCAL_HEADER` and a CBLAS (such as `-lopenblas`) in place of `-DBLAS_BUILTIN`
+for an external BLAS:
 
 ```bash
-c++ -std=c++11 -O2 -shared -fPIC -pthread -fno-fast-math -ffp-contract=off \
-  -fvisibility=hidden -fvisibility-inlines-hidden -DBLAS_BUILTIN \
+c++ $(sed -n 's/^flags //p' src/native_build.txt) -shared -fPIC -DBLAS_BUILTIN \
   "-DSDCA_VERSION=\"$(cat VERSION)\"" -Iinclude src/c_api.cpp -o libsdca_c.so
 ```
 
@@ -51,9 +53,20 @@ On macOS use `DYLD_LIBRARY_PATH` in place of `LD_LIBRARY_PATH`.
 | `sdca_dual_update` | One coordinate step of a training objective per row (new dual blocks) |
 | `sdca_model_fit` | Trains a linear or kernel model; returns the weights, the duals, a status and a history |
 | `sdca_model_scores` | Scores of a batch of examples under a fitted model: one BLAS matrix product |
+| `sdca_blas_backend` | The BLAS of the library: `"external"` (or `"external: <library>"`), `"builtin"` or `"fallback"` ([API.md](API.md#blas)) |
 | `sdca_history_rows` | The history rows a fit with these options may write |
 | `sdca_max_extent` | The largest size a fit takes (`n`, `d`, `num_classes`, weight and dual counts) |
 | `sdca_abi_version`, `sdca_version`, `sdca_last_error` | The ABI, the library version, the last failure |
+
+The PyTorch and JAX bindings use three more entry points as their CPU route when their own
+extensions are not built. They are part of the ABI, but most programs need only the ones
+above:
+
+| Function | Does |
+| --- | --- |
+| `sdca_loss_rows` | `sdca_loss_evaluate` with the options of the PyTorch and JAX losses (`struct sdca_row_options`: probability storage dtype and gradient factors) and 16-bit storage |
+| `sdca_reduce_rows` | Writes double row values to float32 or float64 output. Reduction 0 copies each value, 1 sums them, and 2 divides their sum by the sum of the optional denominator terms (row count when `terms == NULL`). |
+| `sdca_reduce_row_groups` | Applies reduction 1 or 2 to each consecutive group of `rows_per_group` values and writes one result per group. |
 
 ## Arguments
 
@@ -62,18 +75,26 @@ Every call separates what is computed from how:
 ### Loss
 
 `struct sdca_loss` holds the loss (`enum sdca_loss_kind`, one per shared name of
-[API.md](API.md#loss-definitions)) and its own parameters:
+[API.md](API.md#loss-definitions), and `SDCA_LOSS_TOPK_HINGE_ALPHA` and
+`SDCA_LOSS_TOPK_HINGE_BETA` for the two variants of `topk_hinge`) and its own parameters.
+`SDCA_LOSS_INIT(kind)` gives the defaults of a kind, as a constant expression (C89
+initializers too):
 
-| Field | Losses | `SDCA_LOSS_INIT` default |
+| Field | Losses | `SDCA_LOSS_INIT(kind)` default |
 | --- | --- | --- |
 | `k` | Top-*k* losses, required | `0` |
-| `gamma` | Hinges; `0` is nonsmooth | `0` |
-| `alpha` | Proximal losses | `1` |
+| `gamma` | Hinges: the smoothing (`0`: nonsmooth); proximal losses: the step, `> 0` | `0`; `1` for the proximal losses |
 | `temperature` | Distillation losses | `1` |
-| `projection_precision` | `multilabel_hinge` | `SDCA_PROJECTION_FLOAT64` |
+| `weight` | Single-label losses: class weights `(num_classes)`, finite and `>= 0` | `NULL` (every weight `1`) |
+| `label_smoothing` | `cross_entropy`: $\epsilon \in [0, 1]$ | `0` |
+| `ignore`, `ignore_index` | Single-label losses: `ignore = 1` gives the rows of label `ignore_index` the loss `0` and a gradient of `+0.0` | `0`, `-100` |
 
-Every other field keeps its default from `SDCA_LOSS_INIT`; a parameter the loss does not
-take is `SDCA_INVALID_ARGUMENT`.
+Every other field keeps its default; a parameter the loss does not take is
+`SDCA_INVALID_ARGUMENT` ("multilabel_hinge takes no parameter weight"). `weight`,
+`label_smoothing` and `ignore_index` are the options of `sdca_loss_evaluate`, with the
+definitions of PyTorch's `cross_entropy`
+([API.md](API.md#loss-evaluation-options)); `sdca_dual_update` and `sdca_model_fit` take
+their defaults. A label out of range is an error unless it is the ignored one.
 
 ### Precision and threads
 
@@ -83,6 +104,12 @@ take is `SDCA_INVALID_ARGUMENT`.
   `float` storage, `_FLOAT64` works in `double`.
 - **`num_threads`:** `0` uses `SDCA_NUM_THREADS`, else the available CPUs; `n` uses up to
   `n`.
+- **`check_rows`** (`sdca_loss_evaluate`): `0`, the default, gives an invalid row `NaN`
+  outputs and returns `SDCA_INVALID_ROWS`; `1` checks every row before writing any output
+  and returns `SDCA_INVALID_ARGUMENT` for an invalid row, leaving the outputs as given, at
+  the cost of one more pass over the scores.
+- **`report`** (optional): a `struct sdca_loss_report` that receives the number of invalid
+  rows and the first of them.
 
 Storage types are `SDCA_DTYPE_FLOAT32` and `SDCA_DTYPE_FLOAT64`.
 
@@ -95,7 +122,7 @@ Storage types are `SDCA_DTYPE_FLOAT32` and `SDCA_DTYPE_FLOAT64`.
 | `SDCA_TARGET_LABELS` | `labels` (`n`, 0-based) | single-label losses, `proximal_cross_entropy` |
 | `SDCA_TARGET_LABEL_SETS` | `labels`, `offsets` (`n + 1`) | `multilabel_hinge`, `multilabel_cross_entropy` |
 | `SDCA_TARGET_MASK` | `mask` (`n, num_classes` of `0/1`) | the same |
-| `SDCA_TARGET_PROBABILITIES` | `probabilities` (`n, num_classes`) | `cross_entropy` in `sdca_dual_update` and `sdca_model_fit` (distillation objective) |
+| `SDCA_TARGET_PROBABILITIES` | `probabilities` (`n, num_classes`, double) | `cross_entropy`: as given in `sdca_loss_evaluate` (as PyTorch's `cross_entropy`); finite, nonnegative rows that sum to one within the rounding of a row normalized in the storage dtype ($\gamma_{m+1}$, [API.md](API.md#targets)) in `sdca_dual_update` and `sdca_model_fit` (distillation objective), which renormalize a copy |
 | `SDCA_TARGET_LOGITS` | `logits` (teacher, in the scores' dtype) | `distillation`, `proximal_distillation` |
 
 Label sets are sorted, duplicate-free, nonempty and leave a class out (the steps of the
@@ -122,7 +149,7 @@ against target probabilities.
 #include "sdca/c_api.h"
 
 if (sdca_abi_version() != SDCA_ABI_VERSION) { /* mismatched library */ }
-struct sdca_loss loss = SDCA_LOSS_INIT;           /* cross_entropy */
+struct sdca_loss loss = SDCA_LOSS_INIT(SDCA_LOSS_CROSS_ENTROPY);
 struct sdca_fit_options options = SDCA_FIT_OPTIONS_INIT;
 struct sdca_execution execution = SDCA_EXECUTION_INIT;
 struct sdca_input input = SDCA_INPUT_INIT;        /* float64 features */
@@ -141,9 +168,19 @@ See [examples/c/train.c](../examples/c/train.c) for a complete program.
 ## Conventions
 
 - **Errors:** Functions return `SDCA_OK` (`0`), `SDCA_INVALID_ARGUMENT` or `SDCA_FAILURE`
-  and set a thread-local message read by `sdca_last_error()` (`""` after a success).
+  (errors are negative; `sdca_loss_evaluate` also returns `SDCA_INVALID_ROWS`, `1`) and set
+  a thread-local message read by `sdca_last_error()` (`""` after `SDCA_OK`).
   - Every call validates all its arguments before writing any output, so
     `SDCA_INVALID_ARGUMENT` leaves the outputs as given.
+  - `sdca_loss_evaluate` takes scores of `-inf` as
+    [masked classes](API.md#masked-classes) for every loss. A label out of range is
+    `SDCA_INVALID_ARGUMENT` (`Target 7 is out of bounds.`). A row it cannot compute (`NaN`
+    or `+inf` scores, an invalid row of masked classes) gets a `NaN`
+    value and `NaN` gradients; the call writes every output, the valid rows hold their
+    results, and it returns `SDCA_INVALID_ROWS` with the count and the first invalid row in
+    `sdca_last_error()` (and in `execution.report` if given). With
+    `execution.check_rows = 1` an invalid row is `SDCA_INVALID_ARGUMENT` before any output
+    is written.
   - After `SDCA_FAILURE` (a failed computation or allocation) the outputs are unspecified.
   - A fit whose coordinate steps fail numerically returns `SDCA_OK` with
     `SDCA_STATUS_FAILED` and the last consistent iterate.
@@ -166,15 +203,4 @@ See [examples/c/train.c](../examples/c/train.c) for a complete program.
   `sdca_abi_version() == SDCA_ABI_VERSION` once. Within an ABI version fields are only
   appended, and the library accepts every size of that version.
 
-`src/c_api_internal.h` declares the `sdca_internal_*` entry points of the Python package's
-PyTorch and JAX CPU paths (16-bit storage, saved row statistics, class weights and
-`ignore_index`). They are not part of the public ABI and change without notice.
-
 See [API.md](API.md) for the shared names, defaults and definitions.
-
-## Benchmarks
-
-The [solver benchmarks](https://github.com/mlapin/libsdca/blob/master/docs/PYTHON.md#benchmarks)
-compare the shared solver through Python with scikit-learn. They help choose between
-feature and kernel inputs; they do not measure this binding's call overhead.
-No separate end-to-end timings for this interface are published here.

@@ -77,9 +77,6 @@ jobs:
       - run: >-
           cmake --build build/c-consumer &&
           LD_LIBRARY_PATH=$PWD/build/install/lib build/c-consumer/sdca_c_example
-      # Verify MATLAB MEX gateways compile against the stub mex.h and restore std::cout on error exits.
-      - if: matrix.cxx == 'g++'
-        run: bash tests/matlab/check_mex_compiles.sh && bash tests/matlab/run_gateway_mock.sh
 
   sanitizers:
     name: C++ Sanitizers
@@ -139,25 +136,41 @@ jobs:
           python-version: '3.12'
       # Install system BLAS and LLVM 18 OpenMP headers (Clang 18 rejects GCC 13's omp.h attributes).
       - run: bash tools/apt_mirror.sh && sudo apt-get update && sudo apt-get install -y libblas-dev libomp-18-dev
-      # Install core, scikit-learn, JAX, Triton (for CPU interpreter tests), Ninja, and CPU PyTorch.
+      # Install core, scikit-learn, JAX, Triton (for CPU interpreter tests), Ninja, Hypothesis
+      # (property tests) and CPU PyTorch.
       - run: >-
-          python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn triton jax ninja &&
+          python -m pip install numpy scipy mpmath pytest pytest-xdist 'hypothesis>=6.136'
+          scikit-learn triton jax ninja &&
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       # Syntax-check the PyTorch CPU C++ extension across AVX-512, AVX2, and generic ISA flags under GCC and Clang.
       - run: python tools/check_extension_builds.py --compiler g++ --compiler clang++-18
       # Build the native C ABI shared library against the external BLAS backend.
       - run: python python/build.py --blas-backend EXTERNAL
       # Run all parallel Python test groups (core, torch, jax), skipping multi-minute stress tests,
-      # with the CI profile of the conformance matrix unless a manual run asks for the full one.
+      # with the CI profile of the conformance matrix unless a manual run asks for the full one
+      # and the ci Hypothesis profile of the property tests (conftest.py's default).
       - run: >-
           PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python
           --group all -m 'not long' --conformance "$CONFORMANCE"
+      # Check the CPU entropy and distillation losses against the mpmath corpus (exit 1 on a
+      # failure; about 31,000 records over the output dtypes), with the PyTorch CPU extension
+      # unset, then on, which adds the cells of backend="auto".
+      - run: PYTHONPATH=python python tests/python/release_numerics.py --device cpu --jobs 4 --output numerics-cpu
+      - run: >-
+          CXX=g++ SDCA_CPU_EXTENSION=on PYTHONPATH=python python tests/python/release_numerics.py
+          --device cpu --jobs 4 --output numerics-cpu-extension
+      # Run the PyTorch and JAX cases of the cross-interface and rule-table tests on the native
+      # route: the CPU kernels of the native library, without the CPU extensions.
+      - run: >-
+          SDCA_CPU_EXTENSION=off SDCA_JAX_FFI=off PYTHONPATH=python python -m pytest
+          -p no:cacheprovider -n auto --dist worksteal tests/python/test_cross_interface.py
+          tests/python/test_rule_table.py tests/python/test_frontend_rules.py -k "torch or jax"
       # Run thread-scaling and timing tests that require an unloaded machine serially.
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider tests/python --group all -m serial
       # Compile and test the JIT-built PyTorch CPU C++ extension (SDCA_CPU_EXTENSION=on) with GCC.
       - run: >-
           CXX=g++ SDCA_CPU_EXTENSION=on PYTHONPATH=python python -m pytest -p no:cacheprovider
-          tests/python/test_softmax_limits.py::SoftmaxLimitTests tests/python/test_torch.py::TorchTests
+          tests/python/test_softmax_limits.py::SoftmaxLimitTests tests/python/test_torch_references.py::TorchReferenceTests
       # The conformance records of a failed run, for review against the known-failure manifest.
       - uses: actions/upload-artifact@v7.0.2
         if: failure()
@@ -185,8 +198,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       # Install the core test dependencies only (no PyTorch or JAX).
-      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn
-      # Build the native C ABI library with the built-in BLAS, as in the wheels.
+      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist 'hypothesis>=6.136' scikit-learn
+      # Build the native C ABI library with the built-in BLAS (the wheel jobs test OpenBLAS).
       - run: python python/build.py --blas-backend BUILTIN
       # Run the core test group in parallel, skipping multi-minute stress tests.
       - run: PYTHONPATH=python python -m pytest -p no:cacheprovider -n auto --dist worksteal tests/python --group core -m 'not long' --conformance ci
@@ -213,7 +226,7 @@ jobs:
       # Run the C++ and C ABI test suites on macOS arm64 (where long double equals double).
       - run: ctest --test-dir build --output-on-failure --parallel 3
       # Install Python test dependencies, scikit-learn, PyTorch, and Ninja for the CPU extension.
-      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist scikit-learn torch ninja
+      - run: python -m pip install numpy scipy mpmath pytest pytest-xdist 'hypothesis>=6.136' scikit-learn torch ninja
       # Build the Python C ABI library linked against macOS Accelerate.
       - run: CXX=c++ python python/build.py --blas-backend EXTERNAL
       # Run the core NumPy and scikit-learn test suite in parallel across workers.

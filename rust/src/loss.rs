@@ -1,11 +1,12 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::error::{invalid, Error, Result};
+use crate::error::{invalid, Error, Result, TWO_CLASSES};
 use crate::ffi;
 use crate::matrix::Matrix;
-use crate::names::{Precision, ProjectionPrecision};
-use crate::native::{self, call, check_logits, void};
+use crate::names::TopKVariant;
+use crate::native::{self, call, void};
+use crate::options::Options;
 use crate::real::Real;
 use crate::settings::Settings;
 use crate::targets::{self, Targets};
@@ -14,19 +15,22 @@ use crate::targets::{self, Targets};
 /// a loss of [`Loss::loss_and_grad`].
 ///
 /// The constructors give the default parameters (k = 1 where it is not an
-/// argument, gamma = 0: the nonsmooth hinges, alpha = 1, temperature = 1);
-/// write other parameters as the variant, as in
-/// `Loss::TopKHingeBeta { k: 2, gamma: 0.5 }`. The parameters are checked
-/// where the loss is used: k in [1, num_classes - 1], gamma finite and >= 0,
-/// alpha and temperature finite and > 0. The losses are defined in
-/// docs/API.md; [`Targets`] lists the targets each takes.
+/// argument, [`TopKVariant::Beta`], gamma = 0: the nonsmooth hinges, gamma = 1
+/// for the proximal losses, temperature = 1); write other parameters as the
+/// variant, as in `Loss::TopKHinge { k: 2, variant: TopKVariant::Alpha,
+/// gamma: 0.5 }`. The native library checks the parameters where the loss is
+/// used: k in [1, num_classes - 1], gamma finite and >= 0 for the hinges and
+/// finite and > 0 for the proximal losses, temperature finite and > 0. The
+/// losses are defined in docs/API.md; [`Targets`] lists the targets each takes.
 ///
 /// ```
-/// use libsdca::Loss;
+/// use libsdca::{Loss, TopKVariant};
 ///
-/// assert_eq!(Loss::topk_hinge(2), Loss::TopKHingeBeta { k: 2, gamma: 0.0 });
-/// assert_eq!("topk_hinge_beta".parse::<Loss>()?, Loss::topk_hinge(1));
-/// assert_eq!(Loss::TopKHingeAlpha { k: 3, gamma: 0.5 }.name(), "topk_hinge_alpha");
+/// let beta = Loss::TopKHinge { k: 2, variant: TopKVariant::Beta, gamma: 0.0 };
+/// assert_eq!(Loss::topk_hinge(2), beta);
+/// assert_eq!("topk_hinge".parse::<Loss>()?, Loss::topk_hinge(1));
+/// let alpha = Loss::TopKHinge { k: 3, variant: TopKVariant::Alpha, gamma: 0.5 };
+/// assert_eq!(alpha.name(), "topk_hinge");
 /// assert!(Loss::multilabel_hinge().is_multilabel());
 /// # Ok::<(), libsdca::Error>(())
 /// ```
@@ -46,17 +50,14 @@ pub enum Loss {
         /// The smoothing; 0 is the nonsmooth hinge.
         gamma: f64,
     },
-    /// Hinge of the average of the k largest margins.
-    TopKHingeAlpha {
+    /// Top-k hinge: the average of the k largest hinges
+    /// ([`TopKVariant::Beta`]) or the hinge of the average of the k largest
+    /// margins ([`TopKVariant::Alpha`]).
+    TopKHinge {
         /// The k of top-k.
         k: usize,
-        /// The smoothing; 0 is the nonsmooth hinge.
-        gamma: f64,
-    },
-    /// Average of the k largest hinges: the top-k hinge of [`Loss::topk_hinge`].
-    TopKHingeBeta {
-        /// The k of top-k.
-        k: usize,
+        /// The variant.
+        variant: TopKVariant,
         /// The smoothing; 0 is the nonsmooth hinge.
         gamma: f64,
     },
@@ -72,7 +73,7 @@ pub enum Loss {
     /// objective.
     ProximalCrossEntropy {
         /// The step of the envelope.
-        alpha: f64,
+        gamma: f64,
     },
     /// Cross-entropy of the softmax of the logits at a temperature against
     /// that of teacher logits ([`Targets::Teacher`]); a loss only. Train on
@@ -87,7 +88,7 @@ pub enum Loss {
         /// The temperature T.
         temperature: f64,
         /// The step of the envelope.
-        alpha: f64,
+        gamma: f64,
     },
 }
 
@@ -110,22 +111,14 @@ impl Loss {
         Loss::MulticlassHinge { gamma: 0.0 }
     }
 
-    /// The nonsmooth top-k hinge, the beta variant: as [`Loss::topk_hinge_beta`].
+    /// The nonsmooth top-k hinge, the beta variant.
     #[must_use]
     pub const fn topk_hinge(k: usize) -> Self {
-        Loss::topk_hinge_beta(k)
-    }
-
-    /// The nonsmooth top-k hinge, alpha variant.
-    #[must_use]
-    pub const fn topk_hinge_alpha(k: usize) -> Self {
-        Loss::TopKHingeAlpha { k, gamma: 0.0 }
-    }
-
-    /// The nonsmooth top-k hinge, beta variant.
-    #[must_use]
-    pub const fn topk_hinge_beta(k: usize) -> Self {
-        Loss::TopKHingeBeta { k, gamma: 0.0 }
+        Loss::TopKHinge {
+            k,
+            variant: TopKVariant::Beta,
+            gamma: 0.0,
+        }
     }
 
     /// The nonsmooth multilabel hinge.
@@ -140,10 +133,10 @@ impl Loss {
         Loss::MultilabelCrossEntropy
     }
 
-    /// Proximal cross-entropy with alpha = 1.
+    /// Proximal cross-entropy with gamma = 1.
     #[must_use]
     pub const fn proximal_cross_entropy() -> Self {
-        Loss::ProximalCrossEntropy { alpha: 1.0 }
+        Loss::ProximalCrossEntropy { gamma: 1.0 }
     }
 
     /// Distillation at temperature 1.
@@ -152,12 +145,12 @@ impl Loss {
         Loss::Distillation { temperature: 1.0 }
     }
 
-    /// Proximal distillation at temperature 1 with alpha = 1.
+    /// Proximal distillation at temperature 1 with gamma = 1.
     #[must_use]
     pub const fn proximal_distillation() -> Self {
         Loss::ProximalDistillation {
             temperature: 1.0,
-            alpha: 1.0,
+            gamma: 1.0,
         }
     }
 
@@ -169,8 +162,7 @@ impl Loss {
             Loss::CrossEntropy => "cross_entropy",
             Loss::TopKCrossEntropy { .. } => "topk_cross_entropy",
             Loss::MulticlassHinge { .. } => "multiclass_hinge",
-            Loss::TopKHingeAlpha { .. } => "topk_hinge_alpha",
-            Loss::TopKHingeBeta { .. } => "topk_hinge_beta",
+            Loss::TopKHinge { .. } => "topk_hinge",
             Loss::MultilabelHinge { .. } => "multilabel_hinge",
             Loss::MultilabelCrossEntropy => "multilabel_cross_entropy",
             Loss::ProximalCrossEntropy { .. } => "proximal_cross_entropy",
@@ -189,129 +181,43 @@ impl Loss {
         )
     }
 
-    /// Whether [`crate::Solver`] trains the loss.
-    pub(crate) const fn is_objective(self) -> bool {
-        !matches!(
-            self,
-            Loss::ProximalCrossEntropy { .. }
-                | Loss::Distillation { .. }
-                | Loss::ProximalDistillation { .. }
-        )
-    }
-
-    /// The message of targets of a kind the loss does not take.
-    pub(crate) fn wrong_targets<T>(self, targets: &Targets<'_, T>) -> String {
-        let (name, kind) = (self.name(), targets.kind());
-        match self {
-            Loss::Distillation { .. } | Loss::ProximalDistillation { .. } => {
-                format!("{name} takes teacher logits (Targets::Teacher), not {kind}")
-            }
-            Loss::MultilabelHinge { .. } | Loss::MultilabelCrossEntropy => {
-                format!("{name} takes label sets, not {kind}")
-            }
-            Loss::CrossEntropy if targets.is_sets() => format!(
-                "{name} takes one label per example (Targets::Labels), not label sets; \
-                 use Loss::MultilabelCrossEntropy for label sets"
-            ),
-            _ => format!("{name} takes one label per example (Targets::Labels), not {kind}"),
-        }
-    }
-
-    /// Whether the loss takes teacher logits.
-    pub(crate) const fn is_distillation(self) -> bool {
-        matches!(
-            self,
-            Loss::Distillation { .. } | Loss::ProximalDistillation { .. }
-        )
-    }
-
     /// The struct sdca_loss of the loss: its own parameters, the defaults of
-    /// SDCA_LOSS_INIT for the others; `projection` for multilabel_hinge only.
-    pub(crate) fn abi(self, projection: ProjectionPrecision) -> ffi::Loss {
-        let base = ffi::Loss::default();
-        match self {
-            Loss::CrossEntropy => ffi::Loss { kind: 0, ..base },
-            Loss::TopKCrossEntropy { k } => ffi::Loss { kind: 1, k, ..base },
-            Loss::MulticlassHinge { gamma } => ffi::Loss {
-                kind: 2,
-                gamma,
-                ..base
-            },
-            Loss::TopKHingeAlpha { k, gamma } => ffi::Loss {
-                kind: 3,
-                k,
-                gamma,
-                ..base
-            },
-            Loss::TopKHingeBeta { k, gamma } => ffi::Loss {
-                kind: 4,
-                k,
-                gamma,
-                ..base
-            },
-            Loss::MultilabelHinge { gamma } => ffi::Loss {
-                kind: 5,
-                gamma,
-                projection_precision: projection.code(),
-                ..base
-            },
-            Loss::MultilabelCrossEntropy => ffi::Loss { kind: 6, ..base },
-            Loss::ProximalCrossEntropy { alpha } => ffi::Loss {
-                kind: 7,
-                alpha,
-                ..base
-            },
-            Loss::Distillation { temperature } => ffi::Loss {
-                kind: 8,
-                temperature,
-                ..base
-            },
-            Loss::ProximalDistillation { temperature, alpha } => ffi::Loss {
-                kind: 9,
-                temperature,
-                alpha,
-                ..base
-            },
-        }
-    }
-
-    /// Checks the parameters for `classes` classes.
-    pub(crate) fn check(self, classes: usize) -> Result<()> {
-        let name = self.name();
-        let k = match self {
-            Loss::TopKCrossEntropy { k }
-            | Loss::TopKHingeAlpha { k, .. }
-            | Loss::TopKHingeBeta { k, .. } => k,
-            _ => 1,
+    /// SDCA_LOSS_INIT(kind) for the others.
+    pub(crate) fn abi(self) -> ffi::Loss {
+        let kind = match self {
+            Loss::CrossEntropy => ffi::LOSS_CROSS_ENTROPY,
+            Loss::TopKCrossEntropy { .. } => ffi::LOSS_TOPK_CROSS_ENTROPY,
+            Loss::MulticlassHinge { .. } => ffi::LOSS_MULTICLASS_HINGE,
+            Loss::TopKHinge {
+                variant: TopKVariant::Alpha,
+                ..
+            } => ffi::LOSS_TOPK_HINGE_ALPHA,
+            Loss::TopKHinge { .. } => ffi::LOSS_TOPK_HINGE_BETA,
+            Loss::MultilabelHinge { .. } => ffi::LOSS_MULTILABEL_HINGE,
+            Loss::MultilabelCrossEntropy => ffi::LOSS_MULTILABEL_CROSS_ENTROPY,
+            Loss::ProximalCrossEntropy { .. } => ffi::LOSS_PROXIMAL_CROSS_ENTROPY,
+            Loss::Distillation { .. } => ffi::LOSS_DISTILLATION,
+            Loss::ProximalDistillation { .. } => ffi::LOSS_PROXIMAL_DISTILLATION,
         };
-        if k < 1 || k >= classes {
-            return invalid(format!(
-                "{name}: k must be in [1, {}] for {classes} classes, not {k}",
-                classes.saturating_sub(1)
-            ));
-        }
+        let base = ffi::Loss::init(kind);
         match self {
-            Loss::MulticlassHinge { gamma }
-            | Loss::TopKHingeAlpha { gamma, .. }
-            | Loss::TopKHingeBeta { gamma, .. }
-            | Loss::MultilabelHinge { gamma } => {
-                if !(gamma.is_finite() && gamma >= 0.0) {
-                    return invalid(format!("{name}: gamma must be finite and nonnegative"));
-                }
-            }
-            Loss::ProximalCrossEntropy { alpha } => {
-                native::positive(alpha, &format!("{name}: alpha"))?;
-            }
-            Loss::Distillation { temperature } => {
-                native::positive(temperature, &format!("{name}: temperature"))?;
-            }
-            Loss::ProximalDistillation { temperature, alpha } => {
-                native::positive(temperature, &format!("{name}: temperature"))?;
-                native::positive(alpha, &format!("{name}: alpha"))?;
-            }
-            Loss::CrossEntropy | Loss::TopKCrossEntropy { .. } | Loss::MultilabelCrossEntropy => {}
+            Loss::CrossEntropy => base,
+            Loss::TopKCrossEntropy { k } => ffi::Loss { k, ..base },
+            Loss::MulticlassHinge { gamma } => ffi::Loss { gamma, ..base },
+            Loss::TopKHinge { k, gamma, .. } => ffi::Loss { k, gamma, ..base },
+            Loss::MultilabelHinge { gamma } => ffi::Loss { gamma, ..base },
+            Loss::MultilabelCrossEntropy => base,
+            Loss::ProximalCrossEntropy { gamma } => ffi::Loss { gamma, ..base },
+            Loss::Distillation { temperature } => ffi::Loss {
+                temperature,
+                ..base
+            },
+            Loss::ProximalDistillation { temperature, gamma } => ffi::Loss {
+                temperature,
+                gamma,
+                ..base
+            },
         }
-        Ok(())
     }
 
     /// Per-example losses (n) of the scores `logits` (n, classes) and their
@@ -326,11 +232,12 @@ impl Loss {
     /// use libsdca::{Loss, Matrix};
     ///
     /// let logits = Matrix::new(&[2.0, -0.5, 1.0, 0.0, 1.0, 3.0], 2, 3)?;
-    /// let (values, gradients) = Loss::topk_hinge(2).loss_and_grad(logits, &[0, 2])?;
+    /// let (values, gradients, report) = Loss::topk_hinge(2).loss_and_grad(logits, &[0, 2])?;
     /// assert_eq!((values.len(), gradients.len()), (2, 6));
+    /// assert!(report.is_valid());
     ///
     /// let teacher = Matrix::new(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 2, 3)?;
-    /// let (values, _) = Loss::distillation().loss_and_grad(logits, libsdca::Targets::Teacher(teacher))?;
+    /// let (values, _, _) = Loss::distillation().loss_and_grad(logits, libsdca::Targets::Teacher(teacher))?;
     /// assert!(values.iter().all(|&v| v > 0.0));
     /// # Ok::<(), libsdca::Error>(())
     /// ```
@@ -338,7 +245,7 @@ impl Loss {
         &self,
         logits: Matrix<'_, T>,
         targets: impl Into<Targets<'y, T>>,
-    ) -> Result<(Vec<f64>, Vec<T>)> {
+    ) -> Result<(Vec<f64>, Vec<T>, LossReport)> {
         self.loss_and_grad_with(logits, targets, &Settings::default())
     }
 
@@ -346,19 +253,33 @@ impl Loss {
     /// classes >= 2, and their gradients (n, classes) with respect to the
     /// scores, in the arithmetic and on the threads of `settings`.
     ///
-    /// The single-label losses take [`Targets::Labels`], the multilabel ones
-    /// label sets, and `Distillation` and `ProximalDistillation` take
+    /// The single-label losses take [`Targets::Labels`] (`CrossEntropy` also
+    /// [`Targets::Probabilities`], taken as given), the multilabel ones label
+    /// sets, and `Distillation` and `ProximalDistillation` take
     /// [`Targets::Teacher`] logits of the shape of `logits` and give the
     /// gradient (q - p) / T with no T^2 factor. `ProximalDistillation`
-    /// computes in float64 arithmetic for every data type, and so rejects
-    /// `Precision::Float32`. The losses carry no loss weight C.
+    /// computes in float64 arithmetic for every data type. The losses carry no
+    /// loss weight C.
+    ///
+    /// A logit of -inf is a masked class, at the limit of the loss: the class
+    /// is removed and its gradient is +0.0 (docs/API.md, Masked classes).
+    ///
+    /// A label out of range is [`crate::Error::InvalidArgument`], as in
+    /// PyTorch. An invalid row (a logit of NaN or +inf, an empty label set or
+    /// one of every class for the multilabel hinge, a row of masked classes
+    /// that is invalid for the loss) gets a NaN value and NaN
+    /// gradients; the other rows are as computed alone. The [`LossReport`]
+    /// counts the invalid rows. [`Settings::with_check_rows`] refuses such rows
+    /// instead.
     ///
     /// # Errors
-    /// [`Error::InvalidArgument`] for logits that are not finite or have fewer
-    /// than one row or two columns, targets of a kind the loss does not take
-    /// or of the wrong size, labels out of range, invalid loss parameters, or
-    /// a precision the data type or loss does not take; [`Error::Native`] for
-    /// a native failure or a library that does not match the crate.
+    /// [`Error::InvalidArgument`] for logits with fewer than two columns,
+    /// targets of a kind the loss does not take or of the wrong size, label
+    /// sets with duplicates, invalid loss parameters, a precision the data
+    /// type does not take, or with [`Settings::check_rows`] an invalid row
+    /// (the native library's message, but for the sizes of the targets);
+    /// [`Error::Native`] for a native failure or a library that does not match
+    /// the crate.
     ///
     /// ```
     /// use libsdca::{Loss, Matrix, Precision, Settings};
@@ -366,7 +287,7 @@ impl Loss {
     /// let logits = Matrix::new(&[2.0f32, -0.5, 1.0, 0.0, 1.0, 3.0], 2, 3)?;
     /// let settings = Settings::default().with_precision(Precision::Float64);
     /// let sets = [vec![0, 1], vec![2]];
-    /// let (values, gradients) = Loss::multilabel_hinge().loss_and_grad_with(logits, &sets, &settings)?;
+    /// let (values, gradients, _) = Loss::multilabel_hinge().loss_and_grad_with(logits, &sets, &settings)?;
     /// assert_eq!((values.len(), gradients.len()), (2, 6));
     /// # Ok::<(), libsdca::Error>(())
     /// ```
@@ -375,27 +296,58 @@ impl Loss {
         logits: Matrix<'_, T>,
         targets: impl Into<Targets<'y, T>>,
         settings: &Settings,
-    ) -> Result<(Vec<f64>, Vec<T>)> {
+    ) -> Result<(Vec<f64>, Vec<T>, LossReport)> {
+        self.loss_and_grad_with_options(logits, targets, &Options::default(), settings)
+    }
+
+    /// [`Loss::loss_and_grad_with`] with the class weights, label smoothing
+    /// and ignored label of `options`, as PyTorch's `cross_entropy` takes them.
+    ///
+    /// # Errors
+    /// As [`Loss::loss_and_grad_with`], and [`Error::InvalidArgument`] for an
+    /// option the loss does not take, class weights of another length than
+    /// the classes or not finite and nonnegative, label smoothing outside
+    /// [0, 1], or an ignored label with probabilities.
+    pub fn loss_and_grad_with_options<'y, T: Real>(
+        &self,
+        logits: Matrix<'_, T>,
+        targets: impl Into<Targets<'y, T>>,
+        options: &Options<'_>,
+        settings: &Settings,
+    ) -> Result<(Vec<f64>, Vec<T>, LossReport)> {
         native::handshake()?;
-        let loss = *self;
-        if matches!(loss, Loss::ProximalDistillation { .. })
-            && settings.precision == Some(Precision::Float32)
-        {
-            return invalid(
-                "proximal_distillation computes in float64 arithmetic: Precision::Float32 is not supported",
-            );
-        }
-        let execution = native::execution::<T>(settings)?;
-        check_logits(logits, "logits")?;
         let (n, classes) = (logits.rows(), logits.cols());
-        loss.check(classes)?;
-        let targets = targets::native(loss, &targets.into(), n, classes, false)?;
+        if classes < 2 {
+            return invalid(TWO_CLASSES);
+        }
+        let mut loss = self.abi();
+        if let Some(weight) = options.weight() {
+            if weight.len() != classes {
+                return invalid(format!(
+                    "weight must have shape ({classes},), not ({},)",
+                    weight.len()
+                ));
+            }
+            loss.weight = weight.as_ptr();
+        }
+        loss.label_smoothing = options.label_smoothing();
+        if let Some(index) = options.ignore_index() {
+            // The bits of the C ABI's int64 labels (targets::native).
+            loss.ignore = 1;
+            loss.ignore_index = index as i64;
+        }
+        let targets = targets::native(&targets.into(), n, classes, targets::Rows::Logits)?;
         let (mut values, mut gradients) = (vec![0.0; n], vec![T::default(); n * classes]);
+        let mut report = ffi::LossReport::default();
+        let execution = ffi::Execution {
+            report: &mut report,
+            ..native::execution(settings)
+        };
         // SAFETY: the buffers have the sizes of the C ABI documentation, and
-        // the targets point into storage that outlives the call.
-        call(unsafe {
+        // the targets, the weights and the report outlive the call.
+        let code = unsafe {
             ffi::sdca_loss_evaluate(
-                &loss.abi(settings.projection_precision),
+                &loss,
                 &execution,
                 T::DTYPE_CODE,
                 n,
@@ -405,8 +357,46 @@ impl Loss {
                 values.as_mut_ptr(),
                 gradients.as_mut_ptr().cast(),
             )
-        })?;
-        Ok((values, gradients))
+        };
+        if code != ffi::INVALID_ROWS {
+            call(code)?;
+        }
+        let report = LossReport {
+            invalid_rows: report.invalid_rows,
+            first_invalid_row: (report.invalid_rows > 0).then_some(report.first_invalid_row),
+        };
+        Ok((values, gradients, report))
+    }
+}
+
+/// The rows of [`Loss::loss_and_grad`] it could not compute, whose values and
+/// gradients are NaN (a logit of NaN or +inf, an invalid row of masked
+/// classes); the other rows hold their results.
+///
+/// ```
+/// use libsdca::{Loss, Matrix};
+///
+/// let logits = Matrix::new(&[2.0, -0.5, 1.0, f64::NAN, 1.0, 3.0], 2, 3)?;
+/// let (values, _, report) = Loss::cross_entropy().loss_and_grad(logits, &[0, 2])?;
+/// assert_eq!((report.invalid_rows, report.first_invalid_row), (1, Some(1)));
+/// assert!(values[0].is_finite() && values[1].is_nan());
+/// # Ok::<(), libsdca::Error>(())
+/// ```
+#[must_use = "rows the loss could not compute hold NaN"]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct LossReport {
+    /// The number of invalid rows.
+    pub invalid_rows: usize,
+    /// The first invalid row; `None` if every row is valid.
+    pub first_invalid_row: Option<usize>,
+}
+
+impl LossReport {
+    /// Whether every row is valid.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        self.invalid_rows == 0
     }
 }
 
@@ -421,14 +411,13 @@ impl FromStr for Loss {
     type Err = Error;
 
     /// The loss of a [`Loss::name`] with the default parameters; the top-k
-    /// names give k = 1 (write the variant for another k).
+    /// names give k = 1 (write the enum variant for another k).
     fn from_str(text: &str) -> Result<Self> {
         Ok(match text {
             "cross_entropy" => Loss::cross_entropy(),
             "topk_cross_entropy" => Loss::topk_cross_entropy(1),
             "multiclass_hinge" => Loss::multiclass_hinge(),
-            "topk_hinge_alpha" => Loss::topk_hinge_alpha(1),
-            "topk_hinge_beta" => Loss::topk_hinge_beta(1),
+            "topk_hinge" => Loss::topk_hinge(1),
             "multilabel_hinge" => Loss::multilabel_hinge(),
             "multilabel_cross_entropy" => Loss::multilabel_cross_entropy(),
             "proximal_cross_entropy" => Loss::proximal_cross_entropy(),

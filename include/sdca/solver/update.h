@@ -5,29 +5,17 @@
 #include <type_traits>
 #include <vector>
 
-#include "sdca/prox/proxdef.h"
 #include "sdca/solver/data/input.h"
 #include "sdca/solver/data/output.h"
 #include "sdca/solver/data/scratch.h"
 #include "sdca/solver/eval/scores.h"
 #include "sdca/solver/objective.h"
 #include "sdca/solver/screening.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
-namespace detail {
-
-// obj.update_dual_variables(args..., mode), or without mode for an objective
-// that does not take one (a user-defined objective).
-template <typename Objective, typename... Args>
-inline auto update_block(const Objective& obj, const projection_precision mode, int,
-                         Args... args) -> decltype(obj.update_dual_variables(args..., mode)) {
-  return obj.update_dual_variables(args..., mode);
-}
-template <typename Objective, typename... Args>
-inline void update_block(const Objective& obj, const projection_precision, long, Args... args) {
-  obj.update_dual_variables(args...);
-}
+namespace solver_detail {
 
 template <typename Data, typename Context, typename Output, typename Objective, typename Tag>
 inline int part_step(const size_type, Context&, solver_scratch<Data, feature_input>&, const Output&,
@@ -45,7 +33,6 @@ template <typename Var, typename Context, typename Objective>
 inline int part_step(const size_type i, Context& ctx, solver_scratch<Var, feature_input>& scratch,
                      const multiclass_output& out, const Objective& obj, const bool support_only,
                      const char* screened, std::true_type) {
-  typedef typename std::common_type<Var, double>::type Work;
   const size_type m = out.num_classes, dim = ctx.train.in.num_dimensions, y = out.labels[i];
   Var* variables = ctx.dual_variables + m * i;
   size_type* classes = &scratch.classes[0];
@@ -62,38 +49,30 @@ inline int part_step(const size_type i, Context& ctx, solver_scratch<Var, featur
 
   const auto* x_i = ctx.train.in.features + dim * i;
   Var *scores = &scratch.scores[0], *old = &scratch.variables[0], *part = &scratch.part[0];
-  for (size_type q = 0; q < n; ++q) {
-    Work sum;
-    blas_dots<1>(static_cast<blas_int>(dim), ctx.primal_variables + dim * classes[q], 0, x_i, &sum);
-    scores[q] = static_cast<Var>(sum);
-    old[q] = part[q] = variables[classes[q]];
-  }
+  linalg::dots(dim, n, ctx.primal_variables, dim, classes, 1, x_i, 0, scores, 0);
+  for (size_type q = 0; q < n; ++q) old[q] = part[q] = variables[classes[q]];
   // A failed step throws before the block changes.
-  update_block(obj, ctx.criteria.projection, 0, n, scratch.norms[i], part, scores);
+  obj.update_dual_variables(n, scratch.norms[i], part, scores);
 
   bool same = true;
   for (size_type q = 0; q < n; ++q) {
     variables[classes[q]] = part[q];
-    const Var delta = old[q] - part[q];
-    if (delta == 0) continue;
-    same = false;
-    const Var scale = -delta;
-    Var* w = ctx.primal_variables + dim * classes[q];
-    for (size_type j = 0; j < dim; ++j) w[j] += static_cast<Var>(x_i[j]) * scale;
+    old[q] -= part[q];
+    same = same && old[q] == 0;
   }
+  if (!same) linalg::rank_one_update(dim, n, ctx.primal_variables, dim, classes, x_i, old);
   return same ? 1 : 0;
 }
 
-}  // namespace detail
+}  // namespace solver_detail
 
 template <typename Data, typename Result, template <typename, typename> class Objective>
 inline void update_dual_variables(const size_type i, const size_type m, const Data norm2,
                                   const multiclass_output& out, const Objective<Data, Result>& obj,
-                                  Data* variables, Data* scores,
-                                  const projection_precision mode = projection_precision::float64) {
+                                  Data* variables, Data* scores) {
   out.move_front(i, variables, scores);
   try {
-    detail::update_block(obj, mode, 0, m, norm2, variables, scores);
+    obj.update_dual_variables(m, norm2, variables, scores);
   } catch (...) {
     out.move_back(i, variables);
     throw;
@@ -104,11 +83,10 @@ inline void update_dual_variables(const size_type i, const size_type m, const Da
 template <typename Data, typename Result, template <typename, typename> class Objective>
 inline void update_dual_variables(const size_type i, const size_type m, const Data norm2,
                                   const multilabel_output& out, const Objective<Data, Result>& obj,
-                                  Data* variables, Data* scores,
-                                  const projection_precision mode = projection_precision::float64) {
+                                  Data* variables, Data* scores) {
   out.move_front(i, variables, scores);
   try {
-    detail::update_block(obj, mode, 0, m, out.num_labels(i), norm2, variables, scores);
+    obj.update_dual_variables(m, out.num_labels(i), norm2, variables, scores);
   } catch (...) {
     out.move_back(i, variables);
     throw;
@@ -119,9 +97,9 @@ inline void update_dual_variables(const size_type i, const size_type m, const Da
 template <typename Data, typename Result, template <typename, typename> class Objective>
 inline void update_dual_variables(const size_type i, const size_type m, const Data norm2,
                                   const distribution_output& out,
-                                  const Objective<Data, Result>& obj, Data* variables, Data* scores,
-                                  const projection_precision mode = projection_precision::float64) {
-  detail::update_block(obj, mode, 0, m, out.row(i), norm2, variables, scores);
+                                  const Objective<Data, Result>& obj, Data* variables,
+                                  Data* scores) {
+  obj.update_dual_variables(m, out.row(i), norm2, variables, scores);
 }
 
 // A row of zero norm has zero scores: its block maximizes the dual alone.
@@ -174,9 +152,9 @@ inline bool update_variables(const size_type i, Context& ctx,
   const size_type m = d.num_classes(), dim = d.in.num_dimensions;
   const auto* x_i = d.in.features + dim * i;
   if ((!whole || screened) && norm2 > 0) {
-    const int same = detail::part_step(
+    const int same = solver_detail::part_step(
         i, ctx, scratch, d.out, ctx.step_objective, !whole, screened,
-        typename detail::has_part_steps<typename Context::objective_type>::type());
+        typename solver_detail::has_part_steps<typename Context::objective_type>::type());
     if (same >= 0) return same == 1;
   }
 
@@ -190,8 +168,7 @@ inline bool update_variables(const size_type i, Context& ctx,
     Var* scores = &scratch.scores[0];
     column_dots(dim, m, ctx.primal_variables, x_i, scores);
     try {
-      update_dual_variables(i, m, norm2, d.out, ctx.step_objective, variables, scores,
-                            ctx.criteria.projection);
+      update_dual_variables(i, m, norm2, d.out, ctx.step_objective, variables, scores);
     } catch (...) {
       // A failed step leaves the block as it was, so that W = X'A still holds.
       std::copy(old, old + m, variables);
@@ -231,8 +208,7 @@ inline bool update_variables(const size_type i, Context& ctx,
   std::vector<Var>& old = scratch.variables;
   std::copy(variables, variables + m, old.begin());
   try {
-    update_dual_variables(i, m, norm2, d.out, ctx.step_objective, variables, scores,
-                          ctx.criteria.projection);
+    update_dual_variables(i, m, norm2, d.out, ctx.step_objective, variables, scores);
   } catch (...) {
     std::copy(old.begin(), old.end(), variables);
     throw;
@@ -240,6 +216,6 @@ inline bool update_variables(const size_type i, Context& ctx,
   return std::equal(old.begin(), old.end(), variables);
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

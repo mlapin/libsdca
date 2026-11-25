@@ -43,7 +43,8 @@ def manifest() -> dict[str, Any]:
 def variants() -> dict[str, Any]:
     """Exact alternative entry sets: the profiles of XLA GPU compilation choices and of
     other CPUs (AVX-512 kernels round the near-cancelling float64 gradients of the 4097-class
-    Gaussian rows differently from AVX2 ones)."""
+    Gaussian rows differently from AVX2 ones, and some x86 PyTorch matrix kernels
+    flush bfloat16 subnormal gradients in the composed linear head)."""
     return _records().get("variants", {})
 
 

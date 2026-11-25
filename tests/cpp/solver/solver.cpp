@@ -1,24 +1,66 @@
 #include "sdca/solver.h"
 #include "test_util.h"
 
+// The weight entries of the regularizer: d per class on features, a Gram row per class on a
+// kernel.
+template <typename Data>
+sdca::size_type weight_entries(const sdca::feature_input<Data>& in, const sdca::size_type m) {
+  return in.num_dimensions * m;
+}
+template <typename Data>
+sdca::size_type weight_entries(const sdca::kernel_input<Data>& in, const sdca::size_type m) {
+  return in.num_train_examples * m;
+}
+
+// The duality gap that a fit stored in Data and stepped in Result can certify: each of the N
+// iterate entries (the n m duals and the weights) holds one rounding of relative u, the unit
+// roundoff of the coarser type, so the sums of terms that make P and D are known only to
+// gamma_N = N u / (1 - N u) times their magnitudes M_P = |primal loss| + |regularizer| and
+// M_D = |dual loss| + |dual regularizer|. The computed gap is within gap_error of the true one,
+// and the certificate adds gap_error once more.
+template <typename Data, typename Result, typename Context>
+double certifiable_gap(const Context& ctx) {
+  const auto& e = ctx.train.evals.back();
+  const sdca::size_type m = ctx.train.num_classes();
+  const double n_entries = double(ctx.train.num_examples() * m + weight_entries(ctx.train.in, m));
+  const double u = std::max(double(std::numeric_limits<Data>::epsilon()),
+                            double(std::numeric_limits<Result>::epsilon())) /
+                   2;
+  const double gamma = n_entries * u / (1 - n_entries * u);
+  const double sums = std::abs(double(e.primal_loss)) + std::abs(double(e.primal_regularizer)) +
+                      std::abs(double(e.dual_loss)) + std::abs(double(e.dual_regularizer));
+  return gamma * sums + 2 * double(e.gap_error);
+}
+
+// The fit reaches the gap it can certify (certifiable_gap at the iterate of an evaluation):
+// the bound of the current iterate (an evaluation without steps) is the first target; a fit
+// that stalls above it gets the bound of its final iterate, which its next evaluation meets.
 template <typename Data, typename Result, typename Context>
 inline void test_solver_check_converged(Context& ctx) {
-  // The certificate adds the evaluation's rounding bound (about 1e-13 here).
-  ctx.criteria.tol =
-      std::max(1e-11, 64 * std::max(static_cast<double>(std::numeric_limits<Data>::epsilon()),
-                                    static_cast<double>(std::numeric_limits<Result>::epsilon())));
-
   ctx.criteria.eval_epoch = 2;
-  auto solver = sdca::make_solver(ctx);
-  solver.solve();
+  const sdca::size_type max_epoch = ctx.criteria.max_epoch;
+  const bool on_start = ctx.criteria.eval_on_start;
+  ctx.criteria.max_epoch = ctx.epoch;
+  ctx.criteria.eval_on_start = true;
+  ctx.criteria.tol = 0;
+  sdca::make_solver(ctx).solve();
+  ctx.criteria.eval_on_start = on_start;
+  for (int round = 0; round < 2 && ctx.status != sdca::solver_status::solved; ++round) {
+    const auto& start = ctx.train.evals.back();
+    const double scale = std::max(std::abs(double(start.primal)), std::abs(double(start.dual)));
+    ctx.criteria.tol = certifiable_gap<Data, Result>(ctx) / scale;
+    ctx.criteria.max_epoch = ctx.epoch + max_epoch;
+    sdca::make_solver(ctx).solve();
+    ctx.criteria.eval_on_start = true;
+  }
 
   EXPECT_TRUE(ctx.status == sdca::solver_status::solved);
   ASSERT_FALSE(ctx.train.evals.empty());
   const auto& eval = ctx.train.evals.back();
   EXPECT_TRUE(std::isfinite(eval.primal) && std::isfinite(eval.dual));
   EXPECT_GE(eval.primal + eval.gap_error, eval.dual);
-  const double scale = std::max(std::abs(double(eval.primal)), std::abs(double(eval.dual)));
-  EXPECT_LE(double(eval.primal - eval.dual) + eval.gap_error, ctx.criteria.tol * scale);
+  const double bound = certifiable_gap<Data, Result>(ctx);
+  EXPECT_LE(double(eval.primal - eval.dual) + eval.gap_error, bound);
 }
 
 template <typename Data, typename Result, template <typename> class Input,
@@ -66,9 +108,12 @@ inline void test_solver_basic_tests_feature_in(Output out, Objective<Data, Resul
 
   // Kernel (Gram) matrix
   std::vector<Data> K(n * n);
-  sdca::blas_int D = static_cast<sdca::blas_int>(d);
-  sdca::blas_int N = static_cast<sdca::blas_int>(n);
-  sdca::sdca_blas_gemm(N, N, D, &X[0], D, &X[0], D, &K[0], sdca::CblasTrans);
+  for (std::size_t i = 0; i < n; ++i)
+    for (std::size_t l = 0; l < n; ++l) {
+      double s = 0;
+      for (std::size_t j = 0; j < d; ++j) s += double(X[d * i + j]) * double(X[d * l + j]);
+      K[n * i + l] = static_cast<Data>(s);
+    }
 
   // Warm restart - use the same dual variables as above
   auto ctx_warm =
@@ -341,7 +386,7 @@ static void test_shrinking(const Objective<double, double>& objective, const int
       auto solver = sdca::make_solver(ctx);
       solver.solve();
       if (run == 1) {
-        EXPECT_TRUE(A == first_A) << what << ": not deterministic over thread counts";
+        EXPECT_TRUE(same_solves(A, first_A)) << what << ": not deterministic over thread counts";
         continue;
       }
       first_A = A;
@@ -463,16 +508,16 @@ static void test_part_steps(const Objective<double, double>& objective) {
   sdca::make_solver(ctx).solve();
 
   const std::string where = objective.to_string();
-  sdca::solver_scratch<double, sdca::feature_input> scratch;
+  sdca::native::solver_scratch<double, sdca::feature_input> scratch;
   scratch.init(ctx);
   sdca::size_type parts = 0, matches = 0;
   for (sdca::size_type i = 0; i < n; ++i) {
     const std::vector<double> a0(&A[m * i], &A[m * i] + m), w0(W);
-    sdca::update_variables(i, ctx, scratch, true);
+    sdca::native::update_variables(i, ctx, scratch, true);
     const std::vector<double> whole(&A[m * i], &A[m * i] + m), w_whole(W);
     std::copy(a0.begin(), a0.end(), &A[m * i]);
     W = w0;
-    sdca::update_variables(i, ctx, scratch, false);
+    sdca::native::update_variables(i, ctx, scratch, false);
     const std::vector<double> part(&A[m * i], &A[m * i] + m), w_part(W);
     std::copy(a0.begin(), a0.end(), &A[m * i]);
     W = w0;
@@ -568,7 +613,7 @@ static void test_wide_iterate(const Objective<float, double>& objective, const O
     if (threads == 1)
       first_A = A;
     else
-      EXPECT_TRUE(A == first_A) << where << ": not deterministic over thread counts";
+      EXPECT_TRUE(same_solves(A, first_A)) << where << ": not deterministic over thread counts";
   }
 }
 

@@ -6,23 +6,22 @@ NumPy losses return float64 values, computed in their working precision),
 
     |x^ - x| <= (64 eps + delta) |x| + eps x_min + allowance,
 
-the error bound of the report (check_number of release_numerics.py),
+the documented error bound (check_number of release_numerics.py),
 and a reference that rounds beyond the dtype's max needs an infinity of its sign. delta and
 the allowances are the documented terms of their regimes:
 
 - delta = C eps_w (working eps) for top-k entropy with float32 work, and for distillation and
-  proximal distillation on CUDA, plus C eps_w x_min / 2 for the native float32 top-k rows
-  (report);
+  proximal distillation on CUDA, plus C eps_w x_min / 2 for the native float32 top-k rows;
 - distillation with float32 work: 64 float32 eps of (p + q) / T (docs/API.md, Known limits);
 - proximal_cross_entropy: 64 working eps of the row's gradient 1-norm (a 36-digit
   proximal oracle);
-- hinges: their margins 1 + z_j - z_y are formed in working precision (report),
+- hinges: their margins 1 + z_j - z_y are formed in working precision,
   so on random and offset rows values add 64 working eps of 1 + the row's spread, and
   smoothed hinges' gradients 64 working eps of sqrt(C) (1 + spread) / gamma (the
-  1/gamma-Lipschitz projection of test_tensor_losses and common_inputs); where margins lose
+  1/gamma-Lipschitz projection); where margins lose
   the row's information (finfo.max, 1e30 rows) the limit is a table entry, not a bound;
 - the random rows of the ordinary sweeps (families ordinary and ties;
-  16-bit & ordinary sweeps, whose tolerances are those of common_inputs.py): 64 working eps
+  16-bit and ordinary sweeps): 64 working eps
   of |loss| + 1 + max|z| (scores over T for distillation), and of the row's largest gradient
   entry, times sqrt(C / 1000) from 1000 classes; smoothed hinges add 64 working eps of
   sqrt(C) (1 + max|z|) / gamma. 16-bit logits with float32 work add 100 float32 eps of
@@ -69,30 +68,15 @@ class Setting:
     precision: str | None
     reduction: str
     framework: str
-    native: bool  # the native library computes the loss (numpy, backend="native")
+    native: bool  # the native library computes the loss (numpy, backend="kernel")
     cuda: bool
     classes: int = 0
 
     @property
     def work(self) -> str:
-        """NumPy defaults follow storage. Tensor native fallbacks still select double
-        unless float32 work is requested; other tensor defaults permit float32."""
-        if self.dtype == "float64" or self.precision == "float64":
-            return "float64"
-        return (
-            "float64"
-            if self.native
-            and self.framework != "numpy"
-            and not (
-                self.framework == "jax"
-                and (
-                    self.loss.name == "proximal_cross_entropy"
-                    or (self.loss.name == "topk_cross_entropy" and 0 < self.classes <= 64)
-                )
-            )
-            and self.precision is None
-            else "float32"
-        )
+        """float64 storage or precision="float64": double; else float (16-bit storage in
+        float32), on every backend (docs/API.md, Precision)."""
+        return "float64" if "float64" in (self.dtype, self.precision) else "float32"
 
     @property
     def value_dtypes(self) -> tuple[str, str]:
@@ -139,7 +123,7 @@ def ratio(
 
 
 def terms(setting: Setting, classes: int) -> tuple[float, float]:
-    """The relative delta and the absolute floor of the report's bound."""
+    """The relative delta and the absolute floor of the bound."""
     eps_w = FINFO[setting.work][0]
     name = setting.loss.name
     if name == "topk_cross_entropy" and setting.loss.k > 1 and setting.work == "float32":

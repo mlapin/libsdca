@@ -61,8 +61,8 @@ cases = [
     ),
     (
         "proximal_cross_entropy",
-        L.ProximalCrossEntropyLoss(alpha=0.5),
-        lambda z, t: L.proximal_cross_entropy(z, t, alpha=0.5),
+        L.ProximalCrossEntropyLoss(gamma=0.5),
+        lambda z, t: L.proximal_cross_entropy(z, t, gamma=0.5),
         labels,
     ),
     (
@@ -73,8 +73,8 @@ cases = [
     ),
     (
         "proximal_distillation",
-        L.ProximalDistillationLoss(temperature=4.0, alpha=0.5),
-        lambda z, t: L.proximal_distillation_loss(z, t, temperature=4.0, alpha=0.5),
+        L.ProximalDistillationLoss(temperature=4.0, gamma=0.5),
+        lambda z, t: L.proximal_distillation_loss(z, t, temperature=4.0, gamma=0.5),
         teacher,
     ),
 ]
@@ -87,12 +87,15 @@ for name, module, functional, target in cases:
     path = L.explain_backend(module, logits, target)[0]
     print(f"{name:28s} loss {value.item():8.4f}  |grad| {grad.norm().item():.4f}  ({path})")
 
-# reduction="none" gives per-example losses; dim selects the class axis.
+# reduction="none" gives per-example losses; classes are on dim=1, as in F.cross_entropy
+# (pass dim=-1 for classes last).
 per_row = L.TopKHingeLoss(k=2, reduction="none")(logits, labels)
 assert per_row.shape == (n,)
 spatial = torch.randn(2, m, 4, 4, device=device)
 spatial_labels = torch.randint(m, (2, 4, 4), device=device)
-assert L.topk_hinge_loss(spatial, spatial_labels, k=2, dim=1).ndim == 0
+assert L.topk_hinge_loss(spatial, spatial_labels, k=2, reduction="none").shape == (2, 4, 4)
+last = spatial.movedim(1, -1)
+assert L.topk_hinge_loss(last, spatial_labels, k=2, dim=-1).ndim == 0
 
 # Class weights and an ignored label, with torch's weighted mean.
 weight = torch.rand(m, device=device)

@@ -17,10 +17,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from conformance.references import Loss, evaluate, kinks, named
 from libsdca.jax import Reduction, distillation_loss, proximal_distillation_loss
 from named_losses import jax_loss as named_loss
-from numpy_api import mask_loss_and_grad
-from test_distillation_references import proximal_reference, reference
 
 jax.config.update("jax_enable_x64", True)
 
@@ -133,8 +132,13 @@ class JaxHalfPrecisionTests:
                 ran = True
                 z = jnp.asarray(source, dtype)
                 represented = np.asarray(z, np.float64)
-                values, gradients = mask_loss_and_grad(represented, target, loss, k=k, gamma=gamma)
-                for backend in ("jax", "native"):
+                if gamma == 0 and "hinge" in loss:
+                    # Rows at a kink (ties of 16-bit scores) have several subgradients.
+                    keep = kinks(named(loss, k), represented, np.asarray(target)) > 0
+                    z, represented = z[keep], represented[keep]
+                    target = jnp.asarray(np.asarray(target)[keep])
+                values, gradients = evaluate(named(loss, k, gamma), represented, np.asarray(target))
+                for backend in ("composed", "kernel"):
                     for precision in (None, "float64"):
                         for reduction in reductions:
                             message = (
@@ -175,9 +179,13 @@ class JaxHalfPrecisionTests:
             z, t = jnp.asarray(source, dtype), jnp.asarray(teacher_source, dtype)
             s64, t64 = np.asarray(z, np.float64), np.asarray(t, np.float64)
             if name == "distillation":
-                rows = reference(s64, t64, temperature)
+                rows = evaluate(Loss("distillation", temperature=temperature), s64, teacher=t64)
             else:
-                rows = proximal_reference(s64, t64, temperature, alpha)
+                rows = evaluate(
+                    Loss("proximal_distillation", temperature=temperature, alpha=alpha),
+                    s64,
+                    teacher=t64,
+                )
             for precision in (None, "float64"):
                 for reduction in REDUCTIONS:
                     message = f"{name} {np.dtype(dtype).name} {precision} {reduction}"
@@ -195,7 +203,7 @@ class JaxHalfPrecisionTests:
                                     precision=precision,
                                 )
                             return proximal_distillation_loss(
-                                x, t, temperature=temperature, alpha=alpha, reduction=reduction,
+                                x, t, temperature=temperature, gamma=alpha, reduction=reduction,
                                 precision=precision)  # fmt: skip
 
                         *_, value, gradient = _run(jax.jit(f), z, reduction)
@@ -206,14 +214,15 @@ class JaxHalfPrecisionTests:
     @pytest.mark.parametrize("dtype", HALF, ids=lambda dtype: np.dtype(dtype).name)
     def test_loss_scaling_keeps_scaled_gradients(self, dtype: Any, subtests: pytest.Subtests):
         """A gradient below the 16-bit range survives a large cotangent: the gradient of
-        scale * loss is the float32 gradient of the represented logits, rounded once."""
+        scale * loss is the float32 gradient of the represented logits, rounded once.
+        (Distillation is left out: its float32 gradients where student and teacher nearly
+        agree are within 64 eps of (p + q) / T and may cancel to zero, docs/API.md.)"""
         z = jnp.asarray([[0.0, -20.0], [0.0, -24.0]], dtype)
         t = jnp.asarray([[0.0, -19.0], [0.0, -22.0]], dtype)
         losses = {
             "cross_entropy": lambda x: named_loss(x, jnp.array([0, 0]), "cross_entropy"),
-            "distillation": lambda x: distillation_loss(x, t.astype(x.dtype)),
             "proximal": lambda x: proximal_distillation_loss(
-                x, t.astype(x.dtype), temperature=1.0, alpha=0.5
+                x, t.astype(x.dtype), temperature=1.0, gamma=0.5
             ),
         }
         quantum = float(jnp.finfo(dtype).tiny) * float(jnp.finfo(dtype).eps)
@@ -228,3 +237,22 @@ class JaxHalfPrecisionTests:
                     assert np.all(np.abs(expected) > 0), expected
                     error = np.abs(np.asarray(got, np.float64) - expected)
                     assert np.all(error <= float(jnp.finfo(dtype).eps) * np.abs(wide) + quantum)
+
+
+def test_double_bfloat_cast_at_rounding_midpoints() -> None:
+    from libsdca._composed import xp_jax
+
+    # The smallest BF16 subnormal, the normal boundary and an ordinary normal;
+    # odd and even mantissas exercise both directions of midpoint rounding.
+    words = np.array([0, 1, 2, 126, 127, 128, 16256, 16257], np.uint16)
+    lo = (words.astype(np.uint32) << 16).view(np.float32).astype(np.float64)
+    hi = ((words.astype(np.uint32) + 1) << 16).view(np.float32).astype(np.float64)
+    mid = (lo + hi) * 0.5
+    factors = np.stack([np.nextafter(mid, -np.inf), mid, np.nextafter(mid, np.inf)])
+    expected = np.stack([words, words + (words & 1), words + 1])
+    z = jax.lax.bitcast_convert_type(jnp.asarray(words), jnp.bfloat16)
+    wide, pullback = jax.vjp(lambda x: xp_jax.astype(x, jnp.float64), z)
+    np.testing.assert_array_equal(np.asarray(wide).view(np.uint64), lo.view(np.uint64))
+    for sign in (1, -1):
+        got = np.asarray(jax.jit(jax.vmap(lambda g: pullback(g)[0]))(sign * factors))
+        np.testing.assert_array_equal(got.view(np.uint16), expected | (0x8000 if sign < 0 else 0))

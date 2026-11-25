@@ -37,7 +37,7 @@ int main() {
   params.k = 2;
   params.gamma = .7;
   const double value =
-      sdca::loss_and_gradient(sdca::loss_kind::topk_hinge_alpha, 3, scores, 1, gradient, params);
+      sdca::loss_and_gradient(sdca::kernel::topk_hinge_alpha, 3, scores, 1, gradient, params);
   std::cout << sdca::solver_status_name(status) << " loss=" << value << " gradient=" << gradient[0]
             << "," << gradient[1] << "," << gradient[2] << "\n";
   return status == sdca::solver_status::solved ? 0 : 1;

@@ -12,10 +12,11 @@
 #include "sdca/solver/context.h"
 #include "sdca/solver/eval.h"
 #include "sdca/solver/update.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
-namespace detail {
+namespace solver_detail {
 
 // Gap-safe screening needs W and single labels.
 template <typename Input, typename Output>
@@ -50,7 +51,7 @@ inline std::vector<double> input_norms(const feature_input<Data>& in,
   return example_norms<double>(in.num_dimensions, in.num_examples, in.features, num_threads);
 }
 
-}  // namespace detail
+}  // namespace solver_detail
 
 // SDCA on a solver_context: passes over the training examples in a random
 // order, updating each dual block and W, until ctx.criteria stops it. The
@@ -226,12 +227,12 @@ class solver {
   void begin_shrinking() {
     shrinking_mode mode = ctx_.criteria.shrinking;
     if (mode == shrinking_mode::automatic) mode = shrinking_mode::both;
-    const bool shrinks = detail::shrinks<objective_type>::value;
+    const bool shrinks = solver_detail::shrinks<objective_type>::value;
     heuristic_ = shrinks && (mode == shrinking_mode::heuristic || mode == shrinking_mode::both);
     rules_ = screening_rules_of(ctx_.objective);
     safe_ = shrinks && (mode == shrinking_mode::safe || mode == shrinking_mode::both) &&
             (rules_.examples || rules_.classes) &&
-            detail::screens_input(ctx_.train.in, ctx_.train.out);
+            solver_detail::screens_input(ctx_.train.in, ctx_.train.out);
     const size_type n = ctx_.train.num_examples(), m = ctx_.train.num_classes();
     shrunk_.assign(n, 0);
     num_updates_ = num_skipped_ = steps_ = 0;
@@ -239,7 +240,7 @@ class solver {
     eval_epoch_ = ctx_.epoch;
     screened_example_.assign(safe_ ? n : 0, 0);
     screened_class_.assign(safe_ ? n * m : 0, 0);
-    norms_ = safe_ ? detail::input_norms(ctx_.train.in, ctx_.criteria.num_threads)
+    norms_ = safe_ ? solver_detail::input_norms(ctx_.train.in, ctx_.criteria.num_threads)
                    : std::vector<double>();
     screen_gap_ = std::numeric_limits<double>::infinity();
     screen_factor_ = 2;
@@ -262,8 +263,8 @@ class solver {
     ctx_.eval_time.resume();
     const size_type before = num_screened_classes();
     // The gap is that of the stored iterate, so the margins are too.
-    detail::screen_input(ctx_.stored(), ctx_.train.in, ctx_.train.out, rules_, norms_, gap,
-                         screened_example_, screened_class_);
+    solver_detail::screen_input(ctx_.stored(), ctx_.train.in, ctx_.train.out, rules_, norms_, gap,
+                                screened_example_, screened_class_);
     screen_factor_ = num_screened_classes() > before ? 2 : 2 * screen_factor_;
     ctx_.eval_time.stop();
   }
@@ -364,6 +365,74 @@ inline solver<Data, Result, Input, Output, Objective> make_solver(
   return solver<Data, Result, Input, Output, Objective>(ctx);
 }
 
+SDCA_ISA_END
+
+// The public names in namespace sdca: those of the instruction set of the translation unit's
+// flags. This header must not be first included inside an instruction-set pass of
+// sdca/kernel.h.
+#include "sdca/core/isa.h"
+namespace sdca {
+#define SDCA_EXPORT(name) using SDCA_ISA_NAMESPACE::name;
+SDCA_EXPORT(solver)
+SDCA_EXPORT(make_solver)
+SDCA_EXPORT(solver_context)
+SDCA_EXPORT(make_context)
+SDCA_EXPORT(feature_input)
+SDCA_EXPORT(kernel_input)
+SDCA_EXPORT(make_input_feature)
+SDCA_EXPORT(make_input_kernel)
+SDCA_EXPORT(multiclass_output)
+SDCA_EXPORT(multilabel_output)
+SDCA_EXPORT(distribution_output)
+SDCA_EXPORT(make_output_multiclass)
+SDCA_EXPORT(make_output_multilabel)
+SDCA_EXPORT(make_output_distribution)
+SDCA_EXPORT(dataset)
+SDCA_EXPORT(make_dataset_train)
+SDCA_EXPORT(make_dataset_test)
+SDCA_EXPORT(eval_train)
+SDCA_EXPORT(eval_test)
+SDCA_EXPORT(eval_type)
+SDCA_EXPORT(stopping_criteria)
+SDCA_EXPORT(solver_status)
+SDCA_EXPORT(solver_status_name)
+SDCA_EXPORT(shrinking_mode)
+SDCA_EXPORT(shrinking_mode_name)
+SDCA_EXPORT(screening_rules)
+SDCA_EXPORT(objective_spec)
+SDCA_EXPORT(visit_multiclass_objective)
+SDCA_EXPORT(visit_multilabel_objective)
+SDCA_EXPORT(cross_entropy_objective)
+SDCA_EXPORT(multilabel_cross_entropy_objective)
+SDCA_EXPORT(topk_cross_entropy_objective)
+SDCA_EXPORT(multiclass_hinge_objective)
+SDCA_EXPORT(topk_hinge_alpha_objective)
+SDCA_EXPORT(topk_hinge_beta_objective)
+SDCA_EXPORT(multilabel_hinge_objective)
+SDCA_EXPORT(l2_cross_entropy)
+SDCA_EXPORT(l2_distillation)
+SDCA_EXPORT(l2_multilabel_cross_entropy)
+SDCA_EXPORT(l2_topk_cross_entropy)
+SDCA_EXPORT(l2_multilabel_hinge)
+SDCA_EXPORT(l2_multilabel_hinge_smooth)
+SDCA_EXPORT(l2_topk_hinge_alpha)
+SDCA_EXPORT(l2_topk_hinge_alpha_smooth)
+SDCA_EXPORT(l2_topk_hinge_beta)
+SDCA_EXPORT(l2_topk_hinge_beta_smooth)
+SDCA_EXPORT(make_objective_l2_cross_entropy)
+SDCA_EXPORT(make_objective_l2_distillation)
+SDCA_EXPORT(make_objective_l2_multilabel_cross_entropy)
+SDCA_EXPORT(make_objective_l2_topk_cross_entropy)
+SDCA_EXPORT(make_objective_l2_multilabel_hinge)
+SDCA_EXPORT(make_objective_l2_multilabel_hinge_smooth)
+SDCA_EXPORT(make_objective_l2_topk_hinge_alpha)
+SDCA_EXPORT(make_objective_l2_topk_hinge_alpha_smooth)
+SDCA_EXPORT(make_objective_l2_topk_hinge_beta)
+SDCA_EXPORT(make_objective_l2_topk_hinge_beta_smooth)
+SDCA_EXPORT(update_dual_variables)
+SDCA_EXPORT(zero_scores_dual_variables)
+SDCA_EXPORT(batch_scores)
+#undef SDCA_EXPORT
 }  // namespace sdca
 
 #endif

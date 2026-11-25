@@ -69,11 +69,16 @@ class PrecisionRangeTests:
                             x,
                             torch.ones_like(x, dtype=torch.bool),
                             "multilabel_cross_entropy",
-                            backend="torch",
                             precision=precision,
                             reduction="none",
                         )
                         (gradient,) = torch.autograd.grad(value.sum(), x)
+                        # A row whose spread (2 max) overflows the work type may be invalid:
+                        # a NaN row (docs/API.md, Known limits: Extreme spreads).
+                        work = torch.float64 if precision == "float64" else dtype
+                        if 2 * large > torch.finfo(work).max and value.isnan().all():
+                            assert gradient.isnan().all()
+                            continue
                         # At these gaps the tails are below storage range. The
                         # exact limit is max(z)-mean(z), softmax(z)-uniform.
                         tol = 8 * torch.finfo(dtype).eps
@@ -120,9 +125,9 @@ class PrecisionRangeTests:
             (torch.float16, torch.bfloat16, torch.float32, torch.float64), OBJECTIVES
         ):
             z = extreme_scores(dtype, device, classes)
-            reference = value_and_gradient(z.cpu().double(), objective, "float64", "torch")
+            reference = value_and_gradient(z.cpu().double(), objective, "float64", "composed")
             for precision, backend in itertools.product(
-                (None, "float32", "float64"), ("auto", "torch")
+                (None, "float32", "float64"), ("auto", "composed")
             ):
                 with subtests.test(
                     device=device,
@@ -176,7 +181,7 @@ class PrecisionRangeTests:
                         labels,
                         objective,
                         precision="float32",
-                        backend="torch",
+                        backend="composed",
                         reduction="none",
                     )
                     (gradient,) = torch.autograd.grad(value.sum(), x)
@@ -196,3 +201,23 @@ class PrecisionRangeTests:
                 graph.replay()
                 assert value[0].item() == 0
                 assert gradient[0].abs().sum().item() == 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+@pytest.mark.parametrize("winners", [1, 3])
+@pytest.mark.parametrize("step", [0.125, 0.875])
+def test_cuda_proximal_gap_beyond_float64(winners: int, step: float):
+    # At this scale binary entropy is below one ulp. The dual over the common
+    # competitor mass p is D p - gamma (1 + 1 / winners) p**2 / 2.
+    maximum = torch.finfo(torch.float64).max
+    scores = [-0.3125, *[0.75] * winners]
+    x = torch.tensor([scores], device="cuda", dtype=torch.float64).mul(maximum).requires_grad_()
+    target = torch.zeros(1, device="cuda", dtype=torch.long)
+    value = libsdca.torch.proximal_cross_entropy(x, target, gamma=step * maximum, backend="kernel")
+    (gradient,) = torch.autograd.grad(value, x)
+    gap = 1.0625
+    mass = min(1.0, gap / (step * (1.0 + 1.0 / winners)))
+    expected = mass * (gap - 0.5 * step * mass * (1.0 + 1.0 / winners))
+    assert value.item() / maximum == pytest.approx(expected, rel=8 * torch.finfo(x.dtype).eps)
+    wanted = torch.tensor([[-mass, *[mass / winners] * winners]], dtype=x.dtype)
+    torch.testing.assert_close(gradient.cpu(), wanted, rtol=8 * torch.finfo(x.dtype).eps, atol=0)

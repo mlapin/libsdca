@@ -1,15 +1,27 @@
 #ifndef SDCA_SOLVER_REPORTING_H
 #define SDCA_SOLVER_REPORTING_H
 
+#include <atomic>
+
+#include "sdca/math/blas.h"
 #include "sdca/solver/solverdef.h"
 #include "sdca/solver/eval/types.h"
 #include "sdca/utility/logging.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 namespace reporting {
 
 template <typename Context>
 inline void begin_solve(const Context& ctx) {
+#if defined(SDCA_BLAS_FALLBACK)
+  static std::atomic<bool> warned(false);
+  if (logging::get_level() >= logging::level::warning && !warned.exchange(true)) {
+    SDCA_LOG_WARNING << "libsdca found no BLAS and uses its built-in products; build with an "
+                        "external BLAS (docs/API.md#blas) for faster predictions"
+                     << std::endl;
+  }
+#endif
   SDCA_LOG_INFO << "Solve: " << ctx.to_string() << std::endl;
 }
 
@@ -84,6 +96,6 @@ inline void solver_stop_no_progress(const eval_train<Result, Output>& eval,
 }
 
 }  // namespace reporting
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

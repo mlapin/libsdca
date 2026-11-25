@@ -26,3 +26,6 @@ impl std::error::Error for Error {}
 pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T> {
     Err(Error::InvalidArgument(message.into()))
 }
+
+/// The message of logits or a class count below two, in every interface.
+pub(crate) const TWO_CLASSES: &str = "At least two classes are required";

@@ -2,13 +2,16 @@
 
 NumPy (this module):
     fit, loss_and_grad, coordinate_update and Model; the losses CrossEntropy,
-    TopKCrossEntropy, MulticlassHinge, TopKHingeAlpha, TopKHingeBeta, MultilabelHinge,
-    MultilabelCrossEntropy, ProximalCrossEntropy, Distillation and ProximalDistillation;
-    the target and input markers Probabilities and Kernel.
+    TopKCrossEntropy, MulticlassHinge, TopKHinge, MultilabelHinge, MultilabelCrossEntropy,
+    ProximalCrossEntropy, Distillation and ProximalDistillation;
+    the target and input markers Probabilities and Kernel; InvalidRowsWarning, which
+    loss_and_grad issues once per call with NaN rows (check_rows=True raises instead).
 scikit-learn (import libsdca.sklearn; needs scikit-learn):
     SDCAClassifier.
 PyTorch (import libsdca.torch; needs torch) and JAX (import libsdca.jax; needs jax):
-    the losses as framework modules and functions. `import libsdca` imports neither.
+    the losses as framework modules and functions; libsdca.optax has optax's names and
+    signatures for the cross-entropies and the multiclass hinge (needs jax, not optax).
+    `import libsdca` imports neither.
 Names: LOSSES (shared name -> loss class), OBJECTIVES (the names fit trains), their
     subsets TOPK, HINGES and MULTILABEL, PRECISIONS, HISTORY (Model.history keys) and
     STATUS (Model.status values).
@@ -21,13 +24,20 @@ intercept).
 
 from __future__ import annotations
 
-from ._core import HINGES, HISTORY, MULTILABEL, OBJECTIVES, PRECISIONS, STATUS, TOPK
-from ._numpy import (
+from ._native import (
+    HINGES,
+    HISTORY,
     LOSSES,
+    MULTILABEL,
+    OBJECTIVES,
+    PRECISIONS,
+    STATUS,
+    TOPK,
     CrossEntropy,
     Distillation,
     FloatArray,
     IndexArray,
+    InvalidRowsWarning,
     Kernel,
     Loss,
     Model,
@@ -39,8 +49,7 @@ from ._numpy import (
     ProximalDistillation,
     Targets,
     TopKCrossEntropy,
-    TopKHingeAlpha,
-    TopKHingeBeta,
+    TopKHinge,
     coordinate_update,
     fit,
     loss_and_grad,
@@ -61,6 +70,7 @@ __all__ = [
     "Distillation",
     "FloatArray",
     "IndexArray",
+    "InvalidRowsWarning",
     "Kernel",
     "Loss",
     "Model",
@@ -72,8 +82,7 @@ __all__ = [
     "ProximalDistillation",
     "Targets",
     "TopKCrossEntropy",
-    "TopKHingeAlpha",
-    "TopKHingeBeta",
+    "TopKHinge",
     "coordinate_update",
     "fit",
     "loss_and_grad",

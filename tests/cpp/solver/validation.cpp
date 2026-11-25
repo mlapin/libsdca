@@ -25,8 +25,8 @@ struct throwing_evaluation : sdca::l2_topk_hinge_beta<Data, Result> {
   throwing_evaluation() : sdca::l2_topk_hinge_beta<Data, Result>(1, 1) {}
   template <typename D, typename R>
   explicit throwing_evaluation(const throwing_evaluation<D, R>&) : throwing_evaluation() {}
-  template <typename Int>
-  Result primal_loss(Int, Data*) const {
+  template <typename Int, typename T>
+  Result dual_loss(Int, const T*) const {
     throw std::invalid_argument("evaluation rejected");
   }
 };
@@ -139,8 +139,8 @@ TEST(SolverValidation, kernel_primal_is_at_the_stored_duals) {
   std::vector<sdca::size_type> labels = {0};
   auto ctx = sdca::make_context(sdca::make_input_kernel(1, K), sdca::multiclass_output(2, labels),
                                 sdca::l2_cross_entropy<double, double>(1), a);
-  sdca::solver_scratch<double, sdca::kernel_input> scratch;
-  sdca::evaluate_dataset(ctx, ctx.train, scratch);
+  sdca::native::solver_scratch<double, sdca::kernel_input> scratch;
+  sdca::native::evaluate_dataset(ctx, ctx.train, scratch);
   const auto& e = ctx.train.evals.back();
   EXPECT_DOUBLE_EQ(0.205, e.primal_regularizer);
   EXPECT_DOUBLE_EQ(0.16, e.dual_regularizer);
@@ -197,7 +197,7 @@ TEST(SolverValidation, evaluations_are_identical_for_every_thread_count) {
       for (const auto& e : ctx.test[0].evals) run.push_back(e.primal_loss);
       runs.push_back(run);
     }
-    EXPECT_EQ(runs[0], runs[1]);
-    EXPECT_EQ(runs[0], runs[2]);
+    EXPECT_TRUE(same_solves(runs[0], runs[1]));
+    EXPECT_TRUE(same_solves(runs[0], runs[2]));
   }
 }

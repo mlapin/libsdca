@@ -47,3 +47,23 @@ def test_mask_score_gap_rounding(precision: str | None, classes: int, tied: bool
     error = np.max(np.abs(actual - reference) / np.max(np.abs(reference), axis=1, keepdims=True))
     budget = 64 if precision is None else 1
     assert error <= budget * np.finfo(np.float32).eps
+
+
+def test_composed_double_work_preserves_signed_bfloat_subnormals() -> None:
+    from masked_cases import amplified_multilabel_tail
+
+    x, mask, scale, ref = amplified_multilabel_tail(7)
+    z = jnp.asarray(x, dtype=jnp.bfloat16)
+
+    def row(values: jax.Array, target: jax.Array) -> jax.Array:
+        return multilabel_cross_entropy(values, target, backend="composed", precision="float64")
+
+    @jax.jit
+    def pullbacks(values: jax.Array, target: jax.Array, factors: jax.Array) -> jax.Array:
+        _, pullback = jax.vjp(jax.vmap(row), values, target)
+        return jax.vmap(lambda u: pullback(u)[0])(factors)[:, :, 1]
+
+    actual = np.asarray(pullbacks(z, jnp.asarray(mask), jnp.asarray([scale, -scale])))
+    expected = np.stack([ref, -ref]).astype(jnp.bfloat16)
+    expected[:, np.isneginf(x[:, 1])] = 0
+    np.testing.assert_array_equal(actual.view(np.uint16), expected.view(np.uint16))

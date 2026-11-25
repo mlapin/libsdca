@@ -7,8 +7,9 @@
 
 #include "sdca/math/blas.h"
 #include "sdca/solver/data.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 template <typename Result, typename Input, typename Output,
           template <typename, typename> class Evaluation>
@@ -118,6 +119,6 @@ inline void eval_end(const Int num_classes, const Int num_examples, const Object
   sdca_blas_scal(static_cast<blas_int>(num_classes), coeff, &e.accuracy[0]);
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

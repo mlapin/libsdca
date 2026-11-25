@@ -1,29 +1,15 @@
 """A negative maximum bounds the error of direct positive residuals by the row norm."""
 
-import mpmath as mp
 import numpy as np
 import pytest
 import torch
+from conformance.references import Loss, evaluate
 from libsdca.torch import multilabel_cross_entropy
 
 
 def exact(z: np.ndarray, mask: np.ndarray) -> tuple[float, np.ndarray]:
-    with mp.workdps(120):
-        values = [mp.mpf(float(v)) for v in z]
-        top = max(values)
-        exponentials = [mp.exp(v - top) for v in values]
-        den = sum(exponentials)
-        count = int(mask.sum())
-        gradient = np.array(
-            [
-                float(e / den - (mp.mpf(1) / count if pos else 0))
-                for e, pos in zip(exponentials, mask, strict=True)
-            ]
-        )
-        loss = (
-            sum(mp.log(den) + top - v for v, pos in zip(values, mask, strict=True) if pos) / count
-        )
-        return float(loss), gradient
+    values, gradients = evaluate(Loss("multilabel_cross_entropy"), z[None], mask[None])
+    return float(values[0]), gradients[0]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")

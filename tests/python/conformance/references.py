@@ -14,15 +14,14 @@ Values and gradient entries keep DIGITS significant digits. The formulas do not 
   optimality conditions pi_j = t_j exp(w_j), w_j + alpha t_j expm1(w_j) = c_j (and
   log pi_j + alpha pi_j = d_j where t_j = 0), solved by Newton steps for each w and for the
   normalizer, with the value of the entropy above plus alpha |pi - t|^2 / 2;
-- topk_cross_entropy is the capped-set closed form of test_topk_kernels.reference and
-  release_numerics.topk_reference, taken over blocks: tied competitors are
-  capped or free together.
+- topk_cross_entropy is the capped-set closed form of release_numerics.topk_reference, taken
+  over blocks: tied competitors are capped or free together.
 
 The working digits add those of the row's largest magnitude and of its spread (up to 1000),
 so differences of represented inputs and tails down to exp(-1000) keep DIGITS digits.
 
-The hinges reuse test_topk_kernels.reference (60 digits) and test_multilabel_kernels.exact
-(rationals) on the row with each block cut to k + 1 entries. A cut block of a smooth hinge
+The hinges take their definitions (conformance.hinges: mpmath, and the multilabel two-simplex
+in rationals) on the row with each block cut to k + 1 entries. A cut block of a smooth hinge
 must come out with a zero gradient: then the cut row's KKT point is the full row's.
 """
 
@@ -38,6 +37,8 @@ import mpmath as mp
 import numpy as np
 from mpmath_types import MPReal
 
+from conformance import hinges
+
 DIGITS = 50
 HINGES = ("multiclass_hinge", "topk_hinge_alpha", "topk_hinge_beta", "multilabel_hinge")
 PROXIMAL = ("proximal_cross_entropy", "proximal_distillation")
@@ -46,12 +47,14 @@ DISTILLATION = ("distillation", "proximal_distillation")
 
 @dataclass(frozen=True)
 class Block:
-    """count entries of logit value (and teacher logit teacher; a positive label if positive)."""
+    """count entries of logit value (and teacher logit teacher; a positive label if positive;
+    the target probability mass of cross-entropy of probability targets, if not None)."""
 
     value: float
     count: int = 1
     positive: bool = False
     teacher: float = 0.0
+    mass: float | None = None
 
 
 Row = tuple[Block, ...]
@@ -78,6 +81,19 @@ class Loss:
         return self.name + (f"[{','.join(options)}]" if options else "")
 
 
+def named(
+    name: str, k: int = 1, gamma: float = 0.0, temperature: float = 1.0, alpha: float = 1.0
+) -> Loss:
+    """The Loss of a shared name with the parameters it takes (the others at their defaults)."""
+    return Loss(
+        name,
+        k=k if name.startswith("topk") else 1,
+        gamma=gamma if name in HINGES else 0.0,
+        alpha=alpha if name in PROXIMAL else 1.0,
+        temperature=temperature if name in DISTILLATION else 1.0,
+    )
+
+
 @dataclass(frozen=True)
 class Reference:
     """A row's loss, one gradient entry per block and, for distillation, (p + q) / T per
@@ -100,18 +116,29 @@ def entries(row: Row) -> list[float]:
 def _digits(loss: Loss, row: Row) -> int:
     """DIGITS, those of the largest input, and those of each input's largest gap to its
     maximum up to 760 (smaller terms are below every dtype's subnormals)."""
-    inputs = [[b.value for b in row]]
-    inputs += [[b.teacher for b in row]] if loss.name in DISTILLATION else []
-    big = max(abs(v) for values in inputs for v in values)
+    inputs = [[b.value for b in row if math.isfinite(b.value)]]
+    if loss.name in DISTILLATION:
+        inputs.append([b.teacher for b in row if math.isfinite(b.teacher)])
+    inputs = [values for values in inputs if values]
+    big = max((abs(v) for values in inputs for v in values), default=0.0)
     with np.errstate(over="ignore"):
         gaps = [(max(v) - x) / loss.temperature for v in inputs for x in v]
-    spread = max(g for g in gaps if g <= 760)
+    spread = max((g for g in gaps if g <= 760), default=0.0)
     return DIGITS + 10 + int(math.log10(1 + big)) + int(spread / math.log(10))
+
+
+def fraction(x: float | MPReal) -> Fraction:
+    """A represented input (float or mpf) as an exact rational."""
+    if not isinstance(x, float):
+        man, exp = mp.mpf(x).man_exp
+        value = Fraction(man) * Fraction(2) ** exp
+        return -value if x < 0 else value
+    return Fraction(x)
 
 
 def _exact(*terms: float) -> MPReal:
     """The sum of represented inputs, rounded once to the working digits."""
-    total = sum(map(Fraction, terms), Fraction(0))
+    total = sum(map(fraction, terms), Fraction(0))
     return mp.mpf(total.numerator) / total.denominator
 
 
@@ -130,12 +157,20 @@ def _phi(w: MPReal) -> MPReal:
 def _log_targets(loss: Loss, row: Row) -> list[MPReal | None]:
     """log t of each block (None where t = 0): the label, the positives or softmax(teacher/T)."""
     if loss.name in DISTILLATION:
+        # A teacher's -inf masks its class: t = 0 there.
         top = max(b.teacher for b in row)
-        shifted = [_exact(b.teacher, -top) / loss.temperature for b in row]
+        shifted = [
+            None if b.teacher == -math.inf else _exact(b.teacher, -top) / loss.temperature
+            for b in row
+        ]
         ties = sum(b.count for b in row if b.teacher == top)
-        rest = mp.fsum(b.count * mp.exp(s) for b, s in zip(row, shifted, strict=True) if s < 0)
+        rest = mp.fsum(
+            b.count * mp.exp(s)
+            for b, s in zip(row, shifted, strict=True)
+            if s is not None and s < 0
+        )
         normalizer = mp.log1p(ties - 1 + rest)
-        return [s - normalizer for s in shifted]
+        return [None if s is None else s - normalizer for s in shifted]
     positives = sum(b.count for b in row if b.positive)
     if positives == 0:
         raise ValueError("a row without a positive label")
@@ -147,7 +182,15 @@ def _offsets(loss: Loss, row: Row, anchor: int) -> list[MPReal]:
     a student near its teacher keeps the digits of their difference."""
     a = row[anchor]
     if loss.name in DISTILLATION:
-        return [_exact(b.value, -a.value, -b.teacher, a.teacher) / loss.temperature for b in row]
+        return [
+            (
+                _exact(b.value, -a.value)
+                if b.teacher == -math.inf
+                else _exact(b.value, -a.value, -b.teacher, a.teacher)
+            )
+            / loss.temperature
+            for b in row
+        ]
     return [_exact(b.value, -a.value) / loss.temperature for b in row]
 
 
@@ -333,11 +376,9 @@ class CutBlockActive(ValueError):
 def _multilabel_hinge(
     z: list[float], mask: list[bool], gamma: float
 ) -> tuple[MPReal, list[MPReal]]:
-    """test_multilabel_kernels.exact in rationals, rounded to the working digits (its float
-    value overflows at finfo.max)."""
-    import test_multilabel_kernels as multilabel
-
-    zs = [Fraction(v) for v in z]
+    """The multilabel hinge in rationals, rounded to the working digits (its float value
+    overflows at finfo.max)."""
+    zs = [fraction(v) for v in z]
     pos = [v for v, b in zip(zs, mask, strict=True) if b]
     neg = [v for v, b in zip(zs, mask, strict=True) if not b]
 
@@ -345,27 +386,32 @@ def _multilabel_hinge(
         return mp.mpf(x.numerator) / x.denominator
 
     if gamma == 0:
+        # Ties split evenly among the lowest positives and the largest negatives, and a margin
+        # of zero counts half: the mean of the one-sided subgradients.
         low, high = min(pos), max(neg)
-        value = max(Fraction(0), 1 + high - low)
+        margin = 1 + high - low
+        value = max(Fraction(0), margin)
+        factor = Fraction(1) if margin > 0 else (Fraction(1, 2) if margin == 0 else Fraction(0))
+        lows = sum(1 for i, v in enumerate(zs) if mask[i] and v == low)
+        highs = sum(1 for i, v in enumerate(zs) if not mask[i] and v == high)
         gradient = [mp.mpf(0)] * len(z)
-        if value > 0:
-            gradient[next(i for i, v in enumerate(zs) if mask[i] and v == low)] = mp.mpf(-1)
-            gradient[next(i for i, v in enumerate(zs) if not mask[i] and v == high)] = mp.mpf(1)
+        for i, v in enumerate(zs):
+            if mask[i] and v == low:
+                gradient[i] = real(-factor / lows)
+            elif not mask[i] and v == high:
+                gradient[i] = real(factor / highs)
         return real(value), gradient
     g = Fraction(gamma)
     a = [Fraction(1, 2) - (v - pos[0]) for v in pos]
     b = [Fraction(1, 2) + (v - pos[0]) for v in neg]
-    x, y = multilabel._two_simplex(a, b, g)
+    x, y = hinges.two_simplex(a, b, g)
     value = sum((h * v - v * v / 2 for h, v in zip(a + b, x + y, strict=True)), Fraction(0)) / g
     xs, ys = iter(x), iter(y)
     return real(value), [real(-next(xs) / g if m else next(ys) / g) for m in mask]
 
 
 def _hinge(loss: Loss, row: Row) -> Reference:
-    """The hinge references of the kernel tests; rows wider than 64 classes cut to k + 1
-    entries per block."""
-    import test_topk_kernels as topk
-
+    """The hinge references; rows wider than 64 classes cut to k + 1 entries per block."""
     keep = loss.k + 1 if loss.name.startswith("topk") else 2
     cut = [min(b.count, keep) if width(row) > 64 else b.count for b in row]
     first = np.cumsum([0, *cut[:-1]]).tolist()
@@ -375,10 +421,9 @@ def _hinge(loss: Loss, row: Row) -> Reference:
     if loss.name == "multilabel_hinge":
         value, gradient = _multilabel_hinge(z, mask, loss.gamma)
     else:
-        name = "topk_hinge_alpha" if loss.name == "multiclass_hinge" else loss.name
+        variant = "beta" if loss.name == "topk_hinge_beta" else "alpha"
         k = 1 if loss.name == "multiclass_hinge" else loss.k
-        kind = name + ("_smooth" if smooth else "")
-        value, gradient = topk.reference(z, mask.index(True), kind, k, loss.gamma)
+        value, gradient = hinges.topk_hinge(z, mask.index(True), variant, k, loss.gamma)
     for b, n, i in zip(row, cut, first, strict=True):
         if smooth and n < b.count and gradient[i] != 0:
             raise CutBlockActive(f"a cut block is active: {loss.label} on {row}")
@@ -389,7 +434,7 @@ def _hinge(loss: Loss, row: Row) -> Reference:
 def _kink(loss: Loss, z: list[float], mask: list[bool]) -> float:
     """loss_references.nonsmooth_gap in rationals: the distance of the scores from a kink
     (where the subgradients differ), exact where float64 margins would round."""
-    zs = [Fraction(v) for v in z]
+    zs = [fraction(v) for v in z]
     if loss.name == "multilabel_hinge":
         low = sorted(v for v, b in zip(zs, mask, strict=True) if b)
         high = sorted((v for v, b in zip(zs, mask, strict=True) if not b), reverse=True)
@@ -421,10 +466,42 @@ def has_reference(loss: Loss, row: Row) -> bool:
     return True
 
 
-@functools.cache
+def _soft(row: Row) -> Reference:
+    """-sum_j u_j log softmax(z)_j of target masses u and its gradient |u| softmax(z)_j - u_j;
+    a class of logit -inf is masked (its term zero where u_j is, +inf where u_j > 0)."""
+    finite = [b for b in row if math.isfinite(b.value)]
+    top = max(b.value for b in finite)
+    lse = mp.log(mp.fsum(b.count * mp.exp(_exact(b.value, -top)) for b in finite))
+    mass = mp.fsum(b.count * mp.mpf(b.mass or 0.0) for b in row)
+    value, gradient = mp.mpf(0), []
+    for b in row:
+        u = mp.mpf(b.mass or 0.0)
+        if not math.isfinite(b.value):
+            value += mp.inf if u > 0 else 0
+            gradient.append(-u)
+            continue
+        if u != 0:
+            value += b.count * u * (lse - _exact(b.value, -top))
+        gradient.append(mass * mp.exp(_exact(b.value, -top) - lse) - u)
+    return Reference(value, tuple(gradient))
+
+
 def reference(loss: Loss, row: Row) -> Reference:
     """The loss of one row and its gradient per block."""
+    return _reference(loss, row, _signs(row))
+
+
+def _signs(row: Row) -> tuple[float, ...]:
+    """The signs of a row's floats: Blocks of 0.0 and -0.0 compare (and hash) equal."""
+    floats = [x for b in row for x in (b.value, b.teacher, b.mass) if x is not None]
+    return tuple(math.copysign(1.0, x) for x in floats)
+
+
+@functools.cache
+def _reference(loss: Loss, row: Row, signs: tuple[float, ...]) -> Reference:
     with mp.workdps(_digits(loss, row)):
+        if any(b.mass is not None for b in row):
+            return _soft(row)
         if loss.name in HINGES:
             return _hinge(loss, row)
         if loss.name in PROXIMAL:
@@ -443,3 +520,147 @@ def reduced(loss: Loss, rows: Sequence[Row], reduction: str) -> tuple[MPReal, MP
         if reduction == "mean":
             return total / len(rows), 1 / mp.mpf(len(rows))
         return total, mp.mpf(1)
+
+
+def rows(logits: np.ndarray, target: np.ndarray | None = None, teacher: np.ndarray | None = None):
+    """Each row of 2-D logits as blocks of its distinct entries (logit, positive flag or target
+    mass, teacher logit), and the block of each entry."""
+    z = np.asarray(logits, np.float64)
+    t = None if target is None else np.asarray(target)
+    for i in range(z.shape[0]):
+        positive = np.zeros(z.shape[1], bool)
+        mass = None
+        if t is not None and t.ndim == 1:
+            positive[int(t[i])] = True
+        elif t is not None and t.dtype == bool:
+            positive = t[i]
+        elif t is not None:
+            mass = np.asarray(t[i], np.float64)
+        keys = [
+            (
+                float(z[i, j]),
+                bool(positive[j]),
+                0.0 if teacher is None else float(teacher[i, j]),
+                None if mass is None else float(mass[j]),
+            )
+            for j in range(z.shape[1])
+        ]
+        order: dict[tuple, int] = {}
+        counts: list[int] = []
+        index = []
+        for key in keys:
+            if key not in order:
+                order[key] = len(order)
+                counts.append(0)
+            counts[order[key]] += 1
+            index.append(order[key])
+        row = tuple(Block(k[0], n, k[1], k[2], k[3]) for k, n in zip(order, counts, strict=True))
+        yield row, index
+
+
+def evaluate(
+    loss: Loss,
+    logits: np.ndarray,
+    target: np.ndarray | None = None,
+    teacher: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """float64 values (n,) and gradients (n, C), each rounded once, of 2-D logits and their
+    targets: labels (n,), a positive mask (n, C) or target masses (n, C) of cross-entropy;
+    distillation takes teacher logits (n, C) instead."""
+    values, gradients = [], []
+    for row, index in rows(logits, target, teacher):
+        ref = reference(loss, row)
+        values.append(float(ref.value))
+        gradients.append([float(ref.gradient[b]) for b in index])
+    return np.array(values, np.float64), np.array(gradients, np.float64).reshape(np.shape(logits))
+
+
+def kinks(loss: Loss, logits: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Per row, a nonsmooth hinge's distance from a kink (where its subgradients differ), in
+    units of the scores; inf for the smooth losses."""
+    return np.array([reference(loss, row).kink for row, _ in rows(logits, target, None)])
+
+
+def primal(
+    loss: Loss,
+    x: np.ndarray,
+    w: np.ndarray,
+    target: np.ndarray,
+    c: float,
+    center: np.ndarray | None = None,
+) -> MPReal:
+    """The solver's primal objective 0.5 ||W - W0||^2 + C sum_i loss(x_i W) at weights W (d, m)
+    and center W0 (or 0), with the scores x W exact."""
+    x, w = np.asarray(x, np.float64), np.asarray(w, np.float64)
+    labels = np.asarray(target)
+    with mp.workdps(DIGITS + 60):
+        xs = [[mp.mpf(float(v)) for v in row] for row in x]
+        ws = [[mp.mpf(float(v)) for v in row] for row in w]
+        total: MPReal = mp.mpf(0)
+        for i, row in enumerate(xs):
+            scores = [
+                mp.fsum(a * ws[j][col] for j, a in enumerate(row)) for col in range(w.shape[1])
+            ]
+            positive = labels[i] if labels.dtype == bool else np.arange(w.shape[1]) == labels[i]
+            blocks = tuple(Block(v, 1, bool(p)) for v, p in zip(scores, positive, strict=True))
+            total += reference(loss, blocks).value
+        w0 = np.zeros_like(w) if center is None else np.asarray(center, np.float64)
+        squares = mp.fsum(
+            (mp.mpf(float(a)) - mp.mpf(float(b))) ** 2
+            for a, b in zip(w.ravel(), w0.ravel(), strict=True)
+        )
+        return squares / 2 + mp.mpf(c) * total
+
+
+# The solver's top-k entropy dual steps (label first).
+
+
+def all_capped_step(scores: np.ndarray, previous: np.ndarray, c: float, norm2: float = 1.0):
+    """The solver's top-k entropy dual step of an all-capped block (k = C - 1, label first) at
+    scores and previous duals, in 160 digits."""
+    # Average exact represented inputs before forming any rounded differences.
+    # Solve logit(s) + alpha*(1+1/k)*s = mean + log(k) by bisection.
+    with mp.workdps(160):
+        k = len(scores) - 1
+        z, a = [mp.mpf(float(x)) for x in scores], [mp.mpf(float(x)) for x in previous]
+        mean = sum(z[1:]) / k - z[0] - mp.mpf(norm2) * (sum(a[1:]) / k - a[0])
+        coefficient = mp.mpf(c) * norm2 * (1 + mp.mpf(1) / k)
+        rhs = mean + mp.log(k)
+        lo, hi = rhs - coefficient, rhs
+        # Include the bracket's exponent: 1e308 needs over 1024 halvings
+        # merely to reach unit width, before resolving the actual root.
+        for _ in range(max(600, int(mp.log(coefficient, 2)) + 600)):
+            mid = (lo + hi) / 2
+            if mid == lo or mid == hi:
+                break
+            mass = 1 / (1 + mp.exp(-mid))
+            if mid + coefficient * mass < rhs:
+                lo = mid
+            else:
+                hi = mid
+            if hi == lo:
+                break
+        mass = mp.mpf(c) / (1 + mp.exp(-(lo + hi) / 2))
+        return np.array([float(mass)] + [-float(mass / k)] * k)
+
+
+def capped_softmax_dual(z: np.ndarray, a: np.ndarray, c: float, k: int):
+    """C*[mass, -p] of the capped softmax at the updated scores z + a, in 90 digits."""
+    with mp.workdps(90):
+        v = [mp.mpf(float(z[j])) + mp.mpf(float(a[j])) for j in range(len(z))]
+        v = [x - v[0] for x in v[1:]]
+        order = sorted(range(len(v)), key=lambda j: -v[j])
+        u, free, lse = 0, order, mp.mpf("nan")  # rebound by the loop: k >= 1
+        for u in range(k):
+            free = order[u:]
+            lse = v[order[u]] + mp.log(sum(mp.exp(v[j] - v[order[u]]) for j in free))
+            if v[order[u]] <= lse - mp.log(k - u):
+                break
+        odds = (sum(v[j] for j in order[:u]) + (k - u) * (lse - mp.log(k - u))) / k + mp.log(k)
+        mass = 1 / (1 + mp.exp(-odds))
+        p = [mp.mpf(0)] * len(v)
+        for j in order[:u]:
+            p[j] = mass / k
+        for j in free:
+            p[j] = mass * (1 - mp.mpf(u) / k) * mp.exp(v[j] - lse)
+        return np.array([float(c * mass)] + [-float(c * x) for x in p])

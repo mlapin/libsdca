@@ -11,7 +11,7 @@ jax.config.update("jax_enable_x64", True)
 
 CLASSES = 5
 OUT_OF_RANGE = [CLASSES, 2 * CLASSES]
-BACKENDS = ["auto", "native", "jax"]
+BACKENDS = ["auto", "kernel", "composed"]
 TOPK = {
     "topk_cross_entropy": sdca_jax.topk_cross_entropy,
     "topk_hinge_alpha": lambda *a, **o: sdca_jax.topk_hinge_loss(*a, variant="alpha", **o),
@@ -53,7 +53,7 @@ def test_topk_losses_check_k(subtests: pytest.Subtests):
 
 def test_k_is_static():
     z, target = problem()
-    with pytest.raises(TypeError, match="k must be a static Python number"):
+    with pytest.raises(TypeError, match="k must be a static number"):
         jax.jit(lambda k: sdca_jax.topk_cross_entropy(z, target, k=k))(2)
     # A concrete 0-d array is a number.
     np.testing.assert_array_equal(

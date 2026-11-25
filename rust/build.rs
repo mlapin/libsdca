@@ -1,14 +1,15 @@
 //! Compiles the C ABI (src/c_api.cpp) into a static library.
 //!
-//! SDCA_BLAS_BACKEND selects the BLAS as in the Python build: BUILTIN (the
-//! default unless SDCA_BLAS is set) or EXTERNAL, linked with the SDCA_BLAS
-//! libraries (for example "-lopenblas" or "-L/opt/blas/lib -lblas"; the
-//! forms of `directives`). CXX and AR choose the tools (CXX may carry flags).
-//! The C++ sources come from SDCA_SOURCE_DIR, else native/ (vendored by
-//! package.sh), else the repository around the crate.
+//! The compile flags and the BLAS come from src/native_build.txt, as in the Python and CMake
+//! builds: SDCA_BLAS_BACKEND is AUTO (the default), EXTERNAL or BUILTIN; AUTO and EXTERNAL
+//! link the first candidate (or SDCA_BLAS, for example "-lopenblas" or
+//! "-L/opt/blas/lib -lblas"; the forms of `directives`) with which src/blas_probe.cpp links,
+//! and AUTO without one takes the built-in products with a warning. CXX and AR choose the
+//! tools (CXX may carry flags). The C++ sources come from SDCA_SOURCE_DIR, else native/
+//! (vendored by package.sh), else the repository around the crate.
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn run(command: &mut Command) {
     let status = command
@@ -17,25 +18,71 @@ fn run(command: &mut Command) {
     assert!(status.success(), "{command:?} failed with {status}");
 }
 
-/// The BLAS macro of the headers and the linker flags of an external BLAS.
-fn blas() -> (&'static str, Vec<String>) {
-    let flags = env::var("SDCA_BLAS").unwrap_or_default();
+/// The entries of `key` in src/native_build.txt.
+fn settings(root: &Path, key: &str) -> Vec<String> {
+    let path = root.join("src/native_build.txt");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let prefix = format!("{key} ");
+    text.lines()
+        .filter_map(|line| line.strip_prefix(&prefix))
+        .map(|entry| entry.trim().to_string())
+        .collect()
+}
+
+/// Whether src/blas_probe.cpp links with the linker flags.
+fn links(cxx: &[String], root: &Path, out: &Path, flags: &[String]) -> bool {
+    Command::new(&cxx[0])
+        .args(&cxx[1..])
+        .args(["-std=c++11", "-I"])
+        .arg(root.join("include"))
+        .arg(root.join("src/blas_probe.cpp"))
+        .arg("-o")
+        .arg(out.join("blas_probe"))
+        .args(flags)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// The macros of the selected BLAS and its linker flags.
+fn blas(cxx: &[String], root: &Path, out: &Path) -> (Vec<&'static str>, Vec<String>) {
     let backend = env::var("SDCA_BLAS_BACKEND").unwrap_or_else(|_| "AUTO".into());
-    match (backend.to_uppercase().as_str(), flags.is_empty()) {
-        ("BUILTIN", _) | ("AUTO", true) => ("BLAS_BUILTIN", Vec::new()),
-        ("EXTERNAL", true) => panic!("SDCA_BLAS_BACKEND=EXTERNAL needs SDCA_BLAS linker flags"),
-        ("EXTERNAL", false) | ("AUTO", false) => (
-            "BLAS_DEFAULT_LOCAL_HEADER",
-            flags.split_whitespace().map(String::from).collect(),
-        ),
+    let backend = backend.to_uppercase();
+    match backend.as_str() {
+        "BUILTIN" => return (vec!["BLAS_BUILTIN"], Vec::new()),
+        "AUTO" | "EXTERNAL" => {}
         _ => panic!("SDCA_BLAS_BACKEND must be AUTO, EXTERNAL, or BUILTIN"),
     }
+    let given = env::var("SDCA_BLAS").ok().filter(|flags| !flags.is_empty());
+    let candidates = given
+        .clone()
+        .map_or_else(|| settings(root, "blas"), |flags| vec![flags]);
+    for candidate in &candidates {
+        let flags: Vec<String> = candidate.split_whitespace().map(String::from).collect();
+        if links(cxx, root, out, &flags) {
+            return (vec!["BLAS_DEFAULT_LOCAL_HEADER"], flags);
+        }
+    }
+    let tried = candidates.join(", ");
+    if backend == "EXTERNAL" || given.is_some() {
+        panic!("No CBLAS links with {tried}; set SDCA_BLAS to the linker flags of one, or choose SDCA_BLAS_BACKEND=BUILTIN");
+    }
+    println!(
+        "cargo:warning=libsdca found no BLAS (tried {tried}) and uses its built-in products: \
+         install OpenBLAS (or another CBLAS) or set SDCA_BLAS to its linker flags, then rebuild"
+    );
+    (vec!["BLAS_BUILTIN", "SDCA_BLAS_FALLBACK"], Vec::new())
 }
 
 /// The Cargo directives of one SDCA_BLAS entry: -L<dir>, -l<name>,
 /// -l:<file> or an absolute path to a .so or .a library.
 fn directives(flag: &str) -> Vec<String> {
     let nonempty = |s: &&str| !s.is_empty();
+    if let Some(name) = flag.strip_prefix("framework=").filter(nonempty) {
+        return vec![format!("rustc-link-lib=framework={name}")];
+    }
     if let Some(dir) = flag.strip_prefix("-L").filter(nonempty) {
         return vec![format!("rustc-link-search=native={dir}")];
     }
@@ -57,6 +104,22 @@ fn directives(flag: &str) -> Vec<String> {
              path to a .so or .a library; pass other linker flags in RUSTFLAGS"
         ),
     }
+}
+
+/// The linker flags with "-framework <name>" joined into one "framework=<name>" entry.
+fn link_entries(flags: &[String]) -> Vec<String> {
+    let mut entries = Vec::new();
+    let mut iter = flags.iter();
+    while let Some(flag) = iter.next() {
+        match (flag.as_str(), iter.clone().next()) {
+            ("-framework", Some(name)) => {
+                entries.push(format!("framework={name}"));
+                iter.next();
+            }
+            _ => entries.push(flag.clone()),
+        }
+    }
+    entries
 }
 
 /// Link the library file `file` by its exact name, as the linker's -l:file.
@@ -96,25 +159,20 @@ fn main() {
     };
     std::fs::copy(&guide, out.join("guide.md")).expect("copy the Rust guide for doctests");
     println!("cargo:rerun-if-changed={}", guide.display());
-    let (macro_name, flags) = blas();
+    let cxx: Vec<String> = env::var("CXX")
+        .unwrap_or_else(|_| "c++".into())
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+    assert!(!cxx.is_empty(), "CXX is empty");
+    let (macros, flags) = blas(&cxx, &root, &out);
     let object = out.join("c_api.o");
     let version = env::var("CARGO_PKG_VERSION").unwrap();
-    let cxx = env::var("CXX").unwrap_or_else(|_| "c++".into());
-    let mut cxx = cxx.split_whitespace();
-    run(Command::new(cxx.next().expect("CXX is empty"))
-        .args(cxx)
-        .args([
-            "-std=c++11",
-            "-O3",
-            "-DNDEBUG",
-            "-fPIC",
-            "-pthread",
-            "-fno-fast-math",
-            "-ffp-contract=off",
-            "-fvisibility=hidden",
-            "-fvisibility-inlines-hidden",
-        ])
-        .arg(format!("-D{macro_name}"))
+    run(Command::new(&cxx[0])
+        .args(&cxx[1..])
+        .args(settings(&root, "flags"))
+        .arg("-fPIC")
+        .args(macros.iter().map(|name| format!("-D{name}")))
         .arg("-DSDCA_USE_CHRONO")
         .arg(format!("-DSDCA_VERSION=\"{version}\""))
         .arg("-I")
@@ -129,7 +187,10 @@ fn main() {
         .arg(&object));
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-lib=static=sdca_c");
-    for directive in flags.iter().flat_map(|flag| directives(flag)) {
+    for directive in link_entries(&flags)
+        .iter()
+        .flat_map(|flag| directives(flag))
+    {
         println!("cargo:{directive}");
     }
     let std = if env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("apple") {
@@ -141,9 +202,8 @@ fn main() {
     for path in [
         "include",
         "src/c_api.cpp",
-        "src/c_api_internal.h",
-        "src/c_api_baseline.h",
-        "src/tensor_losses.h",
+        "src/blas_probe.cpp",
+        "src/native_build.txt",
     ] {
         println!("cargo:rerun-if-changed={}", root.join(path).display());
     }

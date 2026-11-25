@@ -14,6 +14,13 @@ SDCA_JAX_CPU_FUSION is "fenced" unless set.
 --conformance ci runs the CI profile of the conformance matrix (test_conformance in
 test_conformance_*.py; conformance/cells.py, ci_profile), about a tenth of its cells; the
 default, full, runs them all.
+
+Hypothesis profiles of the property tests (test_properties_*.py), ci unless
+--hypothesis-profile selects another: ci (the explicit examples and 200 derandomized
+examples, no database; the deadline allows the first-use compile of the CPU kernels), search
+(10,000 examples a test with generate, target and shrink, no database; pass the seed with
+--hypothesis-seed and record it) and replay (the explicit examples only: the CUDA run). The
+batched sweeps (marker sweep) are deselected unless -m is given (-m sweep, -m cuda, ...).
 """
 
 from __future__ import annotations
@@ -28,22 +35,60 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import hypothesis
+except ImportError:  # the property tests skip
+    hypothesis = None
+
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE.parents[1] / "python"
 GROUPS = ("core", "torch", "jax")
 # Tests of source-tree helpers, not of the installed package.
-SOURCE_ONLY = {
-    "test_build_config.py",
-}
+SOURCE_ONLY: set[str] = set()
 SERIAL = "serial: needs the machine to itself (timing); deselected under -n, run with -m serial"
 SLOW = "slow: takes about a minute on a loaded machine; started first under -n"
 LONG = "long: over a minute on a 4-CPU runner; started first under -n, CI deselects it"
+SWEEP = "sweep: the batched property sweep of test_properties_*.py; runs only under -m"
 _LOCATION = pytest.StashKey[Path]()
 # Builds (or loads) the CPU extension as the first CPU loss call of a test would.
 PREBUILD = """
-import libsdca._cpu_entropy as ext
-ext.operators() if ext.mode() == "on" else ext.status()
+import torch
+import libsdca._torch_ops as ops
+reason = ops.cpu_kernels() or ops.fallback(torch.device("cpu"))
+if reason:
+    raise SystemExit(reason)
 """
+
+
+def register_profiles() -> None:
+    if hypothesis is None:
+        return
+    from datetime import timedelta
+
+    from hypothesis import HealthCheck, Phase, settings
+
+    slow = [HealthCheck.too_slow, HealthCheck.data_too_large, HealthCheck.filter_too_much]
+    common: dict = {"database": None, "suppress_health_check": slow, "print_blob": True}
+    settings.register_profile(
+        "ci",
+        max_examples=200,
+        derandomize=True,
+        phases=[Phase.explicit, Phase.generate, Phase.shrink],
+        deadline=timedelta(minutes=5),
+        **common,
+    )
+    settings.register_profile(
+        "search",
+        max_examples=10_000,
+        phases=[Phase.explicit, Phase.generate, Phase.target, Phase.shrink],
+        deadline=None,
+        **common,
+    )
+    settings.register_profile("replay", phases=[Phase.explicit], deadline=None, **common)
+    settings.load_profile("ci")
+
+
+register_profiles()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -92,9 +137,9 @@ def tested_libsdca(installed: bool) -> Path:
     location = Path(libsdca.__file__).resolve()
     if installed and location.is_relative_to(SOURCE):
         raise pytest.UsageError(f"--installed imported libsdca from the source tree: {location}")
-    from libsdca._core import _library_path, stale_build
+    from libsdca._native import _library_path, stale_build
 
-    library = Path(_library_path(None))
+    library = _library_path()
     reason = stale_build(library) if library.exists() else None
     if reason:
         raise pytest.UsageError(
@@ -126,6 +171,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", SERIAL)
     config.addinivalue_line("markers", SLOW)
     config.addinivalue_line("markers", LONG)
+    config.addinivalue_line("markers", SWEEP)
     config.stash[_LOCATION] = tested_libsdca(bool(config.getoption("installed")))
 
 
@@ -189,6 +235,11 @@ def outside_ci_profile(item: pytest.Item) -> bool:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if not config.getoption("markexpr"):  # the sweeps run when -m selects them
+        sweeps = [item for item in items if item.get_closest_marker("sweep")]
+        if sweeps:
+            config.hook.pytest_deselected(items=sweeps)
+            items[:] = [item for item in items if not item.get_closest_marker("sweep")]
     if config.getoption("conformance") == "ci":
         outside = [item for item in items if outside_ci_profile(item)]
         if outside:

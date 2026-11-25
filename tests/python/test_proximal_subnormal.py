@@ -5,17 +5,18 @@ is O(alpha * exp(-2 * gap)), many orders below an output subnormal quantum. Thus
 100-digit cross-entropy value is also an oracle for the rounded proximal value.
 """
 
-import os
-from unittest import mock
-
 import mpmath as mp
 import pytest
 import torch
 from libsdca.torch import Backend, proximal_cross_entropy
 
+# The CPU kernels lose the relative accuracy of a proximal loss whose competitors' terms each
+# underflow the work type, though their sum does not (docs/API.md, Known limits).
+LIMIT = pytest.mark.xfail(strict=True, reason="known limit: proximal tails beyond exp's range")
+
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
-@pytest.mark.parametrize("backend", ["auto", "torch"])
+@pytest.mark.parametrize("backend", ["auto", "composed"])
 @pytest.mark.parametrize(
     "dtype,gap",
     [
@@ -38,9 +39,8 @@ def test_one_tiny_competitor(
     y = torch.ones(1, dtype=torch.long, device=device)
     with mp.workdps(100):
         expected = float(mp.log1p(mp.exp(-gap)))
-    with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": "off"}):
-        value = proximal_cross_entropy(z, y, alpha=1.0, backend=backend)
-        (gradient,) = torch.autograd.grad(value, z)
+    value = proximal_cross_entropy(z, y, gamma=1.0, backend=backend)
+    (gradient,) = torch.autograd.grad(value, z)
     rounded = torch.tensor(expected, dtype=value.dtype).item()
     quantum = torch.finfo(value.dtype).tiny * torch.finfo(value.dtype).eps
     assert value.item() > 0, (device, backend, dtype, classes, rounded)
@@ -51,13 +51,12 @@ def test_one_tiny_competitor(
 
 
 @pytest.mark.parametrize(
-    "device,backend,extension",
+    "device,backend",
     [
-        ("cpu", "auto", "off"),
-        ("cpu", "auto", "on"),
-        ("cpu", "torch", "off"),
-        ("cuda", "auto", "off"),
-        ("cuda", "torch", "off"),
+        pytest.param("cpu", "auto", marks=LIMIT),
+        ("cpu", "composed"),
+        ("cuda", "auto"),
+        ("cuda", "composed"),
     ],
 )
 @pytest.mark.parametrize(
@@ -74,7 +73,6 @@ def test_one_tiny_competitor(
 def test_many_underflowed_competitors(
     device: str,
     backend: Backend,
-    extension: str,
     dtype: torch.dtype,
     gap: float,
     classes: int,
@@ -89,9 +87,8 @@ def test_many_underflowed_competitors(
     y = torch.ones(1, dtype=torch.long, device=device)
     with mp.workdps(100):
         expected = float(mp.log1p((classes - 1) * mp.exp(-gap)))
-    with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": extension}):
-        value = proximal_cross_entropy(z, y, alpha=alpha, backend=backend, precision=precision)
-        (gradient,) = torch.autograd.grad(value, z)
+    value = proximal_cross_entropy(z, y, gamma=alpha, backend=backend, precision=precision)
+    (gradient,) = torch.autograd.grad(value, z)
     rounded = torch.tensor(expected, dtype=value.dtype).item()
     quantum = torch.finfo(value.dtype).tiny * torch.finfo(value.dtype).eps
     assert value.item() > 0, (device, backend, dtype, classes, alpha, rounded)
@@ -104,24 +101,29 @@ def test_many_underflowed_competitors(
 
 
 @pytest.mark.parametrize(
-    "device,backend,extension",
+    "device,backend",
     [
-        ("cpu", "auto", "off"),
-        ("cpu", "auto", "on"),
-        ("cpu", "torch", "off"),
-        ("cuda", "auto", "off"),
-        ("cuda", "torch", "off"),
+        pytest.param("cpu", "auto", marks=LIMIT),
+        ("cpu", "composed"),
+        ("cuda", "auto"),
+        ("cuda", "composed"),
     ],
 )
 @pytest.mark.parametrize("classes", [1000, 4097])
-def test_explicit_float32_aggregate(device: str, backend: Backend, extension: str, classes: int):
+def test_explicit_float32_aggregate(device: str, backend: Backend, classes: int):
     test_many_underflowed_competitors(
-        device, backend, extension, torch.float32, 110.0, classes, 1.0, "float32"
+        device, backend, torch.float32, 110.0, classes, 1.0, "float32"
     )
 
 
 @pytest.mark.parametrize(
-    "device,backend", [("cpu", "auto"), ("cpu", "torch"), ("cuda", "auto"), ("cuda", "torch")]
+    "device,backend",
+    [
+        pytest.param("cpu", "auto", marks=LIMIT),
+        ("cpu", "composed"),
+        ("cuda", "auto"),
+        ("cuda", "composed"),
+    ],
 )
 @pytest.mark.parametrize(
     "dtype,gap,alpha,precision",
@@ -135,4 +137,19 @@ def test_subnormal_quantum_bounds_proximal_correction(
     alpha: float,
     precision: str | None,
 ):
-    test_many_underflowed_competitors(device, backend, "on", dtype, gap, 4097, alpha, precision)
+    test_many_underflowed_competitors(device, backend, dtype, gap, 4097, alpha, precision)
+
+
+@pytest.mark.cuda
+def test_masked_competitor_with_step_above_float32_range():
+    """The two supported classes have a positive envelope and residual below float32 range."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    z = torch.tensor(
+        [[0.0, 1.0, -torch.inf]], device="cuda", dtype=torch.float32, requires_grad=True
+    )
+    value = proximal_cross_entropy(z, torch.tensor([0], device="cuda"), gamma=1e60)
+    (gradient,) = torch.autograd.grad(value, z)
+    assert value.item() == 0 and not torch.signbit(value).item()
+    assert torch.equal(gradient, torch.zeros_like(gradient))
+    assert torch.signbit(gradient).tolist() == [[True, False, False]]

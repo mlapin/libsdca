@@ -6,23 +6,21 @@
 [![Crates.io](https://img.shields.io/crates/v/libsdca.svg)](https://crates.io/crates/libsdca)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**libsdca** is a fast and accurate implementation of classification losses: cross-entropy,
+**libsdca** is an accurate and fast implementation of classification losses: cross-entropy,
 multiclass and multilabel SVM hinges, top-*k* losses and knowledge distillation. The losses
-are available as PyTorch and JAX layers on CPU and CUDA and as NumPy, Rust, C++, C and MATLAB
+are available as PyTorch and JAX layers on CPU and CUDA and as NumPy, Rust, C++ and C
 functions, and a stochastic dual coordinate ascent (SDCA) solver trains linear and kernel
-classifiers with them.
+classifiers with the multiclass and multilabel training objectives.
 
-- **Fast:** The losses are fused CPU and CUDA kernels, not chains of tensor operations. On an
-  A100 with 32k–128k classes, cross-entropy matches `torch.compile` and is 2.4–3× faster than
-  eager PyTorch, and the multiclass hinge is 4–8× faster than compiled and 8–14× faster than
-  eager PyTorch implementations ([benchmarks](docs/TORCH.md#benchmarks)).
-- **Accurate:** Losses and gradients of confident predictions are kept down to the subnormal
-  range of the output dtype ([known limits](docs/API.md#known-limits)).
-  - A naive `float32` cross-entropy rounds to zero from a margin of about 17 (softmax
-    collapse [7]), and `libsdca` stays accurate up to about 104.
+- **Accurate:** For confident predictions, the cross-entropy kernels avoid softmax collapse
+  [7] and can retain losses and gradient entries down to the subnormal range of the output
+  dtype ([known limits](docs/API.md#known-limits)).
   - Distillation gradients are exactly zero at equal student and teacher logits [6].
-  - The entropy and distillation losses are tested on CPU and CUDA against 100-digit
-    `mpmath` references.
+  - Losses and gradients are checked against high-precision references
+    ([technical report](https://mlapin.github.io/libsdca/report/)).
+- **Fast:** Fused CPU and CUDA kernels implement the losses. In our benchmarks they match
+  or outperform `torch.compile` and `jax.jit` in most comparisons
+  ([technical report](https://mlapin.github.io/libsdca/report/)).
 - **Many losses:** Cross-entropy, the multiclass hinge (Crammer–Singer SVM [1]), the top-*k*
   hinge and entropy losses [4, 5], the multilabel hinge [2] and cross-entropy, logit
   distillation and proximal variants, with nonsmooth or smoothed hinges, and
@@ -30,15 +28,14 @@ classifiers with them.
   ([losses](docs/API.md#loss-definitions)).
 - **Many interfaces:** PyTorch modules and functions (with `torch.compile` support), JAX
   functions for `jit`, `grad` and `vmap`, NumPy, a scikit-learn estimator, Rust, header-only
-  C++, C and MATLAB/Octave, with the same loss and option names in each
+  C++ and C, with shared loss definitions and interface-specific calling conventions
   ([API reference](docs/API.md)).
 - **SDCA solver with a duality-gap guarantee:** SDCA trains linear and kernel classifiers
   (multiclass, top-*k* and multilabel SVMs, softmax regression).
-  - The duality gap bounds the distance to the optimum, so `status == "solved"` guarantees
-    that the objective of the returned model is within the relative tolerance `tol` of the
-    optimal value ([results](docs/API.md#results)).
+  - When `status == "solved"`, the duality gap bounds the returned model’s objective
+    suboptimality under the relative stopping criterion ([results](docs/API.md#results)).
   - Its steps use efficient projections onto the simplex and the top-*k* cone [3, 4], which
-    C++ and MATLAB also provide directly.
+    C++ also provides directly.
 
 ## Installation
 
@@ -83,7 +80,6 @@ options:
 | Rust | `cargo add libsdca` | [docs/RUST.md](docs/RUST.md) |
 | C++ (header-only) | CMake target `libsdca::libsdca` | [docs/CPP.md](docs/CPP.md) |
 | C | CMake target `libsdca::sdca_c` (`-DSDCA_BUILD_C_API=ON`) | [docs/C.md](docs/C.md) |
-| MATLAB / Octave | `run matlab/make.m` / `tests/matlab/run_octave_tests.sh` | [docs/MATLAB.md](docs/MATLAB.md) |
 
 <details>
 <summary>conda environment</summary>
@@ -113,15 +109,21 @@ CMake and BLAS options are in [DEPENDENCIES.md](DEPENDENCIES.md).
 <details>
 <summary>Wheels, GPU and compiler requirements</summary>
 
-- **Wheels:** Prebuilt for Linux `x86_64` (`manylinux_2_28`) and macOS 11+ `arm64`; other
-  platforms build from the sdist with a C++11 compiler.
+- **Wheels:** Prebuilt for Linux `x86_64` (`manylinux_2_28`, OpenBLAS from the
+  `scipy-openblas32` package, which `pip` installs with it) and macOS 11+ `arm64`
+  (Accelerate); other platforms build from the sdist with a C++11 compiler and link
+  a system CBLAS when one is found ([BLAS](docs/API.md#blas)). The build uses `CC` and `CXX` when
+  set, else the compiler of the Python installation, else `c++`, `g++` or `clang++` on `PATH`.
 - **GPU:** CUDA needs Linux, an NVIDIA GPU and a compatible driver. The PyTorch examples
-  use CUDA when available; `jax-cuda` installs the CUDA 13 runtime and Triton (Python 3.11+,
-  driver 580+). NumPy, scikit-learn, Rust, C, C++ and MATLAB run on CPU.
-- **Compilers:** PyTorch and JAX compile small C++ extensions on first use when a C++17
-  compiler and Python headers are present (`build-essential python3-dev` on Debian/Ubuntu,
-  `xcode-select --install` on macOS); otherwise they fall back with a one-time warning
-  ([build tools](docs/TORCH.md#build-tools)). uv-managed and conda Pythons include headers.
+  use CUDA when available; `jax-cuda` installs the CUDA 13 runtime (Python 3.11+, driver
+  580+) and Triton. The fused kernels launch through jax-triton 0.5 on Python 3.12+,
+  or a C++17 XLA FFI handler built on first use. NumPy, scikit-learn, Rust, C and C++ run on CPU.
+- **Compilers:** PyTorch and JAX compile their CPU kernels on first use, which needs a C++17
+  compiler and Python headers (`build-essential python3-dev` on Debian/Ubuntu,
+  `xcode-select --install` on macOS); without them PyTorch and JAX CPU calls run the same
+  kernels in the prebuilt native library and PyTorch CUDA calls launch them through Python,
+  with a one-time warning ([build tools](docs/TORCH.md#build-tools)). uv-managed and conda
+  Pythons include headers.
 
 </details>
 
@@ -164,7 +166,7 @@ y = (X @ rng.normal(size=(10, 3))).argmax(axis=1)
 
 model = libsdca.fit(X, y)                                  # cross-entropy (softmax regression)
 print(model.status, model.score(X, y))
-model = libsdca.fit(X, y, libsdca.TopKHingeBeta(k=2))      # top-2 SVM
+model = libsdca.fit(X, y, libsdca.TopKHinge(k=2))          # top-2 SVM
 print(model.status, model.score(X, y))
 ```
 
@@ -183,7 +185,7 @@ y = (X @ rng.normal(size=(10, 3))).argmax(axis=1)
 
 clf = SDCAClassifier().fit(X, y)                          # cross-entropy
 print(clf.status_, clf.score(X, y))
-clf = SDCAClassifier("topk_hinge_beta", k=2).fit(X, y)    # top-2 SVM
+clf = SDCAClassifier("topk_hinge", k=2).fit(X, y)         # top-2 SVM
 print(clf.status_, clf.score(X, y))
 ```
 
@@ -213,7 +215,8 @@ fn main() -> libsdca::Result<()> {
 
 After the [CMake installation](#other-interfaces) (*C++ and C from source*), compile this as
 a C++11 program with the installed include directory and
-`-DBLAS_BUILTIN -pthread -fno-fast-math -ffp-contract=off` (a CMake consumer is in
+`-DBLAS_BUILTIN -pthread -fno-fast-math -ffp-contract=off` (or `-DBLAS_DEFAULT_LOCAL_HEADER`
+and a CBLAS such as `-lopenblas`; a CMake consumer is in
 [examples/cpp](examples/cpp)):
 
 <!-- smoke: cpp -->
@@ -263,9 +266,9 @@ int main(void) {
     const double scores[] = {0.3, -0.8, 1.2};
     const int64_t label[] = {0};
     double values[1], gradients[3];
-    struct sdca_loss loss = SDCA_LOSS_INIT;               /* cross-entropy */
+    struct sdca_loss loss = SDCA_LOSS_INIT(SDCA_LOSS_CROSS_ENTROPY);
     struct sdca_execution execution = SDCA_EXECUTION_INIT;
-    struct sdca_targets targets = SDCA_TARGETS_INIT;      /* class labels */
+    struct sdca_targets targets = SDCA_TARGETS_INIT;  /* class labels */
     targets.labels = label;
     int status = sdca_loss_evaluate(&loss, &execution, SDCA_DTYPE_FLOAT64, 1, 3, scores,
                                     &targets, values, gradients);
@@ -277,22 +280,7 @@ int main(void) {
 }
 ```
 
-### MATLAB / Octave
-
-In MATLAB, `run matlab/make.m; addpath matlab` builds the gateways (with a configured MEX
-C++ compiler). In Octave, run `tests/matlab/run_octave_tests.sh`, then `addpath build/octave`.
-
-<!-- smoke: matlab -->
-```matlab
-X = [1 0 -1; 0 1 -1];    % 2 features, 3 examples
-Y = [1 2 3];             % labels in 1:3
-model = matsdca_fit(X, Y);                                             % cross-entropy
-model = matsdca_fit(X, Y, struct('loss', 'topk_hinge_beta', 'k', 2));  % top-2 hinge
-[~, predicted] = max(model.W' * X);
-```
-
-More examples: [examples/](examples), [rust/examples](rust/examples) and
-[matlab/demo.m](matlab/demo.m).
+More examples: [examples/](examples) and [rust/examples](rust/examples).
 
 ## Documentation
 
@@ -301,11 +289,12 @@ An index of the guides is in [docs/](docs/README.md).
 - [API reference](docs/API.md): loss formulas, names across languages, options, precision,
   results, threads, environment variables and known limits
 - Interface guides: [Python](docs/PYTHON.md), [PyTorch](docs/TORCH.md),
-  [JAX](docs/JAX.md), [Rust](docs/RUST.md), [C++](docs/CPP.md), [C](docs/C.md),
-  [MATLAB](docs/MATLAB.md)
+  [JAX](docs/JAX.md), [Rust](docs/RUST.md), [C++](docs/CPP.md), [C](docs/C.md)
+- [Benchmarks and numerical validation](benchmarks/README.md) (summary; the
+  [technical report](https://mlapin.github.io/libsdca/report/) has the details)
 - [Dependencies](DEPENDENCIES.md), [contributing](CONTRIBUTING.md),
   [guide for AI coding assistants](AGENTS.md) and [changelog](CHANGELOG.md)
-- [Project page](https://mlapin.github.io/libsdca/) and technical report
+- [Project page](https://mlapin.github.io/libsdca/)
 
 ## Citation
 
@@ -339,7 +328,7 @@ introduce the top-*k* losses, and the technical report describes the library:
 
 @misc{lapin2026libsdca,
   title        = {libsdca: Accurate and Fast Classification Losses for {SDCA} and Neural Networks},
-  author       = {Lapin, Max},
+  author       = {Lapin, Maksim},
   year         = {2026},
   howpublished = {Technical report, \url{https://mlapin.github.io/libsdca/report/}}
 }

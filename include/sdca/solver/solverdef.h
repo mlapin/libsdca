@@ -6,10 +6,11 @@
 #include <cstdint>
 #include <sstream>
 
-#include "sdca/prox/proxdef.h"
+#include "sdca/core/project_base.h"
 #include "sdca/utility/types.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 enum class solver_status {
   none = 0,
@@ -94,8 +95,14 @@ struct stopping_criteria {
   size_type full_pass_epoch = 50;
   // Recompute W = W0 + X A' at each evaluation (the dual is from A either way).
   bool recompute_primal = true;
-  // The hinge projections' precision (projection_precision); float64 by default.
-  projection_precision projection = projection_precision::float64;
+  // The checks of a training kernel K, relative to sqrt(K_ii K_jj): |K_ij - K_ji| at most
+  // kernel_symmetry, |K_ij| at most 1 + kernel_cauchy_schwarz (positive semidefinite K meet
+  // both exactly). K comes from the caller, computed in any precision and order, so these are
+  // defaults rather than roundings of the library: 1e-5 takes a float32 Gram of up to about
+  // 80 features summed in any order (twice gamma_d(float) apart), 1e-3 rejects grossly
+  // indefinite kernels only.
+  double kernel_symmetry = 1e-5;
+  double kernel_cauchy_schwarz = 1e-3;
   // Threads of the evaluations and input checks (the epochs are sequential):
   // the default takes SDCA_NUM_THREADS, else 0: automatic (the available
   // CPUs, as the work allows); 1 is serial.
@@ -127,6 +134,6 @@ struct stopping_criteria {
   }
 };
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

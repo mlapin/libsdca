@@ -7,8 +7,9 @@
 #include <stdexcept>
 
 #include "sdca/utility/types.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 template <typename Input, typename Output, typename Evaluation>
 struct dataset {
@@ -38,6 +39,6 @@ struct dataset {
   }
 };
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

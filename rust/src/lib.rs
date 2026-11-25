@@ -25,8 +25,8 @@
 //! assert_eq!((model.status(), model.predict(x)?), (Status::Solved, vec![0, 1, 2]));
 //!
 //! let scores = model.decision_function(x)?;
-//! let (losses, gradients) = Loss::topk_hinge(2).loss_and_grad(Matrix::new(&scores, 3, 3)?, &y)?;
-//! assert_eq!((losses.len(), gradients.len()), (3, 9));
+//! let (losses, gradients, report) = Loss::topk_hinge(2).loss_and_grad(Matrix::new(&scores, 3, 3)?, &y)?;
+//! assert_eq!((losses.len(), gradients.len(), report.invalid_rows), (3, 9, 0));
 //! # Ok::<(), libsdca::Error>(())
 //! ```
 //!
@@ -47,16 +47,18 @@ mod matrix;
 mod model;
 mod names;
 mod native;
+mod options;
 mod real;
 mod settings;
 mod solver;
 mod targets;
 
 pub use error::{Error, Result};
-pub use loss::Loss;
+pub use loss::{Loss, LossReport};
 pub use matrix::Matrix;
 pub use model::{Evaluation, Model};
-pub use names::{Precision, ProjectionPrecision, Shrinking, Status};
+pub use names::{Precision, Shrinking, Status, TopKVariant};
+pub use options::Options;
 pub use real::Real;
 pub use settings::{Settings, Threads};
 pub use solver::{Input, Solver, Start};

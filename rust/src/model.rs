@@ -71,7 +71,7 @@ impl Evaluation {
 ///
 /// let x = Matrix::new(&[1.0, 0.0, 0.0, 1.0, -1.0, -1.0], 3, 2)?;
 /// let model = Solver::new(Loss::topk_hinge(2)).fit(x, &[0, 1, 2])?;
-/// assert_eq!(model.loss(), Loss::TopKHingeBeta { k: 2, gamma: 0.0 });
+/// assert_eq!(model.loss(), Loss::topk_hinge(2));
 /// assert_eq!((model.num_classes(), model.num_features()), (3, Some(2)));
 /// assert_eq!((model.weights().map(<[f64]>::len), model.dual().len()), (Some(6), 9));
 /// let last = model.history().last().expect("an evaluation at the end");

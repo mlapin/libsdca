@@ -29,6 +29,26 @@
 #pragma clang diagnostic pop
 #endif
 
+// Results of solves that differ only in their thread counts (or instruction sets): the same
+// bits on the built-in products; an external BLAS rounds its dot products as it will, so
+// there they agree to a tolerance relative to the largest entry.
+template <typename T>
+::testing::AssertionResult same_solves(const std::vector<T>& a, const std::vector<T>& b) {
+  if (a.size() != b.size()) return ::testing::AssertionFailure() << "different sizes";
+#if defined(BLAS_BUILTIN)
+  if (a == b) return ::testing::AssertionSuccess();
+  return ::testing::AssertionFailure() << "not the same bits";
+#else
+  double scale = 0;
+  for (const T& v : a) scale = std::max(scale, std::abs(static_cast<double>(v)));
+  const double tol = 1e3 * static_cast<double>(std::numeric_limits<T>::epsilon()) * scale;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (!(std::abs(static_cast<double>(a[i]) - static_cast<double>(b[i])) <= tol))
+      return ::testing::AssertionFailure() << "entry " << i << ": " << a[i] << " vs " << b[i];
+  return ::testing::AssertionSuccess();
+#endif
+}
+
 // Whether long double extends the precision and exponent range of double
 // (x87, binary128). Where it is double (Apple arm64, MSVC), the extended
 // retries have the range of double: tests beyond it expect an exception or

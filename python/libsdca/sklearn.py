@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import warnings
 from collections.abc import Callable
+from copy import copy
 from typing import Any
 
 import numpy as np
@@ -17,8 +19,18 @@ from sklearn.utils.multiclass import check_classification_targets
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.validation import validate_data as _validate_data
 
-from ._core import MULTILABEL, OBJECTIVES
-from ._numpy import LOSSES, FloatArray, Kernel, Loss, Model, _log_softmax, fit
+from . import _frontend as _f
+from ._native import (
+    LOSSES,
+    MULTILABEL,
+    OBJECTIVES,
+    FloatArray,
+    Kernel,
+    Loss,
+    Model,
+    _log_softmax,
+    fit,
+)
 
 __all__ = ["ConvergenceWarning", "SDCAClassifier"]
 
@@ -38,10 +50,12 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
 
     Args:
         loss: A single-label loss name: "cross_entropy", "topk_cross_entropy",
-            "multiclass_hinge", "topk_hinge_alpha" or "topk_hinge_beta".
+            "multiclass_hinge" or "topk_hinge".
         C: Loss weight, finite and positive.
         k: The top-k parameter of the top-k losses, an integer in [1, n_classes - 1]; None
             for the other losses (giving it to one of them raises ValueError).
+        variant: The variant of topk_hinge, "alpha" or "beta" (None: "beta"); None for the
+            other losses.
         gamma: The smoothing of the hinges, finite and >= 0 (None: 0, nonsmooth); None for
             the other losses.
         tol: Relative duality gap of status "solved".
@@ -78,6 +92,7 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
         *,
         C: float = 1.0,
         k: int | None = None,
+        variant: str | None = None,
         gamma: float | None = None,
         tol: float = 1e-3,
         max_iter: int = 1000,
@@ -92,6 +107,7 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
         self.loss = loss
         self.C = C
         self.k = k
+        self.variant = variant
         self.gamma = gamma
         self.tol = tol
         self.max_iter = max_iter
@@ -109,32 +125,18 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
         return tags
 
     def _loss(self) -> Loss:
-        """The loss object of the parameters loss, k and gamma."""
-        if not isinstance(self.loss, str):
-            raise TypeError(f"loss must be a string, not {type(self.loss).__name__}")
-        if self.loss not in _SINGLE_LABEL:
-            raise ValueError(f"loss must be one of {', '.join(_SINGLE_LABEL)}, not {self.loss!r}")
-        cls = LOSSES[self.loss]
-        fields = cls.__dataclass_fields__  # pyright: ignore[reportAttributeAccessIssue]
-        params: dict[str, Any] = {}
-        for name in ("k", "gamma"):
-            value = getattr(self, name)
-            if value is None:
-                continue
-            if name not in fields:
-                raise ValueError(f"loss {self.loss!r} takes no {name}; leave {name}=None")
-            params[name] = value
-        if "k" in fields and "k" not in params:
-            raise ValueError(f"loss {self.loss!r} needs k")
-        return cls(**params)
+        """The loss object of the parameters loss, k, variant and gamma."""
+        loss = _f.check_choice(self.loss, "loss", _SINGLE_LABEL)
+        names = ("k", "variant", "gamma")
+        params = {name: getattr(self, name) for name in names if getattr(self, name) is not None}
+        return LOSSES[loss](**params)
 
     def _threads(self) -> int | None:
         """num_threads of n_jobs, as in joblib: -1 all CPUs, -2 all but one, ..."""
         jobs = self.n_jobs
         if jobs is None:
             return None
-        if isinstance(jobs, bool) or not isinstance(jobs, int | np.integer):
-            raise TypeError(f"n_jobs must be None or an integer, not {type(jobs).__name__}")
+        jobs = _f.check_integer(jobs, "n_jobs", -(2**63))
         if jobs == 0:
             raise ValueError("n_jobs must not be 0")
         if jobs > 0:
@@ -149,9 +151,12 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
         if self.kernel not in ("linear", "precomputed"):
             raise ValueError("kernel must be 'linear' or 'precomputed'")
         features = getattr(self, "n_features_in_", None)
-        x, labels = validate_data(self, X, y, dtype=[np.float64, np.float32])
+        # validate_data updates feature metadata before the solver can reject a fit.
+        validated = copy(self)
+        x, labels = validate_data(validated, X, y, dtype=[np.float64, np.float32])
         check_classification_targets(labels)
         classes, encoded = np.unique(labels, return_inverse=True)
+        label_digest = (encoded.dtype.str, encoded.shape, hashlib.sha256(encoded).digest())
         if len(classes) < 2:
             raise ValueError(f"Training needs at least two classes; got {len(classes)} class")
         precomputed = self.kernel == "precomputed"
@@ -164,6 +169,7 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
             self.warm_start
             and previous is not None
             and np.array_equal(known, classes)
+            and getattr(self, "_fit_label_digest", None) == label_digest
             and previous.loss == loss
             and previous.kernel == precomputed
             and features == x.shape[1]
@@ -187,6 +193,12 @@ class SDCAClassifier(ClassifierMixin, BaseEstimator):
             precision=self.precision,
             num_threads=self._threads(),
         )
+        self.n_features_in_ = validated.n_features_in_
+        if hasattr(validated, "feature_names_in_"):
+            self.feature_names_in_ = validated.feature_names_in_
+        elif hasattr(self, "feature_names_in_"):
+            del self.feature_names_in_
+        self._fit_label_digest = label_digest
         self.model_ = model
         self.classes_ = classes
         if model.weights is None:

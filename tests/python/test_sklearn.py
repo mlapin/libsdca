@@ -8,8 +8,8 @@ import libsdca
 import numpy as np
 import pytest
 from child_process import run_python
-from libsdca import CrossEntropy, TopKCrossEntropy, TopKHingeBeta
-from loss_references import primal
+from conformance import references as oracle
+from libsdca import CrossEntropy, TopKCrossEntropy, TopKHinge
 
 HAVE_SKLEARN = importlib.util.find_spec("sklearn") is not None
 
@@ -82,7 +82,7 @@ class ModuleFunctionTests:
 
     def test_native_invalid_arguments_raise_value_error(self):
         with pytest.raises(ValueError, match="k must"):
-            libsdca.loss_and_grad([[0.0, 1.0, 2.0]], [0], TopKHingeBeta(3))
+            libsdca.loss_and_grad([[0.0, 1.0, 2.0]], [0], TopKHinge(3))
 
     def test_import_loads_no_framework(self):
         code = (
@@ -115,10 +115,21 @@ class ClassifierTests:
 
         self.Classifier, self.Warning = SDCAClassifier, ConvergenceWarning
 
+    def test_failed_refit_preserves_feature_count(self):
+        x, y = blobs()
+        estimator = self.Classifier().fit(x, y)
+        expected = estimator.predict(x)
+        with pytest.raises(ValueError, match="at least two classes"):
+            estimator.fit(x[:, :1], np.zeros(len(y)))
+        np.testing.assert_array_equal(estimator.predict(x), expected)
+
     def test_check_estimator(self, subtests: pytest.Subtests):
         from sklearn.utils.estimator_checks import check_estimator
 
-        for estimator in [self.Classifier(), self.Classifier("topk_hinge_alpha", k=1, gamma=0.5)]:
+        for estimator in [
+            self.Classifier(),
+            self.Classifier("topk_hinge", k=1, variant="alpha", gamma=0.5),
+        ]:
             with subtests.test(estimator=estimator), warnings.catch_warnings():
                 warnings.simplefilter("ignore", self.Warning)
                 check_estimator(estimator)
@@ -207,7 +218,7 @@ class ClassifierTests:
         for loss, params in [
             ("cross_entropy", {}),
             ("multiclass_hinge", {"gamma": 0.1}),
-            ("topk_hinge_beta", {"k": 1, "gamma": 0.1}),
+            ("topk_hinge", {"k": 1, "gamma": 0.1}),
         ]:
             with subtests.test(loss=loss):
                 options: dict[str, Any] = dict(tol=1e-6, max_iter=5000, **params)
@@ -221,8 +232,15 @@ class ClassifierTests:
                         clf.decision_function(x), reference.decision_function(x), atol=1e-2
                     )
         # Another k starts cold instead of from an infeasible block.
-        clf = self.Classifier("topk_hinge_beta", k=1, gamma=0.1, warm_start=True).fit(x, y)
+        clf = self.Classifier("topk_hinge", k=1, gamma=0.1, warm_start=True).fit(x, y)
         assert clf.set_params(k=2).fit(x, y).status_ == "solved"
+
+    def test_warm_start_with_changed_training_labels(self):
+        x, y = blobs()
+        warm = self.Classifier(warm_start=True, random_state=0).fit(x, y)
+        warm.fit(x, y[::-1])
+        cold = self.Classifier(random_state=0).fit(x, y[::-1])
+        np.testing.assert_array_equal(warm.dual_coef_, cold.dual_coef_)
 
     def test_validation_and_warnings(self):
         from sklearn.exceptions import NotFittedError
@@ -242,9 +260,10 @@ class ClassifierTests:
             ("cross_entropy", {"gamma": 0.5}),
             ("topk_cross_entropy", {"k": 2, "gamma": 0.5}),
             ("multiclass_hinge", {"k": 2}),
-            ("topk_hinge_beta", {}),
+            ("multiclass_hinge", {"variant": "alpha"}),
+            ("topk_hinge", {}),
         ]:
-            with pytest.raises(ValueError, match="k|gamma"):
+            with pytest.raises(TypeError, match="k|gamma|variant"):
                 self.Classifier(loss, **params).fit(x, y)
         with pytest.raises(TypeError):
             self.Classifier("topk_cross_entropy", k=2.0).fit(x, y)  # pyright: ignore[reportArgumentType]
@@ -266,7 +285,7 @@ class ClassifierTests:
 
     def test_random_state_and_n_jobs(self):
         x, y = blobs()
-        options: dict[str, Any] = dict(loss="topk_hinge_beta", k=2, tol=0, max_iter=3)
+        options: dict[str, Any] = dict(loss="topk_hinge", k=2, tol=0, max_iter=3)
         a = self.Classifier(random_state=1, **options).fit(x, y)
         b = self.Classifier(random_state=1, n_jobs=-1, **options).fit(x, y)
         c = self.Classifier(random_state=2, n_jobs=2, **options).fit(x, y)
@@ -283,7 +302,7 @@ class ClassifierTests:
             warnings.simplefilter("error", self.Warning)
             pipeline = make_pipeline(StandardScaler(), self.Classifier("topk_cross_entropy", k=2))
             scores = cross_val_score(pipeline, x, y, cv=3)
-            grid = {"loss": ["multiclass_hinge", "topk_hinge_beta"], "k": [None, 1]}
+            grid = {"loss": ["multiclass_hinge", "topk_hinge"], "k": [None, 1]}
             search = GridSearchCV(self.Classifier(), {"C": [0.1, 10.0]}, cv=3).fit(x, y)
             # The grid holds combinations a loss does not take: they fail to fit (nan score).
             with warnings.catch_warnings():
@@ -293,7 +312,7 @@ class ClassifierTests:
         assert search.best_params_["C"] in (0.1, 10.0)
         assert hinges.best_params_ in (
             {"loss": "multiclass_hinge", "k": None},
-            {"loss": "topk_hinge_beta", "k": 1},
+            {"loss": "topk_hinge", "k": 1},
         )
 
     def test_objectives_match_scikit_learn_solvers(self):
@@ -320,8 +339,8 @@ class ClassifierTests:
                 reference.fit(x, y)
             ours = self.Classifier(loss, tol=1e-10, max_iter=100000).fit(x, y)
             assert ours.status_ == "solved"
-            mine = primal(x, ours.coef_.T, y, loss, 1.0)
-            theirs = primal(x, reference.coef_.T, y, loss, 1.0)
+            mine = float(oracle.primal(oracle.named(loss), x, ours.coef_.T, y, 1.0))
+            theirs = float(oracle.primal(oracle.named(loss), x, reference.coef_.T, y, 1.0))
             # The guaranteed optimum is no higher than any other solver's, and close to it.
             assert mine <= theirs * (1 + 1e-9), loss
             assert theirs - mine <= 1e-4 * mine, loss
@@ -329,9 +348,9 @@ class ClassifierTests:
 
     def test_non_contiguous_integer_labels(self):
         x, y = blobs()
-        expected = libsdca.fit(x, y, TopKHingeBeta(2, gamma=0.5), tol=1e-8)
+        expected = libsdca.fit(x, y, TopKHinge(2, gamma=0.5), tol=1e-8)
         for classes in (np.array([-5, 2, 9]), np.array([2**40, 3, 7], np.int64)):
-            clf = self.Classifier("topk_hinge_beta", k=2, gamma=0.5, tol=1e-8, random_state=0)
+            clf = self.Classifier("topk_hinge", k=2, gamma=0.5, tol=1e-8, random_state=0)
             clf.fit(np.asfortranarray(x), classes[y])
             np.testing.assert_array_equal(clf.classes_, np.sort(classes))
             # classes_ is sorted: the score columns permute.
@@ -345,16 +364,22 @@ class ClassifierTests:
         clf = self.Classifier("cross_entropy", tol=1e-7).fit(x, y)
         assert clf.model_.loss == CrossEntropy()
         np.testing.assert_allclose(clf.predict_proba(x).sum(axis=1), 1.0)
-        for name in ("multiclass_hinge", "topk_hinge_alpha", "topk_hinge_beta"):
+        for name, variant in (
+            ("multiclass_hinge", None),
+            ("topk_hinge", "alpha"),
+            ("topk_hinge", None),
+        ):
             for gamma in (0.0, 0.5):
                 k = None if name == "multiclass_hinge" else 2
-                c1 = self.Classifier(name, k=k, gamma=gamma, tol=0, max_iter=20)
+                c1 = self.Classifier(name, k=k, variant=variant, gamma=gamma, tol=0, max_iter=20)
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", self.Warning)
                     c1.fit(x, y)
                 assert c1.model_.loss.name == name
+                expected = variant or ("beta" if name == "topk_hinge" else None)
+                assert getattr(c1.model_.loss, "variant", None) == expected
                 assert not hasattr(c1, "predict_proba")
-        # No aliases; smoothing is gamma.
-        for name in ("ce", "softmax", "svm", "topk_hinge", "topk_hinge_beta_smooth"):
+        # No aliases; the variant and the smoothing are parameters.
+        for name in ("ce", "softmax", "svm", "topk_hinge_alpha", "topk_hinge_beta_smooth"):
             with pytest.raises(ValueError, match="loss must be one of"):
                 self.Classifier(name).fit(x, y)
