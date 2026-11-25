@@ -6,9 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 import interfaces
+import pytest
 
 
 def test_compiled_helpers_without_their_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -22,4 +21,3 @@ def test_compiled_helpers_without_their_sources(tmp_path: Path, monkeypatch: pyt
     for interface in ("cpp_kernel", "cpp_loss", "rust"):
         with pytest.raises(pytest.skip.Exception, match="source distribution"):
             session.require(interface)
-
