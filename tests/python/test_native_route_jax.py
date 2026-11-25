@@ -54,6 +54,31 @@ def test_the_native_route_gives_the_handlers_bytes(tmp_path: Path) -> None:
     assert native["warnings"] == []
 
 
+def test_a_static_label_smoothing_reaches_the_kernels_in_float64() -> None:
+    """A static label_smoothing (rows.label_smoothing) wins over the eps array, which holds it
+    in the logits' work type: float64 work of float32 logits sees 0.1, not float32(0.1), as
+    through the FFI handler. eps is read only for a traced smoothing (rows: NaN)."""
+    z = np.array([[-2.0, -1.0, -1000.0, 1.0, 5.0, 3.0, -5.0]], np.float32)
+    y = np.array([2])
+    none = jnp.zeros((0,), jnp.float32)
+    eps = jnp.asarray(0.1, jnp.float32)
+    want = libsdca.loss_and_grad(
+        z, y, libsdca.CrossEntropy(), precision="float64", label_smoothing=0.1
+    )
+    for smoothing in (0.1, float("nan")):
+        rows = Rows(KINDS["cross_entropy"], label_smoothing=smoothing, precision=2)
+        shape = jax.ShapeDtypeStruct(z.shape, z.dtype)
+        with jax.default_device(jax.devices("cpu")[0]):
+            grad = _jax_native.call(
+                shape, jnp.asarray(z), jnp.asarray(y), none, eps, jnp.ones((1,), jnp.float32),
+                rows, True,
+            )  # fmt: skip
+        if smoothing == smoothing:
+            assert np.asarray(grad).tobytes() == want[1].tobytes(), (grad, want[1])
+        else:  # traced: the eps array's float32(0.1)
+            assert np.asarray(grad).tobytes() != want[1].tobytes()
+
+
 @pytest.mark.parametrize("zero_copy", [True, False], ids=["buffer_callback", "pure_callback"])
 def test_both_callbacks_give_the_native_librarys_bytes(
     monkeypatch: pytest.MonkeyPatch, zero_copy: bool

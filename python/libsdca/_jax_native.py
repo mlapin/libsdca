@@ -10,6 +10,7 @@ copies the arguments and results.
 from __future__ import annotations
 
 import functools
+import math
 from typing import Any
 
 import jax
@@ -200,7 +201,10 @@ def _rows(
     target_bytes = target.itemsize * (1 if role == "labels" else classes)
     for i in range(groups):
         factor, factors = _group_scale(up, n, i, i * per)
-        r = rows if not e.size else rows._replace(label_smoothing=float(e[i if e.size > 1 else 0]))
+        # A static smoothing (float64, as the FFI handler takes it) wins; e carries a traced one
+        # in the logits' work type.
+        traced = e.size and math.isnan(rows.label_smoothing)
+        r = rows._replace(label_smoothing=float(e[i if e.size > 1 else 0])) if traced else rows
         row0 = i * per
         _native.loss_rows(
             r,
