@@ -7,11 +7,13 @@ builds on first use, "on" also retries a recorded failure, "off" never builds (C
 then take the same kernels in the native library: _frontend.cpu_route). Builds are cached
 in SDCA_CACHE_DIR (default $XDG_CACHE_HOME/libsdca, else ~/.cache/libsdca), one directory
 per source, headers, framework build, compiler and flags; a failed build is recorded there
-and skipped by later processes for RETRY seconds.
+and skipped by later processes for RETRY seconds. Processes that need the same build at once
+(ranks, workers) take turns on a lock file: one compiles, the others load its library.
 """
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import logging
@@ -24,7 +26,7 @@ import sysconfig
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -163,6 +165,25 @@ def _compile(build: Build, target: Path) -> None:
             shutil.rmtree(private, ignore_errors=True)
 
 
+@contextlib.contextmanager
+def _exclusive(directory: Path) -> Iterator[None]:
+    """Hold the lock file of a build directory, so that one process compiles it at a time
+    (each compile of the framework's headers takes gigabytes of memory). Without fcntl
+    (Windows) processes compile at once and the first complete build wins."""
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    with open(directory.with_name(directory.name + ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 class BuildFailure(RuntimeError):
     """The compiler failed: recorded, as the same build would fail again."""
 
@@ -179,6 +200,26 @@ def _recorded(record: Path, env: str) -> str | None:
     return f"an earlier build failed ({reason}); see {record}, or set {env}=on to retry"
 
 
+def _build_once(build: Build, path: Path, record: Path) -> str | None:
+    """Compile path unless another process built it (or recorded its failure) while this
+    one waited for the lock; None, else why it is not built."""
+    if path.is_file():
+        return None
+    recorded = _recorded(record, build.env)
+    if recorded is not None:
+        return recorded
+    _log.warning("libsdca: building %s once in %s", build.what, path.parent)
+    try:
+        _compile(build, path)
+    except BuildFailure as error:
+        try:
+            record.write_text(f"{str(error).splitlines()[0]}\n\n{error}\n")
+        except OSError:
+            pass
+        return str(error).splitlines()[0]
+    return None
+
+
 @functools.cache
 def load(build: Build, loader: Callable[[Path], object]) -> tuple[object | None, str]:
     """(loaded library, "") of a build, compiled first where needed, or (None, why not).
@@ -192,20 +233,13 @@ def load(build: Build, loader: Callable[[Path], object]) -> tuple[object | None,
         path = library(build)
         record = path.parent.with_name(path.parent.name + "." + FAILED)
         if not path.is_file():
-            recorded = _recorded(record, build.env)
-            if recorded is not None:
-                return None, recorded
-            _log.warning("libsdca: building %s once in %s", build.what, path.parent)
             try:
-                _compile(build, path)
-            except BuildFailure as error:
-                try:
-                    record.write_text(f"{str(error).splitlines()[0]}\n\n{error}\n")
-                except OSError:
-                    pass
-                return None, str(error).splitlines()[0]
+                with _exclusive(path.parent):
+                    reason = _build_once(build, path, record)
             except OSError as error:
                 return None, f"{build.what} did not build ({error})"
+            if reason is not None:
+                return None, reason
         try:
             return loader(path), ""
         except Exception as error:  # noqa: BLE001 - reported as the reason

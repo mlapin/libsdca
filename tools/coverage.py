@@ -67,6 +67,20 @@ def _default_jobs() -> int:
     return os.cpu_count() or 2
 
 
+# Compiler memory of one --coverage build job of the large translation units (about 3.6 GiB
+# measured): four at once nearly filled a 16 GiB runner.
+_BUILD_JOB_BYTES = 5 << 30
+
+
+def _build_jobs(jobs: int) -> int:
+    """jobs, capped so that the concurrent compiles fit in the physical memory."""
+    try:
+        memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        return jobs
+    return max(1, min(jobs, memory // _BUILD_JOB_BYTES))
+
+
 def cpp_tests(build: Path, jobs: int) -> None:
     """The C++ suites built with the built-in BLAS, so that it is covered too."""
     run(
@@ -82,7 +96,7 @@ def cpp_tests(build: Path, jobs: int) -> None:
         "-DCMAKE_CXX_FLAGS=--coverage -O1 -fprofile-update=atomic",
         "-DCMAKE_C_FLAGS=--coverage -O1 -fprofile-update=atomic",
     )
-    run("cmake", "--build", build / "cpp", "--parallel", str(jobs))
+    run("cmake", "--build", build / "cpp", "--parallel", str(_build_jobs(jobs)))
     run("ctest", "--test-dir", build / "cpp", "--output-on-failure", "--parallel", str(jobs))
 
 

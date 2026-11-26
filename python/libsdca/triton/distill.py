@@ -1397,8 +1397,10 @@ def _online_chunk(Z, Y, G, state, row, j, shift, valid, per_t, factor, C: tl.con
 # rows it takes: finite rows (BF16: whose scores differ in more than a quarter of the
 # classes, as _sparse_bfloat_rows takes the others), and for a gradient normalizers further
 # apart than _aligned_difference's threshold. _narrow_rescue runs the general path on the
-# rows it leaves.
-_NARROW = 32
+# rows it leaves. Its column loops are unrolled, and the compile time grows steeply with C
+# (minutes at 20 to 31 classes on an A100, in every process through jax-triton): from 12
+# classes the general path takes the rows, as fast or faster except float32 forward calls.
+_NARROW = 12
 _NARROW_ROWS, _NARROW_WARPS = 128, 4
 _GATE = 1024  # rows per _narrow_rescue program (a program none of whose rows is marked returns)
 _CHUNK_FLAGS = tl.constexpr(128)  # flags _narrow_rescue scans at a time
