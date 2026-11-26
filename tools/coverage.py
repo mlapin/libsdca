@@ -72,11 +72,28 @@ def _default_jobs() -> int:
 _BUILD_JOB_BYTES = 5 << 30
 
 
-def _build_jobs(jobs: int) -> int:
-    """jobs, capped so that the concurrent compiles fit in the physical memory."""
+def _memory() -> int | None:
+    """The memory the build may use: the physical memory, or a smaller cgroup limit (a
+    container sees the host's physical memory)."""
     try:
         memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     except (AttributeError, OSError, ValueError):
+        return None
+    for limit in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            text = Path(limit).read_text().strip()
+        except OSError:
+            continue
+        if text.isdigit():
+            memory = min(memory, int(text))
+        break
+    return memory
+
+
+def _build_jobs(jobs: int) -> int:
+    """jobs, capped so that the concurrent compiles fit in the memory."""
+    memory = _memory()
+    if memory is None:
         return jobs
     return max(1, min(jobs, memory // _BUILD_JOB_BYTES))
 
