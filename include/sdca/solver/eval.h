@@ -9,8 +9,9 @@
 #include "sdca/solver/eval/scores.h"
 #include "sdca/solver/eval/types.h"
 #include "sdca/solver/reporting.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 template <typename Data, template <typename> class Input, typename Dataset, typename Context>
 inline void evaluate_dataset(const Context& ctx, Dataset& d, solver_scratch<Data, Input>&,
@@ -24,6 +25,17 @@ inline void evaluate_dataset(const Context& ctx, Dataset& d, solver_scratch<Data
     throw;
   }
   reporting::eval_created(eval, id);
+}
+
+// The entries of an iterate: n m duals and the weights (d per class on features, a Gram row
+// per class on a kernel).
+template <typename Data, typename Output, typename Evaluation>
+inline size_type iterate_entries(const dataset<feature_input<Data>, Output, Evaluation>& d) {
+  return (d.num_examples() + d.num_dimensions()) * d.num_classes();
+}
+template <typename Data, typename Output, typename Evaluation>
+inline size_type iterate_entries(const dataset<kernel_input<Data>, Output, Evaluation>& d) {
+  return (d.num_examples() + d.in.num_train_examples) * d.num_classes();
 }
 
 template <typename Data, typename Result, typename Context>
@@ -55,13 +67,16 @@ inline void check_stopping_criteria(Context& ctx) {
     } else if (criteria.tol > 0 && gap + eval.gap_error <= eps_stop) {
       ctx.status = solver_status::solved;
     } else if (evals.size() > 1) {
-      // Check if the solver is making progress (the iterate's storage limits it)
+      // Check if the solver is making progress: the dual of the stored iterate is known to
+      // the rounding of its N entries in the coarser of Data and Work (gamma_N) times the
+      // magnitudes of its terms, plus the evaluation's rounding bound.
       const auto previous = evals.rbegin();
       const auto& before = previous[1];
-      const Work eps = 64 * max *
-                           std::max(std::numeric_limits<Work>::epsilon(),
-                                    static_cast<Work>(std::numeric_limits<Data>::epsilon())) +
-                       eval.gap_error;
+      const std::size_t entries = iterate_entries(ctx.train);
+      const double units = std::max(rounding_bound<Work>(entries), rounding_bound<Data>(entries));
+      const Work eps =
+          static_cast<Work>(units) * (std::abs(eval.dual_loss) + std::abs(eval.dual_regularizer)) +
+          eval.gap_error;
       if (eval.dual + eps < before.dual) {
         ctx.status = solver_status::no_progress;
         reporting::solver_stop_no_progress(eval, before);
@@ -81,6 +96,6 @@ inline void check_stopping_criteria(Context& ctx) {
   }
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

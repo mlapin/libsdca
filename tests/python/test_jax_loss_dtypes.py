@@ -83,7 +83,7 @@ class JaxLossDtypeTests:
                     x, teacher, temperature=2.0, reduction=r
                 ),
                 "proximal_distillation": lambda x, r: proximal_distillation_loss(
-                    x, teacher, temperature=2.0, alpha=0.5, reduction=r
+                    x, teacher, temperature=2.0, gamma=0.5, reduction=r
                 ),
             }
             for name, fn in cases.items():

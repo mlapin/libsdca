@@ -6,7 +6,7 @@ Forward and backward on wide rows, timed with CUDA events in alternating blocks.
 first checks that both implementations compute the same loss. Exit 1 when a speedup falls
 below its floor or libsdca needs more peak memory than the compiled reference. The floors
 sit below the recorded speedups (docs/TORCH.md, Benchmarks), so a failure means a
-regression, not host noise.
+regression, not timing noise.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import torch.nn.functional as F
 K, T = 5, 2.0
 # Logits ~ N(0, 9) and teachers within N(0, 1/4) of them, as the benchmarks. At 128,256
 # classes distillation is slower on rows whose (student - teacher) / T spans more than
-# +-2 around its mean (bf16 0.94x torch.compile at a teacher noise of 1).
+# +-2 around its mean (bf16 below torch.compile at a teacher noise of 1).
 SCALE, TEACHER_NOISE = 3.0, 0.5
 Loss = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
 

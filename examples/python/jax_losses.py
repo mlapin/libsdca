@@ -33,12 +33,12 @@ for i in range(101):
 # Same values as the NumPy loss_and_grad on the same scores.
 scores = x @ w
 values, _ = libsdca.loss_and_grad(
-    np.asarray(scores), np.asarray(y), libsdca.TopKHingeBeta(k=2, gamma=0.5)
+    np.asarray(scores), np.asarray(y), libsdca.TopKHinge(k=2, gamma=0.5)
 )
 np.testing.assert_allclose(float(objective(w, x, y)), values.mean(), rtol=1e-5)
 
-# Entropy supports higher derivatives; cross_entropy also takes class weights, an ignored
-# label, label smoothing and class probabilities, as torch.nn.functional.cross_entropy.
+# cross_entropy takes class weights, an ignored label, label smoothing and class
+# probabilities, as torch.nn.functional.cross_entropy.
 print("cross_entropy", float(cross_entropy(scores, y)))
 weight = jnp.linspace(0.5, 1.5, 5)
 print("weighted, smoothed", float(cross_entropy(scores, y, weight=weight, label_smoothing=0.1)))
@@ -47,14 +47,17 @@ print("topk_cross_entropy", float(topk_cross_entropy(scores, y, k=2)))
 print("topk_hinge beta", float(topk_hinge_loss(scores, y, k=2, variant="beta")))
 mask = jax.nn.one_hot(y, 5, dtype=bool).at[:, 0].set(True)
 print("multilabel_hinge", float(multilabel_hinge_loss(scores, mask, gamma=0.5)))
-hessian = jax.hessian(lambda z: cross_entropy(z, y[0]))(scores[0])
+# The kernels (backend="auto") give first derivatives; higher ones take the jax.numpy losses.
+hessian = jax.hessian(lambda z: cross_entropy(z, y[0], backend="composed"))(scores[0])
+p = jax.nn.softmax(scores[0])
+np.testing.assert_allclose(hessian, jnp.diag(p) - jnp.outer(p, p), atol=1e-6)
 print("entropy Hessian", hessian.shape)
 
 # vmap over a leading batch axis, reduction="none" per example.
 per_example = jax.vmap(lambda z, t: topk_cross_entropy(z, t, k=2, reduction="none"))
 print("vmap", per_example(scores.reshape(4, 16, 5), y.reshape(4, 16)).shape)
 
-# Distillation: both arguments are logits; the teacher gets no gradient.
+# Distillation: both arguments are logits; a differentiated teacher gets PyTorch's gradient.
 teacher = scores + 0.1 * jax.random.normal(key_t, scores.shape)
 g = jax.grad(lambda s: distillation_loss(s, teacher, temperature=2.0))(scores)
 zero = jax.grad(lambda s: distillation_loss(s, scores, temperature=2.0))(scores)

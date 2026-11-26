@@ -2,14 +2,13 @@ build*
 !build_*.py
 !python/build.py
 !rust/build.rs
-matlab/*.mex*
-matlab/data/
 CMakeLists.txt.user
 .DS_Store
 __pycache__/
 *.pyc
 python/*.so
 python/libsdca/*.so
+python/libsdca/_libsdca_native*.json
 *.egg-info/
 .ruff_cache/
 .coverage*

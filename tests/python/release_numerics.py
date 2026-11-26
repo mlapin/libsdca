@@ -30,6 +30,8 @@ from typing import Any
 import mpmath as mp
 import torch
 import torch.nn.functional as F
+from conformance.references import Block, Loss
+from conformance.references import reference as shared_reference
 from libsdca.torch import (
     distillation_loss,
     proximal_distillation_loss,
@@ -68,57 +70,32 @@ def check_entries(
     ]
 
 
-def reference(first: float, other: float, classes: int, label: int) -> tuple[Any, Any, Any, Any]:
+def _two_group(
+    loss: Loss, first: float, other: float, classes: int, label: int
+) -> tuple[Any, Any, Any, Any]:
     """Loss, target gradient, gradient of entry 0 when it is not the target (else None) and
-    gradient of each other competitor, of the row [first, other, other, ...]."""
-    gap = mp.mpf(first) - mp.mpf(other)
-    if gap >= 0:
-        e = mp.exp(-gap)
-        tail = (classes - 1) * e
-        loss = mp.log1p(tail) + (gap if label else 0)
-        first_p, other_p = 1 / (1 + tail), e / (1 + tail)
+    gradient of each other competitor, of the row [first, other, other, ...]
+    (conformance.references)."""
+    if label == 0:
+        row = (Block(first, 1, True), Block(other, classes - 1))
     else:
-        e = mp.exp(gap)
-        den = classes - 1 + e
-        loss = mp.log(den) - (gap if not label else 0)
-        first_p, other_p = e / den, 1 / den
-    target = -(classes - 1) * other_p if not label else -(first_p + (classes - 2) * other_p)
-    return loss, target, first_p if label else None, other_p
+        row = (Block(first, 1), Block(other, 1, True))
+        row += (Block(other, classes - 2),) if classes > 2 else ()
+    ref = shared_reference(loss, row)
+    if label == 0:
+        return ref.value, ref.gradient[0], None, ref.gradient[1]
+    other_entry = ref.gradient[2] if classes > 2 else None
+    return ref.value, ref.gradient[1], ref.gradient[0], other_entry
+
+
+def reference(first: float, other: float, classes: int, label: int) -> tuple[Any, Any, Any, Any]:
+    """cross_entropy of a two-group row (_two_group)."""
+    return _two_group(Loss("cross_entropy"), first, other, classes, label)
 
 
 def topk_reference(first: float, other: float, classes: int, label: int, k: int) -> tuple:
-    """Top-k entropy (k < classes) as reference() returns cross-entropy: from the active set
-    of the competitors, the k largest of them one by one and the rest by equal score. Tied
-    competitors have equal gradients, so one share per group is the share of each."""
-    if label == 0:
-        groups = [(mp.mpf(other) - mp.mpf(first), classes - 1)]
-    else:
-        groups = [(mp.mpf(first) - mp.mpf(other), 1), (mp.mpf(0), classes - 2)]
-    entries: list[tuple[Any, int, int]] = []  # (score - label score, count, group)
-    for group, (v, count) in sorted(enumerate(groups), key=lambda g: -g[1][0]):
-        single = min(count, k - len(entries)) if len(entries) < k else 0
-        entries += [(v, 1, group)] * single
-        if count > single:
-            entries.append((v, count - single, group))
-    capped, top, lse = 0, mp.mpf(0), mp.mpf(0)
-    for capped in range(k):
-        top = entries[capped][0]
-        lse = mp.log(mp.fsum(n * mp.exp(v - top) for v, n, _ in entries[capped:]))
-        if lse >= mp.log(k - capped):
-            break
-    free = k - capped
-    odds = (mp.fsum(v for v, _, _ in entries[:capped]) + free * (top + lse - mp.log(free))) / k
-    odds += mp.log(k)
-    mass = 1 / (1 + mp.exp(-odds))
-    shares = [
-        mass / k if i < capped else mass * free / k * mp.exp(v - top - lse)
-        for i, (v, _, _) in enumerate(entries)
-    ]
-    share = {group: s for s, (_, _, group) in reversed(list(zip(shares, entries, strict=True)))}
-    loss = mp.log1p(mp.exp(odds))
-    if label == 0:
-        return loss, -mass, None, share[0]
-    return loss, -mass, share[0], share.get(1)
+    """Top-k entropy (k < classes) of a two-group row (_two_group)."""
+    return _two_group(Loss("topk_cross_entropy", k=k), first, other, classes, label)
 
 
 # Gaps near and in the output's subnormal range, where entries built from sums of
@@ -159,18 +136,18 @@ def entropy_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[dict[
             represented = x[0, :2].double().cpu().tolist()
             labels = torch.tensor([0, 1], device=args.device)
             precisions = (None,) if dtype == torch.float64 else ("float32", "float64")
-            implementations = [("torch", p) for p in precisions]
+            implementations = [("composed", p) for p in precisions]
             if args.device == "cpu" and dtype in (torch.float32, torch.float64):
-                implementations += [("native", p) for p in precisions]
+                implementations += [("kernel", p) for p in precisions]
             if args.device == "cpu" and os.environ.get("SDCA_CPU_EXTENSION") in ("on", "1"):
-                # backend="native" bypasses the extension; "auto" takes it.
+                # With the CPU extension built, "auto" takes the same CPU kernels.
                 implementations += [("auto", p) for p in precisions]
             if args.device == "cuda":
                 implementations += [("auto", p) for p in precisions]
             for backend, precision in implementations:
                 work = torch.finfo(torch.float32 if precision == "float32" else torch.float64)
                 summed = classes * work.eps if topk and precision == "float32" else 0.0
-                native32 = topk and backend == "native" and precision == "float32"
+                native32 = topk and backend == "kernel" and precision == "float32"
                 floor = classes * work.tiny * work.eps / 2 if native32 else 0.0
                 z = x.detach().requires_grad_()
                 row: dict[str, Any] = dict(
@@ -226,52 +203,32 @@ def entropy_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[dict[
                 yield row
 
 
-def two_group(first: Any, other: Any, classes: int) -> tuple[Any, Any]:
-    """Probabilities of the first entry and of each of the classes - 1 others."""
-    e = mp.exp(mp.mpf(other) - mp.mpf(first))
-    return 1 / (1 + (classes - 1) * e), e / (1 + (classes - 1) * e)
-
-
-@functools.cache
 def distillation_reference(
     student: tuple[float, ...],
     teacher: tuple[float, ...],
     classes: int,
     temperature: float,
     alpha: float | None,
-    digits: int,
 ) -> tuple[Any, Any, Any]:
-    """Loss and first/other gradients of (proximal) distillation on two-group rows, at the
-    working digits (memoized: the represented rows repeat across dtypes).
-
-    The prox solves v = (s_1 - s_2) / T - alpha k (P(v) - Q), k = C / (C - 1), by bisection.
-    """
-    q, q_other = two_group(
-        mp.mpf(teacher[0]) / temperature, mp.mpf(teacher[1]) / temperature, classes
+    """Loss and first/other gradients of (proximal) distillation on two-group rows
+    (conformance.references)."""
+    row = (
+        Block(student[0], 1, teacher=teacher[0]),
+        Block(student[1], classes - 1, teacher=teacher[1]),
     )
-    d = (mp.mpf(student[0]) - mp.mpf(student[1])) / temperature
-    k = mp.mpf(classes) / (classes - 1)
     if alpha:
-        lo, hi = d - alpha * k, d + alpha * k
-        for _ in range(400):
-            v = (lo + hi) / 2
-            if v - d + alpha * k * (two_group(v, 0, classes)[0] - q) > 0:
-                hi = v
-            else:
-                lo = v
-        d = (lo + hi) / 2
-    p, p_other = two_group(d, 0, classes)
-    loss = -(q * mp.log(p) + (classes - 1) * q_other * mp.log(p_other))
-    if alpha:
-        loss += alpha * k * (p - q) ** 2 / 2
-    return loss, (p - q) / temperature, (p_other - q_other) / temperature
+        loss = Loss("proximal_distillation", temperature=temperature, alpha=alpha)
+    else:
+        loss = Loss("distillation", temperature=temperature)
+    ref = shared_reference(loss, row)
+    return ref.value, ref.gradient[0], ref.gradient[1]
 
 
 def distillation_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[dict[str, Any]]:
     """distillation_loss and proximal_distillation_loss against 100-digit references.
 
     Rows sum C terms; on CUDA the budget adds C working epsilons (recursive summation in the
-    tensor operations without Triton). The CPU extension and native library compensate them.
+    tensor operations without Triton). The CPU kernels compensate them.
     """
     pairs = ((0, 0), (5, 5), (1, 1 + 1 / 64), (1, 0), (0, 1), (20, 1), (1, 20), (40, 0), (0, 40))
     widths = WIDTHS if not args.quick else (2, 65, 4097)
@@ -286,7 +243,7 @@ def distillation_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[
             student, teacher = s[0, :2].double().tolist(), t[0, :2].double().tolist()
             for kind, temperature, alpha in settings:
                 expected = distillation_reference(
-                    tuple(student), tuple(teacher), classes, temperature, alpha, mp.mp.dps
+                    tuple(student), tuple(teacher), classes, temperature, alpha
                 )
                 for precision in precisions:
                     work = torch.float32 if precision == "float32" else torch.float64
@@ -308,7 +265,7 @@ def distillation_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[
                                 z,
                                 t,
                                 temperature=temperature,
-                                alpha=alpha,
+                                gamma=alpha,
                                 reduction="none",
                                 precision=precision,
                             )
@@ -359,7 +316,7 @@ def barron_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[dict[s
         loss = (
             F.cross_entropy(x, y)
             if implementation == "pytorch"
-            else torch_loss(x, y, backend="torch")
+            else torch_loss(x, y, backend="composed")
         )
         (gradient,) = torch.autograd.grad(loss, x)
         yield dict(
@@ -414,16 +371,16 @@ def available_cpus() -> int:
 
 
 def multilabel_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[dict[str, Any]]:
-    """Boolean-mask entropy of well-fit rows (CPU: native, and auto with SDCA_CPU_EXTENSION;
-    CUDA: the tensor and the kernel backends): two positives at 0 first, C - 2 negatives
+    """Boolean-mask entropy of well-fit rows (CPU: the kernels, and auto with
+    SDCA_CPU_EXTENSION; CUDA: the composed and the kernel backends): two positives at 0 first, C - 2 negatives
     at -gap, whose C - 2 equal small terms beside a 1 lose digits in plain sums. Exact:
     den = 2 + (C - 2) exp(-gap), loss log(den), positive gradients 1 / den - 1 / 2, negative
     exp(-gap) / den (normal exponentials: gaps to 700 in float64). Each row records the route
-    that explain_backend reports; auto must take the kernels (CUDA) or the extension (CPU)."""
+    that explain_backend reports; auto must take the Triton (CUDA) or the CPU kernels."""
     gaps = (0, 1, 20, 40, 70, 100, 110)
     gaps += (700,) if dtype == torch.float64 else SUBNORMAL_GAPS[dtype]
     widths = WIDTHS if not args.quick else (2, 65, 4097)
-    backends = ["native"] if args.device == "cpu" else ["torch", "auto"]
+    backends = ["kernel"] if args.device == "cpu" else ["composed", "auto"]
     if args.device == "cpu" and os.environ.get("SDCA_CPU_EXTENSION") in ("on", "1"):
         backends.append("auto")
     precisions = (None,) if dtype == torch.float64 else (None, "float64")
@@ -448,8 +405,7 @@ def multilabel_rows(args: argparse.Namespace, dtype: torch.dtype) -> Iterator[di
                         precision=precision,
                     )
                     if backend == "auto":
-                        kernels = ("cuda-launcher", "triton") if x.is_cuda else ("cpu-kernel",)
-                        if route[0] not in kernels:
+                        if route[0] != ("triton" if x.is_cuda else "cpu-kernel"):
                             raise SystemExit(f"auto takes {route[0]}, not a kernel: {route[1]}")
                     row: dict[str, Any] = dict(
                         kind="multilabel_cross_entropy",
@@ -510,6 +466,22 @@ def dtype_rows(args: argparse.Namespace, name: str) -> list[dict[str, Any]]:
         ]
 
 
+def source_commit() -> str | None:
+    """The tree's git HEAD, else its COMMIT file (a git archive), else None."""
+    root = Path(__file__).resolve().parents[2]
+    with contextlib.suppress(OSError, subprocess.CalledProcessError):
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return out.stdout.strip()
+    with contextlib.suppress(OSError):
+        return (root / "COMMIT").read_text().split()[0]
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("cpu", "cuda"), required=True)
@@ -543,7 +515,7 @@ def main():
                 flush=True,
             )
     metadata: dict[str, Any] = dict(
-        commit=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        commit=source_commit(),
         torch=torch.__version__,
         python=platform.python_version(),
         device=args.device,

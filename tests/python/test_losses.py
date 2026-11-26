@@ -2,8 +2,7 @@ from fractions import Fraction
 from typing import Any
 
 import numpy as np
-import pytest
-from numpy_api import Solver, mask_loss_and_grad
+from numpy_api import Solver
 from scipy.optimize import minimize
 from scipy.special import logsumexp, softmax
 
@@ -50,10 +49,11 @@ def width_of(objective: str, smooth: bool, gamma: float) -> float:
 
 
 def two_class_hinge(z0: float, z1: float, width: float) -> tuple[float, float]:
-    """Exact value and slope v at h = 1 + z1 - z0: max(0, h), or max h v - width v^2/2 on [0, 1]."""
+    """Exact value and slope v at h = 1 + z1 - z0: max(0, h) (slope 1/2 at its kink), or
+    max h v - width v^2/2 on [0, 1]."""
     h = 1 + Fraction(z1) - Fraction(z0)
     if width == 0:
-        return float(max(h, 0)), float(h > 0)
+        return float(max(h, 0)), 1.0 if h > 0 else (0.5 if h == 0 else 0.0)
     v = min(Fraction(1), max(Fraction(0), h / Fraction(width)))
     return float(h * v - Fraction(width) * v * v / 2), float(v)
 
@@ -105,11 +105,8 @@ class LossTests:
         np.testing.assert_allclose(g[0, 0], -np.exp(-40) / 4, rtol=2.4e-7, atol=0)
         z = np.array([[1.0, 2.0, 3.0]])
         target = np.ones(z.shape, bool)
-        # Every class: the public losses need a class outside the set; the internal rows of
-        # the tensor layers take the uniform target.
-        with pytest.raises(ValueError, match="class outside"):
-            Solver().loss_and_grad(z, target, "multilabel_cross_entropy")
-        _, g = mask_loss_and_grad(z, target, "cross_entropy")
+        # Every class: the uniform target (docs/API.md, multilabel_cross_entropy).
+        _, g = Solver().loss_and_grad(z, target, "multilabel_cross_entropy")
         np.testing.assert_allclose(g, softmax(z, axis=1) - 1 / 3, atol=2e-16)
 
     def test_large_regularization_and_scale_invariance(self):

@@ -4,8 +4,7 @@ use std::sync::OnceLock;
 
 use crate::error::{invalid, Error, Result};
 use crate::ffi;
-use crate::matrix::Matrix;
-use crate::real::Real;
+use crate::names::Precision;
 use crate::settings::Settings;
 
 /// Whether the native library has the wrapper's C ABI (which fixes the history layout).
@@ -72,41 +71,22 @@ pub(crate) fn history_rows(options: &ffi::FitOptions) -> Result<usize> {
     Ok(rows)
 }
 
-/// The C ABI execution settings of `settings` on storage `T` (a precision
-/// that `T` takes).
-pub(crate) fn execution<T: Real>(settings: &Settings) -> Result<ffi::Execution> {
-    Ok(ffi::Execution {
-        precision: crate::real::precision_code::<T>(settings.precision)?,
+/// The C ABI execution settings of `settings`.
+pub(crate) fn execution(settings: &Settings) -> ffi::Execution {
+    ffi::Execution {
+        precision: match settings.precision {
+            None => ffi::PRECISION_DEFAULT,
+            Some(Precision::Float32) => ffi::PRECISION_FLOAT32,
+            Some(Precision::Float64) => ffi::PRECISION_FLOAT64,
+        },
         num_threads: settings.threads.code(),
+        check_rows: c_int::from(settings.check_rows),
         ..Default::default()
-    })
+    }
 }
 
 pub(crate) fn void<T>(values: &[T]) -> *const c_void {
     values.as_ptr().cast()
-}
-
-/// A finite, positive parameter.
-pub(crate) fn positive(value: f64, name: &str) -> Result<()> {
-    if !(value.is_finite() && value > 0.0) {
-        return invalid(format!("{name} must be finite and positive"));
-    }
-    Ok(())
-}
-
-/// Finite logits (n >= 1, classes >= 2).
-pub(crate) fn check_logits<T: Real>(logits: Matrix<'_, T>, what: &str) -> Result<()> {
-    if logits.rows() == 0 || logits.cols() < 2 {
-        return invalid(format!(
-            "{what} must have at least one row and two columns, not {}x{}",
-            logits.rows(),
-            logits.cols()
-        ));
-    }
-    if !logits.data().iter().all(|v| v.f64().is_finite()) {
-        return invalid(format!("{what} must be finite"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

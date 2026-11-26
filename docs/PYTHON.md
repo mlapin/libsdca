@@ -1,22 +1,17 @@
 # libsdca for Python
 
-[All guides](https://github.com/mlapin/libsdca/blob/master/docs/README.md) ·
-[Shared API reference](https://github.com/mlapin/libsdca/blob/master/docs/API.md)
+[All guides](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/README.md) ·
+[Shared API reference](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/API.md)
 
-A fast and accurate implementation of classification losses: cross-entropy, multiclass and
+An accurate and fast implementation of classification losses: cross-entropy, multiclass and
 multilabel SVM hinges, top-*k* losses and knowledge distillation, as PyTorch and JAX loss
 layers, NumPy functions, and SDCA solvers for linear and kernel classifiers with a
 scikit-learn estimator ([project page](https://mlapin.github.io/libsdca/),
 [technical report](https://mlapin.github.io/libsdca/report/)).
 
-The native C++ library loads via `ctypes`. Prebuilt wheels for Linux `x86_64` and macOS
-`arm64` require no compiler and depend only on NumPy; `import libsdca` does not import
-PyTorch, scikit-learn or JAX until used.
-
-Small losses and gradients of confident predictions are kept down to the output dtype's
-subnormal range (XLA:CPU flushes subnormals to zero), and distillation gradients are exactly
-zero at equal logits
-([known limits](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/API.md#known-limits)).
+Prebuilt wheels for Linux `x86_64` and macOS `arm64` need no compiler for the NumPy
+interface; they require NumPy (and on Linux `scipy-openblas32`, which `pip` installs).
+PyTorch, scikit-learn and JAX are optional.
 
 ## Installation
 
@@ -33,8 +28,8 @@ pip install 'libsdca[jax-cuda]'  # JAX CUDA losses (Linux, NVIDIA driver 580+)
 | Train a scikit-learn classifier | `libsdca.sklearn.SDCAClassifier` |
 | Train with full control (warm starts, label sets, target probabilities, history) | `libsdca.fit` → `Model` |
 | Evaluate losses and gradients on NumPy arrays | `libsdca.loss_and_grad` |
-| PyTorch neural-network loss layers | `libsdca.torch.CrossEntropyLoss`, `TopKCrossEntropyLoss`, ... ([TORCH.md](https://github.com/mlapin/libsdca/blob/master/docs/TORCH.md)) |
-| JAX loss functions (`jit`, `grad`, `vmap`) | `libsdca.jax.cross_entropy`, `topk_hinge_loss`, ... ([JAX.md](https://github.com/mlapin/libsdca/blob/master/docs/JAX.md)) |
+| PyTorch neural-network loss layers | `libsdca.torch.CrossEntropyLoss`, `TopKCrossEntropyLoss`, ... ([TORCH.md](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/TORCH.md)) |
+| JAX loss functions (`jit`, `grad`, `vmap`) | `libsdca.jax.cross_entropy`, `topk_hinge_loss`, ... ([JAX.md](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/JAX.md)) |
 | Single SDCA dual block update | `libsdca.coordinate_update` |
 
 ## Quick start
@@ -51,23 +46,35 @@ print(model.status, model.predict(X))
 
 Only `model.status == "solved"` guarantees the requested duality gap.
 
+The PyTorch losses replace `torch.nn.CrossEntropyLoss` and add the other losses
+([TORCH.md](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/TORCH.md)):
+
+```python
+import torch
+from libsdca.torch import CrossEntropyLoss, TopKHingeLoss
+
+logits = torch.randn(32, 5, requires_grad=True)
+target = torch.randint(5, (32,))
+(CrossEntropyLoss()(logits, target) + TopKHingeLoss(k=2)(logits, target)).backward()
+```
+
 ## Losses
 
 A loss object accepts its own parameters as positional or keyword arguments. Passing a
-parameter belonging to another loss raises `TypeError`. `libsdca.LOSSES` maps shared
-names to these classes:
+parameter belonging to another loss raises `TypeError`, as does omitting `k`.
+`libsdca.LOSSES` maps shared names to these classes:
 
 | Loss | Parameters (defaults) | Targets |
 | --- | --- | --- |
-| `CrossEntropy()` | — | integer labels `(n,)`; `Probabilities` in `fit` |
+| `CrossEntropy()` | — | integer labels `(n,)`; `Probabilities` (finite, nonnegative; in `fit`, rows that sum to one within the rounding of a row normalized in `X`'s dtype, $\gamma_{m+1}$, renormalized) |
 | `TopKCrossEntropy(k)` | `k` in `[1, m - 1]` | integer labels |
 | `MulticlassHinge(gamma=0.0)` | `gamma >= 0` (`0`: nonsmooth) | integer labels |
-| `TopKHingeAlpha(k, gamma=0.0)`, `TopKHingeBeta(k, gamma=0.0)` | `k`, `gamma` | integer labels |
-| `MultilabelHinge(gamma=0.0, projection_precision="float64")` | `gamma`, `"float64"` or `"extended"` | label sets |
+| `TopKHinge(k, variant="beta", gamma=0.0)` | `k`, `"beta"` or `"alpha"`, `gamma` | integer labels |
+| `MultilabelHinge(gamma=0.0)` | `gamma >= 0` (`0`: nonsmooth) | label sets |
 | `MultilabelCrossEntropy()` | — | label sets |
-| `ProximalCrossEntropy(alpha=1.0)` | `alpha > 0` | integer labels (`loss_and_grad` only) |
+| `ProximalCrossEntropy(gamma=1.0)` | the step `gamma > 0` | integer labels (`loss_and_grad` only) |
 | `Distillation(temperature=1.0)` | `temperature > 0` | teacher logits `(n, m)` (`loss_and_grad` only) |
-| `ProximalDistillation(temperature=1.0, alpha=1.0)` | `temperature`, `alpha` | teacher logits (`loss_and_grad` only) |
+| `ProximalDistillation(temperature=1.0, gamma=1.0)` | `temperature`, the step `gamma > 0` | teacher logits (`loss_and_grad` only) |
 
 Label sets are a boolean mask `(n, m)` or a sequence of integer label sequences; each set
 needs a class outside it. A loss takes one kind of target: nothing is inferred from the
@@ -87,9 +94,9 @@ clf = SDCAClassifier("topk_cross_entropy", k=2, C=1.0).fit(X, y)
 print(clf.predict(X[:5]), clf.score(X, y))
 ```
 
-`SDCAClassifier` takes single-label loss names. Pass the loss's `k` and `gamma` as
-keywords; `None` selects its default. A parameter belonging to another loss raises
-`ValueError` at `fit`.
+`SDCAClassifier` takes single-label loss names. Pass the loss's `k`, `variant`
+(`topk_hinge`) and `gamma` as keywords; `None` selects its default. A parameter belonging to another loss raises
+`TypeError` at `fit`, as for the loss objects.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -102,6 +109,11 @@ keywords; `None` selects its default. A parameter belonging to another loss rais
 It supports `Pipeline`, `clone`, cross-validation and grid search, arbitrary sortable
 labels, and scikit-learn's `check_estimator` (except checks supplying invalid Gram
 matrices). `predict_proba` and `predict_log_proba` are available for `cross_entropy`.
+If the solver stops before reaching the tolerance, `fit` returns the fitted estimator and
+issues scikit-learn’s `ConvergenceWarning`. Inspect `status_` and `history_` for the stopping
+reason and final gap.
+A warm start reuses dual variables when the loss, dimensions, kernel mode and training labels
+in row order agree with the previous fit. Changing the labels starts a fresh solve.
 There is no intercept; append a constant feature for a regularized one.
 
 ### Fitted attributes
@@ -123,7 +135,7 @@ import libsdca
 rng = np.random.default_rng(0)
 X = rng.normal(size=(300, 20))
 y_int = (X @ rng.normal(size=(20, 3))).argmax(axis=1)
-model = libsdca.fit(X, y_int, libsdca.TopKHingeAlpha(k=2, gamma=0.5), C=1.0)
+model = libsdca.fit(X, y_int, libsdca.TopKHinge(k=2, variant="alpha", gamma=0.5), C=1.0)
 print(model.status, model.epochs, model.history["relative_gap"][-1])
 scores = model.decision_function(X)    # X @ model.weights.T
 predicted = model.predict(X)
@@ -160,13 +172,22 @@ predicted = model.predict(X)
 ## Losses and gradients
 
 ```python
-values, gradients = libsdca.loss_and_grad(scores, y_int, libsdca.TopKHingeBeta(k=2, gamma=0.5))
+values, gradients = libsdca.loss_and_grad(scores, y_int, libsdca.TopKHinge(k=2, gamma=0.5))
 values, gradients = libsdca.loss_and_grad(student, teacher, libsdca.Distillation(temperature=2.0))
 ```
 
-- `loss_and_grad(logits, target, loss=CrossEntropy(), *, precision=None, num_threads=None)`
-  computes per-row losses `(n,)` (`float64`) and gradients `(n, m)` (the storage dtype) of
-  any loss of `libsdca.LOSSES`.
+- `loss_and_grad(logits, target, loss=CrossEntropy(), *, precision=None, num_threads=None,
+  check_rows=False, weight=None, label_smoothing=None, ignore_index=None)` computes per-row
+  losses `(n,)` (`float64`) and gradients `(n, m)` (the storage dtype) of any loss of
+  `libsdca.LOSSES`. `weight`, `label_smoothing` and `ignore_index` are PyTorch's
+  `cross_entropy` options, for the losses that take them
+  ([options](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/API.md#loss-evaluation-options));
+  `ignore_index` has no default (PyTorch's `cross_entropy` takes `-100`). A logit of `-inf` masks its class for every
+  loss ([masked classes](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/API.md#masked-classes)).
+  A label out of range raises `ValueError` (`Target 7 is out of bounds.`, as in PyTorch).
+  Rows it cannot compute (`NaN` or `+inf` logits, invalid masked rows) are `NaN`, with one
+  `InvalidRowsWarning` per call; `check_rows=True` raises `ValueError` instead. A batch of
+  zero rows gives empty arrays.
 - `coordinate_update(logits, target, loss=CrossEntropy(), *, previous=None, C=1.0,
   norm2=1.0, precision=None, num_threads=None)` performs one exact SDCA dual block step;
   `norm2` is a scalar or one squared norm per row, and `previous` must be feasible.
@@ -177,7 +198,9 @@ available CPUs; `1` runs serially) with bitwise-identical results
 [environment variables](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/API.md#environment-variables)).
 
 Wrong types raise `TypeError` (a sparse matrix too: pass `X.toarray()`), invalid values
-`ValueError`, and failed native computations `RuntimeError`.
+`ValueError`, and failed native computations `RuntimeError`. PyTorch tensors on CUDA or
+another device are copied to the host with a one-time `RuntimeWarning`; `libsdca.torch`
+keeps the losses on the device.
 
 ## Precision
 
@@ -202,60 +225,12 @@ model = libsdca.fit(X32, y_int)                        # float32 arrays and work
 exact = libsdca.fit(X32, y_int, precision="float64")   # float32 arrays, double working iterate
 ```
 
-## PyTorch drop-in cross-entropy
-
-`libsdca.torch.CrossEntropyLoss` is a drop-in for `torch.nn.CrossEntropyLoss`, with class
-labels or probabilities, `weight`, `ignore_index`, `reduction` and `label_smoothing`.
-
-```python
-import torch
-from libsdca.torch import CrossEntropyLoss
-
-logits = torch.randn(32, 5, requires_grad=True)
-target = torch.randint(5, (32,))
-CrossEntropyLoss()(logits, target).backward()
-```
-
-See [TORCH.md](https://github.com/mlapin/libsdca/blob/master/docs/TORCH.md#replace-pytorch-cross-entropy).
-
-## Benchmarks
-
-**Seconds to relative suboptimality `1e-3`**, on AMD EPYC 7J13 with **one thread**,
-scikit-learn 1.9.1 and `float64` arithmetic.
-
-- **Problems:** These synthetic problems have 10 classes, standardized features, `C=0.1`
-  and no intercept.
-- **Reference:** `LinearSVC` (Crammer–Singer) for the hinge and `LogisticRegression`
-  (L-BFGS) for cross-entropy.
-- **Evidence:** These are historical November 2026 measurements from the
-  [technical report](https://mlapin.github.io/libsdca/report/), not timings of the new
-  0.4.0 API.
-
-| Objective | Examples × features | Input / work timed | `libsdca` (s) | scikit-learn (s) |
-| --- | --- | --- | ---: | ---: |
-| Multiclass hinge | 2,000 × 100 | Features | 0.138 | 0.549 |
-| Multiclass hinge | 2,000 × 32,000 | Reused Gram matrix | 1.75 | 75.7 |
-| Multiclass hinge | 2,000 × 32,000 | Gram construction + kernel fit | 4.52 | 75.7 |
-| Cross-entropy | 2,000 × 100 | Features | 0.0530 | 0.00696 |
-| Cross-entropy | 2,000 × 32,000 | Reused Gram matrix | 0.247 | 1.60 |
-| Cross-entropy | 2,000 × 32,000 | Gram construction + kernel fit | 3.10 | 1.60 |
-
-Each time is one fit, reported at the source's precision. SDCA timings include the final
-duality-gap evaluation and end `solved`; baseline timings reach the same suboptimality
-target but exclude the cost of evaluating it. The repeated scikit-learn entries are the
-same feature-based fit, compared with kernel SDCA with and without Gram construction.
-
-Cross-entropy on tall data favors L-BFGS. A kernel fit can help when `d` is much larger
-than `n`, especially if several fits reuse the Gram matrix. Count its construction
-and storage when comparing a single end-to-end fit.
-
-## Building from source and testing
+## Building from source
 
 ```bash
-pip install -e .                                                   # editable install (uses system CBLAS if found)
-python -m pytest -n auto --dist worksteal tests/python --group all # core, torch, jax, or all
-python -m pytest tests/python --group all -m serial
+pip install .            # links a system CBLAS if one is found, else the built-in products
 ```
 
 See [DEPENDENCIES.md](https://github.com/mlapin/libsdca/blob/v0.4.0/DEPENDENCIES.md) for
-`SDCA_BLAS_BACKEND` options (`AUTO`, `EXTERNAL`, `BUILTIN`).
+`SDCA_BLAS_BACKEND` options (`AUTO`, `EXTERNAL`, `BUILTIN`). A build that finds no BLAS uses
+the built-in products, and `fit` warns once (`RuntimeWarning`; [API.md](https://github.com/mlapin/libsdca/blob/v0.4.0/docs/API.md#blas)).

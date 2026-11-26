@@ -10,10 +10,11 @@
 #include <stdexcept>
 #include <vector>
 
-#include "sdca/math/compensated.h"
+#include "sdca/core/project_numeric.h"
 #include "sdca/utility/types.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 inline void validate_labels_and_offsets(size_type, const std::vector<size_type>&,
                                         const std::vector<size_type>&);
@@ -176,7 +177,7 @@ struct distribution_output {
     const double tol = 64 * std::numeric_limits<double>::epsilon();
     for (size_type i = 0; i < examples; ++i) {
       const double* q = &targets[i * num_classes];
-      detail::compensated_sum<double> sum;
+      core::compensated_sum<double> sum;
       for (size_type j = 0; j < num_classes; ++j) {
         if (!std::isfinite(q[j]) || q[j] < 0)
           throw std::invalid_argument("Target probabilities must be finite and nonnegative");
@@ -199,6 +200,6 @@ struct distribution_output {
   inline const double* row(const size_type i) const { return &targets[i * num_classes]; }
 };
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

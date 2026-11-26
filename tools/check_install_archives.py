@@ -8,18 +8,15 @@ import hashlib
 import io
 import json
 import re
+import subprocess
 import tarfile
 import zipfile
 from pathlib import Path
 
 REQUIRED = (
-    "_cpu_distill.h",
-    "_cpu_lanes.h",
-    "_cpu_prox.h",
-    "_cpu_prox_distill.h",
-    "_jax_cpu.py",
-    "_jax_ffi.cpp",
-    "_torch_entropy.cpp",
+    "_frontend_cpu.h",
+    "_jax_cpu.cpp",
+    "_torch_cpu.cpp",
 )
 
 
@@ -32,6 +29,11 @@ def files(path: Path) -> dict[str, bytes]:
     with tarfile.open(path) as archive:
         result = {}
         for member in archive.getmembers():
+            assert (
+                member.uid == member.gid == 0
+                and member.uname in ("", "root")
+                and member.gname in ("", "root", "wheel")
+            ), f"{path.name}: build account metadata in tar header for {member.name}"
             if member.isfile():
                 stream = archive.extractfile(member)
                 assert stream is not None
@@ -43,29 +45,53 @@ def check(path: Path, source: Path) -> dict[str, object]:
     content = files(path)
     wheel = path.suffix == ".whl"
     prefix = "libsdca/" if wheel else "python/libsdca/"
+    package = source / "python/libsdca"
+    for module in sorted(package.rglob("*")):
+        if (
+            module.suffix not in {".py", ".h", ".cpp"}
+            or "include" in module.relative_to(package).parts
+        ):
+            continue
+        name = prefix + module.relative_to(package).as_posix()
+        assert name in content, f"{path.name}: missing {name}"
+        assert content[name] == module.read_bytes(), f"{path.name}: {name} differs from its source"
     for name in REQUIRED:
         assert prefix + name in content, f"{path.name}: missing {prefix + name}"
+    # The shared CPU kernels' headers: libsdca/include/sdca/... in a wheel, include/sdca/... in
+    # a source archive, each equal to its source.
+    include = prefix + "include/" if wheel else "include/"
+    for header in sorted((source / "include/sdca").rglob("*.h")):
+        name = include + header.relative_to(source / "include").as_posix()
+        assert name in content, f"{path.name}: missing {name}"
+        assert content[name] == header.read_bytes(), f"{name} differs from its source"
     for name, data in content.items():
         if name.startswith(prefix) and name.endswith((".h", ".cpp")):
-            for dependency in re.findall(rb'#include\s+"(_(?:cpu|torch)_[^"/]+\.h)"', data):
-                included = prefix + dependency.decode() in content
-                source_fallback = (
-                    not wheel
-                    and dependency == b"_cpu_storage.h"
-                    and "include/sdca/math/storage.h" in content
-                )
-                assert included or source_fallback, (name, dependency.decode())
-    canonical = source / "include/sdca/math/storage.h"
-    storage = "not present in this source revision"
-    if canonical.exists():
-        name = prefix + "_cpu_storage.h" if wheel else "include/sdca/math/storage.h"
-        assert name in content, f"{path.name}: missing storage header {name}"
-        assert content[name] == canonical.read_bytes(), f"{name} differs from its canonical source"
-        storage = hashlib.sha256(content[name]).hexdigest()
+            for dependency in re.findall(rb'#include\s+"((?:_[^"/]+|sdca/[^"]+)\.h)"', data):
+                found = dependency.decode()
+                target = prefix + found if found.startswith("_") else include + found
+                assert target in content, (name, found)
+    storage = hashlib.sha256((source / "include/sdca/core/storage.h").read_bytes()).hexdigest()
     if not wheel:
-        support = source / "tests/python/conformance"
-        required = [p for p in support.rglob("*") if p.suffix in {".py", ".json"}]
-        required.append(source / "tests/python/release_numerics.py")
+        if (source / ".git").exists():
+            names = subprocess.check_output(
+                ["git", "-C", str(source), "ls-files", "-z", "--", "tests/python"]
+            )
+            tests = (source / name.decode() for name in names.split(b"\0") if name)
+        else:
+            tests = (source / "tests/python").rglob("*")
+        required = [path for path in tests if path.suffix in {".py", ".json"}]
+        required.extend(
+            source / name
+            for name in (
+                "src/c_api.cpp",
+                "src/blas_probe.cpp",
+                "src/native_build.txt",
+                "sdca_build.py",
+                "setup.py",
+                "pyproject.toml",
+                "VERSION",
+            )
+        )
         required.extend((source / "docs").rglob("*.md"))
         for support_path in required:
             name = support_path.relative_to(source).as_posix()
@@ -80,8 +106,6 @@ def check(path: Path, source: Path) -> dict[str, object]:
             ):
                 assert name in recorded, f"{name} is missing from wheel RECORD"
         assert any("/_libsdca_native" in name and name.endswith(".so") for name in content), path
-    if wheel and "linux" in path.name:
-        assert any("/_jax_cuda_native" in name and name.endswith(".so") for name in content), path
     return {
         "archive": path.name,
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

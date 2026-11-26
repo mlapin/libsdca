@@ -60,8 +60,10 @@ jobs:
         run: |
           py="$RUNNER_TEMP/env/bin/python" src="$RUNNER_TEMP/sdist"
           "$py" -m pip install torch ninja --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
-          cd "$RUNNER_TEMP" && SDCA_CPU_EXTENSION=on "$py" -m pytest -p no:cacheprovider \
-            "$src/tests/python/test_cpu_extension.py" --group torch --installed
+          cd "$RUNNER_TEMP"
+          SDCA_CPU_EXTENSION=on "$py" -c 'from libsdca._torch_ops import _extension; module, why = _extension(); assert module is not None, why'
+          SDCA_CPU_EXTENSION=on "$py" -m pytest -p no:cacheprovider \
+            "$src/tests/python/test_torch_references.py" --group torch --installed
       # Save the verified sdist tarball for the TestPyPI / PyPI publish jobs.
       - uses: actions/upload-artifact@v7.0.2
         with:
@@ -82,29 +84,33 @@ jobs:
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
-      # Build py3-none platform wheels with built-in BLAS, repair with auditwheel/delocate, and run core tests.
+      # Build py3-none platform wheels (Linux: scipy-openblas32, macOS: Accelerate), repair with auditwheel/delocate, and run core tests.
       - uses: pypa/cibuildwheel@v4.3.5
       - name: Check shared CPU headers in the wheels
         run: python tools/check_install_archives.py --source . wheelhouse/*.whl
       # Install only each documented extra into a fresh environment and run README examples.
       - name: Fresh wheel installs and literal README examples
         run: |
-          python -m pip install uv
-          python tools/readme_smoke.py --wheel wheelhouse/libsdca-*.whl --output "$RUNNER_TEMP/readme-smoke" --cleanup
-      - name: Save fresh-install records
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: readme-smoke-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/readme-smoke/results.json
-            ${{ runner.temp }}/readme-smoke/*/commands.log
-            ${{ runner.temp }}/readme-smoke/*/packages.txt
-            ${{ runner.temp }}/readme-smoke/*/example.py
-            ${{ runner.temp }}/readme-smoke/*/precision.py
-            ${{ runner.temp }}/readme-smoke/*/precision.json
-            ${{ runner.temp }}/readme-smoke/*/cpu-dispatch.py
-            ${{ runner.temp }}/readme-smoke/*/cpu-dispatch.json
+          for interface in numpy sklearn torch jax; do
+            env_dir="$RUNNER_TEMP/smoke-$interface"
+            python -m venv "$env_dir"
+            wheel=(wheelhouse/libsdca-*.whl)
+            requirement="${wheel[0]}"
+            if [[ "$interface" != numpy ]]; then requirement+="[$interface]"; fi
+            "$env_dir/bin/python" -m pip install "$requirement"
+            python - "$interface" "$env_dir/example.py" <<'PYTHON'
+          import re
+          import sys
+          from pathlib import Path
+
+          marker = f"<!-- smoke: {sys.argv[1]} -->"
+          body = Path("README.md").read_text().split(marker)[1]
+          snippet = re.match(r"\s*```python\n(.*?)\n```", body, re.S)
+          assert snippet, f"missing Python example after {marker}"
+          Path(sys.argv[2]).write_text(snippet[1])
+          PYTHON
+            "$env_dir/bin/python" -I "$env_dir/example.py"
+          done
       # Validate wheel metadata and README formatting with Twine.
       - run: pipx run --spec twine==7.0.0 twine check --strict wheelhouse/*
       # Upload the platform wheel artifact for the TestPyPI / PyPI publish jobs.

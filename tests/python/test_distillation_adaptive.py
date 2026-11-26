@@ -65,13 +65,20 @@ def test_mixed_adaptive_rows(
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
-def test_adaptive_invalid_rows_remain_invalid(bad: float) -> None:
+def test_adaptive_nonfinite_student_score(bad: float) -> None:
     s, t = mixed_inputs(1000)
     s[0, 50] = bad
     s.requires_grad_()
     loss = distillation_loss(s, t, reduction="none")
     (gradient,) = torch.autograd.grad(loss.sum(), s)
-    assert torch.isnan(loss[0])
-    assert torch.isnan(gradient[0]).all()
+    if bad == -float("inf"):
+        assert torch.isposinf(loss[0])
+        student = torch.softmax(s[0].detach().double(), 0)
+        teacher = torch.softmax(t[0].double(), 0)
+        error = (gradient[0].double() - (student - teacher)).abs()
+        assert torch.all(error <= 64 * torch.finfo(s.dtype).eps * (student + teacher))
+    else:
+        assert torch.isnan(loss[0])
+        assert torch.isnan(gradient[0]).all()
     assert torch.isfinite(loss[1:]).all()
     assert torch.isfinite(gradient[1:]).all()

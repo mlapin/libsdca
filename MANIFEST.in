@@ -1,8 +1,7 @@
 recursive-include include *.h
-include src/c_api.cpp src/c_api_internal.h src/tensor_losses.h
+include src/c_api.cpp src/native_build.txt src/blas_probe.cpp
 include sdca_build.py VERSION
 recursive-include docs *.md
-include python/libsdca/_cpu_*.h
-include python/libsdca/_torch_entropy.cpp python/libsdca/_torch_*.h python/libsdca/_jax_ffi.cpp python/libsdca/_jax_cuda.cpp
+include python/libsdca/_torch_cpu.cpp python/libsdca/_jax_cpu.cpp python/libsdca/_jax_cuda.cpp python/libsdca/_frontend_cpu.h python/libsdca/_torch_cuda_plan.h
 include CHANGELOG.md DEPENDENCIES.md AGENTS.md CITATION.cff
 recursive-include tests/python *.py *.json

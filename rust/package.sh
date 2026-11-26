@@ -7,10 +7,8 @@ root=$(dirname "$crate")
 rm -rf "$crate/native"
 mkdir -p "$crate/native/src"
 cp -R "$root/include" "$crate/native/include"
-# The C ABI and the headers it includes from src/ (c_api_baseline.h only with
-# SDCA_BASELINE, shipped so the source stays complete).
-cp "$root/src/c_api.cpp" "$root/src/c_api_internal.h" "$root/src/c_api_baseline.h" \
-  "$root/src/tensor_losses.h" "$crate/native/src/"
+# The C ABI and the build settings and BLAS probe of src/native_build.txt.
+cp "$root/src/c_api.cpp" "$root/src/native_build.txt" "$root/src/blas_probe.cpp" "$crate/native/src/"
 cp "$root/LICENSE" "$crate/LICENSE"
 cd "$crate"
 # The vendored copies are untracked by design.

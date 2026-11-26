@@ -81,29 +81,26 @@ named! {
 parse!(Precision, "precision");
 
 named! {
-    /// How the hinge projections solve: the two-simplex steps and smooth loss
-    /// values of multilabel_hinge; the other losses ignore it (the top-k
-    /// hinges always run the extended solver). See "Projection precision" in
-    /// docs/API.md.
+    /// The variant of [`crate::Loss::TopKHinge`]; the codes order the C ABI's
+    /// SDCA_LOSS_TOPK_HINGE_ALPHA and SDCA_LOSS_TOPK_HINGE_BETA.
     ///
     /// ```
-    /// use libsdca::ProjectionPrecision;
+    /// use libsdca::TopKVariant;
     ///
-    /// assert_eq!(ProjectionPrecision::default(), ProjectionPrecision::Float64);
-    /// assert_eq!("extended".parse::<ProjectionPrecision>()?, ProjectionPrecision::Extended);
+    /// assert_eq!(TopKVariant::default(), TopKVariant::Beta);
+    /// assert_eq!("alpha".parse::<TopKVariant>()?, TopKVariant::Alpha);
     /// # Ok::<(), libsdca::Error>(())
     /// ```
     #[derive(Default)]
-    ProjectionPrecision {
-        /// Double-precision solve with a per-call check; a failed check
-        /// re-solves with the extended solver. The default.
+    TopKVariant {
+        /// The hinge of the average of the k largest margins.
+        Alpha = 0, "alpha",
+        /// The average of the k largest hinges. The default.
         #[default]
-        Float64 = 0, "float64",
-        /// Always the extended-precision solver.
-        Extended = 1, "extended",
+        Beta = 1, "beta",
     }
 }
-parse!(ProjectionPrecision, "projection_precision");
+parse!(TopKVariant, "variant");
 
 named! {
     /// What the epochs of [`crate::Solver::fit`] leave out for the hinge

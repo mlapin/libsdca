@@ -1,7 +1,8 @@
 """Numerical and memory-layout checks of the NumPy API; run with pytest from the repo root."""
 
+import json
 import warnings
-from typing import Any
+from pathlib import Path
 
 import libsdca
 import numpy as np
@@ -12,8 +13,7 @@ from libsdca import (
     MulticlassHinge,
     MultilabelCrossEntropy,
     MultilabelHinge,
-    TopKHingeAlpha,
-    TopKHingeBeta,
+    TopKHinge,
 )
 from scipy.optimize import minimize
 from scipy.special import logsumexp, softmax
@@ -105,9 +105,10 @@ class InterfaceTests:
             assert float(a.sum()) == 0
 
     def test_invalid_input(self):
-        for y in [[-1], [3]]:
-            with pytest.raises(ValueError):
-                libsdca.loss_and_grad([[1.0, 2.0, 3.0]], y)
+        # A label out of range is an error, as in PyTorch.
+        for y in [[-1, 0], [3, 0]]:
+            with pytest.raises(ValueError, match=f"Target {y[0]} is out of bounds."):
+                libsdca.loss_and_grad([[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]], y)
         for y in [[0.1], [[1.0, 0.0]]]:
             with pytest.raises(TypeError):
                 libsdca.loss_and_grad([[1.0, 2.0, 3.0]], y)
@@ -203,10 +204,10 @@ class InterfaceTests:
                 libsdca.loss_and_grad(x @ np.ones((2, 3)), y, name)  # pyright: ignore[reportArgumentType]
             with pytest.raises(TypeError, match="loss"):
                 libsdca.fit(x, y, name)  # pyright: ignore[reportArgumentType]
-        # multiclass_hinge is topk_hinge_alpha (and beta) at k = 1.
+        # multiclass_hinge is topk_hinge of either variant at k = 1.
         z = x @ np.array([[1.0, -1.0, 0.5], [0.0, 2.0, -1.0]])
         for gamma in (0.0, 0.5):
-            for other in (TopKHingeAlpha(1, gamma), TopKHingeBeta(1, gamma)):
+            for other in (TopKHinge(1, "alpha", gamma), TopKHinge(1, "beta", gamma)):
                 np.testing.assert_array_equal(
                     libsdca.loss_and_grad(z, y, MulticlassHinge(gamma))[1],
                     libsdca.loss_and_grad(z, y, other)[1],
@@ -237,70 +238,38 @@ class InterfaceTests:
             svm_model.predict_log_proba(x)
 
 
-class ProjectionPrecisionTests:
-    """projection_precision: float64 by default, extended agrees to rounding. Shrinking is off:
-    its keep-or-drop tests would turn rounding differences (long double is double on Apple
-    arm64) into different paths to the optimum."""
+def test_projection_precision_is_not_an_option():
+    with pytest.raises(TypeError, match="projection_precision"):
+        MultilabelHinge(projection_precision="extended")
 
-    def setup_method(self):
-        rng = np.random.default_rng(23)
-        self.x = rng.normal(size=(30, 5))
-        self.labels = [sorted({i % 4, (i * 7 + 1) % 4}) for i in range(30)]
 
-    def test_default_and_extended_agree_on_a_multilabel_hinge_fit(self):
-        fits = {
-            mode: libsdca.fit(self.x, self.labels, loss, tol=1e-10, shrinking="off")
-            for mode, loss in [
-                ("default", MultilabelHinge(gamma=0.5)),
-                ("float64", MultilabelHinge(gamma=0.5, projection_precision="float64")),
-                ("extended", MultilabelHinge(gamma=0.5, projection_precision="extended")),
-            ]
-        }
-        np.testing.assert_array_equal(fits["default"].weights, fits["float64"].weights)
-        np.testing.assert_array_equal(fits["default"].dual, fits["float64"].dual)
-        extended, float64 = fits["extended"].weights, fits["float64"].weights
-        assert extended is not None and float64 is not None
-        np.testing.assert_allclose(extended, float64, atol=1e-12)
-        np.testing.assert_allclose(fits["extended"].dual, fits["float64"].dual, atol=1e-12)
+def test_blas_package_record(tmp_path: Path):
+    from libsdca._native import _load_blas_package
 
-    def test_losses_and_steps_agree(self):
-        z = self.x[:, :4]
-        mask = np.zeros((30, 4), bool)
-        for i, row in enumerate(self.labels):
-            mask[i, row] = True
-        loss = {
-            mode: libsdca.loss_and_grad(
-                z, mask, MultilabelHinge(gamma=0.5, projection_precision=mode)
-            )
-            for mode in ("float64", "extended")
-        }
-        default = libsdca.loss_and_grad(z, mask, MultilabelHinge(gamma=0.5))
-        np.testing.assert_array_equal(default[0], loss["float64"][0])
-        for got, ref in zip(loss["extended"], loss["float64"], strict=True):
-            np.testing.assert_allclose(got, ref, rtol=1e-13, atol=1e-15)
-        step = {
-            mode: libsdca.coordinate_update(
-                z, mask, MultilabelHinge(gamma=0.5, projection_precision=mode)
-            )
-            for mode in ("float64", "extended")
-        }
-        np.testing.assert_allclose(step["extended"], step["float64"], rtol=1e-13, atol=1e-15)
+    library = tmp_path / "libsdca_c.so"
+    assert _load_blas_package(library) is None
+    record = library.with_suffix(".json")
+    record.write_text(json.dumps({"backend": "EXTERNAL"}))
+    assert _load_blas_package(library) is None
+    package = {"distribution": "no-such-blas", "module": "no_such_blas", "library": "lib/x.so"}
+    record.write_text(json.dumps({"blas_package": package}))
+    with pytest.raises(OSError, match="pip install no-such-blas"):
+        _load_blas_package(library)
 
-    def test_invalid_names_are_rejected(self, subtests: pytest.Subtests):
-        message = "projection_precision must be one of"
-        for mode, error in [
-            ("double", ValueError),
-            ("Float64", ValueError),
-            ("fp64", ValueError),
-            ("long double", ValueError),
-            (None, TypeError),
-            (0, TypeError),
-        ]:
-            with subtests.test(mode=mode), pytest.raises(error):
-                bad: Any = mode
-                MultilabelHinge(projection_precision=bad)
-        with pytest.raises(ValueError, match=message):
-            MultilabelHinge(projection_precision="double")
-        # Only multilabel_hinge takes it.
-        with pytest.raises(TypeError):
-            TopKHingeBeta(2, projection_precision="extended")  # pyright: ignore[reportCallIssue]
+
+def test_blas_package_threads_follow_threadpoolctl():
+    threadpoolctl = pytest.importorskip("threadpoolctl")
+    from libsdca._native import _native
+
+    library = _native().blas_library
+    if library is None:
+        pytest.skip("the library links no BLAS package")
+    path = Path(library._name).resolve()
+
+    def threads() -> list[int]:
+        pools = threadpoolctl.threadpool_info()
+        return [p["num_threads"] for p in pools if Path(p["filepath"]).resolve() == path]
+
+    assert threads(), f"threadpoolctl does not list {path}"
+    with threadpoolctl.threadpool_limits(1):
+        assert threads() == [1]

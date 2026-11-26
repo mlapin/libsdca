@@ -4,6 +4,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include "sdca/prox.h"
 #include "sdca/solver.h"
 #include "sdca/loss.h"
 #include "sdca/utility/logging.h"
@@ -316,8 +317,10 @@ TEST(Stress, topk_entropy_primal_loss_matches_loss_and_gradient_under_far_cap) {
   // Free scores far below a capped competitor keep their differences in primal_loss.
   double z[] = {0.0, 1.0, 1e16, -0.3, 0.2, 1e16 - 3.0};
   double g[6];
-  const double expected = sdca::detail::permuted_loss_and_gradient(
-      sdca::loss_kind::topk_cross_entropy, 6, 1, z, g, 3, 1.0);
+  sdca::loss_parameters top3;
+  top3.k = 3;
+  const double expected =
+      sdca::loss_and_gradient(sdca::kernel::topk_cross_entropy, 6, z, 0, g, top3);
   const double actual = sdca::l2_topk_cross_entropy<double, double>(1.0, 3).primal_loss(6, z);
   EXPECT_DOUBLE_EQ(expected, actual);
 }
@@ -326,7 +329,7 @@ TEST(Stress, topk_entropy_primal_loss_matches_loss_and_gradient_under_far_cap) {
 
 TEST(StressLimit, float32_topk_entropy_at_huge_c_with_zero_scores) {
   // LIMIT: float32 top-k entropy loses accuracy at C ~ 1e35 even at zero scores
-  // (measured: 1309 block ulps; float32 storage with float64 compute is within 2, regression.cpp).
+  // (1309 block ulps; float32 storage with float64 compute is within 2, regression.cpp).
   // Oracle a0: log(a) - log(C - a) + (1 + 1/999) a = log(999), 100 digits.
   const std::size_t n = 1000;
   const double a0 = 82.99536980534230771388;
@@ -352,8 +355,10 @@ TEST(StressLimit, topk_entropy_error_grows_with_the_score_spread) {
   for (std::size_t i = 0; i < 5; ++i) {
     const double s = spreads[i];
     double z[] = {0, s, -s, -s}, g[4], scores[] = {0, s, -s, -s};
-    const double value = sdca::detail::permuted_loss_and_gradient(
-        sdca::loss_kind::topk_cross_entropy, 4, 1, z, g, 2, 1.0);
+    sdca::loss_parameters top2;
+    top2.k = 2;
+    const double value =
+        sdca::loss_and_gradient(sdca::kernel::topk_cross_entropy, 4, z, 0, g, top2);
     const sdca::l2_topk_cross_entropy<double, double> objective(1.0, 2);
     EXPECT_LE(std::abs(value - loss), bounds[i][0] * loss) << s;
     EXPECT_EQ(value, objective.primal_loss(4, scores)) << s;
@@ -371,8 +376,9 @@ TEST(StressLimit, all_capped_topk_entropy_mean_beyond_double_double) {
   // log1p(4 exp(1/4)) = 1.8142); the documented result is log 5.
   const double h = std::ldexp(1.0, 200), m = std::ldexp(1.0, 100);
   double z[] = {m / 4, h, m, 1, -h}, g[5];
-  const double value = sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::topk_cross_entropy,
-                                                                5, 1, z, g, 4, 1.0);
+  sdca::loss_parameters top4;
+  top4.k = 4;
+  const double value = sdca::loss_and_gradient(sdca::kernel::topk_cross_entropy, 5, z, 0, g, top4);
   const double exact = std::log1p(4 * std::exp(0.25));
   EXPECT_LE(std::abs(value - exact), exact - std::log(5.0) + 1e-15);
 }
@@ -381,8 +387,9 @@ TEST(StressLimit, hinge_margins_relative_to_a_far_label) {
   // LIMIT: margins are formed relative to the label score, so other scores closer
   // than the resolution of a huge gap tie; the value stays accurate to its own size.
   double z[] = {-1e20, 0, 1e-3}, g[3];
-  const double value =
-      sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::topk_hinge_alpha, 3, 1, z, g, 1, 0);
+  sdca::loss_parameters top1;
+  top1.k = 1;
+  const double value = sdca::loss_and_gradient(sdca::kernel::topk_hinge_alpha, 3, z, 0, g, top1);
   EXPECT_NEAR(value / (1e20 + 1 + 1e-3), 1, 2 * std::numeric_limits<double>::epsilon());
   EXPECT_EQ(-1, g[0]);
   EXPECT_EQ(1, g[1] + g[2]);

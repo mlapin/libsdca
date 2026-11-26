@@ -11,21 +11,11 @@
 #include "sdca/solver/solverdef.h"
 #include "sdca/utility/logging.h"
 #include "sdca/utility/stopwatch.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
-// k of a top-k objective must suit the classes of the training set.
-template <typename Objective>
-inline void check_k(const Objective&, size_type,
-                    typename std::enable_if<!has_param_k<Objective>::value>::type* = 0) {}
-
-template <typename Objective>
-inline void check_k(const Objective& obj, const size_type num_classes,
-                    typename std::enable_if<has_param_k<Objective>::value>::type* = 0) {
-  detail::check_topk(obj.k, num_classes);
-}
-
-namespace detail {
+namespace solver_detail {
 
 // The entries of W in a training set: dim-by-m on features, none on a kernel.
 template <typename Data, typename Output, typename Evaluation>
@@ -66,7 +56,7 @@ inline void store_iterate(const T* wide, S* buffer, const size_type size) {
     for (size_type j = 0; j < size; ++j) buffer[j] = static_cast<S>(wide[j]);
 }
 
-}  // namespace detail
+}  // namespace solver_detail
 
 // What the evaluations and the screening read of a context: the caller's
 // buffers (the stored iterate, as returned) in place of the iterate.
@@ -145,22 +135,22 @@ struct solver_context {
         primal_initial(primal_initial_),
         primal_buffer(primal_variables_),
         dual_buffer(dual_variables_),
-        primal_variables(detail::wide_iterate(primal_buffer, primal_size(), primal_wide_)),
-        dual_variables(detail::wide_iterate(dual_buffer, dual_size(), dual_wide_)) {
-    check_k(objective, train.num_classes());
+        primal_variables(solver_detail::wide_iterate(primal_buffer, primal_size(), primal_wide_)),
+        dual_variables(solver_detail::wide_iterate(dual_buffer, dual_size(), dual_wide_)) {
+    objective.check_classes(train.num_classes());
   }
 
-  size_type primal_size() const { return primal_buffer ? detail::primal_size(train) : 0; }
+  size_type primal_size() const { return primal_buffer ? solver_detail::primal_size(train) : 0; }
   size_type dual_size() const { return train.num_examples() * train.num_classes(); }
 
   // The iterate from the caller's buffers, and back to them (see above).
   void load_variables() {
-    detail::load_iterate(primal_buffer, primal_variables, primal_size());
-    detail::load_iterate(dual_buffer, dual_variables, dual_size());
+    solver_detail::load_iterate(primal_buffer, primal_variables, primal_size());
+    solver_detail::load_iterate(dual_buffer, dual_variables, dual_size());
   }
   void store_variables() const {
-    detail::store_iterate(primal_variables, primal_buffer, primal_size());
-    detail::store_iterate(dual_variables, dual_buffer, dual_size());
+    solver_detail::store_iterate(primal_variables, primal_buffer, primal_size());
+    solver_detail::store_iterate(dual_variables, dual_buffer, dual_size());
   }
   // The stored iterate (see store_variables) for the evaluations. A wide W
   // is stored as it is, not rebuilt from the stored duals (recompute_primal):
@@ -250,6 +240,6 @@ inline solver_context<Data, Result, kernel_input, Output, Objective> make_contex
       dual_variables);
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

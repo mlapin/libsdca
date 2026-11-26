@@ -24,7 +24,7 @@ grid = GridSearchCV(
     [
         {"sdcaclassifier__loss": ["cross_entropy"], "sdcaclassifier__C": [0.1, 1.0, 10.0]},
         {
-            "sdcaclassifier__loss": ["topk_cross_entropy", "topk_hinge_beta"],
+            "sdcaclassifier__loss": ["topk_cross_entropy", "topk_hinge"],
             "sdcaclassifier__k": [1, 2],
             "sdcaclassifier__C": [0.1, 1.0, 10.0],
         },
@@ -45,5 +45,7 @@ print(proba.predict_proba(X_test[:2]).round(3))
 scaler = StandardScaler().fit(X_train)
 S_train, S_test = scaler.transform(X_train), scaler.transform(X_test)
 K_train, K_test = rbf_kernel(S_train, gamma=0.02), rbf_kernel(S_test, S_train, gamma=0.02)
-kernel = SDCAClassifier("topk_hinge_alpha", k=2, C=10.0, kernel="precomputed").fit(K_train, y_train)
+kernel = SDCAClassifier("topk_hinge", k=2, variant="alpha", C=10.0, kernel="precomputed").fit(
+    K_train, y_train
+)
 print(f"rbf kernel test accuracy {kernel.score(K_test, y_test):.3f}")

@@ -53,8 +53,11 @@ def test_two_pass_propagates_nonfinite_rows():
     student = torch.zeros(4, 4097, device="cuda")
     teacher = student.clone()
     student[0, 0], student[1, -1] = float("nan"), float("inf")
-    teacher[2, 0], teacher[3, -1] = float("nan"), -float("inf")
-    assert torch.isnan(distillation_loss(student, teacher, temperature=2.0, reduction="none")).all()
+    teacher[2, 0], student[3, -1] = float("nan"), -float("inf")
+    values = distillation_loss(student, teacher, temperature=2.0, reduction="none")
+    assert torch.isnan(values[:3]).all()
+    # The teacher assigns positive mass to the fourth student row's masked class.
+    assert torch.isposinf(values[3])
 
 
 @pytest.mark.parametrize("dtype,temperature", [(torch.float64, 1.0), (torch.float32, 1e300)])

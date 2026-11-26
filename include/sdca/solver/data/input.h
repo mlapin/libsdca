@@ -5,8 +5,9 @@
 #include <stdexcept>
 
 #include "sdca/utility/types.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 template <typename Data>
 struct feature_input {
@@ -64,6 +65,6 @@ inline void validate_test_input(const kernel_input<Data>& train, const kernel_in
     throw std::invalid_argument("Test kernel must have one row per training example");
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

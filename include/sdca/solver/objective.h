@@ -5,46 +5,11 @@
 #include <stdexcept>
 #include <string>
 
-#include "sdca/loss_kind.h"
-#include "sdca/solver/objective/l2_distillation.h"
-#include "sdca/solver/objective/l2_cross_entropy.h"
-#include "sdca/solver/objective/l2_topk_cross_entropy.h"
-#include "sdca/solver/objective/l2_topk_hinge_alpha.h"
-#include "sdca/solver/objective/l2_multilabel_cross_entropy.h"
-#include "sdca/solver/objective/l2_multilabel_hinge.h"
-#include "sdca/solver/objective/l2_topk_hinge_beta.h"
+#include "sdca/solver/objective/entropy.h"
+#include "sdca/solver/objective/hinge.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
-
-template <typename Objective>
-struct has_param_k : std::false_type {};
-
-template <typename Data, typename Result>
-struct has_param_k<l2_topk_cross_entropy<Data, Result>> : std::true_type {};
-
-template <typename Data, typename Result>
-struct has_param_k<l2_topk_hinge_alpha<Data, Result>> : std::true_type {};
-
-template <typename Data, typename Result>
-struct has_param_k<l2_topk_hinge_alpha_smooth<Data, Result>> : std::true_type {};
-
-template <typename Data, typename Result>
-struct has_param_k<l2_topk_hinge_beta<Data, Result>> : std::true_type {};
-
-template <typename Data, typename Result>
-struct has_param_k<l2_topk_hinge_beta_smooth<Data, Result>> : std::true_type {};
-
-template <typename Objective>
-struct has_param_gamma : std::false_type {};
-
-template <typename Data, typename Result>
-struct has_param_gamma<l2_topk_hinge_alpha_smooth<Data, Result>> : std::true_type {};
-
-template <typename Data, typename Result>
-struct has_param_gamma<l2_topk_hinge_beta_smooth<Data, Result>> : std::true_type {};
-
-template <typename Data, typename Result>
-struct has_param_gamma<l2_multilabel_hinge_smooth<Data, Result>> : std::true_type {};
+SDCA_ISA_BEGIN
 
 template <typename Data, typename Result = Data>
 inline l2_cross_entropy<Data, Result> make_objective_l2_cross_entropy(const Result c = 1) {
@@ -103,59 +68,45 @@ inline l2_distillation<Data, Result> make_objective_l2_distillation(const Result
   return l2_distillation<Data, Result>(c);
 }
 
-// The training objectives 0.5 ||W - W0||^2 + c sum_i loss_i by the shared loss
-// names (docs/API.md): every loss but the proximal and distillation ones. k is
-// the top-k parameter of the top-k losses (1 otherwise) and gamma > 0 smooths
-// the hinges (0: nonsmooth, the other losses). The factories below validate
-// their arguments (std::invalid_argument); visit_multiclass_objective and
-// visit_multilabel_objective call a visitor with the objective type of a spec.
-struct objective_spec {
-  loss_kind kind;
-  double c;
-  size_type k;
-  double gamma;
-};
-
-namespace detail {
-inline objective_spec checked_objective(const loss_kind kind, const double c, const size_type k,
-                                        const double gamma) {
-  if (!(c > 0) || !std::isfinite(c)) throw std::invalid_argument("C must be finite and positive");
-  if (k < 1) throw std::invalid_argument("k must be positive");
-  if (!(gamma >= 0) || !std::isfinite(gamma))
-    throw std::invalid_argument("gamma must be finite and nonnegative");
-  objective_spec spec = {kind, c, k, gamma};
-  return spec;
+// The specs of the training objectives (objective_spec), checked (std::invalid_argument);
+// visit_multiclass_objective and visit_multilabel_objective call a visitor with the objective
+// type of a spec.
+namespace solver_detail {
+inline objective_spec spec_of(const kernel::Kind kind, const double c, const size_type k,
+                              const double gamma) {
+  const objective_spec spec = {kind, c, k, gamma};
+  return checked(spec);
 }
-}  // namespace detail
+}  // namespace solver_detail
 
 inline objective_spec cross_entropy_objective(const double c = 1) {
-  return detail::checked_objective(loss_kind::cross_entropy, c, 1, 0);
+  return solver_detail::spec_of(kernel::cross_entropy, c, 0, 0);
 }
 
 inline objective_spec topk_cross_entropy_objective(const double c, const size_type k) {
-  return detail::checked_objective(loss_kind::topk_cross_entropy, c, k, 0);
+  return solver_detail::spec_of(kernel::topk_cross_entropy, c, k, 0);
 }
 
 inline objective_spec multiclass_hinge_objective(const double c = 1, const double gamma = 0) {
-  return detail::checked_objective(loss_kind::multiclass_hinge, c, 1, gamma);
+  return solver_detail::spec_of(kernel::multiclass_hinge, c, 0, gamma);
 }
 
 inline objective_spec topk_hinge_alpha_objective(const double c, const size_type k,
                                                  const double gamma = 0) {
-  return detail::checked_objective(loss_kind::topk_hinge_alpha, c, k, gamma);
+  return solver_detail::spec_of(kernel::topk_hinge_alpha, c, k, gamma);
 }
 
 inline objective_spec topk_hinge_beta_objective(const double c, const size_type k,
                                                 const double gamma = 0) {
-  return detail::checked_objective(loss_kind::topk_hinge_beta, c, k, gamma);
+  return solver_detail::spec_of(kernel::topk_hinge_beta, c, k, gamma);
 }
 
 inline objective_spec multilabel_hinge_objective(const double c = 1, const double gamma = 0) {
-  return detail::checked_objective(loss_kind::multilabel_hinge, c, 1, gamma);
+  return solver_detail::spec_of(kernel::multilabel_hinge, c, 0, gamma);
 }
 
 inline objective_spec multilabel_cross_entropy_objective(const double c = 1) {
-  return detail::checked_objective(loss_kind::multilabel_cross_entropy, c, 1, 0);
+  return solver_detail::spec_of(kernel::multilabel_cross_entropy, c, 0, 0);
 }
 
 // visitor(objective) with the objective of spec on one label per example
@@ -169,36 +120,36 @@ template <typename Data, typename Result, typename Visitor>
 inline void visit_multiclass_objective(const objective_spec& spec, Visitor&& visitor) {
   const Result c = static_cast<Result>(spec.c), gamma = static_cast<Result>(spec.gamma);
   const bool smooth = spec.gamma > 0;
-  switch (spec.kind) {
-    case loss_kind::cross_entropy:
+  switch (solver_detail::checked(spec).kind) {
+    case kernel::cross_entropy:
       visitor(l2_cross_entropy<Data, Result>(c));
       return;
-    case loss_kind::topk_cross_entropy:
+    case kernel::topk_cross_entropy:
       visitor(l2_topk_cross_entropy<Data, Result>(c, spec.k));
       return;
-    case loss_kind::multiclass_hinge:
-    case loss_kind::topk_hinge_alpha: {
-      const size_type k = spec.kind == loss_kind::multiclass_hinge ? 1 : spec.k;
+    case kernel::multiclass_hinge:
+    case kernel::topk_hinge_alpha: {
+      const size_type k = spec.kind == kernel::multiclass_hinge ? 1 : spec.k;
       if (smooth)
         visitor(l2_topk_hinge_alpha_smooth<Data, Result>(c, k, gamma));
       else
         visitor(l2_topk_hinge_alpha<Data, Result>(c, k));
       return;
     }
-    case loss_kind::topk_hinge_beta:
+    case kernel::topk_hinge_beta:
       if (smooth)
         visitor(l2_topk_hinge_beta_smooth<Data, Result>(c, spec.k, gamma));
       else
         visitor(l2_topk_hinge_beta<Data, Result>(c, spec.k));
       return;
-    case loss_kind::multilabel_hinge:
-    case loss_kind::multilabel_cross_entropy:
-    case loss_kind::proximal_cross_entropy:
-    case loss_kind::distillation:
-    case loss_kind::proximal_distillation:
+    case kernel::multilabel_hinge:
+    case kernel::multilabel_cross_entropy:
+    case kernel::proximal_cross_entropy:
+    case kernel::distillation:
+    case kernel::proximal_distillation:
       break;
   }
-  throw std::invalid_argument(std::string(loss_name(spec.kind)) +
+  throw std::invalid_argument(std::string(kernel::traits(spec.kind).name) +
                               " is not an objective of one label per example");
 }
 
@@ -209,30 +160,30 @@ inline void visit_multiclass_objective(const objective_spec& spec, Visitor&& vis
 template <typename Data, typename Result, typename Visitor>
 inline void visit_multilabel_objective(const objective_spec& spec, Visitor&& visitor) {
   const Result c = static_cast<Result>(spec.c);
-  switch (spec.kind) {
-    case loss_kind::multilabel_hinge:
+  switch (solver_detail::checked(spec).kind) {
+    case kernel::multilabel_hinge:
       if (spec.gamma > 0)
         visitor(l2_multilabel_hinge_smooth<Data, Result>(c, static_cast<Result>(spec.gamma)));
       else
         visitor(l2_multilabel_hinge<Data, Result>(c));
       return;
-    case loss_kind::multilabel_cross_entropy:
+    case kernel::multilabel_cross_entropy:
       visitor(l2_multilabel_cross_entropy<Data, Result>(c));
       return;
-    case loss_kind::cross_entropy:
-    case loss_kind::topk_cross_entropy:
-    case loss_kind::multiclass_hinge:
-    case loss_kind::topk_hinge_alpha:
-    case loss_kind::topk_hinge_beta:
-    case loss_kind::proximal_cross_entropy:
-    case loss_kind::distillation:
-    case loss_kind::proximal_distillation:
+    case kernel::cross_entropy:
+    case kernel::topk_cross_entropy:
+    case kernel::multiclass_hinge:
+    case kernel::topk_hinge_alpha:
+    case kernel::topk_hinge_beta:
+    case kernel::proximal_cross_entropy:
+    case kernel::distillation:
+    case kernel::proximal_distillation:
       break;
   }
-  throw std::invalid_argument(std::string(loss_name(spec.kind)) +
+  throw std::invalid_argument(std::string(kernel::traits(spec.kind).name) +
                               " is not an objective of label sets");
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

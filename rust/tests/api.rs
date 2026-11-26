@@ -2,8 +2,8 @@
 use std::num::NonZeroUsize;
 
 use libsdca::{
-    Error, Evaluation, Input, Loss, Matrix, Model, Precision, ProjectionPrecision, Real, Settings,
-    Shrinking, Solver, Start, Status, Targets, Threads,
+    Error, Evaluation, Input, Loss, LossReport, Matrix, Model, Precision, Real, Settings,
+    Shrinking, Solver, Start, Status, Targets, Threads, TopKVariant,
 };
 
 const X: [f64; 8] = [1.0, 0.2, -0.3, 1.0, 0.7, -0.4, -0.9, -0.8];
@@ -14,11 +14,28 @@ const OBJECTIVES: [Loss; 7] = [
     Loss::CrossEntropy,
     Loss::TopKCrossEntropy { k: 2 },
     Loss::MulticlassHinge { gamma: 0.0 },
-    Loss::TopKHingeAlpha { k: 2, gamma: 0.0 },
-    Loss::TopKHingeBeta { k: 2, gamma: 0.0 },
+    Loss::TopKHinge {
+        k: 2,
+        variant: TopKVariant::Alpha,
+        gamma: 0.0,
+    },
+    Loss::TopKHinge {
+        k: 2,
+        variant: TopKVariant::Beta,
+        gamma: 0.0,
+    },
     Loss::MultilabelHinge { gamma: 0.0 },
     Loss::MultilabelCrossEntropy,
 ];
+
+/// The nonsmooth top-k hinge of the alpha variant.
+const fn alpha(k: usize) -> Loss {
+    Loss::TopKHinge {
+        k,
+        variant: TopKVariant::Alpha,
+        gamma: 0.0,
+    }
+}
 
 fn x() -> Matrix<'static, f64> {
     Matrix::new(&X, 4, 2).unwrap()
@@ -42,8 +59,7 @@ fn invalid(result: Result<impl std::fmt::Debug, Error>, message: &str) {
 fn smoothed(loss: Loss, gamma: f64) -> Loss {
     match loss {
         Loss::MulticlassHinge { .. } => Loss::MulticlassHinge { gamma },
-        Loss::TopKHingeAlpha { k, .. } => Loss::TopKHingeAlpha { k, gamma },
-        Loss::TopKHingeBeta { k, .. } => Loss::TopKHingeBeta { k, gamma },
+        Loss::TopKHinge { k, variant, .. } => Loss::TopKHinge { k, variant, gamma },
         Loss::MultilabelHinge { .. } => Loss::MultilabelHinge { gamma },
         other => other,
     }
@@ -62,15 +78,15 @@ fn shared_vocabulary() {
             "cross_entropy",
             "topk_cross_entropy",
             "multiclass_hinge",
-            "topk_hinge_alpha",
-            "topk_hinge_beta",
+            "topk_hinge",
+            "topk_hinge",
             "multilabel_hinge",
             "multilabel_cross_entropy"
         ]
     );
     assert_eq!(
         "proximal_cross_entropy".parse::<Loss>(),
-        Ok(Loss::ProximalCrossEntropy { alpha: 1.0 })
+        Ok(Loss::ProximalCrossEntropy { gamma: 1.0 })
     );
     assert_eq!(
         "multilabel_cross_entropy".parse::<Loss>(),
@@ -83,6 +99,9 @@ fn shared_vocabulary() {
         invalid(alias.parse::<Precision>(), "Unknown precision");
     }
     invalid("typo".parse::<Loss>(), "Unknown loss");
+    assert_eq!("alpha".parse::<TopKVariant>(), Ok(TopKVariant::Alpha));
+    assert_eq!(TopKVariant::Beta.to_string(), "beta");
+    invalid("gamma".parse::<TopKVariant>(), "Unknown variant");
     assert_eq!(Status::Solved.to_string(), "solved");
     assert_eq!(libsdca::version(), env!("CARGO_PKG_VERSION"));
 }
@@ -97,12 +116,20 @@ fn losses_carry_their_parameters() {
     );
     assert_eq!(
         Loss::topk_hinge(2),
-        Loss::TopKHingeBeta { k: 2, gamma: 0.0 }
+        Loss::TopKHinge {
+            k: 2,
+            variant: TopKVariant::Beta,
+            gamma: 0.0
+        }
     );
-    assert_eq!(Loss::topk_hinge_beta(2), Loss::topk_hinge(2));
+    assert_eq!(Loss::topk_hinge(2), Loss::topk_hinge(2));
     assert_eq!(
-        Loss::topk_hinge_alpha(2),
-        Loss::TopKHingeAlpha { k: 2, gamma: 0.0 }
+        alpha(2),
+        Loss::TopKHinge {
+            k: 2,
+            variant: TopKVariant::Alpha,
+            gamma: 0.0
+        }
     );
     assert_eq!(
         Loss::multilabel_hinge(),
@@ -114,7 +141,7 @@ fn losses_carry_their_parameters() {
     );
     assert_eq!(
         Loss::proximal_cross_entropy(),
-        Loss::ProximalCrossEntropy { alpha: 1.0 }
+        Loss::ProximalCrossEntropy { gamma: 1.0 }
     );
     assert_eq!(
         Loss::distillation(),
@@ -124,7 +151,7 @@ fn losses_carry_their_parameters() {
         Loss::proximal_distillation(),
         Loss::ProximalDistillation {
             temperature: 1.0,
-            alpha: 1.0
+            gamma: 1.0
         }
     );
     assert!(
@@ -132,14 +159,18 @@ fn losses_carry_their_parameters() {
     );
     assert!(!Loss::cross_entropy().is_multilabel() && !Loss::topk_hinge(2).is_multilabel());
     // The parameters reach the model.
-    let loss = Loss::TopKHingeAlpha { k: 2, gamma: 0.25 };
+    let loss = Loss::TopKHinge {
+        k: 2,
+        variant: TopKVariant::Alpha,
+        gamma: 0.25,
+    };
     let model = Solver::new(loss).with_c(3.0).fit(x(), &Y).unwrap();
     assert_eq!((model.loss(), model.c()), (loss, 3.0));
     assert!(!model.has_probability_targets());
     // And change the values: smoothing lowers the hinge.
     let z = Matrix::new(&[0.5, 0.0, 0.3], 1, 3).unwrap();
-    let (rough, _) = Loss::topk_hinge_alpha(2).loss_and_grad(z, &[0]).unwrap();
-    let (smooth, _) = loss.loss_and_grad(z, &[0]).unwrap();
+    let (rough, _, _) = alpha(2).loss_and_grad(z, &[0]).unwrap();
+    let (smooth, _, _) = loss.loss_and_grad(z, &[0]).unwrap();
     assert!(smooth[0] < rough[0]);
 }
 
@@ -154,7 +185,7 @@ fn precision_must_match_the_data_type() {
     let loss = Loss::cross_entropy();
     invalid(
         loss.loss_and_grad_with(z64, &[0], &settings(Precision::Float32)),
-        "does not match f64 data",
+        "float32 work needs float32 storage",
     );
     for precision in [Precision::Float32, Precision::Float64] {
         assert!(loss
@@ -167,9 +198,9 @@ fn precision_must_match_the_data_type() {
     let solver = Solver::default().with_precision(Precision::Float32);
     invalid(
         solver.coordinate_update(z64, &[0], 1.0, None),
-        "does not match f64 data",
+        "float32 work needs float32 storage",
     );
-    invalid(solver.fit(x(), &Y), "does not match f64 data");
+    invalid(solver.fit(x(), &Y), "float32 work needs float32 storage");
     assert_eq!(f64::DEFAULT_PRECISION, Precision::Float64);
     assert_eq!(f32::DEFAULT_PRECISION, Precision::Float32);
 }
@@ -205,14 +236,7 @@ fn public_types_are_send_and_sync() {
     check::<Solver>();
     check::<Settings>();
     check::<Error>();
-    check::<(
-        Loss,
-        Precision,
-        Status,
-        Threads,
-        Shrinking,
-        ProjectionPrecision,
-    )>();
+    check::<(Loss, Precision, Status, Threads, Shrinking)>();
 }
 
 #[test]
@@ -429,7 +453,7 @@ fn probability_targets_train_cross_entropy() {
             .clone()
             .with_num_classes(4)
             .fit(x(), Targets::Probabilities(q)),
-        "num_classes = 4 columns",
+        "shape of the logits (4x4)",
     );
 }
 
@@ -443,31 +467,32 @@ fn every_loss_checks_its_target_kind() {
         Loss::cross_entropy(),
         Loss::topk_cross_entropy(2),
         Loss::multiclass_hinge(),
-        Loss::topk_hinge_alpha(2),
+        alpha(2),
         Loss::topk_hinge(2),
         Loss::proximal_cross_entropy(),
     ];
     for loss in single {
         assert!(loss.loss_and_grad(z, &labels).is_ok(), "{loss}");
-        invalid(loss.loss_and_grad(z, &sets), "takes one label per example");
+        invalid(loss.loss_and_grad(z, &sets), "not label sets");
         invalid(
             loss.loss_and_grad(z, Targets::Teacher(z)),
-            "not Targets::Teacher",
+            "not teacher logits",
         );
-        invalid(
-            loss.loss_and_grad(z, Targets::Probabilities(q)),
-            "not Targets::Probabilities",
-        );
+        if loss != Loss::cross_entropy() {
+            invalid(
+                loss.loss_and_grad(z, Targets::Probabilities(q)),
+                "not probabilities",
+            );
+        }
     }
-    invalid(
-        Loss::cross_entropy().loss_and_grad(z, &sets),
-        "use Loss::MultilabelCrossEntropy",
-    );
+    assert!(Loss::cross_entropy()
+        .loss_and_grad(z, Targets::Probabilities(q))
+        .is_ok());
     for loss in [Loss::multilabel_hinge(), Loss::multilabel_cross_entropy()] {
         assert!(loss.loss_and_grad(z, &sets).is_ok(), "{loss}");
         invalid(
             loss.loss_and_grad(z, &labels),
-            "takes label sets, not Targets::Labels",
+            "takes label sets or a label mask, not labels",
         );
         invalid(
             loss.loss_and_grad(z, Targets::Teacher(z)),
@@ -494,15 +519,15 @@ fn every_loss_checks_its_target_kind() {
     let q4 = Matrix::new(&[0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5], 4, 2).unwrap();
     invalid(
         Solver::new(Loss::topk_hinge(1)).fit(x(), Targets::Probabilities(q4)),
-        "does not take Targets::Probabilities",
+        "not probabilities",
     );
     invalid(
         Solver::default().fit(x(), Targets::Teacher(q4)),
-        "not Targets::Teacher",
+        "not teacher logits",
     );
     invalid(
         Solver::default().coordinate_update(z, Targets::Teacher(z), 1.0, None),
-        "not Targets::Teacher",
+        "not teacher logits",
     );
 }
 
@@ -522,7 +547,7 @@ fn losses_that_are_not_objectives_do_not_train() {
     }
     invalid(
         Solver::new(Loss::distillation()).fit(x(), &Y),
-        "Targets::Probabilities",
+        "train on target probabilities",
     );
 }
 
@@ -531,20 +556,20 @@ fn distillation_losses() {
     let z = Matrix::new(&[2.0, -0.5, 1.0, 0.3, 0.1, -2.0], 2, 3).unwrap();
     let t = Matrix::new(&[1.0, 0.0, 0.5, -1.0, 2.0, 0.0], 2, 3).unwrap();
     // Equal logits: a zero gradient.
-    let (dv, dg) = Loss::distillation()
+    let (dv, dg, _) = Loss::distillation()
         .loss_and_grad(z, Targets::Teacher(z))
         .unwrap();
     assert!(dg.iter().all(|&g| g == 0.0));
     let proximal = Loss::ProximalDistillation {
         temperature: 1.0,
-        alpha: 0.5,
+        gamma: 0.5,
     };
-    let (pv, pg) = proximal.loss_and_grad(z, Targets::Teacher(z)).unwrap();
+    let (pv, pg, _) = proximal.loss_and_grad(z, Targets::Teacher(z)).unwrap();
     assert!(pv.iter().zip(&dv).all(|(p, d)| (p - d).abs() < 1e-14));
     assert!(pg.iter().all(|&g: &f64| g.abs() < 1e-15));
     // The cross-entropy of the softmaxes at T, and the gradient (q - p) / T.
     let temperature = 2.0;
-    let (v, g) = Loss::Distillation { temperature }
+    let (v, g, _) = Loss::Distillation { temperature }
         .loss_and_grad(z, Targets::Teacher(t))
         .unwrap();
     for i in 0..2 {
@@ -558,10 +583,10 @@ fn distillation_losses() {
         }
     }
     // Proximal distillation lies below plain distillation.
-    let (pv, _) = Loss::proximal_distillation()
+    let (pv, _, _) = Loss::proximal_distillation()
         .loss_and_grad(z, Targets::Teacher(t))
         .unwrap();
-    let (dv, _) = Loss::distillation()
+    let (dv, _, _) = Loss::distillation()
         .loss_and_grad(z, Targets::Teacher(t))
         .unwrap();
     assert!(pv.iter().zip(&dv).all(|(p, d)| p < d));
@@ -569,18 +594,22 @@ fn distillation_losses() {
     let short = Matrix::new(&[1.0, 0.0, 0.5], 1, 3).unwrap();
     invalid(
         Loss::distillation().loss_and_grad(z, Targets::Teacher(short)),
-        "shape of the logits",
+        "student and teacher must have one shape, not (2, 3) and (1, 3)",
     );
     let nan = Matrix::new(&[f64::NAN; 6], 2, 3).unwrap();
-    invalid(
-        Loss::distillation().loss_and_grad(z, Targets::Teacher(nan)),
-        "Teacher logits must be finite",
+    let (values, _, report) = Loss::distillation()
+        .loss_and_grad(z, Targets::Teacher(nan))
+        .unwrap();
+    assert!(values.iter().all(|v| v.is_nan()));
+    assert_eq!(
+        (report.invalid_rows, report.first_invalid_row),
+        (2, Some(0))
     );
     let bad = [
         Loss::Distillation { temperature: 0.0 },
         Loss::ProximalDistillation {
             temperature: f64::NAN,
-            alpha: 1.0,
+            gamma: 1.0,
         },
     ];
     for loss in bad {
@@ -591,31 +620,30 @@ fn distillation_losses() {
     }
     let no_step = Loss::ProximalDistillation {
         temperature: 1.0,
-        alpha: 0.0,
+        gamma: 0.0,
     };
     invalid(
         no_step.loss_and_grad(z, Targets::Teacher(t)),
-        "alpha must be",
+        "gamma must be",
     );
 }
 
 #[test]
-fn proximal_distillation_rejects_float32_work() {
+fn proximal_distillation_computes_in_float64() {
     let z32 = [2.0f32, -0.5, 1.0];
     let z32 = Matrix::new(&z32, 1, 3).unwrap();
     let loss = Loss::proximal_distillation();
     let float = Settings::default().with_precision(Precision::Float32);
-    invalid(
-        loss.loss_and_grad_with(z32, Targets::Teacher(z32), &float),
-        "float64",
-    );
-    // The default precision of f32 data and Float64 compute the same, in double.
+    // Float32, the default precision of f32 data and Float64 compute the same, in double.
     let double = Settings::default().with_precision(Precision::Float64);
     let a = loss.loss_and_grad(z32, Targets::Teacher(z32)).unwrap();
     let b = loss
         .loss_and_grad_with(z32, Targets::Teacher(z32), &double)
         .unwrap();
-    assert_eq!(a, b);
+    let c = loss
+        .loss_and_grad_with(z32, Targets::Teacher(z32), &float)
+        .unwrap();
+    assert_eq!((&a, &a), (&b, &c));
     // Plain distillation computes in float on request.
     let plain = Loss::distillation();
     assert!(plain
@@ -667,7 +695,7 @@ fn coordinate_update_is_the_entropy_fixed_point() {
 #[test]
 fn loss_and_gradient_match_softmax() {
     let z = [2.0, -0.5, 1.0];
-    let (values, grad) = Loss::cross_entropy()
+    let (values, grad, _) = Loss::cross_entropy()
         .loss_and_grad(Matrix::new(&z, 1, 3).unwrap(), &[2])
         .unwrap();
     let p = softmax(&z);
@@ -689,12 +717,16 @@ fn float32_losses_are_close_to_float64() {
     let losses = [
         Loss::CrossEntropy,
         Loss::TopKCrossEntropy { k: 2 },
-        Loss::TopKHingeAlpha { k: 2, gamma: 0.5 },
-        Loss::ProximalCrossEntropy { alpha: 1.0 },
+        Loss::TopKHinge {
+            k: 2,
+            variant: TopKVariant::Alpha,
+            gamma: 0.5,
+        },
+        Loss::ProximalCrossEntropy { gamma: 1.0 },
     ];
     for loss in losses {
-        let (v32, g32) = eval(loss, Precision::Float32);
-        let (v64, g64) = eval(loss, Precision::Float64);
+        let (v32, g32, _) = eval(loss, Precision::Float32);
+        let (v64, g64, _) = eval(loss, Precision::Float64);
         assert!(v32.iter().zip(&v64).all(|(a, b)| (a - b).abs() < 1e-5));
         assert!(g32.iter().zip(&g64).all(|(a, b)| (a - b).abs() < 1e-5));
     }
@@ -763,20 +795,20 @@ fn invalid_input() {
     );
     invalid(
         solver.clone().with_num_classes(3).fit(x(), &[0, 1, 5, 0]),
-        "labels must lie in [0, 3)",
+        "Target 5 is out of bounds.",
     );
     invalid(
         Solver::new(Loss::topk_hinge(3)).fit(x(), &Y),
-        "k must be in [1, 2]",
+        "k must be in [1, classes - 1] = [1, 2], got 3",
     );
     invalid(
         Solver::new(Loss::topk_cross_entropy(0)).fit(x(), &Y),
-        "k must be in",
+        "k must be at least 1, got 0",
     );
     invalid(solver.clone().with_c(0.0).fit(x(), &Y), "C must be finite");
     invalid(
         solver.fit(Input::Kernel(x()), &Y),
-        "must be a square Gram matrix",
+        "A Gram matrix is square",
     );
     // Asymmetric and indefinite (|K_01| > sqrt(K_00 K_11)) kernels.
     for gram in [[1.0, 0.5, 0.4, 1.0], [1.0, 2.0, 2.0, 1.0]] {
@@ -788,7 +820,7 @@ fn invalid_input() {
     let full = [vec![0, 1, 2], vec![1], vec![2], vec![0]];
     invalid(
         Solver::new(Loss::multilabel_hinge()).fit(x(), &full),
-        "between 1 and 2 labels",
+        "needs a class outside it",
     );
     invalid(
         Solver::new(Loss::multilabel_cross_entropy())
@@ -798,19 +830,20 @@ fn invalid_input() {
     let loss = Loss::cross_entropy();
     invalid(
         loss.loss_and_grad(Matrix::new(&[1.0], 1, 1).unwrap(), &[0]),
-        "logits must have at least one row and two columns",
+        "At least two classes are required",
+    );
+    let rows = Settings::default().with_check_rows(true);
+    invalid(
+        loss.loss_and_grad_with(Matrix::new(&[1.0, f64::NAN], 1, 2).unwrap(), &[0], &rows),
+        "1 of 1 rows are invalid",
     );
     invalid(
-        loss.loss_and_grad(Matrix::new(&[1.0, f64::NAN], 1, 2).unwrap(), &[0]),
-        "logits must be finite",
-    );
-    invalid(
-        loss.loss_and_grad(Matrix::new(&[1.0, 0.0], 1, 2).unwrap(), &[2]),
-        "labels must lie in [0, 2)",
+        loss.loss_and_grad_with(Matrix::new(&[1.0, 0.0], 1, 2).unwrap(), &[2], &rows),
+        "Target 2 is out of bounds.",
     );
     invalid(
         loss.loss_and_grad(Matrix::new(&[1.0, 0.0], 1, 2).unwrap(), &[0, 1]),
-        "one entry per example (1), not 2",
+        "target must have shape (1,) (the logits' shape without the class dimension), not (2,)",
     );
     invalid(
         solver.coordinate_update(
@@ -823,9 +856,12 @@ fn invalid_input() {
     );
     // Multilabel losses need a non-label class.
     invalid(
-        Loss::multilabel_hinge()
-            .loss_and_grad(Matrix::new(&[0.0, 0.0], 1, 2).unwrap(), &[vec![0, 1]]),
-        "between 1 and 1 labels",
+        Loss::multilabel_hinge().loss_and_grad_with(
+            Matrix::new(&[0.0, 0.0], 1, 2).unwrap(),
+            &[vec![0, 1]],
+            &rows,
+        ),
+        "1 of 1 rows are invalid",
     );
 }
 
@@ -860,16 +896,48 @@ fn warm_start_signs_are_exact() {
 }
 
 #[test]
+fn invalid_rows_are_reported() {
+    let z = [2.0, -0.5, 1.0, f64::NAN, 1.0, 3.0, 0.0, 1.0, f64::INFINITY];
+    let z = Matrix::new(&z, 3, 3).unwrap();
+    let loss = Loss::cross_entropy();
+    let (values, gradients, report) = loss.loss_and_grad(z, &[0, 2, 1]).unwrap();
+    assert_eq!(
+        (report.invalid_rows, report.first_invalid_row),
+        (2, Some(1))
+    );
+    assert!(!report.is_valid());
+    assert!(values[0].is_finite() && gradients[..3].iter().all(|g| g.is_finite()));
+    assert!(values[1..].iter().all(|v| v.is_nan()) && gradients[3..].iter().all(|g| g.is_nan()));
+    let finite = Matrix::new(&[2.0, -0.5, 1.0], 1, 3).unwrap();
+    let (_, _, clean) = loss.loss_and_grad(finite, &[0]).unwrap();
+    assert_eq!(clean, LossReport::default());
+    let rows = Settings::default().with_check_rows(true);
+    invalid(
+        loss.loss_and_grad_with(z, &[0, 2, 1], &rows),
+        "2 of 3 rows are invalid (first: row 1)",
+    );
+    // A label out of range is an error, as in PyTorch, not an invalid row.
+    invalid(
+        loss.loss_and_grad(z, &[0, 2, 7]),
+        "Target 7 is out of bounds.",
+    );
+}
+
+#[test]
 fn label_sets_need_a_class_outside_them() {
     // The steps of the multilabel objectives need one, and the losses follow them.
     let z = Matrix::new(&[0.0f64, 0.0, 0.0], 1, 3).unwrap();
+    let rows = Settings::default().with_check_rows(true);
+    invalid(
+        Loss::multilabel_hinge().loss_and_grad_with(z, &[vec![0, 1, 2]], &rows),
+        "1 of 1 rows are invalid",
+    );
     for loss in [Loss::multilabel_cross_entropy(), Loss::multilabel_hinge()] {
-        invalid(loss.loss_and_grad(z, &[vec![0, 1, 2]]), "between 1 and 2");
-        let (value, grad) = loss.loss_and_grad(z, &[vec![0, 1]]).unwrap();
+        let (value, grad, _) = loss.loss_and_grad(z, &[vec![0, 1]]).unwrap();
         assert_eq!((value.len(), grad.len()), (1, 3));
     }
     // Multilabel cross-entropy at equal scores: the log of the number of classes.
-    let (value, _) = Loss::multilabel_cross_entropy()
+    let (value, _, _) = Loss::multilabel_cross_entropy()
         .loss_and_grad(z, &[vec![0, 1]])
         .unwrap();
     assert!((value[0] - 3f64.ln()).abs() < 1e-15);
@@ -945,7 +1013,6 @@ fn solver_defaults_and_getters() {
     let settings = Settings::default();
     assert_eq!(settings.precision, None);
     assert_eq!(settings.threads, Threads::FromEnv);
-    assert_eq!(settings.projection_precision, ProjectionPrecision::Float64);
     let two = NonZeroUsize::new(2).unwrap();
     let tuned = Solver::new(Loss::topk_hinge(2))
         .with_c(5.0)
@@ -958,8 +1025,7 @@ fn solver_defaults_and_getters() {
         .with_seed(7)
         .with_num_classes(4)
         .with_precision(Precision::Float64)
-        .with_threads(Threads::Count(two))
-        .with_projection_precision(ProjectionPrecision::Extended);
+        .with_threads(Threads::Count(two));
     assert_eq!(tuned.loss(), Loss::topk_hinge(2));
     assert_eq!(
         (
@@ -980,7 +1046,6 @@ fn solver_defaults_and_getters() {
         Settings::default()
             .with_precision(Precision::Float64)
             .with_threads(Threads::Count(two))
-            .with_projection_precision(ProjectionPrecision::Extended)
     );
     assert_eq!(
         Solver::default().with_settings(tuned.settings()).settings(),
@@ -1019,64 +1084,6 @@ fn recompute_primal_is_on_by_default_and_keeps_the_duals() {
 }
 
 #[test]
-fn projection_precision_is_float64_by_default_and_extended_agrees() {
-    assert_eq!(ProjectionPrecision::default(), ProjectionPrecision::Float64);
-    assert_eq!(
-        "extended".parse::<ProjectionPrecision>(),
-        Ok(ProjectionPrecision::Extended)
-    );
-    invalid(
-        "double".parse::<ProjectionPrecision>(),
-        "projection_precision",
-    );
-    let sets = vec![vec![0usize, 1], vec![1], vec![0, 2], vec![2]];
-    let loss = Loss::MultilabelHinge { gamma: 0.5 };
-    let fits: Vec<_> = ProjectionPrecision::ALL
-        .iter()
-        .map(|&mode| {
-            Solver::new(loss)
-                .with_tol(1e-10)
-                .with_projection_precision(mode)
-                .fit(x(), &sets)
-                .unwrap()
-        })
-        .collect();
-    // Where long double is double (Apple arm64, MSVC), the extended solver rounds differently
-    // from the float64 one and the fits stop at different solved points: each within
-    // sqrt(2 gap) of the optimum, as the objective is 1-strongly convex in W.
-    let radius = |m: &Model<f64>| {
-        let end = last(m);
-        (2.0 * (end.relative_gap * end.primal.abs()).max(0.0)).sqrt()
-    };
-    let narrow = cfg!(any(
-        target_env = "msvc",
-        all(target_vendor = "apple", target_arch = "aarch64")
-    ));
-    let tolerance = if narrow {
-        radius(&fits[0]) + radius(&fits[1])
-    } else {
-        1e-12
-    };
-    assert!(fits.iter().all(|m| m.status() == Status::Solved));
-    let close = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(u, v)| (u - v).abs() <= tolerance);
-    assert!(close(
-        fits[0].weights().unwrap(),
-        fits[1].weights().unwrap()
-    ));
-    let z = [0.3, -0.2, 0.9, 0.1, 0.4, -0.7];
-    let losses: Vec<_> = ProjectionPrecision::ALL
-        .iter()
-        .map(|&mode| {
-            let settings = Settings::default().with_projection_precision(mode);
-            loss.loss_and_grad_with(Matrix::new(&z, 2, 3).unwrap(), &sets[..2], &settings)
-                .unwrap()
-        })
-        .collect();
-    let close_loss = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(u, v)| (u - v).abs() <= 1e-12);
-    assert!(close_loss(&losses[0].0, &losses[1].0) && close_loss(&losses[0].1, &losses[1].1));
-}
-
-#[test]
 fn targets_convert_from_slices_arrays_and_vectors() {
     let labels = vec![0usize, 1];
     let sets = vec![vec![0usize], vec![1, 2]];
@@ -1110,8 +1117,7 @@ fn names_parse_and_display() {
         Loss::cross_entropy(),
         Loss::topk_cross_entropy(1),
         Loss::multiclass_hinge(),
-        Loss::topk_hinge_alpha(1),
-        Loss::topk_hinge_beta(1),
+        Loss::topk_hinge(1),
         Loss::multilabel_hinge(),
         Loss::multilabel_cross_entropy(),
         Loss::proximal_cross_entropy(),
@@ -1122,12 +1128,12 @@ fn names_parse_and_display() {
         assert_eq!(loss.name().parse::<Loss>(), Ok(loss));
         assert_eq!(loss.to_string(), loss.name());
     }
-    // Display and the parsed defaults leave out the parameters.
-    let smooth = Loss::TopKHingeBeta { k: 2, gamma: 0.5 };
-    assert_eq!(smooth.to_string(), "topk_hinge_beta");
-    // Canonical names only; smoothing is gamma, not a name.
+    // Display and the parsed defaults leave out the parameters and the variant.
+    assert_eq!(alpha(2).to_string(), "topk_hinge");
+    // Canonical names only; the variant and the smoothing are parameters, not names.
     for alias in [
-        "topk_hinge",
+        "topk_hinge_alpha",
+        "topk_hinge_beta",
         "ce",
         "softmax",
         "svm",
@@ -1139,7 +1145,7 @@ fn names_parse_and_display() {
 
 #[test]
 fn eval_epoch_zero_evaluates_at_the_end() {
-    // As in C++ and MATLAB: one evaluation, after max_epoch; it decides the status.
+    // As in C++: one evaluation, after max_epoch; it decides the status.
     let model = Solver::default()
         .with_eval_epoch(0)
         .with_max_epoch(5)
@@ -1158,7 +1164,7 @@ fn invalid_options() {
     );
     invalid(
         solver.clone().with_num_classes(1).fit(x(), &Y),
-        "num_classes must be at least 2",
+        "At least two classes are required",
     );
     invalid(solver.clone().with_c(1e-320).fit(x(), &Y), "must be normal");
     let center = Start::default().with_center(&[0.0; 5]);
@@ -1172,13 +1178,13 @@ fn invalid_options() {
     invalid(solver.fit_from(x(), &Y, &dual), "initial_dual must have");
     invalid(
         solver.fit(Matrix::<f64>::new(&[], 0, 2).unwrap(), Targets::Labels(&[])),
-        "nonempty matrix",
+        "n >= 1 and d >= 1",
     );
     let gram = Matrix::new(&[1.0, 0.0, 0.0, 1.0], 2, 2).unwrap();
     let kernel_center = Start::default().with_center(&[0.0; 4]);
     invalid(
         solver.fit_from(Input::Kernel(gram), &[0, 1], &kernel_center),
-        "Start::center is for Input::Features, not Input::Kernel",
+        "A Gram matrix takes no weights and no center",
     );
     let z = Matrix::new(&[1.0, 2.0, 3.0], 1, 3).unwrap();
     let rough = Loss::MulticlassHinge { gamma: -1.0 };
@@ -1188,11 +1194,11 @@ fn invalid_options() {
     );
     invalid(Solver::new(rough).fit(x(), &Y), "gamma must be");
     let step = Loss::ProximalCrossEntropy {
-        alpha: f64::INFINITY,
+        gamma: f64::INFINITY,
     };
     invalid(
         step.loss_and_grad(z, &[0]),
-        "alpha must be finite and positive",
+        "gamma must be finite and positive",
     );
     invalid(
         solver.coordinate_update(z, &[0], 1.0, Some(&[0.0; 2])),
@@ -1217,12 +1223,12 @@ fn warm_start_feasible_sets() {
     let x1 = Matrix::new(&[1.0], 1, 1).unwrap();
     let cases: [(Loss, [f64; 3], &str); 3] = [
         (
-            Loss::topk_hinge_beta(1),
+            Loss::topk_hinge(1),
             [1.1, -0.6, -0.5],
             "outside the feasible set",
         ),
-        (Loss::topk_hinge_alpha(2), [0.6, -0.4, -0.2], "top-k cone"),
-        (Loss::topk_hinge_beta(2), [0.9, -0.6, -0.3], "top-k cap"),
+        (alpha(2), [0.6, -0.4, -0.2], "top-k cone"),
+        (Loss::topk_hinge(2), [0.9, -0.6, -0.3], "top-k cap"),
     ];
     for (loss, a, message) in cases {
         let start = Start::default().with_initial_dual(&a);
@@ -1324,8 +1330,16 @@ fn stress_cases_match_independent_oracles() {
     let z32 = [1.0f32, h as f32];
     for gamma in [0.0, 1.0] {
         for loss in [
-            Loss::TopKHingeAlpha { k: 1, gamma },
-            Loss::TopKHingeBeta { k: 1, gamma },
+            Loss::TopKHinge {
+                k: 1,
+                variant: TopKVariant::Alpha,
+                gamma,
+            },
+            Loss::TopKHinge {
+                k: 1,
+                variant: TopKVariant::Beta,
+                gamma,
+            },
         ] {
             let s = h / (2.0 + gamma);
             let u = Solver::new(loss)
@@ -1337,23 +1351,27 @@ fn stress_cases_match_independent_oracles() {
         }
     }
     // Smoothed hinge value at [0, 1e200], gamma = 1e300 is 5e99, not NaN.
-    let (v, g) = Loss::TopKHingeBeta { k: 1, gamma: 1e300 }
-        .loss_and_grad(Matrix::new(&[0.0, 1e200], 1, 2).unwrap(), &[0])
-        .unwrap();
+    let (v, g, _) = Loss::TopKHinge {
+        k: 1,
+        variant: TopKVariant::Beta,
+        gamma: 1e300,
+    }
+    .loss_and_grad(Matrix::new(&[0.0, 1e200], 1, 2).unwrap(), &[0])
+    .unwrap();
     assert!((v[0] / 5e99 - 1.0).abs() < 1e-14);
     assert!((g[1] / 1e-100 - 1.0_f64).abs() < 1e-14);
     // proximal_cross_entropy at a tiny step: the cross-entropy less
-    // alpha / 2 |gradient|^2, to first order.
+    // gamma / 2 |gradient|^2, to first order.
     let z = [2.0, -0.5, 1.0];
-    let alpha = 1e-6;
-    let (vp, gp) = Loss::ProximalCrossEntropy { alpha }
+    let gamma = 1e-6;
+    let (vp, gp, _) = Loss::ProximalCrossEntropy { gamma }
         .loss_and_grad(Matrix::new(&z, 1, 3).unwrap(), &[2])
         .unwrap();
-    let (vc, gc) = Loss::cross_entropy()
+    let (vc, gc, _) = Loss::cross_entropy()
         .loss_and_grad(Matrix::new(&z, 1, 3).unwrap(), &[2])
         .unwrap();
     let squared: f64 = gc.iter().map(|g| g * g).sum();
-    assert!((vp[0] - (vc[0] - alpha / 2.0 * squared)).abs() < 1e-10);
+    assert!((vp[0] - (vc[0] - gamma / 2.0 * squared)).abs() < 1e-10);
     assert!(gp.iter().zip(&gc).all(|(p, c)| (p - c).abs() < 1e-5));
 }
 
@@ -1376,19 +1394,19 @@ fn hinge_losses_match_closed_forms_on_several_examples() {
         .collect();
     for loss in [
         Loss::multiclass_hinge(),
-        Loss::topk_hinge_alpha(2),
-        Loss::topk_hinge_beta(2),
+        alpha(2),
+        Loss::topk_hinge(2),
         Loss::multilabel_hinge(),
     ] {
         let matrix = Matrix::new(&z, n, m).unwrap();
-        let (values, grad) = if loss.is_multilabel() {
+        let (values, grad, _) = if loss.is_multilabel() {
             loss.loss_and_grad(matrix, &sets)
         } else {
             loss.loss_and_grad(matrix, &y)
         }
         .unwrap();
         let k = match loss {
-            Loss::TopKHingeAlpha { k, .. } | Loss::TopKHingeBeta { k, .. } => k,
+            Loss::TopKHinge { k, .. } => k,
             _ => 1,
         };
         for i in 0..n {
@@ -1418,7 +1436,13 @@ fn hinge_losses_match_closed_forms_on_several_examples() {
                     .iter()
                     .map(|&j| 1.0 + row[j] - row[y[i]])
                     .collect();
-                let beta = matches!(loss, Loss::TopKHingeBeta { .. });
+                let beta = matches!(
+                    loss,
+                    Loss::TopKHinge {
+                        variant: TopKVariant::Beta,
+                        ..
+                    }
+                );
                 value = if beta {
                     margins.iter().map(|h| h.max(0.0)).sum::<f64>() / k as f64
                 } else {
@@ -1489,7 +1513,7 @@ fn every_objective_solves_at_its_reported_primal() {
                 })
                 .collect();
             let scores = Matrix::new(&z, n, m).unwrap();
-            let (values, _) = if loss.is_multilabel() {
+            let (values, _, _) = if loss.is_multilabel() {
                 loss.loss_and_grad(scores, &sets)
             } else {
                 loss.loss_and_grad(scores, &y)

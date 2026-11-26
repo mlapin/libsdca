@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from libsdca import MULTILABEL, OBJECTIVES
+from named_losses import MULTILABEL, OBJECTIVES
 from numpy_api import Solver
 
 

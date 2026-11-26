@@ -9,8 +9,9 @@
 #include "sdca/solver/data/output.h"
 #include "sdca/solver/data/scratch.h"
 #include "sdca/solver/eval/types.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 template <typename Result = double, typename Data, template <typename> class Input, typename Output>
 inline dataset<Input<Data>, Output, eval_train<Result, Output>> make_dataset_train(Input<Data>&& in,
@@ -89,6 +90,6 @@ inline distribution_output make_output_distribution(const size_type num_classes,
   return distribution_output(num_classes, num_examples, std::move(q));
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

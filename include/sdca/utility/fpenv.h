@@ -133,6 +133,24 @@ class ieee_environment {
   fp_modes saved_;
 };
 
+// Subnormals kept in a scope: flush-to-zero and denormals-are-zero cleared
+// where the caller set them (XLA does on its threads), restored on exit; one
+// read of the control register otherwise. The other modes stay the caller's.
+class subnormal_environment {
+ public:
+  subnormal_environment() : saved_(fp_control()) {
+    if (saved_ & flush_to_zero_bits()) set_fp_control(saved_ & ~flush_to_zero_bits());
+  }
+  ~subnormal_environment() {
+    if (saved_ & flush_to_zero_bits()) set_fp_control(saved_);
+  }
+  subnormal_environment(const subnormal_environment&) = delete;
+  subnormal_environment& operator=(const subnormal_environment&) = delete;
+
+ private:
+  std::uint64_t saved_;
+};
+
 }  // namespace detail
 
 }  // namespace sdca

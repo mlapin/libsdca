@@ -1,10 +1,11 @@
-"""Set the release version: python tools/bump_version.py 0.3.2 [--date YYYY-MM-DD]
+"""Set the release version: python tools/bump_version.py 0.4.1 [--date YYYY-MM-DD]
 
-VERSION is the single source that CMake, setup.py, python/build.py, pyproject.toml and
-matlab/make.m read. This script also rewrites the copies that cannot read it: the crate
-manifest, the Python package, the citation and the release links of the package pages.
-A CHANGELOG.md heading "## Unreleased" becomes "## <version> (<date>)"; otherwise add that
-heading by hand. tools/quality.py checks that every copy agrees.
+VERSION is the single source that CMake, setup.py, python/build.py and pyproject.toml read.
+This script also rewrites the copies that cannot read it: the crate manifest, the Python
+package, the citation and the release links of the package pages.
+A CHANGELOG.md heading "## Unreleased" or "## <version> (unreleased)" becomes
+"## <version> (<date>)"; otherwise add that heading by hand. tools/quality.py checks that
+every copy agrees.
 """
 
 from __future__ import annotations
@@ -47,7 +48,9 @@ def bump(version: str, released: str, root: Path = ROOT) -> None:
         file.write_text(text)
     changelog = root / "CHANGELOG.md"
     text = changelog.read_text()
-    changelog.write_text(text.replace("\n## Unreleased\n", f"\n## {version} ({released})\n", 1))
+    for heading in ("Unreleased", f"{version} (unreleased)"):
+        text = text.replace(f"\n## {heading}\n", f"\n## {version} ({released})\n", 1)
+    changelog.write_text(text)
 
 
 def main() -> None:

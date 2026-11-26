@@ -1,14 +1,24 @@
 """Two-rank Hessian-vector products and first-order DTensor boundaries."""
 
+import contextlib
 import datetime
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 import torch
 import torch.distributed as dist
-from test_distributed import case
 from torch.multiprocessing.spawn import spawn
+
+
+@contextlib.contextmanager
+def case(**labels: object) -> Iterator[None]:
+    """Name the failing case in a worker process, where pytest subtests do not report."""
+    try:
+        yield
+    except AssertionError as error:
+        raise AssertionError(f"{labels}: {error}") from error
 
 
 def higher_worker(rank: int, rendezvous: str):
@@ -61,19 +71,21 @@ def check_higher_derivatives():
                         distributed_labels,
                         distributed_weights,
                         ignore_index=-1,
-                        backend="torch",
+                        backend="composed",
                     )
                 else:
                     reference = F.cross_entropy(local, labels)
                     # Plain labels contain the same GLOBAL values on each rank.
-                    actual = torch_loss(z, labels, objective, k=1, backend="torch")
+                    actual = torch_loss(z, labels, objective, k=1, backend="composed")
                 (expected_gradient,) = torch.autograd.grad(reference, local, create_graph=True)
                 (expected_hvp,) = torch.autograd.grad(expected_gradient, local, direction)
                 (gradient,) = torch.autograd.grad(actual, z, create_graph=True)
                 (hvp,) = torch.autograd.grad(gradient, z, v)
-                assert isinstance(actual, DTensor) and isinstance(gradient, DTensor)
-                assert isinstance(hvp, DTensor)
-                torch.testing.assert_close(actual.full_tensor(), reference, rtol=1e-12, atol=1e-14)
+                # The losses gather DTensor logits in full (docs/TORCH.md, Distributed training):
+                # the value is replicated, the derivatives keep the logits' placements.
+                assert isinstance(gradient, DTensor) and isinstance(hvp, DTensor)
+                value = actual.full_tensor() if isinstance(actual, DTensor) else actual
+                torch.testing.assert_close(value, reference, rtol=1e-12, atol=1e-14)
                 torch.testing.assert_close(
                     gradient.full_tensor(), expected_gradient, rtol=1e-11, atol=1e-13
                 )

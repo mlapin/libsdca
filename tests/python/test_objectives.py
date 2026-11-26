@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 import pytest
-from libsdca import HINGES, MULTILABEL, OBJECTIVES
+from named_losses import HINGES, MULTILABEL, OBJECTIVES
 from numpy_api import Solver
 from scipy.optimize import minimize
 

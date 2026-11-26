@@ -29,7 +29,7 @@ REPOSITORY = re.compile(
 REPOSITORY_BRANCH = "master"
 # Package pages render these guides away from the repository, so relative links break.
 PACKAGE_PAGES = ("docs/PYTHON.md", "docs/RUST.md")
-# Archived run records keep the links of the tree they were made from.
+# Archived snapshots keep the links of the tree they were made from.
 ARCHIVE = "/".join(("private", "experiments")) + "/"
 # Metadata that carries URLs but not Markdown links.
 METADATA = ("pyproject.toml", "CITATION.cff", "rust/Cargo.toml")
@@ -54,7 +54,7 @@ def markdown_paths(root: Path, tracked: set[str] | None) -> list[Path]:
     (snapshots of older trees and report sources with generated anchors)."""
     if tracked is None:
         found = list(root.glob("*.md"))
-        for directory in ("docs", "examples", "python", "rust", "matlab", "tools"):
+        for directory in ("docs", "examples", "python", "rust", "tools"):
             found.extend((root / directory).rglob("*.md"))
         return sorted(path for path in found if "build" not in path.relative_to(root).parts)
     return sorted(

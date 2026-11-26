@@ -9,9 +9,9 @@ abstract: >-
   and fast on GPU and CPU.
 authors:
   - family-names: Lapin
-    given-names: Max
+    given-names: Maksim
 version: 0.4.0
-date-released: 2026-11-16
+date-released: 2026-11-26
 license: MIT
 url: https://mlapin.github.io/libsdca/
 repository-code: https://github.com/mlapin/libsdca
@@ -67,7 +67,7 @@ references:
     title: "libsdca: Accurate and Fast Classification Losses for SDCA and Neural Networks"
     authors:
       - family-names: Lapin
-        given-names: Max
+        given-names: Maksim
     year: 2026
     month: 11
     url: https://mlapin.github.io/libsdca/report/

@@ -19,11 +19,11 @@ Families:
 
 from __future__ import annotations
 
-import importlib.util
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 
 import numpy as np
+from storage_limits import LIMITS
 from topk_rows import CAPPED_GAPS
 
 from conformance.references import (
@@ -38,12 +38,7 @@ from conformance.references import (
 
 DTYPES = ("float16", "bfloat16", "float32", "float64")
 # eps, tiny (smallest normal) and max of each storage dtype.
-FINFO = {
-    "float16": (2.0**-10, 2.0**-14, 65504.0),
-    "bfloat16": (2.0**-7, 2.0**-126, float.fromhex("0x1.fep127")),
-    "float32": (2.0**-23, 2.0**-126, float.fromhex("0x1.fffffep127")),
-    "float64": (2.0**-52, 2.0**-1022, float.fromhex("0x1.fffffffffffffp1023")),
-}
+FINFO = {dtype: (lim.eps, lim.tiny, lim.max) for dtype, lim in LIMITS.items()}
 WIDE = (10, 1000, 4096, 32768)
 _GAPS32 = (80, 87, 90, 95, 100, 104, 106, 110)
 GAPS: dict[str, tuple[int, ...]] = {
@@ -223,7 +218,7 @@ def wide(loss: Loss, dtype: str, classes: int) -> Case:
 
 def gaussian(loss: Loss, dtype: str) -> Case:
     """Wide Gaussian row (4097 classes, scale 1), with a random label or positive set, under
-    the report's bound entry by entry."""
+    the documented bound entry by entry."""
     rng = np.random.default_rng(4097)
     z = rng.standard_normal((2, 4097))
     teacher = rng.standard_normal((2, 4097))
@@ -276,7 +271,7 @@ def all_capped(dtype: str) -> Case:
 
 
 def distillation_example(dtype: str) -> Case:
-    """The report's CUDA example: 8192 classes, student [0, -110, ...], teacher [0, -220, ...]."""
+    """A distillation example of the CUDA kernels: 8192 classes, student [0, -110, ...], teacher [0, -220, ...]."""
     s, t = represent(np.array([-110.0, -220.0]), dtype)
     row = (Block(0.0, 1, False, 0.0), Block(s, 8191, False, t))
     return Case("documented", (row,), ({"gap": 220, "student_gap": 110, "teacher_gap": 220},))
@@ -334,9 +329,7 @@ def cases(loss: Loss, dtype: str) -> Iterator[tuple[Loss, Case]]:
 
 def _referenced(loss: Loss, case: Case) -> Case:
     """The rows of a wide smoothed-hinge case whose cut rows give the reference (the cut
-    blocks are inactive); without torch the hinge cells skip."""
-    if importlib.util.find_spec("torch") is None:
-        return case
+    blocks are inactive)."""
     kept = [
         (row, tag)
         for row, tag in zip(case.rows, case.tags, strict=True)

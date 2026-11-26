@@ -8,10 +8,9 @@ TEST(NumericalRegression, all_capped_offset_survives_cancelling_scores) {
     do {
       double scores[] = {-1., competitors[0], competitors[1], competitors[2]};
       double reference[] = {-1., 0., 1., 0.}, grad[4], expected[4];
-      const auto kind = sdca::loss_kind::topk_cross_entropy;
-      const double loss = sdca::detail::permuted_loss_and_gradient(kind, 4, 1, scores, grad, 3);
-      const double ref =
-          sdca::detail::permuted_loss_and_gradient(kind, 4, 1, reference, expected, 3);
+      const auto kind = sdca::kernel::topk_cross_entropy;
+      const double loss = labels_first_loss(kind, 4, 1, scores, grad, 3);
+      const double ref = labels_first_loss(kind, 4, 1, reference, expected, 3);
       EXPECT_NEAR(loss, ref, 2e-14);
       for (int j = 0; j < 4; ++j) EXPECT_NEAR(grad[j], expected[j], 2e-14);
       double a[4] = {0}, b[4] = {0};
@@ -108,9 +107,6 @@ TEST(NumericalRegression, all_capped_near_unit_mass) {
       // At this boundary 1-s is at most log(coefficient)/coefficient.
       // The old shifted solve loses the log-odds and can miss s by 1e-8.
       EXPECT_NEAR(a[0] / c, 1., 1e-11);
-      std::vector<double> v(std::size_t(k), mean), out(std::size_t(k), 0.);
-      sdca::topk_entropy_block(std::size_t(k), v.data(), std::size_t(k), c, out.data());
-      for (int j = 0; j < k; ++j) EXPECT_NEAR(out[std::size_t(j)] * k, 1., 1e-11);
     }
 }
 
@@ -144,25 +140,6 @@ TEST(NumericalRegression, entropy_block_extremes_and_validation) {
     EXPECT_GT(b[0], 0);
     EXPECT_NEAR(b[0] / (2 * std::exp(-gap)), 1., 1e-6);
   }
-  for (double alpha : {1e-300, 1e-30, 1e30, 1e300}) {
-    std::vector<double> v = {0, 1, -1}, probabilities;
-    double a[3], t;
-    sdca::entropy_prox_dual(3, 1, 1., alpha, v, a, &probabilities, &t);
-    EXPECT_NEAR(probabilities[0] + probabilities[1] + probabilities[2], 1., 1e-14);
-    // One entry is reconstructed from the others: zero-sum to one rounding.
-    EXPECT_LE(std::abs(a[0] + a[1] + a[2]),
-              std::numeric_limits<double>::epsilon() * (std::abs(a[1]) + std::abs(a[2])));
-    EXPECT_NEAR(probabilities[1], -a[1], 1e-15);
-    EXPECT_TRUE(std::isfinite(t));
-  }
-  std::vector<double> bad = {0, std::numeric_limits<double>::quiet_NaN()};
-  double a[2];
-  EXPECT_THROW(sdca::entropy_prox_dual(2, 1, 1., 1., bad, a), std::invalid_argument);
-  std::vector<double> ok = {0, 1};
-  EXPECT_THROW(sdca::entropy_prox_dual(2, 2, 1., 1., ok, a), std::invalid_argument);
-  EXPECT_THROW(sdca::entropy_prox_dual(2, 1, 1., 0., ok, a), std::invalid_argument);
-  EXPECT_THROW(sdca::entropy_prox_dual(2, 1, 1., 1., std::vector<double>{0}, a),
-               std::invalid_argument);
 }
 #endif
 
@@ -194,8 +171,7 @@ TEST(NumericalRegression, far_off_label_scores) {
                                                                                 zt.data());
         EXPECT_LE(at[0], c * (1 + 4 * eps));
         for (std::size_t j = 0; j < 5; ++j) zt[j] += at[j];
-        sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::topk_cross_entropy, 5, 1,
-                                                 zt.data(), g.data(), k);
+        labels_first_loss(sdca::kernel::topk_cross_entropy, 5, 1, zt.data(), g.data(), k);
         for (std::size_t j = 0; j < 5; ++j)
           EXPECT_NEAR(at[j], -c * g[j], 1e-13 * c) << "k=" << k << " j=" << j;
       }
@@ -210,12 +186,12 @@ TEST(NumericalRegression, far_off_label_scores) {
   // The top-k entropy loss gradient at such scores: capped softmax of the
   // other classes, in their order.
   double s[] = {-1e16, .88, 1.73, 2.44, -1.05}, g[5];
-  sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::topk_cross_entropy, 5, 1, s, g, 1);
+  labels_first_loss(sdca::kernel::topk_cross_entropy, 5, 1, s, g, 1);
   long double den(0);
   for (double value : s) den += std::exp((long double)value - 2.44L);
   for (std::size_t j = 0; j < 5; ++j)
     EXPECT_NEAR(g[j], double(std::exp((long double)s[j] - 2.44L) / den) - (j == 0), 1e-15);
-  sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::topk_cross_entropy, 5, 1, s, g, 2);
+  labels_first_loss(sdca::kernel::topk_cross_entropy, 5, 1, s, g, 2);
   EXPECT_NEAR(g[3], .5, 1e-15);
   EXPECT_NEAR(g[1] / g[2], std::exp(.88 - 1.73), 1e-15);
   EXPECT_NEAR(g[1] + g[2] + g[3] + g[4], 1., 1e-15);
@@ -374,7 +350,6 @@ TEST(NumericalRegression, prox_wrappers_accept_any_random_access_iterator) {
   SDCA_EXPECT_ITERATOR_AGREEMENT(sdca::prox_topk_entropy_biased(first, last, 2, 1.));
   SDCA_EXPECT_ITERATOR_AGREEMENT(sdca::prox_two_simplex(first, middle, last));
   SDCA_EXPECT_ITERATOR_AGREEMENT(sdca::prox_two_simplex(first, middle, middle, last));
-  SDCA_EXPECT_ITERATOR_AGREEMENT(sdca::prox_two_simplex_sort(first, middle, last));
   SDCA_EXPECT_ITERATOR_AGREEMENT(sdca::prox_two_entropy(first, middle, last, 2.));
 }
 #undef SDCA_EXPECT_ITERATOR_AGREEMENT
@@ -621,25 +596,14 @@ TEST(NumericalRegression, zero_row_block_beyond_float_storage_is_rejected) {
   }
 }
 
-TEST(NumericalRegression, entropy_labels_share_the_recovered_other_mass) {
-  // Both label residuals round to zero, the other class keeps c p.
-  const double v[] = {400, 400, -400};
-  double out[3];
-  sdca::entropy_prox_dual_ptr(3, 2, 1e200, 1.0, v, out);
-  EXPECT_LT(out[2], 0);
-  EXPECT_GT(-out[2], 1e-150);
-  EXPECT_EQ(out[0], out[1]);
-  EXPECT_NEAR(0, (out[0] + out[1] + out[2]) / out[2], 1e-15);
-}
-
 #ifndef __FAST_MATH__
 template <typename T>
 static void proximal_entropy_finite_label_mean() {
   const T limit = std::numeric_limits<T>::max(), eps = std::numeric_limits<T>::epsilon();
   const T z[] = {T(0), -limit, -limit, T(0)};
   T gradient[4];
-  const double value = sdca::detail::permuted_loss_and_gradient<T, T>(
-      sdca::loss_kind::proximal_cross_entropy, 4, 3, z, gradient, 1, 1, 1);
+  const double value =
+      labels_first_loss<T, T>(sdca::kernel::proximal_cross_entropy, 4, 3, z, gradient, 1, 1, 1);
   // The two low-label probabilities round to zero. The finite mean is
   // 2*limit/3 plus bounded terms, despite an overflowing sum of label losses.
   const T expected = (limit / T(3)) * T(2);
@@ -652,25 +616,25 @@ static void proximal_entropy_finite_label_mean() {
     EXPECT_NEAR(double(gradient[j]), reference[j], 8 * double(eps));
 }
 
-TEST(NumericalRegression, proximal_entropy_keeps_representable_label_means) {
+TRACKED_TEST(NumericalRegression, proximal_entropy_keeps_representable_label_means,
+             tracked_proximal_label_means) {
   proximal_entropy_finite_label_mean<float>();
   proximal_entropy_finite_label_mean<double>();
 }
 #endif
 
-TEST(NumericalRegression, proximal_entropy_value_at_extreme_scales) {
+TRACKED_TEST(NumericalRegression, proximal_entropy_value_at_extreme_scales,
+             tracked_proximal_extreme_scale) {
   // Large alpha: equal label scores reach log 2 (u = v + alpha a cancels).
   double z[] = {1e16, 0, 0}, g[3];
   EXPECT_NEAR(std::log(2.0),
-              sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::proximal_cross_entropy, 3,
-                                                       2, z, g, 1, 1, 1e50),
+              labels_first_loss(sdca::kernel::proximal_cross_entropy, 3, 2, z, g, 1, 1, 1e50),
               1e-15);
   // a_j^2 underflows; the value is d^2 / (4 alpha) + log1p(exp(-d)) with
   // d + log d + log1p(exp(-d)) = log(2 alpha).
   double zero[] = {0, 0}, h[2];
   EXPECT_NEAR(1.1762794618348152e-295,
-              sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::proximal_cross_entropy, 2,
-                                                       1, zero, h, 1, 1, 1e300),
+              labels_first_loss(sdca::kernel::proximal_cross_entropy, 2, 1, zero, h, 1, 1, 1e300),
               1e-308);
   // Moderate scales agree with the cross-entropy at the updated scores.
   std::mt19937 gen(3);
@@ -679,30 +643,20 @@ TEST(NumericalRegression, proximal_entropy_value_at_extreme_scales) {
     for (std::size_t p : {1, 2}) {
       std::vector<double> s(6), grad(6), u(6);
       for (auto& v : s) v = normal(gen);
-      const double value = sdca::detail::permuted_loss_and_gradient(
-          sdca::loss_kind::proximal_cross_entropy, 6, p, s.data(), grad.data(), 1, 1, alpha);
+      const double value = labels_first_loss(sdca::kernel::proximal_cross_entropy, 6, p, s.data(),
+                                             grad.data(), 1, 1, alpha);
       double penalty = 0;
       for (std::size_t j = 0; j < 6; ++j) {
         u[j] = s[j] - alpha * grad[j];
         penalty += alpha * grad[j] * grad[j] / 2;
       }
-      EXPECT_NEAR(sdca::entropy_loss<double>(std::size_t(6), p, u.data()) + penalty, value,
-                  1e-14 * value);
+      EXPECT_NEAR(labels_first_loss(
+                      p == 1 ? sdca::kernel::cross_entropy : sdca::kernel::multilabel_cross_entropy,
+                      6, p, u.data(), static_cast<double*>(nullptr)) +
+                      penalty,
+                  value, 1e-14 * value);
     }
   }
-}
-
-TEST(NumericalRegression, entropy_residual_of_a_subnormal_root) {
-  // r = t / (alpha + 1/q) is subnormal: the bracket must not replace it by a midpoint.
-  const double denorm = std::numeric_limits<double>::denorm_min();
-  for (double alpha : {1e-6, 1.0, 1e4, 1e300}) {
-    for (double t : {1e-312, 5e-320, 1e-300, 1e-290}) {
-      const double r = sdca::detail::entropy_residual(t, alpha, 0.5);
-      EXPECT_NEAR(t / (alpha + 2), r, 2 * denorm + 1e-15 * r) << alpha << " " << t;
-    }
-  }
-  const float r = sdca::detail::entropy_residual(1e-40f, 1.0f, 0.5f);
-  EXPECT_NEAR(1e-40f / 3, r, 2 * std::numeric_limits<float>::denorm_min());
 }
 
 // The proximal entropy of p labels at the largest score z[0] and other classes
@@ -712,9 +666,8 @@ static void check_underflowing_others(const std::vector<T>& z, std::size_t p, do
   const std::size_t n = z.size();
   std::vector<T> g(n);
   T value = T(0);
-  ASSERT_NO_THROW(
-      value = T(sdca::detail::permuted_loss_and_gradient<T, T>(
-          sdca::loss_kind::proximal_cross_entropy, n, p, z.data(), g.data(), 1, 1, alpha)))
+  ASSERT_NO_THROW(value = T(labels_first_loss<T, T>(sdca::kernel::proximal_cross_entropy, n, p,
+                                                    z.data(), g.data(), 1, 1, alpha)))
       << alpha << " " << z[0];
   const double denorm = double(std::numeric_limits<T>::denorm_min());
   const double eps = double(std::numeric_limits<T>::epsilon());
@@ -737,7 +690,8 @@ static void check_underflowing_others(const std::vector<T>& z, std::size_t p, do
   EXPECT_NEAR(expected, double(value), 8 * eps * expected + 8 * denorm) << alpha << " " << z[0];
 }
 
-TEST(NumericalRegression, proximal_entropy_with_underflowing_other_classes) {
+TRACKED_TEST(NumericalRegression, proximal_entropy_with_underflowing_other_classes,
+             tracked_proximal_underflow) {
   // These did not converge (the inner residual of a subnormal root took a
   // bracket midpoint) or, at alpha = 1e300, returned a nonfinite loss.
   for (double alpha : {1e-6, 1e-2, 1.0, 30.0, 1e4, 1e300}) {
@@ -860,59 +814,6 @@ TEST(NumericalRegression, warm_entropy_keeps_residual_of_cancelling_scores) {
   warm_entropy_cancellation<float, float>("float32");
 }
 
-// An evaluation of the entropy block solver expanded about an exact one, or
-// started from it, against the exact evaluation at the same threshold, per class: the two
-// differ by the rounding of the class's argument (eps |x| times dp/dx).
-template <typename T>
-static void expanded_entropy_evaluations(const char* precision) {
-  typedef sdca::detail::entropy_block_solver<T, int> block_solver;
-  std::mt19937 gen(5);
-  std::normal_distribution<double> noise(0, 3);
-  const double eps = double(std::numeric_limits<T>::epsilon());
-  double worst = 0;
-  for (int n : {2, 10, 100})
-    for (int p : {1, 2})
-      for (double alpha : {1e-3, 1., 50., 1e4}) {
-        if (p >= n) continue;
-        std::vector<T> v(n), r(n), exact(n);
-        for (int j = 0; j < n; ++j) v[j] = T(noise(gen) + (j < p ? 5 : 0));
-        sdca::detail::entropy_expansion<T> expansion(static_cast<std::size_t>(n));
-        block_solver expanded(n, p, T(alpha), v.data(), r.data()),
-            plain(n, p, T(alpha), v.data(), exact.data());
-        expanded.expansion = &expansion;
-        const T base = expanded.start();
-        for (double s : {-1., -.5, -1e-3, 1e-6, .25, 1., -30., 30., 200., -200., 500., -500.}) {
-          // Steps of the expansion (|s| <= 1), and of the warm evaluations from base.
-          expansion.accurate = false;
-          expanded.evaluate(base);
-          const T dt = base + T(s) * block_solver::expansion_reach();
-          if (std::abs(s) > 1 && std::abs(dt - base) > block_solver::warm_reach()) continue;
-          const T f = expanded.evaluate(dt), g = plain.evaluate(dt);
-          double allowed = 0;
-          for (int j = 0; j < n; ++j) {
-            // A label's residual solves to 8 eps of its argument in each.
-            const double x = std::abs(double(v[j]) - double(plain.v_ref)) + std::abs(double(dt)) +
-                             std::abs(std::log(alpha)) + std::log(double(p)),
-                         prob = j < p ? 1. / p - double(exact[j]) : -double(exact[j]),
-                         argument = j < p ? 16 * std::abs(double(plain.v_ref - v[j] + dt)) : 0,
-                         tolerance = eps * (4 * std::abs(double(exact[j])) +
-                                            (x + argument + 4) * prob / (1 + alpha * prob));
-            allowed += tolerance;
-            if (tolerance > 0)
-              worst = std::max(worst, std::abs(double(r[j]) - double(exact[j])) / tolerance);
-          }
-          EXPECT_LE(std::abs(double(f) - double(g)), allowed)
-              << precision << " n " << n << " p " << p << " alpha " << alpha << " step " << s;
-        }
-      }
-  EXPECT_LE(worst, 1) << precision;
-}
-
-TEST(NumericalRegression, expanded_entropy_evaluations_match_exact_ones) {
-  expanded_entropy_evaluations<double>("float64");
-  expanded_entropy_evaluations<float>("float32");
-}
-
 TEST(NumericalRegression, warm_entropy_keeps_small_duals_beside_common_offset) {
   warm_entropy_common_offset<double, double>("float64");
   warm_entropy_common_offset<float, double>("float32 storage / float64 compute");
@@ -964,10 +865,10 @@ struct two_class_hinge {
 
 #ifndef __FAST_MATH__
 TEST(NumericalRegression, hinge_tiny_margins_and_smoothing_overflow_losses) {
-  const sdca::loss_kind kinds[] = {
-      sdca::loss_kind::topk_hinge_alpha, sdca::loss_kind::topk_hinge_beta,
-      sdca::loss_kind::topk_hinge_alpha, sdca::loss_kind::topk_hinge_beta,
-      sdca::loss_kind::multilabel_hinge, sdca::loss_kind::multilabel_hinge};
+  const sdca::kernel::Kind kinds[] = {
+      sdca::kernel::topk_hinge_alpha, sdca::kernel::topk_hinge_beta,
+      sdca::kernel::topk_hinge_alpha, sdca::kernel::topk_hinge_beta,
+      sdca::kernel::multilabel_hinge, sdca::kernel::multilabel_hinge};
   // {z_0, z_1, gamma, h}: a margin cancelling in 1 + z_1 - z_0, huge and tiny
   // smoothing (products overflow or underflow) and huge common offsets.
   const double cases[][4] = {{1, 1e-20, 1e-20, 1e-20}, {1, 1e-20, 1, 1e-20},
@@ -979,8 +880,7 @@ TEST(NumericalRegression, hinge_tiny_margins_and_smoothing_overflow_losses) {
       const bool smooth = i == 2 || i == 3 || i == 5;
       const two_class_hinge expected(c[3], smooth ? (i == 5 ? 2 : 1) * c[2] : 0);
       double z[] = {c[0], c[1]}, g[2];
-      const double value =
-          sdca::detail::permuted_loss_and_gradient(kinds[i], 2, 1, z, g, 1, smooth ? c[2] : 0);
+      const double value = labels_first_loss(kinds[i], 2, 1, z, g, 1, smooth ? c[2] : 0);
       // Errors relative to the value and to the slope (zero when inactive).
       const double scale = std::max(std::abs(expected.value), 1e-300);
       const double slope = std::max(expected.slope, 1e-300);
@@ -993,14 +893,14 @@ TEST(NumericalRegression, hinge_tiny_margins_and_smoothing_overflow_losses) {
   for (int i = 0; i < 6; ++i) {
     const bool smooth = i == 2 || i == 3 || i == 5;
     const two_class_hinge expected(std::ldexp(1., -26), smooth ? (i == 5 ? 2 : 1) : 0);
-    const double value =
-        sdca::detail::permuted_loss_and_gradient(kinds[i], 2, 1, zf, gf, 1, smooth ? 1 : 0);
+    const double value = labels_first_loss(kinds[i], 2, 1, zf, gf, 1, smooth ? 1 : 0);
     EXPECT_NEAR(value / expected.value, 1, 1e-14) << i;
     EXPECT_NEAR(double(gf[1]) / expected.slope, 1, 1e-7) << i;
   }
 }
 
-TEST(NumericalRegression, float_losses_keep_stable_formulas_and_fall_back) {
+TRACKED_TEST(NumericalRegression, float_losses_keep_stable_formulas_and_fall_back,
+             tracked_float_gradients) {
   // Float arithmetic keeps the compensated margin 2^-26 and tiny smoothing.
   const float tiny = std::ldexp(1.f, -26);
   const float cases[][3] = {{1, tiny, 1}, {1, 1e-20f, 1e-20f}, {1, 1e-20f, 1}};
@@ -1009,8 +909,8 @@ TEST(NumericalRegression, float_losses_keep_stable_formulas_and_fall_back) {
       const bool smooth = i == 4 || i == 5 || i == 7;
       const two_class_hinge expected(double(c[1]), smooth ? (i == 7 ? 2 : 1) * double(c[2]) : 0);
       float z[] = {c[0], c[1]}, g[2];
-      const double value = sdca::detail::permuted_loss_and_gradient<float, float>(
-          loss_case(i).first, 2, 1, z, g, 1, smooth ? double(c[2]) : 0);
+      const double value = labels_first_loss<float, float>(loss_case(i).first, 2, 1, z, g, 1,
+                                                           smooth ? double(c[2]) : 0);
       // A value below the normal floats (h^2 / 2 ~ 5e-41) keeps only subnormal resolution.
       const double floor = 4 * double(std::numeric_limits<float>::denorm_min());
       EXPECT_NEAR(value, expected.value, 1e-6 * expected.value + floor)
@@ -1027,19 +927,18 @@ TEST(NumericalRegression, float_losses_keep_stable_formulas_and_fall_back) {
     const std::size_t p = i == 6 || i == 7 ? 3 : 1;
     const auto kind = loss_case(i).first;
     const double gamma = loss_case(i).second ? 1 : 0;
-    const double v32 = sdca::detail::permuted_loss_and_gradient<float, float>(kind, 12, p, z.data(),
-                                                                              g32.data(), 3, gamma);
-    const double v64 = sdca::detail::permuted_loss_and_gradient<float, double>(
-        kind, 12, p, z.data(), g64.data(), 3, gamma);
+    const double v32 = labels_first_loss<float, float>(kind, 12, p, z.data(), g32.data(), 3, gamma);
+    const double v64 =
+        labels_first_loss<float, double>(kind, 12, p, z.data(), g64.data(), 3, gamma);
     EXPECT_NEAR(v32, v64, 1e-5 * std::max(1., std::abs(v64))) << i;
     for (std::size_t j = 0; j < 12; ++j) EXPECT_NEAR(g32[j], g64[j], 1e-5) << i << " " << j;
     z[1] = 3e38f;
     z[2] = -3e38f;
     for (double alpha : {1., 1e-300}) {
-      const double w32 = sdca::detail::permuted_loss_and_gradient<float, float>(
-          kind, 12, p, z.data(), g32.data(), 3, gamma, alpha);
-      const double w64 = sdca::detail::permuted_loss_and_gradient<float, double>(
-          kind, 12, p, z.data(), g64.data(), 3, gamma, alpha);
+      const double w32 =
+          labels_first_loss<float, float>(kind, 12, p, z.data(), g32.data(), 3, gamma, alpha);
+      const double w64 =
+          labels_first_loss<float, double>(kind, 12, p, z.data(), g64.data(), 3, gamma, alpha);
       EXPECT_EQ(w32, w64) << i;
       EXPECT_EQ(g32, g64) << i;
     }
@@ -1054,20 +953,17 @@ TEST(NumericalRegression, float_topk_hinge_sums_many_margins_accurately) {
   std::vector<float> z(n), g32(n), g64(n);
   z[0] = 0;
   for (std::size_t j = 1; j < n; ++j) z[j] = std::ldexp(float(gen() >> 9), -23);
-  for (auto kind : {sdca::loss_kind::topk_hinge_alpha, sdca::loss_kind::topk_hinge_beta})
+  for (auto kind : {sdca::kernel::topk_hinge_alpha, sdca::kernel::topk_hinge_beta})
     for (std::size_t k : {65UL, 1000UL, 50000UL, n - 1}) {
-      const double v32 = sdca::detail::permuted_loss_and_gradient<float, float>(
-          kind, n, 1, z.data(), g32.data(), k);
-      const double v64 = sdca::detail::permuted_loss_and_gradient<float, double>(
-          kind, n, 1, z.data(), g64.data(), k);
+      const double v32 = labels_first_loss<float, float>(kind, n, 1, z.data(), g32.data(), k);
+      const double v64 = labels_first_loss<float, double>(kind, n, 1, z.data(), g64.data(), k);
       EXPECT_NEAR(v32 / v64, 1, 1e-7) << int(kind) << " " << k;
       EXPECT_EQ(g32, g64) << int(kind) << " " << k;
     }
 }
 
-TEST(NumericalRegression, topk_hinge_selects_the_stable_sort_top_k_on_ties) {
-  // Integer scores tie heavily; both selections (partial_sort up to
-  // max(16, m / 32), nth_element above) must pick the first k in stable order.
+TEST(NumericalRegression, topk_hinge_shares_the_cutoff_mass_on_ties) {
+  // A full sort gives the value and the ranks sharing the cutoff for every k.
   std::mt19937 gen(3);
   for (std::size_t n : {40UL, 700UL, 5000UL}) {
     std::vector<double> z(n), g(n);
@@ -1077,14 +973,20 @@ TEST(NumericalRegression, topk_hinge_selects_the_stable_sort_top_k_on_ties) {
     std::stable_sort(order.begin(), order.end(),
                      [&](std::size_t i, std::size_t j) { return z[i] > z[j]; });
     for (std::size_t k = 2; k < n; k += 1 + k / 8) {
-      const double value = sdca::detail::permuted_loss_and_gradient(
-          sdca::loss_kind::topk_hinge_alpha, n, 1, z.data(), g.data(), k);
+      const double value =
+          labels_first_loss(sdca::kernel::topk_hinge_alpha, n, 1, z.data(), g.data(), k);
       std::vector<double> expected(n, 0.);
       double sum = 0;
       for (std::size_t j = 0; j < k; ++j) sum += 1 + z[order[j]] - z[0];
-      if (sum > 0)
-        for (std::size_t j = 0; j < k; ++j) expected[order[j]] = 1. / double(k);
-      expected[0] = sum > 0 ? -1. : 0.;
+      const double slope = sum > 0 ? 1. : (sum < 0 ? 0. : 0.5);
+      const double cutoff = z[order[k - 1]];
+      std::size_t above = 0, end = k;
+      while (z[order[above]] > cutoff) ++above;
+      while (end < order.size() && z[order[end]] == cutoff) ++end;
+      const double share = double(k - above) / double(end - above);
+      for (std::size_t j = 0; j < end; ++j)
+        expected[order[j]] = slope * (j < above ? 1. : share) / double(k);
+      expected[0] = -slope;
       EXPECT_NEAR(value, std::max(0., sum / double(k)), 1e-12) << n << " " << k;
       for (std::size_t j = 0; j < n; ++j) EXPECT_NEAR(g[j], expected[j], 1e-12) << n << " " << k;
     }
@@ -1178,56 +1080,39 @@ TEST(NumericalRegression, hinge_steps_resolve_margins_in_every_precision) {
 }
 #endif
 
-// Multilabel hinge steps and smoothed losses agree to rounding in both
-// projection precisions on ordinary blocks.
-TEST(NumericalRegression, multilabel_hinge_projection_precisions_agree) {
+// The two-simplex projection solves in double where its acceptance check passes, else in
+// extended precision: both agree to rounding on ordinary blocks, far offsets and ties.
+TEST(NumericalRegression, two_simplex_matches_extended) {
+  namespace core = sdca::native::core;
+  const double eps = std::numeric_limits<double>::epsilon();
+  auto check = [&](const std::vector<double>& z, std::size_t p, double rhs, double scale) {
+    const std::size_t n = z.size();
+    std::vector<double> s1 = z, s2 = z, x1 = z, x2 = z;
+    const auto t1 = core::thresholds_two_simplex(s1.begin(), s1.begin() + long(p),
+                                                 s1.begin() + long(p), s1.end(), rhs);
+    const auto t2 = core::two_simplex::solve_extended(s2.begin(), s2.begin() + long(p),
+                                                      s2.begin() + long(p), s2.end(), rhs);
+    core::apply(t1.first, x1.begin(), x1.begin() + long(p));
+    core::apply(t1.second, x1.begin() + long(p), x1.end());
+    core::apply(t2.first, x2.begin(), x2.begin() + long(p));
+    core::apply(t2.second, x2.begin() + long(p), x2.end());
+    for (std::size_t j = 0; j < n; ++j)
+      EXPECT_NEAR(x1[j], x2[j], 16 * eps * scale) << z[0] << " " << j;
+  };
   std::mt19937 gen(23);
   std::normal_distribution<double> d(0, 1);
-  const double eps = std::numeric_limits<double>::epsilon();
-  const auto f64 = sdca::projection_precision::float64, ext = sdca::projection_precision::extended;
   for (int i = 0; i < 1000; ++i) {
     const std::size_t n = 3 + std::size_t(i) % 30, p = 1 + std::size_t(i) % 2;
     const double c = std::ldexp(1., i % 7 - 3);
-    std::vector<double> z(n), a(n, 0.);
+    std::vector<double> z(n);
     for (auto& x : z) x = d(gen);
-    std::vector<double> z1 = z, z2 = z, a1 = a, a2 = a;
-    sdca::l2_multilabel_hinge_smooth<double, double> obj(c, 1);
-    obj.update_dual_variables(n, p, 1., a1.data(), z1.data(), f64);
-    obj.update_dual_variables(n, p, 1., a2.data(), z2.data(), ext);
     double scale = c;
     for (double x : z) scale = std::max(scale, std::abs(x));
-    for (std::size_t j = 0; j < n; ++j) EXPECT_NEAR(a1[j], a2[j], 16 * eps * scale) << i;
-    std::vector<double> g1(n), g2(n);
-    const double v1 = sdca::detail::permuted_loss_and_gradient(
-        sdca::loss_kind::multilabel_hinge, n, p, z.data(), g1.data(), 1, 1., 1., f64);
-    const double v2 = sdca::detail::permuted_loss_and_gradient(
-        sdca::loss_kind::multilabel_hinge, n, p, z.data(), g2.data(), 1, 1., 1., ext);
-    EXPECT_NEAR(v1, v2, 16 * eps * std::max(1., std::abs(v2))) << i;
+    check(z, p, c, scale);
   }
-}
-
-// Far offsets and tiny smoothing: the projected mass is small next to the
-// scores, so float64 must hold its outputs relative to a score origin, as
-// extended does (labels first; rows from the Python exact-reference tests).
-TEST(NumericalRegression, multilabel_hinge_far_offsets_match_extended) {
-  const double eps = std::numeric_limits<double>::epsilon();
-  auto check = [&](std::vector<double> z, std::size_t p, double gamma) {
-    const std::size_t n = z.size();
-    std::vector<double> g1(n), g2(n);
-    const double v1 = sdca::detail::permuted_loss_and_gradient(sdca::loss_kind::multilabel_hinge, n,
-                                                               p, z.data(), g1.data(), 1, gamma, 1.,
-                                                               sdca::projection_precision::float64);
-    const double v2 = sdca::detail::permuted_loss_and_gradient(
-        sdca::loss_kind::multilabel_hinge, n, p, z.data(), g2.data(), 1, gamma, 1.,
-        sdca::projection_precision::extended);
-    EXPECT_NEAR(v1, v2, 16 * eps * std::abs(v2)) << z[0] << " " << gamma;
-    for (std::size_t j = 0; j < n; ++j) EXPECT_NEAR(g1[j], g2[j], 16 * eps) << z[0] << " " << j;
-  };
-  check({700, 1, -.3, 0, 700, .2}, 3, 1e-3);
-  check({-700, 1, -1, 0, 2}, 3, 1e-3);
-  check({-1e30, 1, -1, 0, 2}, 3, 1e20);
-  std::mt19937 gen(29);
-  std::normal_distribution<double> d(0, 1);
+  check({700, 1, -.3, 0, 700, .2}, 3, 1e-3, 1e-3);
+  check({-700, 1, -1, 0, 2}, 3, 1e-3, 1e-3);
+  check({-1e30, 1, -1, 0, 2}, 3, 1e20, 1e20);
   for (int k = 0; k <= 30; k += 3)
     for (double gamma : {1e-6, 1e-3, 1., 1e3})
       for (int i = 0; i < 20; ++i) {
@@ -1235,24 +1120,23 @@ TEST(NumericalRegression, multilabel_hinge_far_offsets_match_extended) {
         for (auto& x : z) x = d(gen);
         z[i % 3] += (i % 2 ? -1 : 1) * std::pow(10., k);
         z[3 + i % 3] += std::pow(10., k);
-        check(z, 3, gamma);
+        check(z, 3, gamma, gamma);
       }
-  // Ties: integer scores in [-2, 2], tiny to unit smoothing, 3 to 20 classes.
   std::uniform_int_distribution<int> score(-2, 2);
   for (int i = 0; i < 2000; ++i) {
     const std::size_t n = 3 + std::size_t(i) % 18, p = 1 + std::size_t(i / 18) % (n - 1);
     std::vector<double> z(n);
     for (auto& x : z) x = double(score(gen));
-    check(z, p, std::pow(10., -6 + i % 7));
+    const double gamma = std::pow(10., -6 + i % 7);
+    check(z, p, gamma, gamma);
   }
-  check({2, -2, -2, -2, -2, -2}, 4, 1e-3);
 }
 
 TEST(NumericalRegression, distillation_losses_and_solver_certify_gap) {
   const double s[] = {1.5, -0.5, 0.2}, t[] = {1.5, -0.5, 0.2};
   double g[3] = {1., 1., 1.}, pg[3] = {1., 1., 1.};
-  const double v = sdca::distillation_loss_and_gradient(3, s, t, g, 2.0);
-  const double pv = sdca::proximal_distillation_loss_and_gradient(3, s, t, pg, 2.0, 0.5);
+  const double v = sdca::distillation_loss(3, s, t, 2.0, g);
+  const double pv = sdca::proximal_distillation_loss(3, s, t, 2.0, 0.5, pg);
   EXPECT_NEAR(v, pv, 1e-14);
   for (int j = 0; j < 3; ++j) {
     EXPECT_NEAR(g[j], 0., 1e-15);

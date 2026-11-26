@@ -1,9 +1,11 @@
-"""The PyTorch and JAX losses by their shared names (libsdca.LOSSES), for tests that sweep them.
+"""The PyTorch and JAX losses by their kinds, for tests that sweep them.
 
-loss(framework_module, name, logits, target, k=..., gamma=..., alpha=..., **options) calls the
-named public function with the parameters that loss takes: k for the top-k losses, gamma for
-the hinges, alpha for proximal_cross_entropy; the others are ignored, so a sweep can pass one
-set. Options (reduction, dim/axis, backend, precision, weight, ...) pass through.
+The kinds are the shared names (libsdca.LOSSES), but for topk_hinge_alpha and topk_hinge_beta:
+topk_hinge of variant "alpha" and "beta". loss(framework_module, name, logits, target, k=...,
+gamma=..., alpha=..., **options) calls the named public function with the parameters that loss
+takes: k for the top-k losses, gamma for the hinges, and alpha, the proximal step, as the gamma
+of proximal_cross_entropy; the others are ignored, so a sweep can pass one set. Options
+(reduction, dim/axis, backend, precision, weight, ...) pass through.
 """
 
 from __future__ import annotations
@@ -13,6 +15,16 @@ from typing import Any
 TOPK = ("topk_cross_entropy", "topk_hinge_alpha", "topk_hinge_beta")
 HINGES = ("multiclass_hinge", "topk_hinge_alpha", "topk_hinge_beta", "multilabel_hinge")
 MULTILABEL = ("multilabel_cross_entropy", "multilabel_hinge")
+# The training objectives, in the order of the C ids.
+OBJECTIVES = (
+    "cross_entropy",
+    "topk_cross_entropy",
+    "multiclass_hinge",
+    "topk_hinge_alpha",
+    "topk_hinge_beta",
+    "multilabel_hinge",
+    "multilabel_cross_entropy",
+)
 SINGLE_LABEL = (
     "cross_entropy",
     "topk_cross_entropy",
@@ -33,8 +45,38 @@ def parameters(name: str, k: int = 1, gamma: float = 0.0, alpha: float = 1.0) ->
     if name.startswith("topk_hinge_"):
         out["variant"] = name.removeprefix("topk_hinge_")
     if name == "proximal_cross_entropy":
-        out["alpha"] = alpha
+        out["gamma"] = alpha
     return out
+
+
+def options_of(name: str, options: dict[str, Any]) -> dict[str, Any]:
+    """The keyword arguments of a kind's PyTorch or JAX function for the parameters of a row
+    of the rule table (masked_cases: k, gamma, alpha, temperature)."""
+    if name in ("distillation", "proximal_distillation"):
+        out = dict(options)
+        if "alpha" in out:
+            out["gamma"] = out.pop("alpha")
+        return out
+    k, gamma, alpha = int(options.get("k", 1)), options.get("gamma", 0.0), options.get("alpha", 1.0)
+    return parameters(name, k, gamma, alpha)
+
+
+def numpy_loss(name: str, **options: Any) -> Any:
+    """The NumPy loss object (libsdca.LOSSES) of a kind with the options it takes, of the
+    names of parameters: k, gamma, alpha (the proximal step, its gamma) and temperature; the
+    others are ignored."""
+    import dataclasses
+
+    import libsdca
+
+    base = "topk_hinge" if name.startswith("topk_hinge_") else name
+    cls = libsdca.LOSSES[base]
+    taken = {field.name for field in dataclasses.fields(cls)}  # pyright: ignore[reportArgumentType]
+    if "alpha" in options and base in ("proximal_cross_entropy", "proximal_distillation"):
+        options = {**options, "gamma": options["alpha"]}
+    if name != base:
+        options = {**options, "variant": name.removeprefix("topk_hinge_")}
+    return cls(**{key: value for key, value in options.items() if key in taken})
 
 
 def function(module: Any, name: str) -> Any:
@@ -148,39 +190,17 @@ def torch_module(
     return getattr(L, MODULES[name])(**parameters_, **options)
 
 
-def proximal_mask_loss(
-    logits: Any,
-    mask: Any,
-    *,
-    alpha: float = 1.0,
-    backend: str = "auto",
-    reduction: str = "mean",
-    dim: int = -1,
-    precision: str | None = None,
-) -> Any:
-    """proximal_cross_entropy of uniform target probabilities on a positive mask: the kernels,
-    tensor operations and native library compute it, the public PyTorch API (class labels)
-    does not take it; the internal loss of the same backends."""
-    import libsdca.torch as L
-
-    objective = "proximal_cross_entropy"
-    return L._resolved_loss(
-        logits, mask, objective, backend, 1, 1.0, alpha, reduction, dim, precision, 1
-    )
-
-
 def route(explained: tuple[str, str]) -> str:
-    """The route of an explain_backend result: "cpu-kernel" (the CPU extension),
-    "cuda-launcher" (fused kernels launched from C++), "triton" (launched by Triton or a
-    Triton kernel), else its backend ("native" or "torch")."""
+    """The route of an explain_backend result: "cpu-kernel" (the CPU kernels), "triton" (the
+    Triton kernels) or "composed" (tensor operations)."""
     backend, reason = explained
-    if backend != "kernel":
-        return backend
-    if "CPU extension" in reason:
+    if backend == "composed":
+        return "composed"
+    if reason.startswith("the CPU kernels"):
         return "cpu-kernel"
-    if "launched from C++ autograd" in reason:
-        return "cuda-launcher"
-    return "triton"
+    if reason.startswith("the Triton kernels"):
+        return "triton"
+    raise ValueError(f"unknown route of {explained}")
 
 
 def explain_route(logits: Any, target: Any, name: str = "cross_entropy", **options: Any) -> Any:

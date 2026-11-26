@@ -78,13 +78,13 @@ class ConvergenceTests:
         scores = torch.zeros(2, 3)
         targets = torch.tensor([0, 1])
         nan = float("nan")
-        for backend in ["native", "torch"]:
+        for backend in ["kernel", "composed"]:
             for fn, options, error in [
                 (L.topk_cross_entropy, dict(k=0), ValueError),
                 (L.topk_cross_entropy, dict(k=3), ValueError),
                 (L.topk_cross_entropy, dict(k=1.5), TypeError),
                 (L.topk_cross_entropy, dict(k=True), TypeError),
-                (L.proximal_cross_entropy, dict(alpha=0), ValueError),
+                (L.proximal_cross_entropy, dict(gamma=0), ValueError),
                 (L.multiclass_hinge_loss, dict(gamma=nan), ValueError),
             ]:
                 with subtests.test(backend=backend, loss=fn.__name__, options=options):

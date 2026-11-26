@@ -1,13 +1,13 @@
 use std::ffi::c_int;
 use std::ptr;
 
-use crate::error::{invalid, Result};
+use crate::error::{invalid, Result, TWO_CLASSES};
 use crate::ffi;
 use crate::loss::Loss;
 use crate::matrix::Matrix;
 use crate::model::{Evaluation, Model};
-use crate::names::{Precision, ProjectionPrecision, Shrinking, Status};
-use crate::native::{self, call, check_logits, void};
+use crate::names::{Precision, Shrinking, Status};
+use crate::native::{self, call, void};
 use crate::real::Real;
 use crate::settings::{Settings, Threads};
 use crate::targets::{self, Targets};
@@ -230,7 +230,7 @@ impl Solver {
         self
     }
 
-    /// With the arithmetic, threads and projection solver of `settings`.
+    /// With the arithmetic and threads of `settings`.
     #[must_use]
     pub fn with_settings(mut self, settings: Settings) -> Self {
         self.settings = settings;
@@ -248,16 +248,6 @@ impl Solver {
     #[must_use]
     pub fn with_threads(mut self, threads: Threads) -> Self {
         self.settings = self.settings.with_threads(threads);
-        self
-    }
-
-    /// With the projection solver `projection_precision`; see
-    /// [`Settings::with_projection_precision`].
-    #[must_use]
-    pub fn with_projection_precision(mut self, projection_precision: ProjectionPrecision) -> Self {
-        self.settings = self
-            .settings
-            .with_projection_precision(projection_precision);
         self
     }
 
@@ -321,7 +311,7 @@ impl Solver {
         self.num_classes
     }
 
-    /// The arithmetic, threads and projection solver.
+    /// The arithmetic and threads.
     #[must_use]
     pub fn settings(&self) -> Settings {
         self.settings
@@ -376,27 +366,19 @@ impl Solver {
         start: &Start<'_, T>,
     ) -> Result<Model<T>> {
         native::handshake()?;
-        let execution = native::execution::<T>(&self.settings)?;
         let (x, kernel) = match input.into() {
             Input::Features(x) => (x, false),
             Input::Kernel(x) => (x, true),
         };
         let (n, d) = (x.rows(), x.cols());
-        if n == 0 || d == 0 {
-            return invalid("input must be a nonempty matrix");
-        }
-        if kernel && n != d {
-            return invalid(format!(
-                "Input::Kernel must be a square Gram matrix, not {n}x{d}"
-            ));
-        }
         let targets = targets.into();
         let classes = match self.num_classes {
             Some(classes) => classes,
             None => implied_classes(&targets)?,
         };
-        if classes < 2 {
-            return invalid(format!("num_classes must be at least 2, not {classes}"));
+        // After the native library's check of n and d, as it orders them.
+        if classes < 2 && n > 0 && d > 0 {
+            return invalid(TWO_CLASSES);
         }
         // Before the buffers of (n, classes) and (classes, d) are allocated.
         let sizes = [
@@ -410,8 +392,7 @@ impl Solver {
         if sizes.iter().any(|&size| size > limit) {
             return invalid("Dimensions exceed the native BLAS integer limit");
         }
-        self.check_objective(classes)?;
-        let targets = targets::native(self.loss, &targets, n, classes, true)?;
+        let targets = targets::native(&targets, n, classes, targets::Rows::Examples)?;
         let options = ffi::FitOptions {
             c: self.c,
             tol: self.tol,
@@ -433,17 +414,13 @@ impl Solver {
         }
         history.resize(rows * ffi::HISTORY_FIELDS, 0.0);
         let center = match start.center {
-            None => None,
-            Some(_) if kernel => {
-                return invalid("Start::center is for Input::Features, not Input::Kernel");
-            }
-            Some(center) if center.len() != d * classes => {
+            Some(center) if !kernel && center.len() != d * classes => {
                 return invalid(format!(
                     "Start::center must have the {classes}x{d} entries of (num_classes, d), not {}",
                     center.len()
                 ));
             }
-            Some(center) => Some(center),
+            center => center,
         };
         if let Some(initial) = start.initial_dual {
             if initial.len() != n * classes {
@@ -470,12 +447,12 @@ impl Solver {
         let mut result = ffi::FitResult::default();
         // SAFETY: the buffers have the sizes of the C ABI documentation, the
         // targets point into storage that outlives the call, and the weights
-        // and center are NULL for a kernel.
+        // are NULL for a kernel (whose center the library rejects unread).
         call(unsafe {
             ffi::sdca_model_fit(
-                &self.loss.abi(self.settings.projection_precision),
+                &self.loss.abi(),
                 &options,
-                &execution,
+                &native::execution(&self.settings),
                 &input,
                 classes,
                 &targets.abi(),
@@ -519,8 +496,8 @@ impl Solver {
     ///
     /// # Errors
     /// [`crate::Error::InvalidArgument`] for logits that are not finite or have
-    /// fewer than one row or two columns (or not `num_classes` columns if
-    /// set), `previous` of another shape, not finite or infeasible, `norm2`
+    /// fewer than two columns (or not `num_classes` columns if set),
+    /// `previous` of another shape, not finite or infeasible, `norm2`
     /// not finite and positive, `c`, `norm2` or `c * norm2` not normal in the
     /// data type, and as [`Solver::fit_from`] for the loss and targets;
     /// [`crate::Error::Native`] for a native failure.
@@ -541,9 +518,10 @@ impl Solver {
         previous: Option<&[T]>,
     ) -> Result<Vec<T>> {
         native::handshake()?;
-        let execution = native::execution::<T>(&self.settings)?;
-        check_logits(logits, "logits")?;
         let (n, classes) = (logits.rows(), logits.cols());
+        if classes < 2 {
+            return invalid(TWO_CLASSES);
+        }
         if let Some(expected) = self.num_classes {
             if classes != expected {
                 return invalid(format!(
@@ -551,8 +529,7 @@ impl Solver {
                 ));
             }
         }
-        self.check_objective(classes)?;
-        let targets = targets::native(self.loss, &targets.into(), n, classes, true)?;
+        let targets = targets::native(&targets.into(), n, classes, targets::Rows::Examples)?;
         if let Some(previous) = previous {
             if previous.len() != n * classes {
                 return invalid(format!(
@@ -567,9 +544,9 @@ impl Solver {
         // the targets point into storage that outlives the call.
         call(unsafe {
             ffi::sdca_dual_update(
-                &self.loss.abi(self.settings.projection_precision),
+                &self.loss.abi(),
                 self.c,
-                &execution,
+                &native::execution(&self.settings),
                 T::DTYPE_CODE,
                 n,
                 classes,
@@ -581,23 +558,6 @@ impl Solver {
             )
         })?;
         Ok(out)
-    }
-
-    /// Rejects a loss that is not a training objective, and invalid loss
-    /// parameters for `classes` classes.
-    fn check_objective(&self, classes: usize) -> Result<()> {
-        if !self.loss.is_objective() {
-            let hint = if self.loss.is_distillation() {
-                "; train on target distributions with Loss::CrossEntropy and Targets::Probabilities"
-            } else {
-                ""
-            };
-            return invalid(format!(
-                "{} is a loss, not a training objective{hint}",
-                self.loss.name()
-            ));
-        }
-        self.loss.check(classes)
     }
 }
 

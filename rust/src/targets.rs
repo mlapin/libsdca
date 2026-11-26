@@ -2,7 +2,6 @@ use std::borrow::Cow;
 
 use crate::error::{invalid, Result};
 use crate::ffi;
-use crate::loss::Loss;
 use crate::matrix::Matrix;
 use crate::real::Real;
 
@@ -15,9 +14,9 @@ use crate::real::Real;
 ///
 /// | Kind | Losses |
 /// | --- | --- |
-/// | [`Targets::Labels`] | `CrossEntropy`, `TopKCrossEntropy`, `MulticlassHinge`, `TopKHingeAlpha`, `TopKHingeBeta`, `ProximalCrossEntropy` |
+/// | [`Targets::Labels`] | `CrossEntropy`, `TopKCrossEntropy`, `MulticlassHinge`, `TopKHinge`, `ProximalCrossEntropy` |
 /// | label sets | `MultilabelHinge`, `MultilabelCrossEntropy` |
-/// | [`Targets::Probabilities`] | `CrossEntropy` in [`crate::Solver`] (the distillation objective) |
+/// | [`Targets::Probabilities`] | `CrossEntropy` (in [`crate::Solver`], the distillation objective) |
 /// | [`Targets::Teacher`] | `Distillation`, `ProximalDistillation` in [`crate::Loss::loss_and_grad`] |
 ///
 /// ```
@@ -41,8 +40,10 @@ pub enum Targets<'a, T> {
     Sets(&'a [Vec<usize>]),
     /// Label sets as [`Targets::Sets`], borrowed as slices.
     SetSlices(&'a [&'a [usize]]),
-    /// Target distributions (n, num_classes): finite, nonnegative rows that sum
-    /// to one to the rounding of `T`, such as the softmax of a teacher.
+    /// Target distributions (n, num_classes): finite, nonnegative rows, such
+    /// as the softmax of a teacher; for training they sum to one within
+    /// the rounding of a row normalized in `T` (gamma_{m+1}), and the library
+    /// renormalizes them.
     Probabilities(Matrix<'a, T>),
     /// Teacher logits of the shape of the logits.
     Teacher(Matrix<'a, T>),
@@ -120,21 +121,6 @@ impl<T> Targets<'_, T> {
         self.len() == 0
     }
 
-    /// Whether the targets are label sets.
-    pub(crate) fn is_sets(&self) -> bool {
-        matches!(self, Targets::Sets(_) | Targets::SetSlices(_))
-    }
-
-    /// The kind, as the variant is written.
-    pub(crate) fn kind(&self) -> &'static str {
-        match self {
-            Targets::Labels(_) => "Targets::Labels",
-            Targets::Sets(_) | Targets::SetSlices(_) => "label sets",
-            Targets::Probabilities(_) => "Targets::Probabilities",
-            Targets::Teacher(_) => "Targets::Teacher",
-        }
-    }
-
     /// The labels of example `i` (one for [`Targets::Labels`]).
     pub(crate) fn set(&self, i: usize) -> &[usize] {
         match self {
@@ -199,136 +185,114 @@ impl<T> Native<'_, T> {
     }
 }
 
-/// The checked targets of `loss` for `n` examples and `classes` classes, in
-/// the layout of the C ABI; `training` also takes target distributions.
+/// What the targets go with: the logits of a loss evaluation, whose size checks
+/// say what PyTorch says (docs/API.md, Errors: one text per error), or the
+/// examples of a fit or a coordinate step.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rows {
+    Logits,
+    Examples,
+}
+
+/// The targets of `n` examples and `classes` classes in the layout of the C
+/// ABI, which checks their values and whether the loss takes them. The sizes
+/// are checked here: the library reads as many entries as they imply.
 pub(crate) fn native<'a, T: Real>(
-    loss: Loss,
     targets: &Targets<'a, T>,
     n: usize,
     classes: usize,
-    training: bool,
+    rows: Rows,
 ) -> Result<Native<'a, T>> {
-    if !matches!(targets, Targets::Teacher(_)) {
-        targets.check_count(n)?;
-    }
     Ok(match *targets {
-        Targets::Labels(labels) if !loss.is_multilabel() && !loss.is_distillation() => {
-            check_labels(labels, classes)?;
+        Targets::Labels(labels) => {
+            check_count(targets, n, rows)?;
             Native::Labels(label_codes(labels))
         }
-        // The library needs a class outside every label set.
-        Targets::Sets(_) | Targets::SetSlices(_) if loss.is_multilabel() => {
-            let (labels, offsets) = label_sets(targets, classes, classes - 1)?;
+        Targets::Sets(_) | Targets::SetSlices(_) => {
+            check_count(targets, n, rows)?;
+            let (labels, offsets) = label_sets(targets);
             Native::Sets { labels, offsets }
         }
-        Targets::Probabilities(q) if training && loss == Loss::CrossEntropy => {
-            Native::Probabilities(distributions(q, classes)?)
+        Targets::Probabilities(q) => {
+            check_shape(q, n, classes, rows, "Targets::Probabilities")?;
+            Native::Probabilities(T::to_f64s(q.data()))
         }
-        Targets::Probabilities(_) if training => {
-            return invalid(format!(
-                "{} does not take Targets::Probabilities: target distributions train \
-                 Loss::CrossEntropy",
-                loss.name()
-            ));
-        }
-        Targets::Teacher(teacher) if loss.is_distillation() => {
-            if (teacher.rows(), teacher.cols()) != (n, classes) {
-                return invalid(format!(
-                    "teacher logits must have the shape of the logits ({n}x{classes}), not {}x{}",
-                    teacher.rows(),
-                    teacher.cols()
-                ));
-            }
+        Targets::Teacher(teacher) => {
+            check_shape(teacher, n, classes, rows, "Targets::Teacher")?;
             Native::Logits(teacher.data())
         }
-        _ => return invalid(loss.wrong_targets(targets)),
     })
 }
 
-/// Labels in [0, classes).
-fn check_labels(labels: &[usize], classes: usize) -> Result<()> {
-    if labels.iter().any(|&label| label >= classes) {
-        return invalid(format!("labels must lie in [0, {classes})"));
+/// One label or label set per example.
+fn check_count<T>(targets: &Targets<'_, T>, n: usize, rows: Rows) -> Result<()> {
+    let len = targets.len();
+    if len == n {
+        return Ok(());
     }
-    Ok(())
+    if rows == Rows::Logits {
+        return invalid(format!(
+            "target must have shape ({n},) (the logits' shape without the class dimension), \
+             not ({len},)"
+        ));
+    }
+    targets.check_count(n)
 }
 
-/// The C ABI's int64 labels of labels in [0, classes) (checked): the same
-/// memory on 64-bit targets.
+/// A matrix of targets of the shape of the logits (n, classes).
+fn check_shape<T>(
+    matrix: Matrix<'_, T>,
+    n: usize,
+    classes: usize,
+    rows: Rows,
+    what: &str,
+) -> Result<()> {
+    let (r, c) = (matrix.rows(), matrix.cols());
+    if (r, c) == (n, classes) {
+        return Ok(());
+    }
+    match (rows, what) {
+        (Rows::Logits, "Targets::Teacher") => invalid(format!(
+            "student and teacher must have one shape, not ({n}, {classes}) and ({r}, {c})"
+        )),
+        (Rows::Logits, _) => invalid(format!(
+            "class probabilities must have the logits' shape ({n}, {classes}), not ({r}, {c})"
+        )),
+        (Rows::Examples, _) => invalid(format!(
+            "{what} must have the shape of the logits ({n}x{classes}), not {r}x{c}"
+        )),
+    }
+}
+
+/// The C ABI's int64 labels: the same memory on 64-bit targets. A label of
+/// 2^63 or more reads as a negative one, out of range for the library.
 #[cfg(target_pointer_width = "64")]
 fn label_codes(labels: &[usize]) -> Cow<'_, [i64]> {
     const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<i64>());
     // SAFETY: usize and i64 have the same size and alignment on 64-bit targets,
-    // and every bit pattern is an i64. Labels below 2^63 read as the same
-    // values; the callers check them against the number of classes first.
+    // and every bit pattern is an i64.
     Cow::Borrowed(unsafe {
         std::slice::from_raw_parts(labels.as_ptr().cast::<i64>(), labels.len())
     })
 }
 
-/// The C ABI's int64 labels of labels in [0, classes) (checked).
+/// The C ABI's int64 labels.
 #[cfg(not(target_pointer_width = "64"))]
 fn label_codes(labels: &[usize]) -> Cow<'_, [i64]> {
     Cow::Owned(labels.iter().map(|&label| label as i64).collect())
 }
 
-/// Concatenated sorted label sets of between 1 and `largest` labels in [0,
-/// classes) each, and their offsets (n + 1), as the C ABI takes them.
-fn label_sets<T>(
-    targets: &Targets<'_, T>,
-    classes: usize,
-    largest: usize,
-) -> Result<(Vec<i64>, Vec<i64>)> {
+/// Concatenated sorted label sets and their offsets (n + 1), as the C ABI
+/// takes them; the library checks the labels.
+fn label_sets<T>(targets: &Targets<'_, T>) -> (Vec<i64>, Vec<i64>) {
     let n = targets.len();
     let (mut labels, mut offsets) = (Vec::new(), Vec::with_capacity(n + 1));
     offsets.push(0i64);
     for i in 0..n {
-        let set = targets.set(i);
         let start = labels.len();
-        for &label in set {
-            if label >= classes {
-                return invalid(format!("labels must lie in [0, {classes})"));
-            }
-            labels.push(label as i64);
-        }
-        let row = &mut labels[start..];
-        row.sort_unstable();
-        if row.windows(2).any(|pair| pair[0] == pair[1]) {
-            return invalid("label sets must not contain duplicates");
-        }
-        if row.is_empty() || row.len() > largest {
-            return invalid(format!(
-                "every label set needs between 1 and {largest} labels"
-            ));
-        }
+        labels.extend(targets.set(i).iter().map(|&label| label as i64));
+        labels[start..].sort_unstable();
         offsets.push(labels.len() as i64);
     }
-    Ok((labels, offsets))
-}
-
-/// Target distributions (n, classes) as f64. The library checks f64 rows to
-/// its double tolerance; f32 rows sum to one only to f32 rounding, so they are
-/// checked here to that of f32 and renormalized in f64.
-fn distributions<'a, T: Real>(q: Matrix<'a, T>, classes: usize) -> Result<Cow<'a, [f64]>> {
-    if q.cols() != classes {
-        return invalid(format!(
-            "Targets::Probabilities must have num_classes = {classes} columns, not {}",
-            q.cols()
-        ));
-    }
-    let mut q = T::to_f64s(q.data());
-    if let Cow::Owned(rows) = &mut q {
-        let tol = 64.0 * T::EPSILON * classes as f64;
-        for row in rows.chunks_exact_mut(classes) {
-            if !row.iter().all(|&p| p.is_finite() && p >= 0.0) {
-                return invalid("Targets::Probabilities must be finite and nonnegative");
-            }
-            let sum: f64 = row.iter().sum();
-            if (sum - 1.0).abs() > tol {
-                return invalid("Targets::Probabilities rows must sum to one");
-            }
-            row.iter_mut().for_each(|p| *p /= sum);
-        }
-    }
-    Ok(q)
+    (labels, offsets)
 }

@@ -67,6 +67,37 @@ def _default_jobs() -> int:
     return os.cpu_count() or 2
 
 
+# Compiler memory of one --coverage build job of the large translation units (about 3.6 GiB
+# measured): four at once nearly filled a 16 GiB runner.
+_BUILD_JOB_BYTES = 5 << 30
+
+
+def _memory() -> int | None:
+    """The memory the build may use: the physical memory, or a smaller cgroup limit (a
+    container sees the host's physical memory)."""
+    try:
+        memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        return None
+    for limit in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            text = Path(limit).read_text().strip()
+        except OSError:
+            continue
+        if text.isdigit():
+            memory = min(memory, int(text))
+        break
+    return memory
+
+
+def _build_jobs(jobs: int) -> int:
+    """jobs, capped so that the concurrent compiles fit in the memory."""
+    memory = _memory()
+    if memory is None:
+        return jobs
+    return max(1, min(jobs, memory // _BUILD_JOB_BYTES))
+
+
 def cpp_tests(build: Path, jobs: int) -> None:
     """The C++ suites built with the built-in BLAS, so that it is covered too."""
     run(
@@ -82,7 +113,7 @@ def cpp_tests(build: Path, jobs: int) -> None:
         "-DCMAKE_CXX_FLAGS=--coverage -O1 -fprofile-update=atomic",
         "-DCMAKE_C_FLAGS=--coverage -O1 -fprofile-update=atomic",
     )
-    run("cmake", "--build", build / "cpp", "--parallel", str(jobs))
+    run("cmake", "--build", build / "cpp", "--parallel", str(_build_jobs(jobs)))
     run("ctest", "--test-dir", build / "cpp", "--output-on-failure", "--parallel", str(jobs))
 
 
@@ -117,7 +148,7 @@ def python_tests(build: Path) -> None:
         "all",
         env=env,
     )
-    env.update(SDCA_CPU_EXTENSION="on", TORCH_EXTENSIONS_DIR=str(build / "torch-extensions"))
+    env.update(SDCA_CPU_EXTENSION="on", SDCA_CACHE_DIR=str(build / "extensions"))
     run(
         sys.executable, "-m", "coverage", "run", "--append", source,
         "-m", "pytest", "-p", "no:cacheprovider", "tests/python", "--group", "torch", env=env,

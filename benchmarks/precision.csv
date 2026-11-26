@@ -1,0 +1,489 @@
+framework,device,loss,dtype,shape,rows,mode,implementation,value_err_median,value_err_max,grad_err_median,grad_err_max,grad_entry_err_median,grad_entry_err_max,grad_correctly_rounded_pct,grad_faithful_pct
+jax,cuda,ce_probs,bfloat16,16384x1000,finite,train,libsdca,0.2773,0.9775,0.1601,0.3664,0.4854,0.4979,99.99,100
+jax,cuda,ce_probs,bfloat16,16384x1000,finite,train,JAX eager,1.423e+04,3.843e+04,0.2336,0.7952,341.7,6427,42.82,55.89
+jax,cuda,ce_probs,bfloat16,16384x1000,finite,train,jax.jit,1.316e+04,3.368e+04,0.1764,0.3664,350.5,7043,46.1,57.97
+jax,cuda,ce_probs,bfloat16,2560x50257,finite,train,libsdca,0.1548,0.8882,0.1915,0.3999,0.9799,364,99.98,100
+jax,cuda,ce_probs,bfloat16,2560x50257,finite,train,JAX eager,8293,3.6e+04,0.2421,0.7213,2.476e+04,1.804e+07,32.62,49.82
+jax,cuda,ce_probs,bfloat16,2560x50257,finite,train,jax.jit,8293,2.831e+04,0.2421,0.597,2.284e+04,1.687e+07,37.94,52.1
+jax,cuda,ce_probs,bfloat16,4096x32000,finite,train,libsdca,0.1459,0.376,0.1848,0.3857,0.5905,12.23,99.98,100
+jax,cuda,ce_probs,bfloat16,4096x32000,finite,train,JAX eager,9840,2.127e+04,0.2257,0.7108,1.767e+04,4.761e+05,40.55,52.04
+jax,cuda,ce_probs,bfloat16,4096x32000,finite,train,jax.jit,9840,2.137e+04,0.2202,0.4801,1.771e+04,4.482e+05,42.63,53.32
+jax,cuda,ce_probs,float32,4096x32000,finite,train,libsdca,0.1228,0.4031,0.3096,0.7208,1327,1.15e+05,39.54,51.83
+jax,cuda,ce_probs,float32,4096x32000,finite,train,JAX eager,0.221,0.641,0.3648,1.616,1.873e+04,2.51e+06,39.2,51.09
+jax,cuda,ce_probs,float32,4096x32000,finite,train,jax.jit,0.1646,0.9274,0.3648,1.616,1.873e+04,2.51e+06,39.2,51.09
+jax,cuda,ce_weighted_smoothing,bfloat16,16384x1000,finite,train,libsdca,0.1616,0.3873,0.2029,0.4864,0.4852,0.498,100,100
+jax,cuda,ce_weighted_smoothing,bfloat16,16384x1000,finite,train,JAX eager (formula),0.2822,1.056,0.2029,0.4864,0.4852,0.498,99.99,100
+jax,cuda,ce_weighted_smoothing,bfloat16,16384x1000,finite,train,jax.jit (formula),0.2778,1.056,0.2029,0.4864,0.4852,0.8397,99.99,100
+jax,cuda,ce_weighted_smoothing,bfloat16,2560x50257,finite,train,libsdca,0.188,0.4196,0.136,0.3816,0.498,98.74,99.99,100
+jax,cuda,ce_weighted_smoothing,bfloat16,2560x50257,finite,train,JAX eager (formula),0.2586,0.7932,0.136,0.3816,0.4977,46.6,99.99,100
+jax,cuda,ce_weighted_smoothing,bfloat16,2560x50257,finite,train,jax.jit (formula),0.326,1.097,0.136,0.3816,0.4977,27.2,99.99,100
+jax,cuda,ce_weighted_smoothing,bfloat16,4096x32000,finite,train,libsdca,0.2008,0.4568,0.1976,0.4524,0.4979,75.83,99.99,100
+jax,cuda,ce_weighted_smoothing,bfloat16,4096x32000,finite,train,JAX eager (formula),0.2402,1.254,0.1976,0.4524,0.4976,28.42,99.99,100
+jax,cuda,ce_weighted_smoothing,bfloat16,4096x32000,finite,train,jax.jit (formula),0.2339,1.254,0.1976,0.4524,0.4976,28.42,92.18,100
+jax,cuda,ce_weighted_smoothing,float32,4096x32000,finite,train,libsdca,0.132,0.4344,0.2471,1.056,1.872e+04,2.008e+06,33.39,59.03
+jax,cuda,ce_weighted_smoothing,float32,4096x32000,finite,train,JAX eager (formula),0.2863,0.9471,0.2163,1.252,1.958e+04,1.816e+06,30.57,55.07
+jax,cuda,ce_weighted_smoothing,float32,4096x32000,finite,train,jax.jit (formula),0.2856,0.9471,0.2163,1.252,1.958e+04,1.816e+06,22.76,55.07
+jax,cuda,cross_entropy,bfloat16,16384x1000,finite,fwd,libsdca,0.1828,0.4084,,,,,,
+jax,cuda,cross_entropy,bfloat16,16384x1000,finite,fwd,JAX eager,1.487e+04,1.459e+05,,,,,,
+jax,cuda,cross_entropy,bfloat16,16384x1000,finite,fwd,jax.jit,1.332e+04,2.609e+04,,,,,,
+jax,cuda,cross_entropy,bfloat16,16384x1000,finite,train,libsdca,0.1828,0.4084,0.04711,0.2466,0.4811,0.4977,100,100
+jax,cuda,cross_entropy,bfloat16,16384x1000,finite,train,JAX eager,1.487e+04,1.459e+05,0.07206,0.3607,8.608,9.207,21.31,33.03
+jax,cuda,cross_entropy,bfloat16,16384x1000,finite,train,jax.jit,1.332e+04,2.609e+04,0.07206,0.3607,8.608,9.207,21.31,33.03
+jax,cuda,cross_entropy,bfloat16,16384x8193,finite,fwd,libsdca,0.1587,0.4393,,,,,,
+jax,cuda,cross_entropy,bfloat16,16384x8193,finite,fwd,JAX eager,1.195e+04,4.169e+04,,,,,,
+jax,cuda,cross_entropy,bfloat16,16384x8193,finite,fwd,jax.jit,1.027e+04,3.009e+04,,,,,,
+jax,cuda,cross_entropy,bfloat16,16384x8193,finite,train,libsdca,0.1587,0.4393,0.02469,0.2308,0.4881,0.4979,99.99,100
+jax,cuda,cross_entropy,bfloat16,16384x8193,finite,train,JAX eager,1.195e+04,4.169e+04,0.03372,0.2308,8.93,9.45,18.49,28.86
+jax,cuda,cross_entropy,bfloat16,16384x8193,finite,train,jax.jit,1.027e+04,3.009e+04,0.03372,0.2308,8.93,9.45,18.49,28.86
+jax,cuda,cross_entropy,bfloat16,2560x50257,finite,fwd,libsdca,0.1599,0.4677,,,,,,
+jax,cuda,cross_entropy,bfloat16,2560x50257,finite,fwd,JAX eager,1.154e+04,5.141e+04,,,,,,
+jax,cuda,cross_entropy,bfloat16,2560x50257,finite,fwd,jax.jit,1.014e+04,2.75e+04,,,,,,
+jax,cuda,cross_entropy,bfloat16,2560x50257,finite,train,libsdca,0.1599,0.4677,0.1251,0.306,0.4887,0.4979,99.99,100
+jax,cuda,cross_entropy,bfloat16,2560x50257,finite,train,JAX eager,1.154e+04,5.141e+04,0.1251,0.32,9.309,9.815,14.14,24.19
+jax,cuda,cross_entropy,bfloat16,2560x50257,finite,train,jax.jit,1.014e+04,2.75e+04,0.1251,0.32,9.001,9.257,17.4,25.94
+jax,cuda,cross_entropy,bfloat16,4096x32000,finite,fwd,libsdca,0.1808,0.4346,,,,,,
+jax,cuda,cross_entropy,bfloat16,4096x32000,finite,fwd,JAX eager,1.341e+04,4.791e+04,,,,,,
+jax,cuda,cross_entropy,bfloat16,4096x32000,finite,fwd,jax.jit,1.084e+04,3.168e+04,,,,,,
+jax,cuda,cross_entropy,bfloat16,4096x32000,finite,train,libsdca,0.1808,0.4346,0.01522,0.1012,0.4889,0.4974,99.99,100
+jax,cuda,cross_entropy,bfloat16,4096x32000,finite,train,JAX eager,1.341e+04,4.791e+04,0.02503,0.1012,8.878,9.478,16.94,26.66
+jax,cuda,cross_entropy,bfloat16,4096x32000,finite,train,jax.jit,1.084e+04,3.168e+04,0.01611,0.1012,8.883,9.067,18.84,27.41
+jax,cuda,cross_entropy,float32,275059x9,finite,train,libsdca,0.1568,0.4645,0.1977,0.8551,2.251,5.168,39.93,62.15
+jax,cuda,cross_entropy,float32,275059x9,finite,train,JAX eager,0.2472,67.34,0.3026,23.12,2.304,23.12,34.9,55.56
+jax,cuda,cross_entropy,float32,275059x9,finite,train,jax.jit,0.2472,67.34,0.2608,14.2,2.328,14.2,37.85,57.47
+jax,cuda,cross_entropy,float32,4096x32000,finite,fwd,libsdca,0.1493,0.4498,,,,,,
+jax,cuda,cross_entropy,float32,4096x32000,finite,fwd,JAX eager,0.2205,0.8332,,,,,,
+jax,cuda,cross_entropy,float32,4096x32000,finite,fwd,jax.jit,0.2205,0.8332,,,,,,
+jax,cuda,cross_entropy,float32,4096x32000,finite,train,libsdca,0.1493,0.4498,0.1236,0.2556,9.494,10.13,14.09,25.86
+jax,cuda,cross_entropy,float32,4096x32000,finite,train,JAX eager,0.2205,0.8332,0.1282,0.2444,9.396,10.39,15.2,26.85
+jax,cuda,cross_entropy,float32,4096x32000,finite,train,jax.jit,0.2205,0.8332,0.1282,0.2444,9.396,10.39,15.2,26.85
+jax,cuda,cross_entropy,float32,7x946,finite,train,libsdca,0.178,0.2481,0.1786,0.7148,8.579,8.654,21.84,36.12
+jax,cuda,cross_entropy,float32,7x946,finite,train,JAX eager,0.2415,0.6106,0.3269,0.7148,8.422,9.145,17.74,31.8
+jax,cuda,cross_entropy,float32,7x946,finite,train,jax.jit,0.2415,0.6106,0.3269,0.7148,8.697,9.485,14.83,28.98
+jax,cuda,distillation,bfloat16,16384x1000,finite,fwd,libsdca,0.1954,0.7258,,,,,,
+jax,cuda,distillation,bfloat16,16384x1000,finite,fwd,JAX eager,1.375e+04,4.389e+04,,,,,,
+jax,cuda,distillation,bfloat16,16384x1000,finite,fwd,jax.jit,1.33e+04,4.389e+04,,,,,,
+jax,cuda,distillation,bfloat16,16384x1000,finite,train,libsdca,0.1954,0.7258,0.2289,0.4505,0.4873,48.15,99.87,99.99
+jax,cuda,distillation,bfloat16,16384x1000,finite,train,JAX eager,1.375e+04,4.389e+04,1.752,7.333,2951,2.261e+06,4.07,7.934
+jax,cuda,distillation,bfloat16,16384x1000,finite,train,jax.jit,1.33e+04,4.389e+04,1.38,4.361,2793,1.786e+06,4.439,8.602
+jax,cuda,distillation,bfloat16,16384x8193,finite,fwd,libsdca,0.1413,0.4433,,,,,,
+jax,cuda,distillation,bfloat16,16384x8193,finite,fwd,JAX eager,1.581e+04,4.392e+04,,,,,,
+jax,cuda,distillation,bfloat16,16384x8193,finite,fwd,jax.jit,1.581e+04,4.392e+04,,,,,,
+jax,cuda,distillation,bfloat16,16384x8193,finite,train,libsdca,0.1413,0.4433,0.2333,0.4251,0.4955,0.528,99.99,100
+jax,cuda,distillation,bfloat16,16384x8193,finite,train,JAX eager,1.581e+04,4.392e+04,1.734,5.065,1.079e+04,1.978e+06,3.54,7.062
+jax,cuda,distillation,bfloat16,16384x8193,finite,train,jax.jit,1.581e+04,4.392e+04,1.444,4.779,9989,1.917e+06,3.805,7.49
+jax,cuda,distillation,bfloat16,2560x50257,finite,fwd,libsdca,0.1878,0.4147,,,,,,
+jax,cuda,distillation,bfloat16,2560x50257,finite,fwd,JAX eager,1.614e+04,4.835e+04,,,,,,
+jax,cuda,distillation,bfloat16,2560x50257,finite,fwd,jax.jit,1.492e+04,3.503e+04,,,,,,
+jax,cuda,distillation,bfloat16,2560x50257,finite,train,libsdca,0.1878,0.4147,0.2474,0.4604,0.4974,2.832,99.98,99.98
+jax,cuda,distillation,bfloat16,2560x50257,finite,train,JAX eager,1.614e+04,4.835e+04,1.822,5.511,2.395e+04,1.309e+08,3.163,6.285
+jax,cuda,distillation,bfloat16,2560x50257,finite,train,jax.jit,1.492e+04,3.503e+04,0.9436,2.333,1.996e+04,1.176e+08,3.766,7.354
+jax,cuda,distillation,bfloat16,262144x10,finite,fwd,libsdca,0.2432,0.6133,,,,,,
+jax,cuda,distillation,bfloat16,262144x10,finite,fwd,JAX eager,1.737e+04,6.1e+04,,,,,,
+jax,cuda,distillation,bfloat16,262144x10,finite,fwd,jax.jit,1.547e+04,6.1e+04,,,,,,
+jax,cuda,distillation,bfloat16,262144x10,finite,train,libsdca,0.2432,0.6133,0.1929,0.4398,0.3623,0.48,100,100
+jax,cuda,distillation,bfloat16,262144x10,finite,train,JAX eager,1.737e+04,6.1e+04,2.149,26.74,29.35,937,7.344,16.25
+jax,cuda,distillation,bfloat16,262144x10,finite,train,jax.jit,1.547e+04,6.1e+04,1.647,14.75,24.71,1017,8.281,16.88
+jax,cuda,distillation,bfloat16,275059x9,finite,train,libsdca,0.1746,0.5622,0.2062,0.4405,0.3649,0.495,100,100
+jax,cuda,distillation,bfloat16,275059x9,finite,train,JAX eager,1.558e+04,5.806e+04,3.209,30,30.4,3373,7.292,12.33
+jax,cuda,distillation,bfloat16,275059x9,finite,train,jax.jit,1.614e+04,4.916e+04,1.942,25.02,24.59,2302,7.639,15.8
+jax,cuda,distillation,bfloat16,4096x32000,finite,fwd,libsdca,0.208,0.4641,,,,,,
+jax,cuda,distillation,bfloat16,4096x32000,finite,fwd,JAX eager,1.771e+04,5.034e+04,,,,,,
+jax,cuda,distillation,bfloat16,4096x32000,finite,fwd,jax.jit,1.54e+04,4.15e+04,,,,,,
+jax,cuda,distillation,bfloat16,4096x32000,finite,train,libsdca,0.208,0.4641,0.2425,0.456,0.4973,0.4981,99.99,100
+jax,cuda,distillation,bfloat16,4096x32000,finite,train,JAX eager,1.771e+04,5.034e+04,1.676,4.04,2.025e+04,1.248e+06,3.301,6.568
+jax,cuda,distillation,bfloat16,4096x32000,finite,train,jax.jit,1.54e+04,4.15e+04,1.115,2.263,1.892e+04,1.385e+06,3.96,7.709
+jax,cuda,distillation,bfloat16,65536x100,finite,fwd,libsdca,0.2252,0.773,,,,,,
+jax,cuda,distillation,bfloat16,65536x100,finite,fwd,JAX eager,1.498e+04,4.326e+04,,,,,,
+jax,cuda,distillation,bfloat16,65536x100,finite,fwd,jax.jit,1.597e+04,4.326e+04,,,,,,
+jax,cuda,distillation,bfloat16,65536x100,finite,train,libsdca,0.2252,0.773,0.2316,0.4307,0.4541,1.203,99.92,99.97
+jax,cuda,distillation,bfloat16,65536x100,finite,train,JAX eager,1.498e+04,4.326e+04,1.971,15.1,582.1,9.678e+04,5.406,10.09
+jax,cuda,distillation,bfloat16,65536x100,finite,train,jax.jit,1.597e+04,4.326e+04,1.916,6.18,517.2,8.164e+04,5.578,10.58
+jax,cuda,distillation,float32,4096x32000,finite,fwd,libsdca,0.1571,0.4663,,,,,,
+jax,cuda,distillation,float32,4096x32000,finite,fwd,JAX eager,0.3767,1.49,,,,,,
+jax,cuda,distillation,float32,4096x32000,finite,fwd,jax.jit,0.3767,1.49,,,,,,
+jax,cuda,distillation,float32,4096x32000,finite,train,libsdca,0.1571,0.4663,2.065,5.606,582,1.059e+05,6.332,12.62
+jax,cuda,distillation,float32,4096x32000,finite,train,JAX eager,0.3767,1.49,2.603,9.684,2.944e+05,4.797e+07,2.911,5.8
+jax,cuda,distillation,float32,4096x32000,finite,train,jax.jit,0.3767,1.49,2.603,9.684,2.944e+05,4.797e+07,2.904,5.785
+jax,cuda,distillation_t1,bfloat16,16384x1000,finite,train,libsdca,0.3106,1.038,0.2117,0.479,0.4876,0.7612,99.92,100
+jax,cuda,distillation_t1,bfloat16,16384x1000,finite,train,JAX eager,1.984e+04,6.597e+04,1.001,7.849,2098,3.452e+04,5.18,10.05
+jax,cuda,distillation_t1,bfloat16,16384x1000,finite,train,jax.jit,1.984e+04,6.597e+04,0.7752,3.153,2009,3.245e+04,5.75,10.84
+jax,cuda,distillation_t1,bfloat16,2560x50257,finite,train,libsdca,0.1453,0.3657,0.2273,0.4192,0.4973,0.4981,99.99,100
+jax,cuda,distillation_t1,bfloat16,2560x50257,finite,train,JAX eager,1.403e+04,5.258e+04,1.011,5.018,3.336e+04,1.348e+06,3.527,6.967
+jax,cuda,distillation_t1,bfloat16,2560x50257,finite,train,jax.jit,7060,2.849e+04,0.4227,1.29,3.017e+04,1.088e+06,4.621,8.555
+jax,cuda,distillation_t1,bfloat16,4096x32000,finite,train,libsdca,0.1865,0.4051,0.185,0.4303,0.4969,0.4982,99.99,100
+jax,cuda,distillation_t1,bfloat16,4096x32000,finite,train,JAX eager,1.329e+04,4.044e+04,0.8603,5.382,1.606e+04,4.009e+05,3.737,7.323
+jax,cuda,distillation_t1,bfloat16,4096x32000,finite,train,jax.jit,1.143e+04,2.626e+04,0.3895,2.058,1.685e+04,3.751e+05,4.693,8.719
+jax,cuda,distillation_t1,float32,4096x32000,finite,train,libsdca,0.1903,0.3769,0.9521,2.576,1190,1.002e+06,5.237,10.43
+jax,cuda,distillation_t1,float32,4096x32000,finite,train,JAX eager,0.3823,1.588,1.107,10.49,2.529e+05,2.536e+07,3.378,6.681
+jax,cuda,distillation_t1,float32,4096x32000,finite,train,jax.jit,0.3823,1.588,1.107,10.49,2.529e+05,2.536e+07,3.378,6.681
+jax,cuda,multiclass_hinge,bfloat16,16384x1000,finite,train,libsdca,0,0,0,0,0,0,100,100
+jax,cuda,multiclass_hinge,bfloat16,16384x1000,finite,train,jax.jit,0,0,0,0,0,0,100,100
+jax,cuda,multiclass_hinge,float32,4096x32000,finite,train,libsdca,0.1631,0.4817,0,0,0,0,100,100
+jax,cuda,multiclass_hinge,float32,4096x32000,finite,train,JAX eager,0.1631,0.4817,0,0,0,0,100,100
+jax,cuda,multiclass_hinge,float32,4096x32000,finite,train,jax.jit,0.1631,0.4817,0,0,0,0,100,100
+jax,cuda,multilabel_ce,bfloat16,16384x1000,finite,train,libsdca,0.2081,0.3835,0.2293,0.3927,0.4852,0.4977,100,100
+jax,cuda,multilabel_ce,bfloat16,16384x1000,finite,train,jax.jit,1.771e+04,5.615e+04,0.2613,0.7337,8.576,9.097,24.14,34.92
+jax,cuda,multilabel_ce,bfloat16,2560x50257,finite,train,libsdca,0.1457,0.2582,0.2086,0.3615,0.4889,0.4982,99.98,100
+jax,cuda,multilabel_ce,bfloat16,2560x50257,finite,train,JAX eager,1.26e+04,5.384e+04,0.3423,1.31,9.111,14.97,13.27,23.23
+jax,cuda,multilabel_ce,bfloat16,2560x50257,finite,train,jax.jit,7235,2.32e+04,0.2674,0.4211,9.002,14.72,18.45,27.18
+jax,cuda,multilabel_ce,bfloat16,4096x32000,finite,train,libsdca,0.1492,0.2705,0.2006,0.3989,0.4889,0.4972,99.99,100
+jax,cuda,multilabel_ce,bfloat16,4096x32000,finite,train,JAX eager,1.821e+04,6.253e+04,0.387,1.576,8.98,16.18,13.92,24.33
+jax,cuda,multilabel_ce,bfloat16,4096x32000,finite,train,jax.jit,1.006e+04,2.165e+04,0.2635,0.7978,8.889,10.92,18.68,27.35
+jax,cuda,multilabel_ce,float32,3592x35870,finite,train,libsdca,0.1406,0.422,0.4112,0.9308,1.896,8.789,51.1,83.39
+jax,cuda,multilabel_ce,float32,3592x35870,finite,train,JAX eager,0.2656,0.8713,0.699,1.843,9.814,19.51,10.96,21.29
+jax,cuda,multilabel_ce,float32,3592x35870,finite,train,jax.jit,0.2656,0.8713,0.699,1.843,9.814,19.51,10.96,21.29
+jax,cuda,multilabel_ce,float32,4096x32000,finite,train,libsdca,0.1027,0.3639,0.3068,0.6754,1.66,16.66,58.64,89.36
+jax,cuda,multilabel_ce,float32,4096x32000,finite,train,JAX eager,0.1903,0.7038,0.4567,1.41,9.457,32,14.75,26.35
+jax,cuda,multilabel_ce,float32,4096x32000,finite,train,jax.jit,0.2324,0.7038,0.4567,1.41,9.457,32,14.75,26.35
+jax,cuda,multilabel_hinge,bfloat16,16384x1000,finite,train,libsdca,0,0,0,0,0,0,100,100
+jax,cuda,multilabel_hinge,bfloat16,16384x1000,finite,train,JAX eager (formula),0,0,0,0,0,0,100,100
+jax,cuda,multilabel_hinge,bfloat16,16384x1000,finite,train,jax.jit (formula),0,0,0,0,0,0,100,100
+jax,cuda,multilabel_hinge,bfloat16,2560x50257,finite,train,libsdca,0,0,0.125,0.125,0.125,0.125,100,100
+jax,cuda,multilabel_hinge,bfloat16,2560x50257,finite,train,JAX eager (formula),0,0,0.125,0.125,0.125,0.125,100,100
+jax,cuda,multilabel_hinge,bfloat16,2560x50257,finite,train,jax.jit (formula),0,0,0.125,0.125,0.125,0.125,100,100
+jax,cuda,multilabel_hinge,bfloat16,4096x32000,finite,train,libsdca,0,0,0,0,0,0,100,100
+jax,cuda,multilabel_hinge,bfloat16,4096x32000,finite,train,JAX eager (formula),0,0,0,0,0,0,100,100
+jax,cuda,multilabel_hinge,bfloat16,4096x32000,finite,train,jax.jit (formula),0,0,0,0,0,0,100,100
+jax,cuda,multilabel_hinge,float32,4096x32000,finite,train,libsdca,0,0.4041,0,0,0,0,100,100
+jax,cuda,multilabel_hinge,float32,4096x32000,finite,train,JAX eager (formula),0,0.4041,0,0,0,0,100,100
+jax,cuda,multilabel_hinge,float32,4096x32000,finite,train,jax.jit (formula),0,0.4041,0,0,0,0,100,100
+jax,cuda,proximal_ce,bfloat16,16384x1000,finite,train,libsdca,0.3257,0.7952,0.05257,0.2476,0.4813,0.4976,100,100
+jax,cuda,proximal_ce,bfloat16,16384x1000,finite,train,"libsdca composed, eager",0.3286,0.9184,0.05257,0.2476,0.4813,0.4976,100,100
+jax,cuda,proximal_ce,bfloat16,16384x1000,finite,train,"libsdca composed, jax.jit",0.3433,0.9184,0.05257,0.2476,0.4813,0.4976,100,100
+jax,cuda,proximal_ce,bfloat16,2560x50257,finite,train,libsdca,0.2055,0.8417,0.125,0.1391,0.4906,0.4979,99.99,100
+jax,cuda,proximal_ce,bfloat16,2560x50257,finite,train,"libsdca composed, eager",0.2666,1.103,0.125,0.1391,0.4906,0.4979,100,100
+jax,cuda,proximal_ce,bfloat16,2560x50257,finite,train,"libsdca composed, jax.jit",0.2666,1.103,0.125,0.1391,0.4906,0.4979,100,100
+jax,cuda,proximal_ce,bfloat16,4096x32000,finite,train,libsdca,0.2287,0.8548,0.0142,0.1243,0.491,0.4978,99.99,100
+jax,cuda,proximal_ce,bfloat16,4096x32000,finite,train,"libsdca composed, eager",0.2287,0.9351,0.0142,0.1243,0.491,0.4978,99.99,100
+jax,cuda,proximal_ce,bfloat16,4096x32000,finite,train,"libsdca composed, jax.jit",0.2293,0.9351,0.0142,0.1243,0.491,0.4978,99.99,100
+jax,cuda,proximal_ce,float32,4096x32000,finite,train,libsdca,0.3187,0.892,1.506,16.8,13.89,27.17,5.179,10.31
+jax,cuda,proximal_ce,float32,4096x32000,finite,train,"libsdca composed, eager",0.3289,1.015,1.481,15.3,13.91,27.17,5.303,10.6
+jax,cuda,proximal_ce,float32,4096x32000,finite,train,"libsdca composed, jax.jit",0.3155,1.015,1.324,14.3,13.91,27.17,5.375,10.74
+jax,cuda,proximal_distillation,bfloat16,16384x1000,finite,train,libsdca,1.118,3.113,0.2279,0.3871,0.485,0.5434,99.99,100
+jax,cuda,proximal_distillation,bfloat16,16384x1000,finite,train,"libsdca composed, eager",0.3732,1.28,0.2279,0.3871,0.485,1.74,99.99,100
+jax,cuda,proximal_distillation,bfloat16,16384x1000,finite,train,"libsdca composed, jax.jit",0.3581,1.734,0.2279,0.3871,0.485,1.74,99.99,100
+jax,cuda,proximal_distillation,bfloat16,2560x50257,finite,train,libsdca,2.268,5.7,0.2402,0.475,0.497,1.534,99.99,100
+jax,cuda,proximal_distillation,bfloat16,2560x50257,finite,train,"libsdca composed, jax.jit",0.5436,1.593,0.2402,0.475,0.4973,1.277,99.98,100
+jax,cuda,proximal_distillation,bfloat16,4096x32000,finite,train,libsdca,1.733,5.439,0.2435,0.4192,0.497,0.8378,99.99,100
+jax,cuda,proximal_distillation,bfloat16,4096x32000,finite,train,"libsdca composed, jax.jit",0.4795,1.734,0.2435,0.4192,0.4972,1.165,99.98,100
+jax,cuda,proximal_distillation,float32,4096x32000,finite,train,libsdca,0.7322,2.313,1.313,2.797,4054,3.321e+05,7.785,15.52
+jax,cuda,proximal_distillation,float32,4096x32000,finite,train,"libsdca composed, jax.jit",0.4192,1.467,70.66,514.4,1.434e+04,1.125e+06,11.73,23.01
+jax,cuda,smooth_multilabel_hinge,bfloat16,16384x1000,finite,train,libsdca,0,0.2406,0,0.2133,0,0.32,100,100
+jax,cuda,smooth_multilabel_hinge,bfloat16,16384x1000,finite,train,"libsdca composed, eager",0,0.7943,0,0.2133,0,0.32,100,100
+jax,cuda,smooth_multilabel_hinge,bfloat16,16384x1000,finite,train,"libsdca composed, jax.jit",0,0.7943,0,0.2133,0,0.32,100,100
+jax,cuda,smooth_multilabel_hinge,bfloat16,2560x50257,finite,train,libsdca,0,0.2776,0.125,0.3333,0.1623,0.4375,100,100
+jax,cuda,smooth_multilabel_hinge,bfloat16,2560x50257,finite,train,"libsdca composed, eager",0,0.5551,0.125,0.3333,0.1623,0.4375,100,100
+jax,cuda,smooth_multilabel_hinge,bfloat16,2560x50257,finite,train,"libsdca composed, jax.jit",0,0.5551,0.125,0.3333,0.1623,0.4375,100,100
+jax,cuda,smooth_multilabel_hinge,bfloat16,4096x32000,finite,train,libsdca,0,0.2513,0,0.1667,0,0.3077,100,100
+jax,cuda,smooth_multilabel_hinge,bfloat16,4096x32000,finite,train,"libsdca composed, eager",0,0.5026,0,0.1667,0,0.3077,100,100
+jax,cuda,smooth_multilabel_hinge,bfloat16,4096x32000,finite,train,"libsdca composed, jax.jit",0,0.5026,0,0.1667,0,0.3077,100,100
+jax,cuda,smooth_topk_hinge_alpha,bfloat16,16384x1000,finite,train,libsdca,0.1525,0.3935,0.025,0.05833,0.125,0.4375,100,100
+jax,cuda,smooth_topk_hinge_alpha,bfloat16,16384x1000,finite,train,"libsdca composed, eager",0.2462,0.9113,0.025,0.05833,0.125,0.4375,100,100
+jax,cuda,smooth_topk_hinge_alpha,bfloat16,16384x1000,finite,train,"libsdca composed, jax.jit",0.2905,0.976,0.025,0.05833,0.125,0.4375,100,100
+jax,cuda,topk_ce,bfloat16,17101x7471,finite,train,libsdca,0.1705,0.4357,0.1388,0.1391,0.4896,0.4977,100,100
+jax,cuda,topk_ce,bfloat16,17101x7471,finite,train,JAX eager (formula),0.2435,0.8521,0.1388,0.1391,0.4896,0.4977,100,100
+jax,cuda,topk_ce,bfloat16,17101x7471,finite,train,jax.jit (formula),0.2435,0.8521,0.1388,0.1391,0.4896,0.4977,100,100
+jax,cuda,topk_ce,float32,4096x32000,finite,train,libsdca,0.145,0.4189,0.1049,0.2468,9.388,9.896,15.97,27.83
+jax,cuda,topk_ce,float32,4096x32000,finite,train,JAX eager (formula),0.2951,1.445,0.2068,0.9211,9.644,10.8,12.82,24.73
+jax,cuda,topk_ce,float32,4096x32000,finite,train,jax.jit (formula),0.2951,1.445,0.2068,0.9211,9.644,10.8,12.82,24.73
+jax,cuda,topk_hinge_alpha,bfloat16,16384x1000,finite,train,libsdca,0.1593,0.3653,0.025,0.025,0.125,0.125,100,100
+jax,cuda,topk_hinge_alpha,bfloat16,16384x1000,finite,train,JAX eager (formula),0.2557,1.231,0.025,12.82,0.125,128.2,99.99,99.99
+jax,cuda,topk_hinge_alpha,bfloat16,16384x1000,finite,train,jax.jit (formula),0.2557,1.231,0.025,12.82,0.125,128.2,99.99,99.99
+jax,cuda,topk_hinge_alpha,bfloat16,2560x50257,finite,train,libsdca,0.173,0.3966,0.125,0.125,0.125,0.2656,100,100
+jax,cuda,topk_hinge_alpha,bfloat16,2560x50257,finite,train,JAX eager (formula),0.173,0.7101,0.125,17.09,0.125,256.4,100,100
+jax,cuda,topk_hinge_alpha,bfloat16,2560x50257,finite,train,jax.jit (formula),0.173,0.7101,0.125,17.09,0.125,256.4,100,100
+jax,cuda,topk_hinge_alpha,bfloat16,4096x32000,finite,train,libsdca,0.196,0.3966,0.025,0.02917,0.125,0.4375,100,100
+jax,cuda,topk_hinge_alpha,bfloat16,4096x32000,finite,train,JAX eager (formula),0.2275,0.7491,0.025,19.23,0.125,384.5,100,100
+jax,cuda,topk_hinge_alpha,bfloat16,4096x32000,finite,train,jax.jit (formula),0.2275,0.7491,0.025,19.23,0.125,384.5,100,100
+jax,cuda,topk_hinge_alpha,float32,4096x32000,finite,train,libsdca,0.1878,0.4868,0.025,0.025,0.125,0.125,100,100
+jax,cuda,topk_hinge_alpha,float32,4096x32000,finite,train,JAX eager (formula),0.3917,1.415,0.025,0.025,0.125,0.125,100,100
+jax,cuda,topk_hinge_alpha,float32,4096x32000,finite,train,jax.jit (formula),0.3917,1.415,0.025,0.025,0.125,0.125,100,100
+jax,cuda,topk_hinge_beta_nonsmooth,float32,4096x32000,finite,train,libsdca,0.1597,0.3999,0.025,0.025,0.125,0.125,100,100
+jax,cuda,topk_hinge_beta_nonsmooth,float32,4096x32000,finite,train,JAX eager (formula),0.386,1.056,0.025,0.025,0.125,0.125,100,100
+jax,cuda,topk_hinge_beta_nonsmooth,float32,4096x32000,finite,train,jax.jit (formula),0.386,1.056,0.025,0.025,0.125,0.125,100,100
+torch,cuda,ce_probs,bfloat16,16384x1000,finite,train,libsdca,0.2773,0.9775,0.1601,0.3664,0.4854,0.4979,99.99,100
+torch,cuda,ce_probs,bfloat16,16384x1000,finite,train,PyTorch eager,1.365e+04,3.75e+04,0.2727,1.2,427.6,7080,36.47,47.69
+torch,cuda,ce_probs,bfloat16,16384x1000,finite,train,torch.compile,1.212e+04,2.891e+04,0.1601,0.3664,0.4854,0.4979,100,100
+torch,cuda,ce_probs,bfloat16,2560x50257,finite,train,libsdca,0.1548,0.8882,0.1915,0.3999,0.9799,364,99.98,100
+torch,cuda,ce_probs,bfloat16,2560x50257,finite,train,PyTorch eager,8293,2.831e+04,0.4512,1.139,3.175e+04,1.308e+07,26.55,42.01
+torch,cuda,ce_probs,bfloat16,2560x50257,finite,train,torch.compile,8293,2.831e+04,0.1915,0.3999,0.7461,191.1,99.98,100
+torch,cuda,ce_probs,bfloat16,4096x32000,finite,train,libsdca,0.1459,0.376,0.1848,0.3857,0.5905,12.23,99.98,100
+torch,cuda,ce_probs,bfloat16,4096x32000,finite,train,PyTorch eager,9840,1.934e+04,0.345,1.168,1.785e+04,2.78e+05,33.7,43.29
+torch,cuda,ce_probs,bfloat16,4096x32000,finite,train,torch.compile,9840,1.739e+04,0.1848,0.3857,0.4979,4.996,99.99,100
+torch,cuda,ce_probs,float32,4096x32000,finite,train,libsdca,0.1228,0.4031,0.3096,0.7208,1327,1.15e+05,39.54,51.83
+torch,cuda,ce_probs,float32,4096x32000,finite,train,PyTorch eager,0.2241,0.9856,0.5328,1.898,3.724e+04,6.356e+06,32.33,41.95
+torch,cuda,ce_probs,float32,4096x32000,finite,train,torch.compile,0.2108,1.5,0.5007,1.932,3.593e+04,6.356e+06,32.21,41.73
+torch,cuda,ce_smoothing,float32,16384x1000,finite,train,libsdca,0.2014,0.4142,0.1665,0.3333,370.5,1.57e+05,44.34,70.74
+torch,cuda,ce_smoothing,float32,16384x1000,finite,train,Liger,0.2795,1.056,0.2491,0.8134,686.6,2.106e+05,27.53,57.44
+torch,cuda,ce_smoothing,float32,16384x1000,finite,train,PyTorch eager,0.3237,1.116,0.3425,2.232,900.2,1.454e+05,33.11,56.06
+torch,cuda,ce_smoothing,float32,16384x1000,finite,train,torch.compile,0.309,1.116,0.2199,0.8566,811.6,1.632e+05,37.13,60.17
+torch,cuda,ce_smoothing,float32,4096x32000,finite,train,libsdca,0.1863,0.4773,0.1691,0.3041,2.568e+04,3.43e+05,43.72,69.19
+torch,cuda,ce_smoothing,float32,4096x32000,finite,train,Liger,0.3215,0.9174,0.2937,0.4877,3.599e+04,9.223e+05,25.95,54.61
+torch,cuda,ce_smoothing,float32,4096x32000,finite,train,PyTorch eager,0.3215,1.049,0.6555,4.125,8.875e+04,7.502e+06,34.49,52.11
+torch,cuda,ce_smoothing,float32,4096x32000,finite,train,torch.compile,0.2853,1.049,0.5216,2.458,5.58e+04,1.282e+06,38.73,57.77
+torch,cuda,ce_weighted,float32,16384x1000,finite,train,libsdca,0.1934,0.4744,0.1881,0.4432,8.843,9.533,19.6,33.59
+torch,cuda,ce_weighted,float32,16384x1000,finite,train,Liger,0.2365,0.8436,0.3925,1.206,12.47,15.72,14.35,23.78
+torch,cuda,ce_weighted,float32,16384x1000,finite,train,PyTorch eager,0.2324,0.8436,0.464,1.095,12.1,17.75,13.29,22.19
+torch,cuda,ce_weighted,float32,16384x1000,finite,train,torch.compile,0.2404,0.8436,0.4039,1.208,12.1,17.75,13.34,22.15
+torch,cuda,ce_weighted,float32,4096x32000,finite,train,libsdca,0.117,0.4937,0.1984,0.4251,9.459,10.25,19.03,30.09
+torch,cuda,ce_weighted,float32,4096x32000,finite,train,Liger,0.1657,0.9486,0.3681,1.194,16.94,22.14,13,19.7
+torch,cuda,ce_weighted,float32,4096x32000,finite,train,PyTorch eager,0.1657,0.8876,0.2867,0.9687,12.87,17.72,12.83,19.54
+torch,cuda,ce_weighted,float32,4096x32000,finite,train,torch.compile,0.1657,0.8876,0.2953,0.9687,13.06,17.72,12.86,19.61
+torch,cuda,ce_weighted_smoothing,bfloat16,16384x1000,finite,train,libsdca,0.1616,0.3873,0.2029,0.4864,0.4852,0.498,100,100
+torch,cuda,ce_weighted_smoothing,bfloat16,16384x1000,finite,train,PyTorch eager,1.92e+04,7.052e+04,0.3309,0.6943,705.5,2.542e+04,23.71,50.04
+torch,cuda,ce_weighted_smoothing,bfloat16,16384x1000,finite,train,torch.compile,1.359e+04,3.084e+04,0.2414,0.5922,0.5864,0.6037,85.1,100
+torch,cuda,ce_weighted_smoothing,bfloat16,2560x50257,finite,train,libsdca,0.188,0.4196,0.136,0.3816,0.498,79.34,99.99,100
+torch,cuda,ce_weighted_smoothing,bfloat16,2560x50257,finite,train,PyTorch eager,1.675e+04,7.726e+04,0.6162,1.083,2.222e+04,7.43e+06,38.5,60.4
+torch,cuda,ce_weighted_smoothing,bfloat16,2560x50257,finite,train,torch.compile,1.16e+04,2.471e+04,0.1421,0.4484,0.6137,39.33,83.93,100
+torch,cuda,ce_weighted_smoothing,bfloat16,4096x32000,finite,train,libsdca,0.2008,0.4568,0.1976,0.4524,0.4979,75.83,99.99,100
+torch,cuda,ce_weighted_smoothing,bfloat16,4096x32000,finite,train,PyTorch eager,2.049e+04,7.74e+04,0.4565,0.8338,1.628e+04,7.546e+06,48.85,66.58
+torch,cuda,ce_weighted_smoothing,bfloat16,4096x32000,finite,train,torch.compile,7768,2.963e+04,0.1976,0.5034,0.5522,103.8,92.72,100
+torch,cuda,ce_weighted_smoothing,float32,16384x1000,finite,train,libsdca,0.1857,0.4173,0.2098,0.4524,333.6,1.856e+05,46.45,69.36
+torch,cuda,ce_weighted_smoothing,float32,16384x1000,finite,train,Liger,0.3091,1.035,0.4699,1.57,653.7,2.992e+05,36.06,58.37
+torch,cuda,ce_weighted_smoothing,float32,16384x1000,finite,train,PyTorch eager,0.2322,0.9053,0.4609,1.421,792.7,3.267e+05,20.89,45.09
+torch,cuda,ce_weighted_smoothing,float32,16384x1000,finite,train,torch.compile,0.3312,1.016,0.7017,1.865,808.9,3.744e+05,22.23,46.83
+torch,cuda,ce_weighted_smoothing,float32,4096x32000,finite,train,libsdca,0.132,0.4344,0.1388,1.184,1.844e+04,1.904e+06,49.72,70.18
+torch,cuda,ce_weighted_smoothing,float32,4096x32000,finite,train,Liger,0.2366,0.8071,0.2284,1.082,2.6e+04,2.153e+06,23.28,41.31
+torch,cuda,ce_weighted_smoothing,float32,4096x32000,finite,train,PyTorch eager,0.3998,1.007,0.2284,1.743,2.405e+04,2.458e+06,45.11,63.28
+torch,cuda,ce_weighted_smoothing,float32,4096x32000,finite,train,torch.compile,0.3673,1.007,0.2181,3.295,2.604e+04,2.749e+06,45.38,63.56
+torch,cuda,cross_entropy,bfloat16,16384x1000,finite,fwd,libsdca,0.1828,0.4084,,,,,,
+torch,cuda,cross_entropy,bfloat16,16384x1000,finite,fwd,PyTorch eager,1.332e+04,2.609e+04,,,,,,
+torch,cuda,cross_entropy,bfloat16,16384x1000,finite,fwd,torch.compile,1.332e+04,2.609e+04,,,,,,
+torch,cuda,cross_entropy,bfloat16,16384x1000,finite,train,libsdca,0.1828,0.4084,0.04711,0.2466,0.4811,0.4977,100,100
+torch,cuda,cross_entropy,bfloat16,16384x1000,finite,train,Liger,1.332e+04,2.609e+04,0.04711,0.2466,0.4811,0.4977,100,100
+torch,cuda,cross_entropy,bfloat16,16384x1000,finite,train,PyTorch eager,1.332e+04,2.609e+04,0.0867,0.2466,7.595,8.522,10.7,21.31
+torch,cuda,cross_entropy,bfloat16,16384x1000,finite,train,torch.compile,1.332e+04,2.609e+04,0.04711,0.2466,0.4811,0.4977,99.99,100
+torch,cuda,cross_entropy,bfloat16,16384x8193,finite,fwd,libsdca,0.1587,0.4393,,,,,,
+torch,cuda,cross_entropy,bfloat16,16384x8193,finite,fwd,PyTorch eager,1.027e+04,2.713e+04,,,,,,
+torch,cuda,cross_entropy,bfloat16,16384x8193,finite,fwd,torch.compile,1.027e+04,2.713e+04,,,,,,
+torch,cuda,cross_entropy,bfloat16,16384x8193,finite,train,libsdca,0.1587,0.4393,0.02469,0.2308,0.4881,0.4979,99.99,100
+torch,cuda,cross_entropy,bfloat16,16384x8193,finite,train,Liger,1.027e+04,2.713e+04,0.02469,0.2308,0.4881,0.4979,99.99,100
+torch,cuda,cross_entropy,bfloat16,16384x8193,finite,train,PyTorch eager,1.027e+04,2.713e+04,0.06167,0.2892,7.862,8.612,8.093,16.61
+torch,cuda,cross_entropy,bfloat16,16384x8193,finite,train,torch.compile,1.027e+04,2.713e+04,0.02469,0.2308,0.4881,0.4979,99.99,100
+torch,cuda,cross_entropy,bfloat16,16384x8193,unaligned,train,libsdca,0.2167,0.4062,0.02752,0.2158,0.4887,0.4979,100,100
+torch,cuda,cross_entropy,bfloat16,16384x8193,unaligned,train,PyTorch eager,9383,2.753e+04,0.06231,0.2158,7.79,8.666,8.002,16.18
+torch,cuda,cross_entropy,bfloat16,16384x8193,unaligned,train,torch.compile,9383,2.753e+04,0.02752,0.2158,0.4887,0.4979,99.99,100
+torch,cuda,cross_entropy,bfloat16,2560x50257,finite,fwd,libsdca,0.1599,0.4677,,,,,,
+torch,cuda,cross_entropy,bfloat16,2560x50257,finite,fwd,PyTorch eager,1.014e+04,2.75e+04,,,,,,
+torch,cuda,cross_entropy,bfloat16,2560x50257,finite,fwd,torch.compile,1.014e+04,2.75e+04,,,,,,
+torch,cuda,cross_entropy,bfloat16,2560x50257,finite,train,libsdca,0.1599,0.4677,0.1251,0.306,0.4887,0.4979,99.99,100
+torch,cuda,cross_entropy,bfloat16,2560x50257,finite,train,Liger,1.014e+04,2.75e+04,0.1251,0.306,0.4887,0.4979,99.99,100
+torch,cuda,cross_entropy,bfloat16,2560x50257,finite,train,PyTorch eager,1.014e+04,2.75e+04,0.1251,0.32,8.463,8.865,6.694,14.53
+torch,cuda,cross_entropy,bfloat16,2560x50257,finite,train,torch.compile,1.014e+04,2.75e+04,0.1251,0.306,0.4887,0.4979,99.99,100
+torch,cuda,cross_entropy,bfloat16,2560x50257,unaligned,train,libsdca,0.1812,0.4352,0.125,0.1547,0.4881,0.4978,99.99,100
+torch,cuda,cross_entropy,bfloat16,2560x50257,unaligned,train,PyTorch eager,1.157e+04,2.83e+04,0.125,0.3147,8.535,8.8,7.085,14.12
+torch,cuda,cross_entropy,bfloat16,2560x50257,unaligned,train,torch.compile,1.157e+04,2.83e+04,0.125,0.1547,0.4881,0.4978,100,100
+torch,cuda,cross_entropy,bfloat16,4096x32000,finite,fwd,libsdca,0.1808,0.4346,,,,,,
+torch,cuda,cross_entropy,bfloat16,4096x32000,finite,fwd,PyTorch eager,1.084e+04,3.065e+04,,,,,,
+torch,cuda,cross_entropy,bfloat16,4096x32000,finite,fwd,torch.compile,1.084e+04,3.065e+04,,,,,,
+torch,cuda,cross_entropy,bfloat16,4096x32000,finite,train,libsdca,0.1808,0.4346,0.01522,0.1012,0.4889,0.4974,99.99,100
+torch,cuda,cross_entropy,bfloat16,4096x32000,finite,train,Liger,1.084e+04,3.065e+04,0.01522,0.1012,0.4889,0.4974,99.99,100
+torch,cuda,cross_entropy,bfloat16,4096x32000,finite,train,PyTorch eager,1.084e+04,3.065e+04,0.03386,0.135,8.133,8.642,7.461,14.93
+torch,cuda,cross_entropy,bfloat16,4096x32000,finite,train,torch.compile,1.084e+04,3.065e+04,0.01522,0.1012,0.4889,0.4974,99.99,100
+torch,cuda,cross_entropy,bfloat16,523x128256,finite,train,libsdca,0.1994,0.468,0.1963,0.2072,0.49,0.4978,100,100
+torch,cuda,cross_entropy,bfloat16,523x128256,finite,train,Liger,1.105e+04,2.802e+04,0.1963,0.2072,0.49,0.4978,100,100
+torch,cuda,cross_entropy,bfloat16,523x128256,finite,train,PyTorch eager,1.105e+04,2.802e+04,0.3144,0.3145,8.196,12.17,5.711,12.51
+torch,cuda,cross_entropy,bfloat16,523x128256,finite,train,torch.compile,1.105e+04,2.802e+04,0.3144,0.3145,0.7295,0.7411,64.5,100
+torch,cuda,cross_entropy,bfloat16,65536x250,finite,train,libsdca,0.1882,0.4481,0.08928,0.2505,0.469,0.4942,100,100
+torch,cuda,cross_entropy,bfloat16,65536x250,finite,train,Liger,1.248e+04,3.008e+04,0.08928,0.2505,0.469,0.4942,99.99,100
+torch,cuda,cross_entropy,bfloat16,65536x250,finite,train,PyTorch eager,1.248e+04,3.008e+04,0.1058,0.3021,6.365,8.417,12.99,25.15
+torch,cuda,cross_entropy,bfloat16,65536x250,finite,train,torch.compile,1.248e+04,3.008e+04,0.08928,0.2505,0.469,0.4942,99.99,100
+torch,cuda,cross_entropy,float32,16384x8193,finite,train,libsdca,0.1497,0.3557,0.1425,0.405,9.377,10.26,14.84,27.39
+torch,cuda,cross_entropy,float32,16384x8193,finite,train,Liger,0.2085,0.9227,0.1593,0.6031,15.18,20.81,8.231,16.32
+torch,cuda,cross_entropy,float32,16384x8193,finite,train,PyTorch eager,0.1776,0.6466,0.1593,0.489,11.8,17.83,7.518,15.01
+torch,cuda,cross_entropy,float32,16384x8193,finite,train,torch.compile,0.1746,0.6466,0.1582,0.595,11.72,17.83,7.513,15.02
+torch,cuda,cross_entropy,float32,2560x50257,finite,train,libsdca,0.1811,0.4757,0.1639,0.3092,9.539,10.22,12.92,24.5
+torch,cuda,cross_entropy,float32,2560x50257,finite,train,Liger,0.1976,0.8857,0.1755,0.6143,19.56,22.17,6.988,13.95
+torch,cuda,cross_entropy,float32,2560x50257,finite,train,PyTorch eager,0.1976,0.6429,0.1778,0.4372,12.93,18.02,6.883,13.44
+torch,cuda,cross_entropy,float32,2560x50257,finite,train,torch.compile,0.1897,0.6429,0.1784,0.4372,13.05,19.02,6.979,13.62
+torch,cuda,cross_entropy,float32,275059x9,finite,train,libsdca,0.1568,0.4645,0.2015,0.8551,2.201,5.168,39.24,61.28
+torch,cuda,cross_entropy,float32,275059x9,finite,train,Liger,0.2472,72.92,0.3047,13.61,3.035,13.61,30.9,52.78
+torch,cuda,cross_entropy,float32,275059x9,finite,train,PyTorch eager,0.2026,21.42,0.2726,13.61,3.109,13.61,31.6,49.48
+torch,cuda,cross_entropy,float32,275059x9,finite,train,torch.compile,0.2026,21.42,0.2726,13.61,3.109,13.61,31.6,49.48
+torch,cuda,cross_entropy,float32,4096x32000,finite,fwd,libsdca,0.1493,0.4498,,,,,,
+torch,cuda,cross_entropy,float32,4096x32000,finite,fwd,PyTorch eager,0.2205,0.8601,,,,,,
+torch,cuda,cross_entropy,float32,4096x32000,finite,fwd,torch.compile,0.1953,0.655,,,,,,
+torch,cuda,cross_entropy,float32,4096x32000,finite,train,libsdca,0.1493,0.4498,0.1236,0.2556,9.494,10.13,14.09,25.86
+torch,cuda,cross_entropy,float32,4096x32000,finite,train,Liger,0.2205,0.8332,0.1236,0.2444,18.39,21.48,7.357,14.71
+torch,cuda,cross_entropy,float32,4096x32000,finite,train,PyTorch eager,0.2205,0.8601,0.13,0.2556,13.51,18.48,6.412,13.57
+torch,cuda,cross_entropy,float32,4096x32000,finite,train,torch.compile,0.1953,0.655,0.1382,0.2556,13.51,18.53,6.415,13.57
+torch,cuda,cross_entropy,float32,523x128256,finite,train,libsdca,0.1408,0.4874,0.1292,0.3691,9.614,14.64,12.59,23.32
+torch,cuda,cross_entropy,float32,523x128256,finite,train,Liger,0.2424,0.9102,0.1358,0.4318,20.63,22.48,6.635,13.25
+torch,cuda,cross_entropy,float32,523x128256,finite,train,PyTorch eager,0.162,0.6578,0.1358,0.6524,13.39,18.25,6.088,12.14
+torch,cuda,cross_entropy,float32,523x128256,finite,train,torch.compile,0.162,0.741,0.1364,0.549,13.42,18.99,6.081,12.13
+torch,cuda,cross_entropy,float32,65536x129,finite,train,libsdca,0.1748,0.4772,0.1545,0.3018,5.157,9.129,20.13,37.5
+torch,cuda,cross_entropy,float32,65536x129,finite,train,Liger,0.2084,0.8682,0.1875,1.369,9.427,15.4,13.01,26.16
+torch,cuda,cross_entropy,float32,65536x129,finite,train,PyTorch eager,0.187,0.6978,0.2291,1.636,7.3,16.83,12.6,24.89
+torch,cuda,cross_entropy,float32,65536x129,finite,train,torch.compile,0.187,0.7793,0.2277,0.9814,7.3,16.83,12.5,24.6
+torch,cuda,cross_entropy,float32,7x946,finite,train,libsdca,0.178,0.2481,0.1711,0.3908,8.654,9.712,15,29.7
+torch,cuda,cross_entropy,float32,7x946,finite,train,PyTorch eager,0.2415,0.6106,0.3269,0.7148,10.51,14.4,9.619,17.02
+torch,cuda,cross_entropy,float32,7x946,finite,train,torch.compile,0.2415,0.6106,0.3269,0.7148,10.51,14.4,9.619,17.02
+torch,cuda,distillation,bfloat16,16384x1000,finite,fwd,libsdca,0.1954,0.7258,,,,,,
+torch,cuda,distillation,bfloat16,16384x1000,finite,fwd,PyTorch eager,1.127e+04,3.125e+04,,,,,,
+torch,cuda,distillation,bfloat16,16384x1000,finite,fwd,torch.compile,1.127e+04,2.318e+04,,,,,,
+torch,cuda,distillation,bfloat16,16384x1000,finite,train,libsdca,0.1954,0.7258,0.2289,0.4505,0.4878,10.66,99.86,99.98
+torch,cuda,distillation,bfloat16,16384x1000,finite,train,PyTorch eager,1.127e+04,3.125e+04,2.929,9.516,4237,1.602e+06,2.763,5.558
+torch,cuda,distillation,bfloat16,16384x1000,finite,train,torch.compile,1.127e+04,2.318e+04,0.2289,0.4505,0.4868,32.13,99.87,99.99
+torch,cuda,distillation,bfloat16,16384x8193,finite,fwd,libsdca,0.1413,0.4433,,,,,,
+torch,cuda,distillation,bfloat16,16384x8193,finite,fwd,PyTorch eager,1.046e+04,1.873e+04,,,,,,
+torch,cuda,distillation,bfloat16,16384x8193,finite,fwd,torch.compile,1.046e+04,1.64e+04,,,,,,
+torch,cuda,distillation,bfloat16,16384x8193,finite,train,libsdca,0.1413,0.4433,0.2333,0.4251,0.4955,0.528,99.99,100
+torch,cuda,distillation,bfloat16,16384x8193,finite,train,PyTorch eager,1.046e+04,1.873e+04,3.2,13.49,1.41e+04,2.04e+06,1.913,3.829
+torch,cuda,distillation,bfloat16,16384x8193,finite,train,torch.compile,1.046e+04,1.64e+04,0.2333,0.4251,0.4971,20.64,99.81,99.96
+torch,cuda,distillation,bfloat16,16384x8193,unaligned,train,libsdca,0.1397,0.4089,0.2673,0.4244,0.4953,2.774,99.99,100
+torch,cuda,distillation,bfloat16,16384x8193,unaligned,train,PyTorch eager,7441,2.237e+04,2.986,16.91,1.485e+04,1.702e+08,1.966,3.941
+torch,cuda,distillation,bfloat16,16384x8193,unaligned,train,torch.compile,7441,2.023e+04,0.2673,0.4244,0.4985,4123,99.85,99.99
+torch,cuda,distillation,bfloat16,2560x50257,finite,fwd,libsdca,0.1878,0.4147,,,,,,
+torch,cuda,distillation,bfloat16,2560x50257,finite,fwd,PyTorch eager,1.492e+04,3.026e+04,,,,,,
+torch,cuda,distillation,bfloat16,2560x50257,finite,fwd,torch.compile,1.492e+04,2.587e+04,,,,,,
+torch,cuda,distillation,bfloat16,2560x50257,finite,train,libsdca,0.1878,0.4147,0.2474,0.4604,0.4974,2.832,99.98,99.98
+torch,cuda,distillation,bfloat16,2560x50257,finite,train,PyTorch eager,1.492e+04,3.026e+04,3.167,20.53,4.871e+04,1.778e+08,1.913,3.786
+torch,cuda,distillation,bfloat16,2560x50257,finite,train,torch.compile,1.492e+04,2.587e+04,0.2474,0.4604,0.8099,1147,99.83,99.98
+torch,cuda,distillation,bfloat16,2560x50257,unaligned,train,libsdca,0.1591,0.4381,0.2247,0.4309,0.4973,0.4981,99.99,100
+torch,cuda,distillation,bfloat16,2560x50257,unaligned,train,PyTorch eager,1.062e+04,2.765e+04,4.058,18.03,3.752e+04,1.47e+06,1.748,3.501
+torch,cuda,distillation,bfloat16,2560x50257,unaligned,train,torch.compile,1.062e+04,2.7e+04,0.2247,0.4309,0.7501,44.6,99.84,99.99
+torch,cuda,distillation,bfloat16,262144x10,finite,fwd,libsdca,0.2432,0.6133,,,,,,
+torch,cuda,distillation,bfloat16,262144x10,finite,fwd,PyTorch eager,1.297e+04,4.028e+04,,,,,,
+torch,cuda,distillation,bfloat16,262144x10,finite,fwd,torch.compile,1.13e+04,2.615e+04,,,,,,
+torch,cuda,distillation,bfloat16,262144x10,finite,train,libsdca,0.2432,0.6133,0.1929,0.4398,0.3623,0.48,100,100
+torch,cuda,distillation,bfloat16,262144x10,finite,train,PyTorch eager,1.297e+04,4.028e+04,1.387,6.946,23.6,1172,6.562,16.25
+torch,cuda,distillation,bfloat16,262144x10,finite,train,torch.compile,1.258e+04,3.208e+04,1.387,6.946,23.6,1172,6.562,16.25
+torch,cuda,distillation,bfloat16,275059x9,finite,train,libsdca,0.1746,0.5622,0.2062,0.4405,0.3649,0.495,100,100
+torch,cuda,distillation,bfloat16,275059x9,finite,train,PyTorch eager,1.129e+04,3.704e+04,2.155,11.56,33.05,1487,6.25,14.41
+torch,cuda,distillation,bfloat16,4096x32000,finite,fwd,libsdca,0.208,0.4641,,,,,,
+torch,cuda,distillation,bfloat16,4096x32000,finite,fwd,PyTorch eager,1.527e+04,3.527e+04,,,,,,
+torch,cuda,distillation,bfloat16,4096x32000,finite,fwd,torch.compile,1.527e+04,2.812e+04,,,,,,
+torch,cuda,distillation,bfloat16,4096x32000,finite,train,libsdca,0.208,0.4641,0.2425,0.456,0.4973,0.4981,99.99,100
+torch,cuda,distillation,bfloat16,4096x32000,finite,train,PyTorch eager,1.527e+04,3.527e+04,4.151,12.17,3.863e+04,3.457e+06,1.754,3.524
+torch,cuda,distillation,bfloat16,4096x32000,finite,train,torch.compile,1.527e+04,2.812e+04,0.2425,0.456,0.8182,98.16,99.84,99.98
+torch,cuda,distillation,bfloat16,65536x100,finite,fwd,libsdca,0.2252,0.773,,,,,,
+torch,cuda,distillation,bfloat16,65536x100,finite,fwd,PyTorch eager,1.047e+04,2.822e+04,,,,,,
+torch,cuda,distillation,bfloat16,65536x100,finite,fwd,torch.compile,9903,2.822e+04,,,,,,
+torch,cuda,distillation,bfloat16,65536x100,finite,train,libsdca,0.2252,0.773,0.2316,0.4307,0.4538,1.203,99.95,99.98
+torch,cuda,distillation,bfloat16,65536x100,finite,train,PyTorch eager,1.047e+04,2.822e+04,2.087,9.959,492.6,1.382e+05,4.188,8.656
+torch,cuda,distillation,bfloat16,65536x100,finite,train,torch.compile,9903,2.822e+04,1.049,3.684,95.5,1.209e+04,21.78,39.92
+torch,cuda,distillation,float32,4096x32000,finite,fwd,libsdca,0.1571,0.4663,,,,,,
+torch,cuda,distillation,float32,4096x32000,finite,fwd,PyTorch eager,0.3506,1.057,,,,,,
+torch,cuda,distillation,float32,4096x32000,finite,fwd,torch.compile,0.4356,1.251,,,,,,
+torch,cuda,distillation,float32,4096x32000,finite,train,libsdca,0.1571,0.4663,2.065,5.606,582,1.059e+05,6.332,12.62
+torch,cuda,distillation,float32,4096x32000,finite,train,PyTorch eager,0.3506,1.057,4.356,36.69,4.783e+05,8.554e+07,1.49,2.997
+torch,cuda,distillation,float32,4096x32000,finite,train,torch.compile,0.4356,1.251,4.492,32.38,4.614e+05,6.474e+07,1.503,3.014
+torch,cuda,distillation_t1,bfloat16,16384x1000,finite,train,libsdca,0.3106,1.038,0.2117,0.479,0.4876,0.7489,99.93,100
+torch,cuda,distillation_t1,bfloat16,16384x1000,finite,train,PyTorch eager,1.064e+04,4.335e+04,0.9248,5.19,1964,3.71e+04,4.241,8.431
+torch,cuda,distillation_t1,bfloat16,16384x1000,finite,train,torch.compile,1.051e+04,3.121e+04,0.2117,0.479,0.4869,0.555,99.94,100
+torch,cuda,distillation_t1,bfloat16,2560x50257,finite,train,libsdca,0.1453,0.3657,0.2273,0.4192,0.4973,0.4981,99.99,100
+torch,cuda,distillation_t1,bfloat16,2560x50257,finite,train,PyTorch eager,7060,2.58e+04,1.328,5.018,2.734e+04,1.136e+06,3.096,6.107
+torch,cuda,distillation_t1,bfloat16,2560x50257,finite,train,torch.compile,7060,2.05e+04,0.2273,0.4192,0.5768,25.43,99.87,99.98
+torch,cuda,distillation_t1,bfloat16,4096x32000,finite,train,libsdca,0.1865,0.4051,0.185,0.4303,0.4969,0.4982,99.99,100
+torch,cuda,distillation_t1,bfloat16,4096x32000,finite,train,PyTorch eager,1.143e+04,2.703e+04,1.12,4.62,1.572e+04,2.705e+05,3.165,6.305
+torch,cuda,distillation_t1,bfloat16,4096x32000,finite,train,torch.compile,1.143e+04,2.309e+04,0.185,0.4303,0.5106,3.594,99.9,99.99
+torch,cuda,distillation_t1,float32,4096x32000,finite,train,libsdca,0.1903,0.3769,0.9521,2.576,1190,1.002e+06,5.237,10.43
+torch,cuda,distillation_t1,float32,4096x32000,finite,train,PyTorch eager,0.3922,1.694,2.234,16.22,3.645e+05,4.334e+07,2.154,4.307
+torch,cuda,distillation_t1,float32,4096x32000,finite,train,torch.compile,0.3631,1.254,1.944,20.85,3.506e+05,2.61e+07,2.179,4.356
+torch,cuda,multiclass_hinge,bfloat16,16384x1000,finite,train,libsdca,0,0,0,0,0,0,100,100
+torch,cuda,multiclass_hinge,bfloat16,16384x1000,finite,train,PyTorch eager (formula),0,0,0,0,0,0,100,100
+torch,cuda,multiclass_hinge,bfloat16,16384x1000,finite,train,torch.compile (formula),0,0,0,0,0,0,100,100
+torch,cuda,multiclass_hinge,bfloat16,2560x50257,finite,train,libsdca,0,0,0.125,0.125,0.125,0.125,100,100
+torch,cuda,multiclass_hinge,bfloat16,2560x50257,finite,train,PyTorch eager (formula),0,0,0.125,0.125,0.125,0.125,100,100
+torch,cuda,multiclass_hinge,bfloat16,2560x50257,finite,train,torch.compile (formula),0,0,0.125,0.125,0.125,0.125,100,100
+torch,cuda,multiclass_hinge,bfloat16,4096x32000,finite,train,libsdca,0,0,0,0,0,0,100,100
+torch,cuda,multiclass_hinge,bfloat16,4096x32000,finite,train,PyTorch eager (formula),0,0,0,0,0,0,100,100
+torch,cuda,multiclass_hinge,bfloat16,4096x32000,finite,train,torch.compile (formula),0,0,0,0,0,0,100,100
+torch,cuda,multiclass_hinge,float32,4096x32000,finite,train,libsdca,0.1631,0.4817,0,0,0,0,100,100
+torch,cuda,multiclass_hinge,float32,4096x32000,finite,train,PyTorch eager (formula),0.1631,0.4817,0,0,0,0,100,100
+torch,cuda,multiclass_hinge,float32,4096x32000,finite,train,torch.compile (formula),0.1631,0.4817,0,0,0,0,100,100
+torch,cuda,multilabel_ce,bfloat16,16384x1000,finite,train,libsdca,0.2081,0.3835,0.2293,0.3927,0.4852,0.4977,100,100
+torch,cuda,multilabel_ce,bfloat16,16384x1000,finite,train,PyTorch eager,1.843e+04,4.316e+04,0.3932,1.045,7.279,8.759,10.52,20.84
+torch,cuda,multilabel_ce,bfloat16,16384x1000,finite,train,torch.compile,1.349e+04,2.355e+04,0.2293,0.3927,0.4852,0.4977,100,100
+torch,cuda,multilabel_ce,bfloat16,2560x50257,finite,train,libsdca,0.1457,0.2582,0.2086,0.3615,0.4889,0.4979,99.98,100
+torch,cuda,multilabel_ce,bfloat16,2560x50257,finite,train,PyTorch eager,1.409e+04,5.384e+04,0.6627,1.901,8.503,55.91,7.673,15.28
+torch,cuda,multilabel_ce,bfloat16,2560x50257,finite,train,torch.compile,7235,1.727e+04,0.257,0.8454,0.7262,0.9857,74.58,97.48
+torch,cuda,multilabel_ce,bfloat16,4096x32000,finite,train,libsdca,0.1492,0.2705,0.2006,0.3989,0.4889,0.4972,99.99,100
+torch,cuda,multilabel_ce,bfloat16,4096x32000,finite,train,PyTorch eager,1.66e+04,4.925e+04,0.6291,1.632,8.244,39.55,7.618,15.45
+torch,cuda,multilabel_ce,bfloat16,4096x32000,finite,train,torch.compile,1.006e+04,1.686e+04,0.284,0.8301,0.4966,0.9454,72.1,95.49
+torch,cuda,multilabel_ce,float32,3592x35870,finite,train,libsdca,0.1406,0.422,0.2989,0.6719,1.687,9.503,58.59,89.26
+torch,cuda,multilabel_ce,float32,3592x35870,finite,train,PyTorch eager,0.2463,0.901,0.9313,3.272,13.49,50.32,6.772,13.37
+torch,cuda,multilabel_ce,float32,4096x32000,finite,train,libsdca,0.1027,0.3639,0.3068,0.6754,1.66,16.66,58.64,89.36
+torch,cuda,multilabel_ce,float32,4096x32000,finite,train,PyTorch eager,0.1767,0.6819,0.8659,3.164,12.82,68.36,7.193,14.01
+torch,cuda,multilabel_ce,float32,4096x32000,finite,train,torch.compile,0.1713,0.7874,0.9317,2.504,12.66,101.5,7.032,13.54
+torch,cuda,multilabel_hinge,bfloat16,16384x1000,finite,train,libsdca,0,0,0,0,0,0,100,100
+torch,cuda,multilabel_hinge,bfloat16,16384x1000,finite,train,PyTorch eager (formula),0,0,0,0,0,0,100,100
+torch,cuda,multilabel_hinge,bfloat16,16384x1000,finite,train,torch.compile (formula),0,0,0,0,0,0,100,100
+torch,cuda,multilabel_hinge,bfloat16,2560x50257,finite,train,libsdca,0,0,0.125,0.125,0.125,0.125,100,100
+torch,cuda,multilabel_hinge,bfloat16,2560x50257,finite,train,PyTorch eager (formula),0,0,0.125,0.125,0.125,0.125,100,100
+torch,cuda,multilabel_hinge,bfloat16,2560x50257,finite,train,torch.compile (formula),0,0,0.125,0.125,0.125,0.125,100,100
+torch,cuda,multilabel_hinge,bfloat16,4096x32000,finite,train,libsdca,0,0,0,0,0,0,100,100
+torch,cuda,multilabel_hinge,bfloat16,4096x32000,finite,train,PyTorch eager (formula),0,0,0,0,0,0,100,100
+torch,cuda,multilabel_hinge,bfloat16,4096x32000,finite,train,torch.compile (formula),0,0,0,0,0,0,100,100
+torch,cuda,multilabel_hinge,float32,4096x32000,finite,train,libsdca,0,0.4041,0,0,0,0,100,100
+torch,cuda,multilabel_hinge,float32,4096x32000,finite,train,PyTorch eager (formula),0,0.4041,0,0,0,0,100,100
+torch,cuda,multilabel_hinge,float32,4096x32000,finite,train,torch.compile (formula),0,0.4041,0,0,0,0,100,100
+torch,cuda,proximal_ce,bfloat16,16384x1000,finite,train,libsdca,0.3257,0.7952,0.05257,0.2476,0.4813,0.4976,100,100
+torch,cuda,proximal_ce,bfloat16,16384x1000,finite,train,"libsdca composed, eager",0.3433,0.9184,0.05257,0.2476,0.4813,0.4976,100,100
+torch,cuda,proximal_ce,bfloat16,16384x1000,finite,train,"libsdca composed, torch.compile",0.3065,0.9279,0.05257,0.2476,0.4813,0.4976,100,100
+torch,cuda,proximal_ce,bfloat16,2560x50257,finite,train,libsdca,0.2055,0.8417,0.125,0.1391,0.4906,0.4979,99.99,100
+torch,cuda,proximal_ce,bfloat16,2560x50257,finite,train,"libsdca composed, eager",0.2055,0.976,0.125,0.1391,0.4906,0.4979,99.99,100
+torch,cuda,proximal_ce,bfloat16,2560x50257,finite,train,"libsdca composed, torch.compile",0.2174,0.8417,0.125,0.1391,0.4906,0.4979,99.99,100
+torch,cuda,proximal_ce,bfloat16,4096x32000,finite,train,libsdca,0.2287,0.8548,0.0142,0.1243,0.491,0.4978,99.99,100
+torch,cuda,proximal_ce,bfloat16,4096x32000,finite,train,"libsdca composed, eager",0.2008,0.9351,0.0142,0.1243,0.491,0.4978,99.99,100
+torch,cuda,proximal_ce,bfloat16,4096x32000,finite,train,"libsdca composed, torch.compile",0.2293,0.9351,0.0142,0.1243,0.491,0.4978,99.99,100
+torch,cuda,proximal_ce,float32,4096x32000,finite,train,libsdca,0.3187,0.892,1.506,16.8,13.89,27.17,5.179,10.31
+torch,cuda,proximal_ce,float32,4096x32000,finite,train,"libsdca composed, torch.compile",0.3155,1.015,1.309,13.8,13.91,27.17,5.335,10.67
+torch,cuda,proximal_distillation,bfloat16,16384x1000,finite,train,libsdca,1.118,3.113,0.2279,0.3871,0.485,0.5434,99.99,100
+torch,cuda,proximal_distillation,bfloat16,16384x1000,finite,train,"libsdca composed, torch.compile",0.2852,1.101,0.2279,0.3871,0.485,1.468,99.99,100
+torch,cuda,smooth_hinge,bfloat16,16384x1000,finite,train,libsdca,0,0.2274,0,0.1,0,0.381,100,100
+torch,cuda,smooth_hinge,bfloat16,16384x1000,finite,train,PyTorch eager (formula),0,0.2274,0,0.1,0,0.381,100,100
+torch,cuda,smooth_hinge,bfloat16,16384x1000,finite,train,torch.compile (formula),0,0.2274,0,0.1,0,0.381,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,16384x1000,finite,train,libsdca,0,0.2406,0,0.2133,0,0.32,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,16384x1000,finite,train,"libsdca composed, eager",0,0.7943,0,0.2133,0,0.32,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,16384x1000,finite,train,"libsdca composed, torch.compile",0,0.429,0,0.2133,0,0.32,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,2560x50257,finite,train,libsdca,0,0.2776,0.125,0.3333,0.1623,0.4375,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,2560x50257,finite,train,"libsdca composed, eager",0,0.5551,0.125,0.3333,0.1623,0.4375,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,2560x50257,finite,train,"libsdca composed, torch.compile",0,0.4865,0.125,0.3333,0.1623,0.4375,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,4096x32000,finite,train,libsdca,0,0.2513,0,0.1667,0,0.3077,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,4096x32000,finite,train,"libsdca composed, eager",0,0.4418,0,0.1667,0,0.3077,100,100
+torch,cuda,smooth_multilabel_hinge,bfloat16,4096x32000,finite,train,"libsdca composed, torch.compile",0,0.5026,0,0.1667,0,0.3077,100,100
+torch,cuda,smooth_topk_hinge_alpha,bfloat16,16384x1000,finite,train,libsdca,0.1525,0.3935,0.025,0.05833,0.125,0.4375,100,100
+torch,cuda,smooth_topk_hinge_alpha,bfloat16,16384x1000,finite,train,"libsdca composed, eager",0.2462,0.9113,0.025,0.05833,0.125,0.4375,100,100
+torch,cuda,smooth_topk_hinge_alpha,bfloat16,16384x1000,finite,train,"libsdca composed, torch.compile",0.2445,0.9113,0.025,0.05833,0.125,0.4375,100,100
+torch,cuda,topk_ce,bfloat16,16384x1000,finite,train,libsdca,0.1534,0.4133,0.02866,0.127,0.4844,0.4973,100,100
+torch,cuda,topk_ce,bfloat16,16384x1000,finite,train,PyTorch eager (formula),0.2912,0.9613,0.02866,0.127,0.4844,0.4973,99.99,100
+torch,cuda,topk_ce,bfloat16,16384x1000,finite,train,torch.compile (formula),0.2934,0.9613,0.02866,0.127,0.4844,0.4973,100,100
+torch,cuda,topk_ce,bfloat16,17101x7471,finite,train,libsdca,0.1705,0.4357,0.1388,0.1391,0.4896,0.4977,100,100
+torch,cuda,topk_ce,bfloat16,17101x7471,finite,train,PyTorch eager (formula),0.2435,0.8521,0.1388,0.1391,0.4896,0.4977,100,100
+torch,cuda,topk_ce,bfloat16,2560x50257,finite,train,libsdca,0.1398,0.47,0.125,0.1455,0.4886,0.4979,100,100
+torch,cuda,topk_ce,bfloat16,2560x50257,finite,train,PyTorch eager (formula),0.2154,0.7323,0.125,0.1455,0.4886,0.4979,100,100
+torch,cuda,topk_ce,bfloat16,2560x50257,finite,train,torch.compile (formula),0.2154,0.7323,0.125,0.1455,0.4886,0.4979,100,100
+torch,cuda,topk_ce,bfloat16,4096x32000,finite,train,libsdca,0.1972,0.4388,0.02247,0.061,0.4892,0.4968,100,100
+torch,cuda,topk_ce,bfloat16,4096x32000,finite,train,PyTorch eager (formula),0.2048,1.001,0.02247,0.061,0.4892,0.4968,100,100
+torch,cuda,topk_ce,bfloat16,4096x32000,finite,train,torch.compile (formula),0.2048,1.001,0.02247,0.061,0.4892,0.4968,100,100
+torch,cuda,topk_ce,float32,4096x32000,finite,train,libsdca,0.145,0.4189,0.1049,0.2468,9.388,9.896,15.97,27.83
+torch,cuda,topk_ce,float32,4096x32000,finite,train,PyTorch eager (formula),0.3441,1.445,0.1724,0.7345,9.619,10.87,13.23,25.57
+torch,cuda,topk_ce,float32,4096x32000,finite,train,torch.compile (formula),0.3022,1.445,0.2448,0.9956,9.697,11.59,12.24,23.63
+torch,cuda,topk_hinge_alpha,bfloat16,16384x1000,finite,train,libsdca,0.1593,0.3653,0.025,0.025,0.125,0.125,100,100
+torch,cuda,topk_hinge_alpha,bfloat16,16384x1000,finite,train,PyTorch eager (formula),0.1593,0.3653,0.025,0.025,0.125,0.125,100,100
+torch,cuda,topk_hinge_alpha,bfloat16,16384x1000,finite,train,torch.compile (formula),0.1593,0.3653,0.025,0.025,0.125,0.125,100,100
+torch,cuda,topk_hinge_alpha,bfloat16,2560x50257,finite,train,libsdca,0.173,0.3966,0.125,0.125,0.125,0.2656,100,100
+torch,cuda,topk_hinge_alpha,bfloat16,2560x50257,finite,train,PyTorch eager (formula),0.173,0.3966,0.125,0.125,0.125,0.2656,100,100
+torch,cuda,topk_hinge_alpha,bfloat16,2560x50257,finite,train,torch.compile (formula),0.173,0.3966,0.125,0.125,0.125,0.2656,100,100
+torch,cuda,topk_hinge_alpha,bfloat16,4096x32000,finite,train,libsdca,0.196,0.3966,0.025,0.02917,0.125,0.4375,100,100
+torch,cuda,topk_hinge_alpha,bfloat16,4096x32000,finite,train,PyTorch eager (formula),0.196,0.3966,0.025,0.02917,0.125,0.4375,100,100
+torch,cuda,topk_hinge_alpha,bfloat16,4096x32000,finite,train,torch.compile (formula),0.196,0.3966,0.025,0.02917,0.125,0.4375,100,100
+torch,cuda,topk_hinge_alpha,float32,4096x32000,finite,train,libsdca,0.1878,0.4868,0.025,0.025,0.125,0.125,100,100
+torch,cuda,topk_hinge_alpha,float32,4096x32000,finite,train,PyTorch eager (formula),0.1878,0.4868,0.025,0.025,0.125,0.125,100,100
+torch,cuda,topk_hinge_alpha,float32,4096x32000,finite,train,torch.compile (formula),0.1878,0.4868,0.025,0.025,0.125,0.125,100,100
+torch,cuda,topk_hinge_beta,bfloat16,16384x1000,finite,train,libsdca,0.1614,0.3829,0.025,0.05833,0.125,0.4375,100,100
+torch,cuda,topk_hinge_beta,bfloat16,16384x1000,finite,train,"libsdca composed, eager",0.224,0.8848,0.025,0.05833,0.125,0.4375,100,100
+torch,cuda,topk_hinge_beta,bfloat16,16384x1000,finite,train,"libsdca composed, torch.compile",0.2209,0.8848,0.025,0.05833,0.125,0.4375,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,16384x1000,finite,train,libsdca,0.1519,0.3779,0.025,0.2222,0.125,0.4375,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,16384x1000,finite,train,PyTorch eager (formula),0.1519,0.5569,0.025,17.07,0.125,128.2,99.97,99.97
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,16384x1000,finite,train,torch.compile (formula),0.1519,0.5569,0.025,17.07,0.125,128.2,99.97,99.97
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,2560x50257,finite,train,libsdca,0.1484,0.3951,0.125,0.125,0.125,0.2656,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,2560x50257,finite,train,PyTorch eager (formula),0.1484,0.5823,0.125,17.09,0.125,256.4,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,2560x50257,finite,train,torch.compile (formula),0.1484,0.5823,0.125,17.09,0.125,256.4,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,4096x32000,finite,train,libsdca,0.144,0.3926,0.025,0.05833,0.125,0.4375,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,4096x32000,finite,train,PyTorch eager (formula),0.144,0.589,0.025,17.09,0.125,256.4,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,bfloat16,4096x32000,finite,train,torch.compile (formula),0.144,0.589,0.025,17.09,0.125,256.4,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,float32,4096x32000,finite,train,libsdca,0.1597,0.3999,0.025,0.025,0.125,0.125,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,float32,4096x32000,finite,train,PyTorch eager (formula),0.2755,1.232,0.025,0.025,0.125,0.125,100,100
+torch,cuda,topk_hinge_beta_nonsmooth,float32,4096x32000,finite,train,torch.compile (formula),0.386,1.056,0.025,0.025,0.125,0.125,100,100

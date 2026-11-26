@@ -11,7 +11,7 @@ fn main() -> libsdca::Result<()> {
     for loss in [Loss::cross_entropy(), Loss::topk_hinge(2)] {
         let model = Solver::new(loss).with_c(10.0).fit(x, &y)?;
         let scores = model.decision_function(x)?;
-        let (losses, _) = loss.loss_and_grad(Matrix::new(&scores, 6, 3)?, &y)?;
+        let (losses, _, _) = loss.loss_and_grad(Matrix::new(&scores, 6, 3)?, &y)?;
         println!(
             "{loss}: {} after {} epochs, predictions {:?}, mean loss {:.3}",
             model.status(),

@@ -1,4 +1,4 @@
-"""Build the NumPy/ctypes library without Matlab, Python headers, or pybind11."""
+"""Build the NumPy/ctypes library without Python headers or pybind11."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from sdca_build import blas_config, version
+from sdca_build import COMPILE_FLAGS, blas_config, blas_package, version
 
 
 def build(backend: str | None = None, output: str | Path | None = None) -> Path:
@@ -20,19 +20,15 @@ def build(backend: str | None = None, output: str | Path | None = None) -> Path:
     out = Path(output) if output else ROOT / "build" / "python"
     out.mkdir(parents=True, exist_ok=True)
     lib = out / "libsdca_c.so"
-    # The flags of the wheel: IEEE semantics keep the finiteness checks.
-    flags = ["-O3", "-DNDEBUG", "-fno-fast-math", "-ffp-contract=off"]
-    flags += ["-fvisibility=hidden", "-fvisibility-inlines-hidden"]
-    selected, macro, link = blas_config(backend)
-    cmd = shlex.split(os.environ.get("CXX", "g++")) + [
-        "-std=c++11",
+    cxx = shlex.split(os.environ.get("CXX", "g++"))
+    selected, macros, link = blas_config(backend, cxx)
+    cmd = cxx + [
+        *COMPILE_FLAGS,
         "-shared",
         "-fPIC",
-        "-pthread",
-        "-D" + macro,
+        *("-D" + macro for macro in macros),
         "-DSDCA_USE_CHRONO",
         f'-DSDCA_VERSION="{version()}"',
-        *flags,
         "-I",
         str(ROOT / "include"),
         str(ROOT / "src/c_api.cpp"),
@@ -46,13 +42,17 @@ def build(backend: str | None = None, output: str | Path | None = None) -> Path:
         "backend": selected,
         "compiler": subprocess.check_output([cmd[0], "--version"], text=True).splitlines()[0],
     }
+    if selected == "PACKAGE":
+        # The BLAS package to load first (python/libsdca/_native.py).
+        package = blas_package()
+        metadata["blas_package"] = {k: package[k] for k in ("distribution", "module", "library")}
     lib.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")
     return lib
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--blas-backend", choices=["AUTO", "EXTERNAL", "BUILTIN"])
+    parser.add_argument("--blas-backend", choices=["AUTO", "EXTERNAL", "PACKAGE", "BUILTIN"])
     parser.add_argument("--output", type=Path, help="Directory for the native libraries")
     args = parser.parse_args()
     print(build(args.blas_backend, args.output))

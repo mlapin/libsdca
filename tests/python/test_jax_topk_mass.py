@@ -8,7 +8,17 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from libsdca.jax import topk_cross_entropy
-from test_jax import x64
+
+
+def x64(enabled: bool) -> Any:
+    """A thread-local x64 scope (jax.enable_x64, else jax.experimental's)."""
+    import jax.experimental
+
+    scope = getattr(jax, "enable_x64", None)
+    if scope is None:
+        scope = getattr(jax.experimental, "enable_x64", None)
+    assert scope is not None
+    return scope(enabled)
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
@@ -22,7 +32,7 @@ def test_topk_normal_mass_above_flushed_competitors(dtype: Any, classes: int):
         x, y = jnp.asarray(z), jnp.array([0], dtype=jnp.int32)
 
         def f(x: jax.Array):
-            return topk_cross_entropy(x, y, k=2, backend="jax")
+            return topk_cross_entropy(x, y, k=2, backend="composed")
 
         value, gradient = jax.value_and_grad(f)(x)
         tail = math.exp(-float(z[0, 0]) + math.log(classes - 1))

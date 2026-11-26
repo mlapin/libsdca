@@ -10,7 +10,7 @@ CLASSES = 5
 BELOW = [0, -1]
 ABOVE = [CLASSES, 2 * CLASSES]
 VALID = [1, CLASSES - 1]
-BACKENDS = ["auto", "native", "torch"]
+BACKENDS = ["auto", "kernel", "composed"]
 # The top-k losses: function, module and fixed options.
 TOPK = {
     "topk_cross_entropy": (sdca_torch.topk_cross_entropy, sdca_torch.TopKCrossEntropyLoss, {}),
@@ -38,7 +38,7 @@ def cases() -> list[tuple[str, str, str]]:
         for loss in TOPK
         for device in devices()
         for backend in BACKENDS
-        if device == "cpu" or backend != "native"
+        if device == "cpu" or backend != "kernel"
     ]
 
 
@@ -121,4 +121,4 @@ def test_losses_without_k_reject_it():
         sdca_torch.CrossEntropyLoss,
     ):
         with pytest.raises(TypeError):
-            module(k=2)  # pyright: ignore[reportCallIssue]
+            module(k=2)

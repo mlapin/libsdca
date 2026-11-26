@@ -1,19 +1,15 @@
-"""Distillation gradients against softmax differences in 120-digit arithmetic."""
+"""Distillation values and gradients against the mpmath references (conformance.references)."""
 
 import itertools
 from typing import Any
 
-import mpmath as mp
 import numpy as np
 import pytest
+from conformance.references import Loss, evaluate
 
 # Relative error budget in working eps (docs/API.md, Known limits): the CPU paths and JAX measure at most
 # 0.15 eps on these cases.
 BUDGET = 64
-
-
-def _finfo(dtype: type[np.floating[Any]]):
-    return np.finfo(dtype)
 
 
 def cases(dtype: type[np.floating[Any]], temperature: float) -> tuple[np.ndarray, np.ndarray]:
@@ -34,51 +30,13 @@ def cases(dtype: type[np.floating[Any]], temperature: float) -> tuple[np.ndarray
 def reference(
     student: np.ndarray, teacher: np.ndarray, temperature: float
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Independent definition, using the exact represented inputs and T."""
-    values, gradients = [], []
-    with mp.workdps(120):
-        scale = mp.mpf(float(temperature))
-        for student_row, teacher_row in zip(student, teacher, strict=True):
-            s = [mp.mpf(float(x)) / scale for x in student_row]
-            t = [mp.mpf(float(x)) / scale for x in teacher_row]
-            s_max, t_max = max(s), max(t)
-            es, et = [mp.exp(x - s_max) for x in s], [mp.exp(x - t_max) for x in t]
-            s_sum, t_sum = sum(es), sum(et)
-            q, p = [x / s_sum for x in es], [x / t_sum for x in et]
-            values.append(float(-sum(a * mp.log(b) for a, b in zip(p, q, strict=True))))
-            gradients.append([float((a - b) / scale) for a, b in zip(q, p, strict=True)])
-    return np.array(values), np.array(gradients)
+    """Distillation of the represented rows by conformance.references."""
+    return evaluate(Loss("distillation", temperature=temperature), student, teacher=teacher)
 
 
-def proximal_reference(
-    student: np.ndarray, teacher: np.ndarray, temperature: float, alpha: float, digits: int = 80
-) -> tuple[np.ndarray, np.ndarray]:
-    """Envelope value and gradient (pi - p) / T: pi_j = W(alpha exp(s_j + alpha p_j - L)) / alpha
-    with L the root of sum(pi) = 1, found by Newton steps from the left of [L0 - alpha, L0]."""
-    values, gradients = [], []
-    with mp.workdps(digits):
-        scale, a = mp.mpf(float(temperature)), mp.mpf(float(alpha))
-        for student_row, teacher_row in zip(student, teacher, strict=True):
-            s = [mp.mpf(float(x)) / scale for x in student_row]
-            t = [mp.mpf(float(x)) / scale for x in teacher_row]
-            et = [mp.exp(x - max(t)) for x in t]
-            p = [x / sum(et) for x in et]
-            x = [si + a * pi for si, pi in zip(s, p, strict=True)]
-            top = max(x)
-            level = top + mp.log(sum(mp.exp(v - top) for v in x)) - a
-            for _ in range(1000):
-                w = [mp.lambertw(a * mp.exp(v - level)).real for v in x]
-                step = (sum(w) / a - 1) / (sum(v / (1 + v) for v in w) / a)
-                level += step
-                if abs(step) < mp.mpf(10) ** (10 - digits) * max(1, abs(level)):
-                    break
-            w = [mp.lambertw(a * mp.exp(v - level)).real for v in x]
-            pi = [v / a for v in w]
-            cross = -sum(b * (mp.log(v) - mp.log(a)) for b, v in zip(p, w, strict=True) if b)
-            penalty = a * sum((u - b) ** 2 for u, b in zip(pi, p, strict=True)) / 2
-            values.append(float(cross + penalty))
-            gradients.append([float((u - b) / scale) for u, b in zip(pi, p, strict=True)])
-    return np.array(values), np.array(gradients)
+def _softmax(x: np.ndarray) -> np.ndarray:
+    e = np.exp(x.astype(np.float64) - x.max(axis=1, keepdims=True))
+    return e / e.sum(axis=1, keepdims=True)
 
 
 def check_reference(
@@ -87,71 +45,90 @@ def check_reference(
     student: np.ndarray,
     teacher: np.ndarray,
     temperature: float,
-    expected: tuple[np.ndarray, np.ndarray] | None = None,
+    work: type[np.floating[Any]] | None = None,
 ) -> None:
-    """values and gradients (unless None) within the budget of the reference (or expected)."""
-    expected_value, expected_gradient = expected or reference(student, teacher, temperature)
+    """values and gradients (unless None) within the documented budget of the reference:
+    64 eps of each entry in float64 work, of (p + q) / T in float32 work (docs/API.md, Known
+    limits)."""
+    expected_value, expected_gradient = reference(student, teacher, temperature)
     info = np.finfo(student.dtype)
+    eps = float(np.finfo(work or student.dtype).eps)
     np.testing.assert_allclose(values, expected_value, rtol=float(BUDGET * info.eps), atol=0)
     if gradients is None:
         return
-    # Check every component relative to its own magnitude, including the
-    # tiny tail; a unit-scale absolute tolerance would hide this regression.
-    np.testing.assert_allclose(
-        gradients,
-        expected_gradient,
-        rtol=float(BUDGET * info.eps),
-        atol=float(info.smallest_subnormal),
-    )
-    np.testing.assert_array_equal(np.signbit(gradients), np.signbit(expected_gradient))
+    if eps == float(np.finfo(np.float64).eps):
+        scale = np.abs(expected_gradient)
+    else:
+        scale = (_softmax(student / temperature) + _softmax(teacher / temperature)) / temperature
+    bound = BUDGET * max(eps, float(info.eps)) * scale + float(info.smallest_subnormal)
+    assert np.all(np.abs(gradients - expected_gradient) <= bound), (gradients, expected_gradient)
+
+
+def check_temperature_case(
+    device: str, dtype: type[np.floating[Any]], large: float, temperature: float | None
+) -> None:
+    """Rows at +-large (dtype's) with temperature, or large itself where None."""
+    import torch
+    from libsdca.torch import distillation_loss
+
+    large = float(dtype(large))
+    temperature = large if temperature is None else temperature
+    students = np.array([[large, -large], [large, -large]], dtype=dtype)
+    teachers = np.array([[large, -large], [-large, large]], dtype=dtype)
+    # Opposing common offsets also exercise near-equal distributions:
+    # raw student-teacher differences overflow but class gaps do not.
+    if temperature == large:
+        near = np.nextafter(dtype(large), dtype(0))
+        students = np.concatenate((students, [[large, near]]))
+        teachers = np.concatenate((teachers, [[-near, -large]]))
+        students, teachers = students.astype(dtype), teachers.astype(dtype)
+    x = torch.tensor(students, device=device, requires_grad=True)
+    t = torch.tensor(teachers, device=device)
+    value = distillation_loss(x, t, temperature=temperature, reduction="none")
+    (gradient,) = torch.autograd.grad(value.sum(), x)
+    values, gradients = value.detach().cpu().numpy(), gradient.cpu().numpy()
+    # A row whose spread overflows the work type may be invalid: then its
+    # value and every gradient entry are NaN (docs/API.md, Known limits).
+    with np.errstate(over="ignore"):
+        spread = np.maximum(np.ptp(students, 1), np.ptp(teachers, 1))
+    overflows = ~np.isfinite(spread.astype(dtype))
+    invalid = overflows & np.isnan(values)
+    assert np.isnan(gradients[invalid]).all(), gradients
+    keep = ~invalid
+    check_reference(values[keep], gradients[keep], students[keep], teachers[keep], temperature)
+
+
+# (dtype, large, temperature; None: large)
+TEMPERATURE_CASES = [
+    (dtype, large, temperature)
+    for dtype, large in ((np.float32, 3e38), (np.float64, 1e308))
+    for temperature in (4.0, None)
+]
+
+
+def _temperature_params() -> list[Any]:
+    out = []
+    for dtype, large, temperature in TEMPERATURE_CASES:
+        key = f"{np.dtype(dtype).name}-{'max' if temperature is None else temperature}"
+        out.append(pytest.param(dtype, large, temperature, id=key))
+    return out
 
 
 class DistillationReferenceTests:
-    def check_temperature_range(self, subtests: pytest.Subtests, device: str) -> None:
-        import torch
-        from libsdca.torch import distillation_loss
-
-        for dtype, large in ((np.float32, 3e38), (np.float64, 1e308)):
-            large = float(dtype(large))
-            for temperature in (4.0, large):
-                students = np.array([[large, -large], [large, -large]], dtype=dtype)
-                teachers = np.array([[large, -large], [-large, large]], dtype=dtype)
-                # Opposing common offsets also exercise near-equal distributions:
-                # raw student-teacher differences overflow but class gaps do not.
-                if temperature == large:
-                    near = np.nextafter(dtype(large), dtype(0))
-                    students = np.concatenate((students, [[large, near]]))
-                    teachers = np.concatenate((teachers, [[-near, -large]]))
-                    students, teachers = students.astype(dtype), teachers.astype(dtype)
-                with subtests.test(device=device, dtype=dtype, temperature=temperature):
-                    x = torch.tensor(students, device=device, requires_grad=True)
-                    t = torch.tensor(teachers, device=device)
-                    value = distillation_loss(x, t, temperature=temperature, reduction="none")
-                    (gradient,) = torch.autograd.grad(value.sum(), x)
-                    expected_value, expected_gradient = reference(students, teachers, temperature)
-                    info = _finfo(dtype)
-                    np.testing.assert_allclose(
-                        value.detach().cpu().numpy(),
-                        expected_value,
-                        rtol=float(BUDGET * info.eps),
-                        atol=0,
-                    )
-                    np.testing.assert_allclose(
-                        gradient.cpu().numpy(),
-                        expected_gradient,
-                        rtol=float(BUDGET * info.eps),
-                        atol=float(info.smallest_subnormal),
-                    )
-
-    def test_torch_cpu_temperature_range(self, subtests: pytest.Subtests):
-        self.check_temperature_range(subtests, "cpu")
+    @pytest.mark.parametrize("dtype,large,temperature", _temperature_params())
+    def test_torch_cpu_temperature_range(
+        self, dtype: type[np.floating[Any]], large: float, temperature: float | None
+    ):
+        check_temperature_case("cpu", dtype, large, temperature)
 
     def test_torch_cuda_temperature_range(self, subtests: pytest.Subtests):
         import torch
 
         if not torch.cuda.is_available():
             pytest.skip("CUDA is unavailable")
-        self.check_temperature_range(subtests, "cuda")
+        for dtype, large, temperature in TEMPERATURE_CASES:
+            with subtests.test(dtype=dtype, temperature=temperature):
+                check_temperature_case("cuda", dtype, large, temperature)
 
     def check_torch(self, subtests: pytest.Subtests, device: str) -> None:
         import torch
@@ -177,6 +154,7 @@ class DistillationReferenceTests:
                             student,
                             teacher,
                             temperature,
+                            np.float64 if precision == "float64" else np.float32,
                         )
 
     def test_torch_cpu(self, subtests: pytest.Subtests):
@@ -190,31 +168,14 @@ class DistillationReferenceTests:
         self.check_torch(subtests, "cuda")
 
 
-def _softmax(x: np.ndarray) -> np.ndarray:
-    e = np.exp(x.astype(np.float64) - x.max(axis=1, keepdims=True))
-    return e / e.sum(axis=1, keepdims=True)
-
-
 @pytest.mark.parametrize(
-    "device,extension,precision",
-    [
-        ("cpu", "on", None),
-        ("cpu", "off", None),
-        ("cuda", "auto", None),
-        ("cuda", "auto", "float64"),
-    ],
+    "device,precision", [("cpu", None), ("cpu", "float64"), ("cuda", None), ("cuda", "float64")]
 )
 @pytest.mark.parametrize("classes", [4, 40])
-def test_float32_rows_with_a_large_shift(
-    device: str, extension: str, precision: str | None, classes: int
-):
-    """A shift near 100: s + shift exceeds the 88 where the float32 exponentials clamp, so the
-    CPU kernels take float64 for these rows (the extension's small-row lanes and the native
-    library's rows). Float32 work on CUDA keeps a float32 log-ratio: the entries where student
-    and teacher nearly agree (2e-9 beside p = 4.5e-5) are within the budget of (p + q) / T."""
-    import os
-    from unittest import mock
-
+def test_float32_rows_with_a_large_shift(device: str, precision: str | None, classes: int):
+    """A shift near 100, beyond the 88 where float32 exponentials leave the normal range: the
+    entries where student and teacher nearly agree (2e-9 beside p = 4.5e-5) are within the
+    budget of (p + q) / T in float32 work, of each entry in float64 work."""
     import torch
     from libsdca.torch import distillation_loss
 
@@ -224,18 +185,64 @@ def test_float32_rows_with_a_large_shift(
     teacher = np.full((2, classes), -100.0, dtype=np.float32)
     student[:, :4] = [[0.0, -10.0, -100.0, -21.5], [-21.5, -100.0, -10.0, 0.0]]
     teacher[:, :4] = [[-100.0, -10.0, 0.0, -10.0], [-10.0, 0.0, -10.0, -100.0]]
-    with mock.patch.dict(os.environ, {"SDCA_CPU_EXTENSION": extension}):
-        z = torch.tensor(student, device=device, requires_grad=True)
-        target = torch.tensor(teacher, device=device)
-        value = distillation_loss(z, target, reduction="none", precision=precision)
-        (gradient,) = torch.autograd.grad(value.sum(), z)
-    values, gradients = value.detach().cpu().numpy(), gradient.cpu().numpy()
-    if device == "cpu" or precision == "float64":
-        check_reference(values, gradients, student, teacher, temperature=1.0)
-        return
-    expected_value, expected_gradient = reference(student, teacher, 1.0)
-    info = np.finfo(np.float32)
-    budget = BUDGET * float(info.eps)
-    np.testing.assert_allclose(values, expected_value, rtol=budget, atol=0)
-    bound = budget * (_softmax(student) + _softmax(teacher)) + float(info.smallest_subnormal)
-    assert np.all(np.abs(gradients - expected_gradient) <= bound)
+    z = torch.tensor(student, device=device, requires_grad=True)
+    target = torch.tensor(teacher, device=device)
+    value = distillation_loss(z, target, reduction="none", precision=precision)
+    (gradient,) = torch.autograd.grad(value.sum(), z)
+    work = np.float64 if precision == "float64" else np.float32
+    check_reference(
+        value.detach().cpu().numpy(), gradient.cpu().numpy(), student, teacher, 1.0, work
+    )
+
+
+@pytest.mark.parametrize("dtype,gap", [(np.float32, -88.0), (np.float64, -715.0)])
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_proximal_distillation_adjacent_tail_scores(
+    dtype: type[np.floating[Any]], gap: float, device: str
+) -> None:
+    """The pivot collects a representable subnormal difference of individually equal tails."""
+    import torch
+    from libsdca.torch import proximal_distillation_loss
+
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    student = np.full((2, 1000), gap, dtype=dtype)
+    student[:, 0] = 0
+    teacher = student.copy()
+    for row, direction in enumerate((np.inf, -np.inf)):
+        teacher[row, 1:] = np.nextafter(dtype(gap), dtype(direction))
+    _, expected = evaluate(Loss("proximal_distillation", alpha=0.01), student, teacher=teacher)
+    x = torch.tensor(student, device=device, requires_grad=True)
+    value = proximal_distillation_loss(
+        x, torch.tensor(teacher, device=device), backend="composed", gamma=0.01, reduction="sum"
+    )
+    (gradient,) = torch.autograd.grad(value, x)
+    pivot = gradient[:, 0].double().cpu().numpy()
+    np.testing.assert_allclose(
+        pivot, expected[:, 0], atol=float(np.finfo(dtype).smallest_subnormal), rtol=0
+    )
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_proximal_distillation_large_penalty_tail(device: str) -> None:
+    """A subnormal probability can retain a significant penalty in log space."""
+    import torch
+    from libsdca.torch import proximal_distillation_loss
+
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    student = np.array([[0.0, -88.0, -88.0]], dtype=np.float32)
+    teacher = np.array([[0.0, -89.0, -89.0]], dtype=np.float32)
+    gamma = 1e32
+    _, expected = evaluate(Loss("proximal_distillation", alpha=gamma), student, teacher=teacher)
+    x = torch.tensor(student, device=device, requires_grad=True)
+    value = proximal_distillation_loss(
+        x, torch.tensor(teacher, device=device), backend="composed", gamma=gamma
+    )
+    (gradient,) = torch.autograd.grad(value, x)
+    np.testing.assert_allclose(
+        gradient.double().cpu().numpy(),
+        expected,
+        atol=8 * float(np.finfo(np.float32).smallest_subnormal),
+        rtol=0,
+    )

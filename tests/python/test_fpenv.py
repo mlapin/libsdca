@@ -32,12 +32,24 @@ class FlushToZeroTests:
             assert _flushes()
             assert np.all(gradients[:, 1].view(np.uint64) == tiny)
 
+    def test_torch_kernels_keep_subnormal_gradients(self):
+        # The kernels clear flush-to-zero; PyTorch's own operations (the value's float32
+        # rounding) keep the caller's modes.
+        import libsdca.torch as L
+
+        z = torch.tensor([[0.0, -95.0]], requires_grad=True)
+        L.cross_entropy(z, torch.tensor([0]), reduction="sum", backend="kernel").backward()
+        assert z.grad is not None
+        _, want = loss_and_grad(z.detach().numpy(), np.array([0]))
+        assert z.grad.numpy().tobytes() == want.tobytes()  # [-5.521e-42, 5.521e-42]
+        assert _flushes()
+
     def test_proximal_entropy_converges_and_errors_restore_the_caller(self):
         z = np.array([[0.0, 20.0, 20.0, -100.0]])
         values, _ = loss_and_grad(z, [2], "proximal_cross_entropy", alpha=1e300)
         assert _flushes()
         assert 0 <= values[0] < 1e-12  # the infimum of cross-entropy
-        with pytest.raises(ValueError, match="Labels"):
+        with pytest.raises(ValueError, match="Target 4 is out of bounds"):
             loss_and_grad(z, [4], "topk_hinge_alpha")
         assert _flushes()
         coordinate_update(z, [0], "cross_entropy", C=2.0)

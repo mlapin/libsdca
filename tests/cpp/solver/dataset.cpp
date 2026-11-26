@@ -1,4 +1,4 @@
-#include "sdca/solver/data.h"
+#include "sdca/solver.h"
 #include "test_util.h"
 
 TEST(SolverDatasetTest, multiclass_output) {

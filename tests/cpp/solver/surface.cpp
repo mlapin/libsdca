@@ -133,7 +133,7 @@ TEST(SurfaceTest, shared_name_objectives_visit_their_types) {
       (sdca::visit_multilabel_objective<D, D>(sdca::cross_entropy_objective(), type_of{name})),
       std::invalid_argument);
   sdca::objective_spec prox = sdca::cross_entropy_objective();
-  prox.kind = sdca::loss_kind::proximal_cross_entropy;
+  prox.kind = sdca::kernel::proximal_cross_entropy;
   EXPECT_THROW((sdca::visit_multiclass_objective<D, D>(prox, type_of{name})),
                std::invalid_argument);
   EXPECT_THROW(sdca::cross_entropy_objective(0), std::invalid_argument);
@@ -184,32 +184,35 @@ TEST(SurfaceTest, row_losses_take_the_target_in_class_order) {
   sdca::loss_parameters smooth_top2 = top2;
   smooth_top2.gamma = .25;
   sdca::loss_parameters proximal;
-  proximal.alpha = .7;
+  proximal.gamma = .7;
   const struct {
-    sdca::loss_kind kind;
+    sdca::kernel::Kind kind;
     sdca::loss_parameters params;
-  } cases[] = {{sdca::loss_kind::cross_entropy, sdca::loss_parameters()},
-               {sdca::loss_kind::topk_cross_entropy, top2},
-               {sdca::loss_kind::multiclass_hinge, sdca::loss_parameters()},
-               {sdca::loss_kind::multiclass_hinge, smooth},
-               {sdca::loss_kind::topk_hinge_alpha, top2},
-               {sdca::loss_kind::topk_hinge_beta, smooth_top2},
-               {sdca::loss_kind::proximal_cross_entropy, proximal}};
+  } cases[] = {{sdca::kernel::cross_entropy, sdca::loss_parameters()},
+               {sdca::kernel::topk_cross_entropy, top2},
+               {sdca::kernel::multiclass_hinge, sdca::loss_parameters()},
+               {sdca::kernel::multiclass_hinge, smooth},
+               {sdca::kernel::topk_hinge_alpha, top2},
+               {sdca::kernel::topk_hinge_beta, smooth_top2},
+               {sdca::kernel::proximal_cross_entropy, proximal}};
   for (const auto& c : cases) {
     for (std::size_t label = 0; label < m; ++label) {
       std::vector<double> g(m), permuted(m), order(m), expected(m);
       const double value = sdca::loss_and_gradient(c.kind, m, z, label, g.data(), c.params);
-      // The permuted kernel: the label first, then the others in order.
+      // The same row permuted: the label first, then the others in order.
       std::vector<std::size_t> index(1, label);
       for (std::size_t j = 0; j < m; ++j)
         if (j != label) index.push_back(j);
       for (std::size_t j = 0; j < m; ++j) order[j] = z[index[j]];
-      const double reference = sdca::detail::permuted_loss_and_gradient(
-          c.kind, m, 1, order.data(), permuted.data(), c.params.k ? c.params.k : 1, c.params.gamma,
-          c.params.alpha);
+      const double reference =
+          sdca::loss_and_gradient(c.kind, m, order.data(), 0, permuted.data(), c.params);
       for (std::size_t j = 0; j < m; ++j) expected[index[j]] = permuted[j];
-      EXPECT_EQ(reference, value) << sdca::loss_name(c.kind) << " label " << label;
-      EXPECT_EQ(expected, g) << sdca::loss_name(c.kind) << " label " << label;
+      // The kernels sum the classes in their order: equal to rounding.
+      EXPECT_NEAR(reference, value, 1e-15 * std::abs(reference))
+          << sdca::kernel::traits(c.kind).name << " label " << label;
+      for (std::size_t j = 0; j < m; ++j)
+        EXPECT_NEAR(expected[j], g[j], 1e-15)
+            << sdca::kernel::traits(c.kind).name << " label " << label << " class " << j;
       // Values alone.
       EXPECT_EQ(value, sdca::loss_and_gradient(c.kind, m, z, label, static_cast<double*>(nullptr),
                                                c.params));
@@ -218,26 +221,27 @@ TEST(SurfaceTest, row_losses_take_the_target_in_class_order) {
 
   // Label sets: the labels first, then the others, each in order.
   const std::size_t labels[] = {1, 4};
-  for (const auto kind :
-       {sdca::loss_kind::multilabel_hinge, sdca::loss_kind::multilabel_cross_entropy}) {
+  for (const auto kind : {sdca::kernel::multilabel_hinge, sdca::kernel::multilabel_cross_entropy}) {
     std::vector<double> g(m), permuted(m), order(m), expected(m);
     sdca::loss_parameters params;
-    if (kind == sdca::loss_kind::multilabel_hinge) params.gamma = .3;
+    if (kind == sdca::kernel::multilabel_hinge) params.gamma = .3;
     const double value = sdca::loss_and_gradient(kind, m, z, labels, 2, g.data(), params);
     const std::size_t index[] = {1, 4, 0, 2, 3, 5};
     for (std::size_t j = 0; j < m; ++j) order[j] = z[index[j]];
-    const double reference = sdca::detail::permuted_loss_and_gradient(
-        kind, m, 2, order.data(), permuted.data(), 1, params.gamma);
+    const std::size_t first[] = {0, 1};
+    const double reference =
+        sdca::loss_and_gradient(kind, m, order.data(), first, 2, permuted.data(), params);
     for (std::size_t j = 0; j < m; ++j) expected[index[j]] = permuted[j];
-    EXPECT_EQ(reference, value) << sdca::loss_name(kind);
-    EXPECT_EQ(expected, g) << sdca::loss_name(kind);
+    EXPECT_NEAR(reference, value, 1e-15 * std::abs(reference)) << sdca::kernel::traits(kind).name;
+    for (std::size_t j = 0; j < m; ++j)
+      EXPECT_NEAR(expected[j], g[j], 1e-15) << sdca::kernel::traits(kind).name << " class " << j;
   }
   // multilabel_cross_entropy takes every class: its target is uniform.
   const std::size_t all[] = {0, 1, 2, 3, 4, 5};
   std::vector<double> g(m);
   EXPECT_NO_THROW(
-      sdca::loss_and_gradient(sdca::loss_kind::multilabel_cross_entropy, m, z, all, m, g.data()));
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::multilabel_hinge, m, z, all, m, g.data()),
+      sdca::loss_and_gradient(sdca::kernel::multilabel_cross_entropy, m, z, all, m, g.data()));
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::multilabel_hinge, m, z, all, m, g.data()),
                std::invalid_argument);
 }
 
@@ -249,48 +253,40 @@ TEST(SurfaceTest, row_losses_reject_invalid_arguments) {
   k2.k = 2;
   sdca::loss_parameters gamma;
   gamma.gamma = 1;
-  sdca::loss_parameters alpha;
-  alpha.alpha = 2;
-  sdca::loss_parameters extended;
-  extended.projection = sdca::projection_precision::extended;
+
   const std::size_t sets[] = {2, 1}, twice[] = {1, 1}, outside[] = {0, 4};
   // Labels out of range; k missing, out of range or not taken.
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::cross_entropy, m, z, 4, g),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::cross_entropy, m, z, 4, g),
                std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::topk_hinge_beta, m, z, 0, g),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::topk_hinge_beta, m, z, 0, g),
                std::invalid_argument);
   sdca::loss_parameters k4;
   k4.k = 4;
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::topk_hinge_beta, m, z, 0, g, k4),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::topk_hinge_beta, m, z, 0, g, k4),
                std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::cross_entropy, m, z, 0, g, k2),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::cross_entropy, m, z, 0, g, k2),
                std::invalid_argument);
   // Parameters of other losses.
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::cross_entropy, m, z, 0, g, gamma),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::cross_entropy, m, z, 0, g, gamma),
                std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::multiclass_hinge, m, z, 0, g, alpha),
+  // proximal_cross_entropy's step gamma is required.
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::proximal_cross_entropy, m, z, 0, g),
                std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::multiclass_hinge, m, z, 0, g, extended),
-               std::invalid_argument);
-  EXPECT_NO_THROW(
-      sdca::loss_and_gradient(sdca::loss_kind::multilabel_hinge, m, z, sets + 1, 1, g, extended));
   // Targets of the other kind, invalid sets, and the distillation losses.
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::multilabel_hinge, m, z, 0, g),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::multilabel_hinge, m, z, 0, g),
                std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::cross_entropy, m, z, sets + 1, 1, g),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::cross_entropy, m, z, sets + 1, 1, g),
                std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::multilabel_cross_entropy, m, z, sets, 2, g),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::multilabel_cross_entropy, m, z, sets, 2, g),
                std::invalid_argument);
-  EXPECT_THROW(
-      sdca::loss_and_gradient(sdca::loss_kind::multilabel_cross_entropy, m, z, twice, 2, g),
-      std::invalid_argument);
-  EXPECT_THROW(
-      sdca::loss_and_gradient(sdca::loss_kind::multilabel_cross_entropy, m, z, outside, 2, g),
-      std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::multilabel_cross_entropy, m, z, sets, 0, g),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::multilabel_cross_entropy, m, z, twice, 2, g),
                std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::distillation, m, z, 0, g),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::multilabel_cross_entropy, m, z, outside, 2, g),
                std::invalid_argument);
-  EXPECT_THROW(sdca::loss_and_gradient(sdca::loss_kind::cross_entropy, 1, z, 0, g),
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::multilabel_cross_entropy, m, z, sets, 0, g),
+               std::invalid_argument);
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::distillation, m, z, 0, g),
+               std::invalid_argument);
+  EXPECT_THROW(sdca::loss_and_gradient(sdca::kernel::cross_entropy, 1, z, 0, g),
                std::invalid_argument);
 }

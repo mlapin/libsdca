@@ -104,20 +104,22 @@ inline std::size_t automatic_threads() {
   return cap > 0 ? std::min(cap, cpus) : cpus;
 }
 
-// Microseconds of serial work left for a call to add threads, then one
-// thread per eighth of it: five times the cost of waking sleeping workers
-// (measured at about 200 us for the pool in a VM or on macOS, 10 to 40 us for
-// an OpenMP team), so that no call runs slower than on one thread. A test may
-// set it (negative: the default).
+// Microseconds of serial work left before a call adds threads, then one thread per
+// eighth of that amount. OpenMP teams use 200 us. A pool takes a conservative
+// threshold until the call site has measured its row cost. A test may override
+// either threshold (negative: the default).
 inline double& thread_work_setting() {
   static double us = -1;
   return us;
 }
 
-inline double parallel_work_us(bool openmp_team) {
+inline double parallel_work_us(bool openmp_team, double pool_us) {
   const double us = thread_work_setting();
-  return us >= 0 ? us : openmp_team ? 200 : 1000;
+  return us >= 0 ? us : openmp_team ? 200 : pool_us;
 }
+
+constexpr double kColdPoolUs = 1000;
+constexpr double kWarmLossPoolUs = 80;
 
 // Parallel calls in flight; automatic calls split the CPUs among them.
 inline std::atomic<std::size_t>& parallel_calls() {
@@ -303,8 +305,8 @@ inline bool openmp_team() {
 
 // Runs job on the caller and extra other threads: a team of team threads of
 // a loaded OpenMP runtime outside its parallel regions (a team of constant
-// size: libgomp resizing its team between calls was measured up to 1.8 times
-// slower than one thread), else the pool, else new threads.
+// size: libgomp resizing its team between calls can be slower than one
+// thread), else the pool, else new threads.
 inline void run_parallel(const parallel_job& job, std::size_t extra, std::size_t team) {
 #ifdef SDCA_PARALLEL_OPENMP
   if (openmp_team()) {
@@ -352,8 +354,8 @@ inline int openmp_thread(std::size_t threads) {
 // takes the tasks of rows [t, t + 1) * ceil(n / threads) (the caller, thread
 // 0, ran [0, first)): the split of an OpenMP static loop, as PyTorch's, so the
 // rows stay in the caches of the threads that take them in the next PyTorch
-// call (tasks taken in order were measured to make a PyTorch pass over the
-// rows up to 1.9 times slower); then it helps the next threads with theirs.
+// call (tasks taken in order make the next PyTorch pass over the rows
+// slower); then it helps the next threads with theirs.
 // Elsewhere every thread takes the tasks in order. Rethrows the exception of
 // the first failing task.
 template <typename Rows>
@@ -421,13 +423,22 @@ std::atomic<double>& entry_us() {
   return us;
 }
 
+// Estimate the remaining work at the lower of the current and previous rates.
+inline double remaining_row_work(std::size_t remaining, double measured_per_row,
+                                 double known_per_entry, double width) {
+  const double count = static_cast<double>(remaining);
+  const double measured = measured_per_row * count;
+  return known_per_entry > 0 ? std::min(measured, known_per_entry * width * count) : measured;
+}
+
 // Calls rows(begin, end) on consecutive ranges covering [0, n) of row_size
 // entries each, on up to requested_threads(num_threads) threads; 0 is
 // automatic: automatic_threads(), split among the parallel calls in flight.
 // The caller runs the first rows in doubling batches until their time
 // predicts at least parallel_work_us() for the rest, which then runs on one
 // thread per eighth of it; smaller calls stay on the caller, at once when the
-// call site's last measured cost per entry predicts less than half of it.
+// call site's last measured cost per entry predicts less than half of it, and
+// every row runs on threads at once where that cost predicts twice of it.
 // Calls inside the rows of a call with workers, and automatic calls inside
 // an OpenMP parallel region, run serially; rows run with no workers beside
 // them (a serial call's, or the ones the caller times first) are like any
@@ -436,18 +447,47 @@ std::atomic<double>& entry_us() {
 // modes. Rethrows the exception of the first failing range, the one a serial
 // loop would throw.
 template <typename Rows>
-void parallel_rows(std::size_t n, std::size_t row_size, std::size_t num_threads, const Rows& rows) {
+void parallel_rows(std::size_t n, std::size_t row_size, std::size_t num_threads, const Rows& rows,
+                   std::atomic<double>& cost, double measured_pool_us, std::size_t first_probe,
+                   double serial_pool_us = 0) {
   const std::size_t requested = requested_threads(num_threads);
-  const double least = parallel_work_us(openmp_team());
   const double width = static_cast<double>(std::max<std::size_t>(row_size, 1));
-  std::atomic<double>& cost = entry_us<Rows>();
   const double known = cost.load(std::memory_order_relaxed);
+  double least = parallel_work_us(openmp_team(), known > 0 ? measured_pool_us : kColdPoolUs);
+  const double estimate = static_cast<double>(n) * width * known;
+  // Reconsider only a measured call that would otherwise return without probing
+  // any rows. All larger calls keep the probes and task partition above.
+  if (serial_pool_us > 0 && known > 0 && estimate < least / 2)
+    least = parallel_work_us(openmp_team(), serial_pool_us);
   if (n < 2 || requested == 1 || in_parallel_rows() || (requested == 0 && in_openmp_parallel()) ||
-      (known > 0 && static_cast<double>(n) * width * known < least / 2)) {
+      (known > 0 && estimate < least / 2)) {
     rows(std::size_t(0), n);
     return;
   }
   const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+  // An OpenMP runtime starts a team of this size: at most 4096, as SDCA_NUM_THREADS.
+  auto team_size = [&] {
+    return std::min<std::size_t>(requested > 0 ? requested : automatic_threads(), 4096);
+  };
+  // Where the site's last rate predicts twice the parallel threshold, no row runs alone first:
+  // a serial probe would add a row's time to calls of few wide rows (a third of 64 rows on 32
+  // threads). The call's time on its threads then bounds the rate from above.
+  const double predicted = static_cast<double>(n) * width * known;
+  if (known > 0 && least > 0 && predicted >= 2 * least) {
+    const std::size_t team = team_size();
+    const std::size_t cpus = requested > 0 ? team : team / (parallel_calls().load() + 1);
+    const double shares = std::min(8 * predicted / least, 4096.);
+    const std::size_t threads = std::min(std::min(cpus, n), static_cast<std::size_t>(shares));
+    if (threads >= 2) {
+      parallel_tasks(0, n, threads, team, rows);
+      const double us =
+          std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
+              .count();
+      const double bound = us * static_cast<double>(threads) / (static_cast<double>(n) * width);
+      if (bound > 0 && bound < known) cost.store(bound, std::memory_order_relaxed);
+      return;
+    }
+  }
   std::size_t done = 0;
   for (std::size_t batch = 1;; batch *= 2) {
     const std::size_t end = done + std::min(batch, n - done);
@@ -459,14 +499,12 @@ void parallel_rows(std::size_t n, std::size_t row_size, std::size_t num_threads,
     if (us > 0 && (done == n || us >= 1))
       cost.store(us / (static_cast<double>(done) * width), std::memory_order_relaxed);
     if (done == n) return;
+    if (done < first_probe) continue;
     // The rest at the probe's rate, or at the site's last rate if lower: a
     // first row slowed by cold caches does not add threads to a small call.
-    double rest = us / static_cast<double>(done) * static_cast<double>(n - done);
-    if (known > 0) rest = std::min(rest, known * width * static_cast<double>(n - done));
+    const double rest = remaining_row_work(n - done, us / static_cast<double>(done), known, width);
     if (rest < least) continue;
-    // An OpenMP runtime starts a team of this size: at most 4096, as SDCA_NUM_THREADS.
-    const std::size_t team =
-        std::min<std::size_t>(requested > 0 ? requested : automatic_threads(), 4096);
+    const std::size_t team = team_size();
     const std::size_t cpus = requested > 0 ? team : team / (parallel_calls().load() + 1);
     const double shares = least > 0 ? std::min(8 * rest / least, 4096.) : 4096.;
     const std::size_t threads =
@@ -475,6 +513,30 @@ void parallel_rows(std::size_t n, std::size_t row_size, std::size_t num_threads,
     parallel_tasks(done, n, threads, team, rows);
     return;
   }
+}
+template <typename Rows>
+void parallel_rows(std::size_t n, std::size_t row_size, std::size_t num_threads, const Rows& rows,
+                   double serial_pool_us = 0) {
+  parallel_rows(n, row_size, num_threads, rows, entry_us<Rows>(), kColdPoolUs, 1, serial_pool_us);
+}
+
+// parallel_rows of rows(context, begin, end), its call site's cost in cost.
+typedef void (*row_range)(void* context, std::size_t begin, std::size_t end);
+struct erased_rows {
+  row_range rows;
+  void* context;
+  void operator()(std::size_t begin, std::size_t end) const { rows(context, begin, end); }
+};
+inline void parallel_rows_erased(std::size_t n, std::size_t row_size, std::size_t num_threads,
+                                 std::atomic<double>* cost, row_range rows, void* context) {
+  const erased_rows call = {rows, context};
+  // Once a loss call site has a row cost, its own pool can divide batches whose total
+  // work is below a millisecond. Keep the cold site conservative when a worker pool
+  // may have to start threads that this process only uses once.
+  // For short rows the first probe includes a sizeable fraction of loop setup.
+  // Probe several rows before using that estimate to launch workers.
+  const bool small = row_size == 0 || n <= 4095 / row_size;
+  parallel_rows(n, row_size, num_threads, call, *cost, kWarmLossPoolUs, small ? 8 : 1);
 }
 
 }  // namespace detail

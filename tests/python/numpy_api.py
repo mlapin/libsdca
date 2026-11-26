@@ -4,12 +4,12 @@ the API contracts themselves are tested on libsdca directly)."""
 
 from __future__ import annotations
 
-import dataclasses
 from typing import Any
 
 import libsdca
+import named_losses
 import numpy as np
-from libsdca._core import _canonical_precision
+from libsdca._native import _precision
 
 
 def make_loss(
@@ -19,19 +19,15 @@ def make_loss(
     gamma: float = 0.0,
     alpha: float = 1.0,
     temperature: float = 1.0,
-    projection_precision: str = "float64",
 ) -> libsdca.Loss:
-    """The loss named name with the parameters it takes (the others are dropped)."""
-    cls = libsdca.LOSSES[name]
-    given = dict(
+    """The loss of kind name with the parameters it takes (named_losses.numpy_loss)."""
+    return named_losses.numpy_loss(
+        name,
         k=k,
         gamma=gamma,
         alpha=alpha,
         temperature=temperature,
-        projection_precision=projection_precision,
     )
-    fields = {field.name for field in dataclasses.fields(cls)}  # pyright: ignore[reportArgumentType]
-    return cls(**{key: value for key, value in given.items() if key in fields})
 
 
 class Solver:
@@ -42,7 +38,7 @@ class Solver:
     """
 
     def __init__(self, precision: Any = None, *, dtype: Any = None) -> None:
-        work = _canonical_precision(precision)
+        work = _precision(precision)
         if work is None:
             work = "float64" if dtype is None else np.dtype(dtype).name
         self.precision: str = work
@@ -99,11 +95,10 @@ class Solver:
         kernel: bool = False,
         k: int = 1,
         gamma: float = 0.0,
-        projection_precision: str = "float64",
         **options: Any,
     ) -> libsdca.Model:
         x = self._array(X)
-        loss = make_loss(objective, k=k, gamma=gamma, projection_precision=projection_precision)
+        loss = make_loss(objective, k=k, gamma=gamma)
         for key in ("center", "initial_dual"):
             if options.get(key) is not None:
                 options[key] = self._array(options[key])
@@ -143,7 +138,7 @@ def fit(X: Any, y: Any, loss: str = "cross_entropy", *, kernel: bool = False, **
     return libsdca.fit(data, y, make_loss(loss, **params), **options)
 
 
-PARAMETERS = ("k", "gamma", "alpha", "temperature", "projection_precision")
+PARAMETERS = ("k", "gamma", "alpha", "temperature")
 
 
 def distillation_loss_and_grad(
@@ -172,35 +167,4 @@ def proximal_distillation_loss_and_grad(
     """libsdca.loss_and_grad of ProximalDistillation."""
     return libsdca.loss_and_grad(
         student, teacher, libsdca.ProximalDistillation(temperature, alpha), **options
-    )
-
-
-def mask_loss_and_grad(
-    logits: Any,
-    target: Any,
-    loss: str = "cross_entropy",
-    *,
-    k: int = 1,
-    gamma: float = 0.0,
-    alpha: float = 1.0,
-    precision: Any = None,
-    num_threads: int | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """The internal rows of the tensor layers' host paths (_core._host_loss_and_grad) of
-    integer labels or a label mask: the references of the PyTorch and JAX tests, where
-    cross_entropy of a mask has the uniform target on its labels."""
-    from libsdca._core import _host_loss_and_grad
-
-    z = np.asarray(logits)
-    labels = np.asarray(target)
-    mask = labels if labels.dtype == np.bool_ else np.eye(z.shape[-1], dtype=bool)[labels]
-    return _host_loss_and_grad(
-        z,
-        mask,
-        loss,
-        k=k,
-        gamma=gamma,
-        alpha=alpha,
-        precision=precision,
-        num_threads=num_threads,
     )

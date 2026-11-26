@@ -4,13 +4,14 @@
 /*
  * The C ABI of libsdca (src/c_api.cpp), used by the Python and Rust packages.
  *
- * Entry points: sdca_loss_evaluate (losses and gradients), sdca_dual_update
+ * Entry points: sdca_loss_evaluate (losses and gradients; sdca_loss_rows with
+ * the options of the PyTorch and JAX losses), sdca_dual_update
  * (coordinate steps), sdca_model_fit (training) and sdca_history_rows (the
- * history a fit needs); sdca_abi_version, sdca_version and sdca_last_error
- * describe the library and the last failure.
+ * history a fit needs); sdca_abi_version, sdca_version, sdca_blas_backend and
+ * sdca_last_error describe the library and the last failure.
  *
  * Arguments. A loss (struct sdca_loss) takes only its own parameters: every
- * field of another loss keeps its default (SDCA_LOSS_INIT). The execution
+ * field of another loss keeps its default (SDCA_LOSS_INIT(kind)). The execution
  * settings (struct sdca_execution: working precision and threads) and the fit
  * options (struct sdca_fit_options) are separate structs. Targets (struct
  * sdca_targets) name their kind: class labels, label sets (as labels and
@@ -23,31 +24,40 @@
  * defaults.
  *
  * Results. Every computing entry point returns SDCA_OK, SDCA_INVALID_ARGUMENT
- * or SDCA_FAILURE, and sdca_last_error() describes a failure (thread-local;
- * "" after a success). Each validates every argument before it writes an
- * output: SDCA_INVALID_ARGUMENT leaves every output as given. SDCA_FAILURE (a
- * failed computation or allocation) leaves the outputs unspecified. A fit
- * whose coordinate steps fail numerically returns SDCA_OK with the status
- * SDCA_STATUS_FAILED and the last consistent iterate.
+ * or SDCA_FAILURE (sdca_loss_evaluate and sdca_loss_rows also SDCA_INVALID_ROWS), and
+ * sdca_last_error() describes any other code than SDCA_OK (thread-local; ""
+ * after SDCA_OK). Each validates every argument before it writes an output:
+ * SDCA_INVALID_ARGUMENT leaves every output as given. The rows of
+ * sdca_loss_evaluate are the exception: a row it cannot compute (a score of
+ * NaN or +inf, an invalid row of masked classes) is an invalid row, with a NaN
+ * value and NaN gradients; a label out of range is SDCA_INVALID_ARGUMENT
+ * ("Target 7 is out of bounds.", as in PyTorch). The call then returns
+ * SDCA_INVALID_ROWS, a nonnegative code: every output is written and the valid
+ * rows hold their results; sdca_last_error() gives the count and the first
+ * invalid row, as does the report of struct sdca_execution if given.
+ * execution.check_rows = 1 makes an invalid row SDCA_INVALID_ARGUMENT before
+ * any output is written. SDCA_FAILURE (a failed computation or allocation)
+ * leaves the outputs unspecified. A fit whose coordinate steps fail
+ * numerically returns SDCA_OK with the status SDCA_STATUS_FAILED and the last
+ * consistent iterate.
  *
  * Arrays are dense and row-major, in the storage type of a dtype argument:
  * scores (n, num_classes), features x (n, d), a Gram matrix (n, n), dual
  * variables (n, num_classes), and weights and a regularizer center
  * (num_classes, d), one weight vector per class. The library reads and writes
- * these buffers in place, without copies. Class labels are 0-based. Required pointers must be non-NULL and their buffers large enough
- * for their shapes; the library rejects NULL pointers and extents that
- * overflow, but cannot check a buffer's capacity. Inputs must not overlap
- * outputs unless stated.
+ * these buffers in place, without copies. Class labels are 0-based. Required
+ * pointers must be non-NULL and their buffers large enough for their shapes;
+ * the library rejects NULL pointers and extents that overflow, but cannot check
+ * a buffer's capacity. Inputs must not overlap outputs unless stated.
  *
  * Threads. The loss and update entry points compute the rows independently,
  * on up to num_threads threads of the calling process (a loaded OpenMP
  * runtime's team, else a persistent pool); the results are identical for every
  * thread count. num_threads 0 takes SDCA_NUM_THREADS, else the CPUs the
  * process may run on (at most a loaded OpenMP runtime's thread count, else
- * OMP_NUM_THREADS), split among concurrent calls; 1 is serial. A call adds
- * threads only when its work would take at least 1 ms on one thread (0.2 ms on
- * an OpenMP team). A fit's epochs are sequential; its evaluations and checks
- * use the threads (docs/API.md#threads).
+ * OMP_NUM_THREADS), split among concurrent calls; 1 is serial. A fit's epochs
+ * are sequential; its evaluations and checks use the threads
+ * (docs/API.md#threads).
  *
  * The computing entry points run in the default IEEE floating-point modes
  * (subnormals kept, round to nearest, no traps) and restore the caller's.
@@ -67,20 +77,30 @@ extern "C" {
 
 /* Changes with every incompatible change of these declarations; a binding
  * compares it with sdca_abi_version() before any other call. */
-#define SDCA_ABI_VERSION 6
+#define SDCA_ABI_VERSION 7
 
-/* Return codes of the computing entry points. */
-enum sdca_result { SDCA_OK = 0, SDCA_FAILURE = -1, SDCA_INVALID_ARGUMENT = -2 };
+/* Return codes of the computing entry points: the errors are negative.
+ * SDCA_INVALID_ROWS: sdca_loss_evaluate wrote every output, with NaN rows. */
+enum sdca_result {
+  SDCA_OK = 0,
+  SDCA_INVALID_ROWS = 1,
+  SDCA_FAILURE = -1,
+  SDCA_INVALID_ARGUMENT = -2
+};
 
-/* Storage types. */
-enum sdca_dtype { SDCA_DTYPE_FLOAT32 = 0, SDCA_DTYPE_FLOAT64 = 1 };
+/* Storage types; the 16-bit ones (IEEE half, bfloat16) in sdca_loss_rows only. */
+enum sdca_dtype {
+  SDCA_DTYPE_FLOAT32 = 0,
+  SDCA_DTYPE_FLOAT64 = 1,
+  SDCA_DTYPE_FLOAT16 = 2,
+  SDCA_DTYPE_BFLOAT16 = 3
+};
 
 /* Working precision. DEFAULT works in the storage type; FLOAT32 needs float32
  * storage; FLOAT64 works in double (float32 storage keeps a fit's iterate in
  * double and returns it rounded once). float32 work bounds the accuracy of the
  * results, but takes double where float cannot hold a parameter or a row's
- * spread (docs/API.md#precision); the losses of the smoothed hinges and of
- * proximal distillation compute in double. */
+ * spread (docs/API.md#precision). */
 enum sdca_precision {
   SDCA_PRECISION_DEFAULT = 0,
   SDCA_PRECISION_FLOAT32 = 1,
@@ -89,62 +109,105 @@ enum sdca_precision {
 
 /* The losses by their shared names (docs/API.md#loss-definitions). */
 enum sdca_loss_kind {
-  SDCA_LOSS_CROSS_ENTROPY = 0,            /* labels; fit: labels or probabilities */
+  SDCA_LOSS_CROSS_ENTROPY = 0,            /* labels or probabilities */
   SDCA_LOSS_TOPK_CROSS_ENTROPY = 1,       /* labels; k */
   SDCA_LOSS_MULTICLASS_HINGE = 2,         /* labels; gamma */
   SDCA_LOSS_TOPK_HINGE_ALPHA = 3,         /* labels; k, gamma */
   SDCA_LOSS_TOPK_HINGE_BETA = 4,          /* labels; k, gamma */
-  SDCA_LOSS_MULTILABEL_HINGE = 5,         /* label sets; gamma, projection_precision */
+  SDCA_LOSS_MULTILABEL_HINGE = 5,         /* label sets; gamma */
   SDCA_LOSS_MULTILABEL_CROSS_ENTROPY = 6, /* label sets */
-  SDCA_LOSS_PROXIMAL_CROSS_ENTROPY = 7,   /* labels; alpha (no fit) */
+  SDCA_LOSS_PROXIMAL_CROSS_ENTROPY = 7,   /* labels; gamma (no fit) */
   SDCA_LOSS_DISTILLATION = 8,             /* teacher logits; temperature (no fit) */
-  SDCA_LOSS_PROXIMAL_DISTILLATION = 9     /* teacher logits; temperature, alpha (no fit) */
+  SDCA_LOSS_PROXIMAL_DISTILLATION = 9     /* teacher logits; temperature, gamma (no fit) */
 };
 
-/* projection_precision of multilabel_hinge: FLOAT64 solves its two-simplex
- * projections in double, checks each result and re-solves with EXTENDED where
- * the check fails; EXTENDED always runs the extended-precision solver. */
-enum sdca_projection_precision { SDCA_PROJECTION_FLOAT64 = 0, SDCA_PROJECTION_EXTENDED = 1 };
-
-/* A loss and its own parameters; start from SDCA_LOSS_INIT. The fields of the
- * other losses must keep their defaults (in brackets). */
+/* A loss and its own parameters; start from SDCA_LOSS_INIT(kind). The fields of
+ * the other losses must keep their defaults (in brackets). */
+/* The options weight, label_smoothing and ignore_index are those of PyTorch's cross_entropy,
+ * for sdca_loss_evaluate (the training entry points take their defaults). A row of label y
+ * and class weights w has the loss and gradient of the target weights
+ * u_j = w_j ((1 - eps) [j = y] + eps / num_classes), sum_j u_j (logsumexp(z) - z_j) for
+ * cross_entropy, and w_y times its loss and gradient for the other single-label losses; the
+ * probabilities p of cross_entropy take u_j = w_j ((1 - eps) p_j + eps / num_classes). A row of
+ * label ignore_index (ignore = 1) has the loss 0 and a gradient of +0.0, whatever its scores.
+ * A loss that does not take an option keeps its default (else SDCA_INVALID_ARGUMENT, "...
+ * takes no parameter weight"). */
 struct sdca_loss {
   size_t size;
-  int kind;                 /* enum sdca_loss_kind [SDCA_LOSS_CROSS_ENTROPY] */
-  size_t k;                 /* the top-k losses: 1 <= k < num_classes, required [0] */
-  double gamma;             /* the hinges: finite, >= 0 (0: nonsmooth) [0] */
-  double alpha;             /* the proximal losses: finite, > 0 [1] */
-  double temperature;       /* the distillation losses: finite, > 0 [1] */
-  int projection_precision; /* multilabel_hinge: SDCA_PROJECTION_* [FLOAT64] */
+  int kind;               /* enum sdca_loss_kind [SDCA_LOSS_CROSS_ENTROPY] */
+  size_t k;               /* the top-k losses: 1 <= k < num_classes, required [0] */
+  double gamma;           /* the hinges: smoothing, finite, >= 0 [0: nonsmooth]; the
+                             proximal losses: Moreau step, finite, > 0 [1] */
+  double temperature;     /* the distillation losses: finite, > 0 [1] */
+  const double* weight;   /* the single-label losses: class weights (num_classes), finite
+                             and >= 0 [NULL: every weight 1] */
+  double label_smoothing; /* cross_entropy: eps in [0, 1] [0] */
+  int ignore;             /* the single-label losses: 1 ignores the rows of label
+                             ignore_index (no class probabilities with ignore_index >= 0) [0] */
+  int64_t ignore_index;   /* the ignored label [-100] */
 };
 
-#define SDCA_LOSS_INIT \
-  {sizeof(struct sdca_loss), SDCA_LOSS_CROSS_ENTROPY, 0, 0.0, 1.0, 1.0, SDCA_PROJECTION_FLOAT64}
+/* The defaults of a loss kind: a constant expression, for C89 initializers too. */
+#define SDCA_LOSS_INIT(kind)                                                                 \
+  {sizeof(struct sdca_loss),                                                                 \
+   (kind),                                                                                   \
+   0,                                                                                        \
+   ((kind) == SDCA_LOSS_PROXIMAL_CROSS_ENTROPY || (kind) == SDCA_LOSS_PROXIMAL_DISTILLATION) \
+       ? 1.0                                                                                 \
+       : 0.0,                                                                                \
+   1.0,                                                                                      \
+   NULL,                                                                                     \
+   0.0,                                                                                      \
+   0,                                                                                        \
+   -100}
 
-/* Execution settings: the working precision and the threads. */
+/* What sdca_loss_evaluate reports about its rows; start from SDCA_LOSS_REPORT_INIT.
+ * Written on SDCA_OK, SDCA_INVALID_ROWS and the SDCA_INVALID_ARGUMENT of check_rows = 1. */
+struct sdca_loss_report {
+  size_t size;
+  size_t invalid_rows;      /* the rows with NaN outputs (check_rows: the rows refused) */
+  size_t first_invalid_row; /* the first of them; n if there is none */
+};
+
+#define SDCA_LOSS_REPORT_INIT {sizeof(struct sdca_loss_report), 0, 0}
+
+/* Execution settings: the working precision, the threads, and how
+ * sdca_loss_evaluate treats invalid rows. check_rows 0: an invalid row gets
+ * NaN outputs and the call returns SDCA_INVALID_ROWS; 1: every row is checked before any
+ * output is written, and an invalid row is SDCA_INVALID_ARGUMENT. report, if
+ * not NULL, receives the invalid-row count of sdca_loss_evaluate (the other
+ * entry points ignore it). */
 struct sdca_execution {
   size_t size;
   int precision;      /* enum sdca_precision [DEFAULT] */
   size_t num_threads; /* 0: SDCA_NUM_THREADS, else the available CPUs; n: up to n [0] */
+  int check_rows;     /* 0: NaN rows; 1: refuse before writing [0] */
+  struct sdca_loss_report* report; /* [NULL] */
 };
 
-#define SDCA_EXECUTION_INIT {sizeof(struct sdca_execution), SDCA_PRECISION_DEFAULT, 0}
+#define SDCA_EXECUTION_INIT {sizeof(struct sdca_execution), SDCA_PRECISION_DEFAULT, 0, 0, NULL}
 
 /* Kinds of targets. */
 enum sdca_target_kind {
   SDCA_TARGET_LABELS = 0,        /* labels: one class per example (n) */
   SDCA_TARGET_LABEL_SETS = 1,    /* labels and offsets: sorted label sets without duplicates */
   SDCA_TARGET_MASK = 2,          /* mask: label sets as an (n, num_classes) 0/1 matrix */
-  SDCA_TARGET_PROBABILITIES = 3, /* probabilities: (n, num_classes) rows on the simplex */
+  SDCA_TARGET_PROBABILITIES = 3, /* probabilities: (n, num_classes) target weights */
   SDCA_TARGET_LOGITS = 4         /* logits: (n, num_classes) teacher logits, in the dtype */
 };
 
-/* The targets of n examples: the fields of kind, the others NULL. Label sets
- * (LABEL_SETS, MASK) are nonempty and leave a class out (the steps of the
- * multilabel objectives need one); example i of LABEL_SETS has the labels
- * labels[offsets[i]] .. labels[offsets[i + 1] - 1], offsets[0] = 0.
- * Probabilities are finite, nonnegative and sum to 1 within 64 n_classes
- * double eps per row. Teacher logits are finite. */
+/* The targets of n examples: the fields of kind, the others NULL. Example i of
+ * LABEL_SETS has the labels labels[offsets[i]] .. labels[offsets[i + 1] - 1],
+ * offsets[0] = 0, sorted without duplicates. Labels lie in [0, num_classes)
+ * (else SDCA_INVALID_ARGUMENT, "Target 7 is out of bounds."). For training,
+ * label sets (LABEL_SETS, MASK) are nonempty and leave a class out (the steps of
+ * the multilabel objectives need one); in sdca_loss_evaluate a row that breaks
+ * this is an invalid row. sdca_loss_evaluate takes probabilities as given (as
+ * PyTorch's cross_entropy); for training they are finite and nonnegative and
+ * each row sums to 1 within gamma_{m+1} = (m+1)u / (1 - (m+1)u), u the unit
+ * roundoff of the storage dtype (a row normalized in it), renormalized
+ * in a copy.
+ * Teacher logits are finite, or -inf at classes of probability 0. */
 struct sdca_targets {
   size_t size;
   int kind;                    /* enum sdca_target_kind [LABELS] */
@@ -160,21 +223,57 @@ struct sdca_targets {
 
 /* Which targets each loss takes:
  *   cross_entropy, topk_cross_entropy, multiclass_hinge, topk_hinge_alpha,
- *   topk_hinge_beta, proximal_cross_entropy: LABELS (and cross_entropy in
- *   sdca_dual_update and sdca_model_fit: PROBABILITIES, the distillation
- *   objective H(p_i, softmax(x_i W)));
+ *   topk_hinge_beta, proximal_cross_entropy: LABELS (and cross_entropy:
+ *   PROBABILITIES, the loss -sum_j p_ij log softmax(z_i)_j, and in
+ *   sdca_dual_update and sdca_model_fit the distillation objective
+ *   H(p_i, softmax(x_i W)));
  *   multilabel_hinge, multilabel_cross_entropy: LABEL_SETS or MASK;
  *   distillation, proximal_distillation: LOGITS (sdca_loss_evaluate only).
  * sdca_dual_update and sdca_model_fit train every loss but the proximal
  * and distillation ones (the training objectives). */
 
 /* Losses (n) and, unless gradients is NULL, their gradients (n, num_classes)
- * at the finite scores of dtype, n >= 0 and num_classes >= 2. Values are
- * double; gradients are in the dtype (subgradients at the kinks of the
- * nonsmooth hinges). Proximal distillation computes in double. */
+ * at the scores of dtype, n >= 0 and num_classes >= 2. Values are double;
+ * gradients are in the dtype (subgradients at the kinks of the nonsmooth
+ * hinges). A score of -inf masks its class (docs/API.md, Masked classes): the
+ * row's loss is its limit, with a gradient of +0.0 at that class (+inf where a
+ * target probability is positive there); teacher logits of -inf are teacher
+ * probabilities of 0. Invalid rows: see Results above. */
 int sdca_loss_evaluate(const struct sdca_loss* loss, const struct sdca_execution* execution,
                        int dtype, size_t n, size_t num_classes, const void* scores,
                        const struct sdca_targets* targets, double* values, void* gradients);
+
+/* The options of the PyTorch and JAX losses that sdca_loss_rows adds; start from
+ * SDCA_ROW_OPTIONS_INIT. */
+struct sdca_row_options {
+  size_t size;
+  int probability_dtype;      /* PROBABILITIES: FLOAT32, FLOAT64 or the scores' [FLOAT64] */
+  double upstream;            /* the factor of every gradient [1] */
+  const double* row_upstream; /* (n) the factor of each row's gradient, or NULL [NULL] */
+};
+
+#define SDCA_ROW_OPTIONS_INIT {sizeof(struct sdca_row_options), SDCA_DTYPE_FLOAT64, 1.0, NULL}
+
+/* sdca_loss_evaluate with the options and storage of libsdca.torch and libsdca.jax (the
+ * kernels of their CPU extensions, for when those are not built): dtype may also be FLOAT16
+ * or BFLOAT16 (values double, gradients in the dtype); labels and masks are not checked (a
+ * label out of range that is not ignored is an invalid row, a nonzero mask byte a label);
+ * each gradient is multiplied by upstream and row_upstream[i] before its one rounding, and
+ * may be written over the scores (gradients == scores). values may be NULL. */
+int sdca_loss_rows(const struct sdca_loss* loss, const struct sdca_row_options* options,
+                   const struct sdca_execution* execution, int dtype, size_t n, size_t num_classes,
+                   const void* scores, const struct sdca_targets* targets, double* values,
+                   void* gradients);
+
+/* Finalize n double row values, casting once into float32 or float64 out. Reduction 0
+ * writes n values; 1 writes their sum; 2 writes their mean over the sum of n optional
+ * double denominator terms (NULL: divide by n). */
+int sdca_reduce_rows(int dtype, int reduction, size_t n, const double* values, const double* terms,
+                     void* out);
+
+/* Finalize groups independent sums or means of rows_per_group doubles each. */
+int sdca_reduce_row_groups(int dtype, int reduction, size_t groups, size_t rows_per_group,
+                           const double* values, const double* terms, void* out);
 
 /* The coordinate step of a training objective: new dual blocks out (n,
  * num_classes) from the blocks previous (NULL: zeros) at the finite scores,
@@ -282,7 +381,7 @@ struct sdca_fit_result {
 size_t sdca_history_rows(const struct sdca_fit_options* options);
 
 /* The largest n, d, num_classes and weight or dual element count that a fit
- * takes: the maximum of the linked BLAS integer type (normally INT_MAX).
+ * takes: INT_MAX, the integer type of the CBLAS interface.
  * Bindings check their sizes against it before allocating the outputs. */
 size_t sdca_max_extent(void);
 
@@ -292,18 +391,19 @@ size_t sdca_max_extent(void);
  * and num_classes >= 2. Outputs: dual (n, num_classes) and, for features,
  * weights (num_classes, d), the transpose of W = center + x' dual with one
  * row per class (NULL for a Gram matrix), in the dtype of the input. center
- * (num_classes, d) may be NULL (zero; NULL for a Gram matrix). initial_dual (n, num_classes) starts the fit from these
- * duals (NULL: zeros), which must be feasible for the objective (checked to
- * the tolerances of docs/API.md; single-label rows get the label entry that
- * makes them sum to zero exactly); the library builds the starting W = center +
- * x' initial_dual in double. initial_dual may be dual itself. history holds
- * history_rows rows of SDCA_HISTORY_FIELDS, at least sdca_history_rows(options),
- * or is NULL with history_rows 0 (no history). c and every nonzero squared row
- * norm (Gram diagonal entry) and c times it must be normal in the storage type,
- * and c in the working precision. With a center, the history and the stopping
- * test use the full objective, with no center-dependent constant omitted.
- * n, d, num_classes and the weight and dual counts must fit the linked BLAS
- * integer type (normally INT_MAX, including the built-in backend). */
+ * (num_classes, d) may be NULL (zero; NULL for a Gram matrix). initial_dual
+ * (n, num_classes) starts the fit from these duals (NULL: zeros), which must be
+ * feasible for the objective (checked to the tolerances of docs/API.md;
+ * single-label rows get the label entry that makes them sum to zero exactly);
+ * the library builds the starting W = center + x' initial_dual in double.
+ * initial_dual may be dual itself. history holds history_rows rows of
+ * SDCA_HISTORY_FIELDS, at least sdca_history_rows(options), or is NULL with
+ * history_rows 0 (no history). c and every nonzero squared row norm (Gram
+ * diagonal entry) and c times it must be normal in the storage type, and c in
+ * the working precision. With a center, the history and the stopping test use
+ * the full objective, with no center-dependent constant omitted. n, d,
+ * num_classes and the weight and dual counts must fit the CBLAS integer type
+ * (sdca_max_extent), with the built-in products as well. */
 int sdca_model_fit(const struct sdca_loss* loss, const struct sdca_fit_options* options,
                    const struct sdca_execution* execution, const struct sdca_input* input,
                    size_t num_classes, const struct sdca_targets* targets, const void* center,
@@ -314,9 +414,9 @@ int sdca_model_fit(const struct sdca_loss* loss, const struct sdca_fit_options* 
  * its dtype: features x (n, d) with coefficients = weights (num_classes, d)
  * give x weights'; a cross-kernel x (n, d) between the n examples and the d
  * training examples (kind KERNEL) with coefficients = dual (d, num_classes)
- * gives x dual. One matrix product (gemm) of the linked BLAS in the storage
- * type; n may be 0. n, d and num_classes must fit the BLAS integer type
- * (sdca_max_extent). */
+ * gives x dual. One matrix product (gemm) of the external BLAS in the storage
+ * type (the built-in products without one); n may be 0. n, d and num_classes
+ * must fit the CBLAS integer type (sdca_max_extent). */
 int sdca_model_scores(const struct sdca_input* input, size_t num_classes, const void* coefficients,
                       void* scores);
 
@@ -324,6 +424,12 @@ int sdca_model_scores(const struct sdca_input* input, size_t num_classes, const 
 int sdca_abi_version(void);
 /* The library version (the VERSION file at build time); a static string. */
 const char* sdca_version(void);
+/* The BLAS of the library, a static string: "external" (a CBLAS linked at build
+ * time; "external: <library>" when the build names it, as the Linux wheels do:
+ * "external: OpenBLAS (scipy-openblas32)"), "builtin" (the built-in products,
+ * chosen) or "fallback" (the built-in products because the build found no BLAS;
+ * bindings warn about it). */
+const char* sdca_blas_backend(void);
 /* The message of this thread's last failed call, "" after a success; valid
  * until the thread's next computing call. */
 const char* sdca_last_error(void);

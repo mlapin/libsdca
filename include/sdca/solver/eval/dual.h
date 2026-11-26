@@ -2,8 +2,9 @@
 #define SDCA_SOLVER_EVAL_DUAL_H
 
 #include "sdca/solver/data/output.h"
+#include "sdca/core/lanes.h"
 
-namespace sdca {
+SDCA_ISA_BEGIN
 
 // The feasible block (class order) of stored duals in the evaluation's
 // arithmetic, and its conjugate loss; the stored duals are not modified.
@@ -41,6 +42,6 @@ inline Work eval_dual_block(const size_type i, const distribution_output& out, c
   return obj.dual_loss(m, q, const_cast<const Work*>(block));
 }
 
-}  // namespace sdca
+SDCA_ISA_END
 
 #endif

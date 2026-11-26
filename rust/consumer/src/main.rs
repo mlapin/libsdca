@@ -1,7 +1,7 @@
 //! A downstream crate: trains and scores through the BLAS that SDCA_BLAS linked and
 //! checks the duality gap, W = A' X and the scores X W' with plain loops, independently
 //! of that BLAS.
-use libsdca::{Loss, Matrix, Real, Solver, Status};
+use libsdca::{Loss, Matrix, Real, Solver, Status, TopKVariant};
 
 /// Deterministic features in [-1, 1) and labels of (n, d) data with `classes` classes.
 fn data(n: usize, d: usize, classes: usize) -> (Vec<f64>, Vec<usize>) {
@@ -71,7 +71,11 @@ fn main() {
     let (n, d) = (120, 9);
     let (x, y) = data(n, d, 4);
     let x32: Vec<f32> = x.iter().map(|&v| v as f32).collect();
-    let alpha = Loss::TopKHingeAlpha { k: 2, gamma: 1.0 };
+    let alpha = Loss::TopKHinge {
+        k: 2,
+        variant: TopKVariant::Alpha,
+        gamma: 1.0,
+    };
     for loss in [Loss::cross_entropy(), alpha] {
         println!("{}", check(loss, &x, &y, d));
         println!("{}", check(loss, &x32, &y, d));

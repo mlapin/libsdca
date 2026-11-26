@@ -1,15 +1,11 @@
-// XLA FFI handler of libsdca.jax on CUDA GPUs, built on first use by _jax_cuda.py against the
-// headers of the running jaxlib. It launches the fused Triton kernels of libsdca.torch on XLA's
-// stream: _jax_cuda.py compiles them with Triton and lowers each loss to one call of this
-// handler with a launch program in its attributes, which the handler only interprets. As the
-// C++ launcher of PyTorch (_torch_cuda.h), it calls cuLaunchKernel with the kernels' own
-// arguments and null scratch pointers (_cuda_launch.kernel_gate checks that this suffices).
-// The driver API is loaded from libcuda.so.1 at run time, so no CUDA toolkit is needed to build.
+// XLA FFI handler for the shared CUDA launch plan (triton/jax_ffi.py). The initialize
+// stage loads Triton binaries into the stream's context, including before graph capture.
+// The execute stage issues cuLaunchKernel on that stream. Only the NVIDIA driver and the
+// headers of the running jaxlib are required.
 #include <dlfcn.h>
 
 #include <array>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -253,13 +249,10 @@ ffi::Error addresses(ffi::RemainingArgs args, ffi::RemainingRets rets, std::vect
   return ffi::Error::Success();
 }
 
-// One pass of the launch program over batch element `element`: each launch is (kernel, grid x,
-// y, z, argument count, then (kind, a, b) per argument). A buffer argument is buffer a at byte
-// offset b plus element * strides[a]; Triton compiled the kernels for 16-byte aligned pointers.
+// A launch is (kernel, grid x, y, z, argument count), followed by (kind, value) per argument.
 ffi::Error run(CUstream stream, const std::vector<CUfunction>& kernels,
                ffi::Span<const std::int64_t> table, ffi::Span<const std::int64_t> program,
-               const std::vector<char*>& buffers, ffi::Span<const std::int64_t> strides,
-               std::int64_t element) {
+               const std::vector<char*>& buffers) {
   std::vector<std::uint64_t> values;
   std::vector<void*> params;
   std::size_t at = 0;
@@ -269,16 +262,16 @@ ffi::Error run(CUstream stream, const std::vector<CUfunction>& kernels,
     const std::int64_t gx = program[at + 1], gy = program[at + 2], gz = program[at + 3];
     at += 5;
     if (kernel < 0 || static_cast<std::size_t>(kernel) >= kernels.size() || count < 0 ||
-        at + 3 * static_cast<std::size_t>(count) > program.size())
+        at + 2 * static_cast<std::size_t>(count) > program.size())
       return ffi::Error::InvalidArgument("libsdca: malformed program");
     values.assign(static_cast<std::size_t>(count), 0);
     params.assign(static_cast<std::size_t>(count), nullptr);
-    for (std::int64_t i = 0; i < count; ++i, at += 3) {
-      const std::int64_t kind = program[at], a = program[at + 1], b = program[at + 2];
+    for (std::int64_t i = 0; i < count; ++i, at += 2) {
+      const std::int64_t kind = program[at], a = program[at + 1];
       if (kind == buffer) {
         if (a < 0 || static_cast<std::size_t>(a) >= buffers.size())
           return ffi::Error::InvalidArgument("libsdca: malformed program");
-        char* address = buffers[a] + b + element * strides[a];
+        char* address = buffers[a];
         if ((reinterpret_cast<std::uintptr_t>(address) & 15) != 0)
           return ffi::Error::InvalidArgument("libsdca: a kernel buffer is not 16-byte aligned");
         std::memcpy(&values[i], &address, sizeof(address));
@@ -305,7 +298,7 @@ ffi::Error run(CUstream stream, const std::vector<CUfunction>& kernels,
 
 ffi::Error initialize(CUstream stream, ffi::RemainingArgs, ffi::RemainingRets,
                       ffi::Span<const std::int64_t> kernels, std::string_view binaries,
-                      ffi::Span<const std::int64_t>, std::int64_t, ffi::Span<const std::int64_t>) {
+                      ffi::Span<const std::int64_t>) {
   ContextScope scope;
   ffi::Error error = scope.enter(stream);
   if (error.failure()) return error;
@@ -315,8 +308,7 @@ ffi::Error initialize(CUstream stream, ffi::RemainingArgs, ffi::RemainingRets,
 
 ffi::Error execute(CUstream stream, ffi::RemainingArgs args, ffi::RemainingRets rets,
                    ffi::Span<const std::int64_t> kernels, std::string_view binaries,
-                   ffi::Span<const std::int64_t> program, std::int64_t batch,
-                   ffi::Span<const std::int64_t> strides) {
+                   ffi::Span<const std::int64_t> program) {
   ContextScope scope;
   ffi::Error error = scope.enter(stream);
   std::vector<CUfunction> loaded_kernels;
@@ -324,38 +316,10 @@ ffi::Error execute(CUstream stream, ffi::RemainingArgs args, ffi::RemainingRets 
   if (error.success()) error = functions(scope.context, stream, kernels, binaries, loaded_kernels);
   if (error.success()) error = addresses(args, rets, buffers);
   if (error.failure()) return error;
-  if (strides.size() != buffers.size() || batch < 1)
-    return ffi::Error::InvalidArgument("libsdca: malformed batch strides");
-  for (std::int64_t element = 0; element < batch; ++element) {
-    error = run(stream, loaded_kernels, kernels, program, buffers, strides, element);
-    if (error.failure()) return error;
-  }
-  return ffi::Error::Success();
+  return run(stream, loaded_kernels, kernels, program, buffers);
 }
 
 }  // namespace
-
-// Loads the kernels of a table in the current context (_jax_cuda.py: each GPU's primary
-// context, before XLA runs or captures a call); 0, or -1 with the reason in error.
-extern "C" int sdca_jax_cuda_preload(const char* binaries, std::size_t size,
-                                     const std::int64_t* kernels, std::size_t count, char* error,
-                                     std::size_t error_size) {
-  const Driver& d = driver();
-  CUcontext context = nullptr;
-  ffi::Error result = ffi::Error::Success();
-  if (!d.missing.empty()) {
-    result = ffi::Error::Internal("libsdca: the CUDA driver lacks " + d.missing);
-  } else if (d.ctx_get_current(&context) != success || context == nullptr) {
-    result = ffi::Error::Internal("libsdca: no current CUDA context");
-  } else {
-    std::vector<CUfunction> loaded_kernels;
-    result = functions(context, nullptr, ffi::Span<const std::int64_t>(kernels, count),
-                       std::string_view(binaries, size), loaded_kernels);
-  }
-  if (result.success()) return 0;
-  std::snprintf(error, error_size, "%s", result.message().c_str());
-  return -1;
-}
 
 #define SDCA_JAX_CUDA_BINDING(stage)                  \
   ffi::Ffi::Bind<stage>()                             \
@@ -364,9 +328,7 @@ extern "C" int sdca_jax_cuda_preload(const char* binaries, std::size_t size,
       .RemainingRets()                                \
       .Attr<ffi::Span<const std::int64_t>>("kernels") \
       .Attr<std::string_view>("binaries")             \
-      .Attr<ffi::Span<const std::int64_t>>("program") \
-      .Attr<std::int64_t>("batch")                    \
-      .Attr<ffi::Span<const std::int64_t>>("strides")
+      .Attr<ffi::Span<const std::int64_t>>("program")
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(sdca_jax_cuda_initialize, initialize,
                               SDCA_JAX_CUDA_BINDING(ffi::ExecutionStage::kInitialize));

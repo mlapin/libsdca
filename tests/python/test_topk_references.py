@@ -3,6 +3,7 @@
 import mpmath as mp
 import numpy as np
 import pytest
+from conformance.references import Loss, all_capped_step, capped_softmax_dual, evaluate
 from numpy_api import Solver
 from scipy.optimize import minimize
 
@@ -13,83 +14,22 @@ _LONG_DOUBLE = np.finfo(np.longdouble)
 WIDE_LONG_DOUBLE = _LONG_DOUBLE.nmant >= 63 and _LONG_DOUBLE.maxexp > 1024
 
 
-def all_capped_reference(scores: np.ndarray, previous: np.ndarray, c: float, norm2: float = 1.0):
-    # Average exact represented inputs before forming any rounded differences.
-    # Solve logit(s) + alpha*(1+1/k)*s = mean + log(k) by bisection.
-    with mp.workdps(160):
-        k = len(scores) - 1
-        z, a = [mp.mpf(float(x)) for x in scores], [mp.mpf(float(x)) for x in previous]
-        mean = sum(z[1:]) / k - z[0] - mp.mpf(norm2) * (sum(a[1:]) / k - a[0])
-        coefficient = mp.mpf(c) * norm2 * (1 + mp.mpf(1) / k)
-        rhs = mean + mp.log(k)
-        lo, hi = rhs - coefficient, rhs
-        # Include the bracket's exponent: 1e308 needs over 1024 halvings
-        # merely to reach unit width, before resolving the actual root.
-        for _ in range(max(600, int(mp.log(coefficient, 2)) + 600)):
-            mid = (lo + hi) / 2
-            if mid == lo or mid == hi:
-                break
-            mass = 1 / (1 + mp.exp(-mid))
-            if mid + coefficient * mass < rhs:
-                lo = mid
-            else:
-                hi = mid
-            if hi == lo:
-                break
-        mass = mp.mpf(c) / (1 + mp.exp(-(lo + hi) / 2))
-        return np.array([float(mass)] + [-float(mass / k)] * k)
-
-
-def capped_softmax_dual(z: np.ndarray, a: np.ndarray, c: float, k: int):
-    """C*[mass, -p] of the capped softmax at the updated scores z + a, in 90 digits."""
-    with mp.workdps(90):
-        v = [mp.mpf(float(z[j])) + mp.mpf(float(a[j])) for j in range(len(z))]
-        v = [x - v[0] for x in v[1:]]
-        order = sorted(range(len(v)), key=lambda j: -v[j])
-        u, free, lse = 0, order, mp.mpf("nan")  # rebound by the loop: k >= 1
-        for u in range(k):
-            free = order[u:]
-            lse = v[order[u]] + mp.log(sum(mp.exp(v[j] - v[order[u]]) for j in free))
-            if v[order[u]] <= lse - mp.log(k - u):
-                break
-        odds = (sum(v[j] for j in order[:u]) + (k - u) * (lse - mp.log(k - u))) / k + mp.log(k)
-        mass = 1 / (1 + mp.exp(-odds))
-        p = [mp.mpf(0)] * len(v)
-        for j in order[:u]:
-            p[j] = mass / k
-        for j in free:
-            p[j] = mass * (1 - mp.mpf(u) / k) * mp.exp(v[j] - lse)
-        return np.array([float(c * mass)] + [-float(c * x) for x in p])
-
-
 def topk_entropy_reference(scores: np.ndarray, y: int, k: int):
-    """Top-k entropy loss and gradient of one row in 60 digits, from its active set.
-
-    Log-sum-exps are relative to the first free score: at 60 digits an absolute one
-    of scores near 1e300 would carry errors near 1e240."""
-    with mp.workdps(60):
-        z = [mp.mpf(float(x)) for x in scores]
-        others = [j for j in range(len(z)) if j != y]
-        v = {j: z[j] - z[y] for j in others}
-        order = sorted(others, key=lambda j: -v[j])
-        u, top, lse = 0, mp.mpf("nan"), mp.mpf("nan")  # rebound by the loop: k >= 1
-        for u in range(k):
-            top = v[order[u]]
-            lse = mp.log(sum(mp.exp(v[j] - top) for j in order[u:]))
-            if lse - mp.log(k - u) >= 0:
-                break
-        odds = (sum(v[j] for j in order[:u]) + (k - u) * (top + lse - mp.log(k - u))) / k
-        odds += mp.log(k)
-        mass = 1 / (1 + mp.exp(-odds))
-        gradient = [mp.mpf(0)] * len(z)
-        for i, j in enumerate(order):
-            share = mp.exp(v[j] - top - lse)
-            gradient[j] = mass / k if i < u else mass * (k - u) / k * share
-        gradient[y] = -sum(gradient, mp.mpf(0))
-        return float(mp.log1p(mp.exp(odds))), np.array([float(g) for g in gradient])
+    """Top-k entropy loss and gradient of one row (conformance.references)."""
+    labels = np.array([y])
+    values, gradients = evaluate(Loss("topk_cross_entropy", k=k), scores[None], labels)
+    return float(values[0]), gradients[0]
 
 
 class TopkReferenceTests:
+    def test_capped_competitor_gradient_rounds_once(self):
+        scores = np.array([-2, 6, -1, -1], dtype=np.float32)
+        _, reference = topk_entropy_reference(scores, 0, 2)
+        solver = Solver("float32", dtype=np.float32)
+        _, gradient = solver.loss_and_grad(scores[None], [0], "topk_cross_entropy", k=2)
+        # The largest competitor receives exactly half of the projected mass.
+        assert gradient[0, 1] == np.float32(reference[1])
+
     def test_alpha_hinge_excludes_the_target_zero_margin(self, subtests: pytest.Subtests):
         # The reduced non-target convention: top2([1, -3])
         # averages to -1, so alpha and its gamma=1 smoothing are both zero.
@@ -133,7 +73,7 @@ class TopkReferenceTests:
                     )
 
     def test_topk_entropy_free_scores_far_below_a_capped_competitor(self):
-        # Scores relative to the maximum lost the free ones' differences beside a far
+        # Scores relative to the maximum lose the free ones' differences beside a far
         # larger capped competitor (from a gap of about 1e4 on); relative to the first
         # free score they keep them. The label far below, two far competitors, two
         # tied ones, and the label far above.
@@ -165,6 +105,40 @@ class TopkReferenceTests:
                             atol=rtol * np.abs(gradient).max(),
                             err_msg=message,
                         )
+
+    def test_topk_entropy_capped_mean_keeps_its_digits(self, subtests: pytest.Subtests):
+        # Capped rows whose odds are the mean of k scores that cancel (S, -S) or lie near
+        # exp(-470) (a far capped competitor, the free ones at the k-th score). The kernels
+        # once rounded the scores' differences from the maximum and their quotient by k at
+        # |S| (170 eps at S = 1260, a NaN from about 1e19) and the free group's log-mass
+        # beside -708 at 700 (240 eps). [S, -S, 0, 1, -inf] (label 2, k = 3) leaves three
+        # competitors, all capped: loss log(1 + 3 e^(1/3)) at every S. [g, 708, 0, 0, 0]
+        # (label 0, k = 3) caps 708 and spreads the other two places over the zeros, as
+        # [708, 708, 0, 0, 0, 0] at k = 4.
+        with mp.workdps(50):
+            cases = [
+                ([s, -s, 0.0, 1.0, -np.inf], 2, 3, mp.log1p(3 * mp.exp(mp.mpf(1) / 3)))
+                for s in (1260.0, 1260.3, 1e5, 1e19, 1e150, 1e300)
+            ]
+            for label, k, zeros in ((708.0, 3, 3), (700.0, 3, 3), (708.0, 4, 4)):
+                free = k - 1
+                mean = (708 + free * (mp.log(zeros) - mp.log(free))) / k - mp.mpf(label)
+                cases.append(([label, 708.0] + [0.0] * zeros, 0, k, mp.log1p(k * mp.exp(mean))))
+            for precision, dtype, eps in (
+                ("float64", np.float64, np.finfo(np.float64).eps),
+                ("float64", np.float32, np.finfo(np.float64).eps),
+                ("float32", np.float32, np.finfo(np.float32).eps),
+            ):
+                solver = Solver(precision, dtype=dtype)
+                for row, y, k, exact in cases:
+                    z = np.array([row], dtype=dtype)
+                    if not np.isfinite(z[0, :2]).all():
+                        continue  # beyond float32's range
+                    with subtests.test(precision=precision, dtype=dtype, row=row[:2], k=k):
+                        values, gradient = solver.loss_and_grad(z, [y], "topk_cross_entropy", k=k)
+                        assert np.isfinite(gradient).all()
+                        error = abs(mp.mpf(float(values[0])) - exact) / exact
+                        assert error <= 8 * eps, float(error / eps)
 
     def test_topk_offset_coordinate_against_constrained_reference(self):
         # Once the target is this far below, mass=1 to double precision.
@@ -427,7 +401,7 @@ class TopkReferenceTests:
                 for huge in [1e16, 1e30]:
                     z = np.array([target, huge, 1.0, -huge], dtype=dtype)
                     old = np.array([3.0, -1.0, -1.0, -1.0] if warm else [0.0] * 4, dtype=dtype)
-                    expected = all_capped_reference(z, old, 10.0)
+                    expected = all_capped_step(z, old, 10.0)
                     actual = solver.coordinate_update(
                         z[None],
                         [0],
@@ -473,7 +447,7 @@ class TopkReferenceTests:
                             z[None], [0], C=c, objective="topk_cross_entropy", k=k
                         )
                     continue
-                expected = all_capped_reference(z, old, c)
+                expected = all_capped_step(z, old, c)
                 actual = solver.coordinate_update(
                     z[None], [0], C=c, objective="topk_cross_entropy", k=k
                 )[0]
@@ -500,8 +474,8 @@ class TopkReferenceTests:
             assert abs(a.sum()) <= 1e-14 * c
 
     def test_topk_coordinate_free_scores_far_below_a_capped_competitor(self):
-        # The step centred the scores at the largest: free scores far below a capped
-        # competitor lost their differences (dual drift 0.17 at a gap of 1e16). The
+        # Centring the scores at the largest would lose the differences of free scores far
+        # below a capped competitor (dual drift at a gap of 1e16). The
         # optimal block is C [mass, -p] of the capped softmax at the updated scores,
         # checked here in 90 digits, with its constraints.
         solver = Solver("float64")
@@ -537,7 +511,7 @@ class TopkReferenceTests:
                 coefficient = c * (1 + 1 / k)
                 for factor in [0.49, 0.51, 0.99, 1.0, 1.01, 2.0]:
                     z = np.r_[0.0, np.full(k, coefficient * factor)]
-                    expected = all_capped_reference(z, np.zeros_like(z), c)
+                    expected = all_capped_step(z, np.zeros_like(z), c)
                     actual = solver.coordinate_update(
                         z[None], [0], C=c, objective="topk_cross_entropy", k=k
                     )[0]
@@ -571,7 +545,7 @@ class TopkReferenceTests:
                                 objective="topk_cross_entropy", k=k,
                             )  # fmt: skip
                         continue
-                    expected = all_capped_reference(z, old, 100.0)
+                    expected = all_capped_step(z, old, 100.0)
                     actual = solver.coordinate_update(
                         z[None],
                         [0],

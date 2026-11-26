@@ -34,8 +34,7 @@ def cpp_sources() -> list[str]:
     ]
     for directory in ("include/sdca", "src", "tests", "tools"):
         paths.extend(p for p in (ROOT / directory).rglob("*") if p.suffix in {".h", ".cpp"})
-    vendored = {"mex.h"}
-    return sorted(str(p.relative_to(ROOT)) for p in paths if p.name not in vendored)
+    return sorted(str(p.relative_to(ROOT)) for p in paths)
 
 
 def check_complexity() -> None:
@@ -108,11 +107,13 @@ def check_versions() -> None:
     changelog, the crate, the Python package, the citation and the package-page links; and
     one SDCA_ABI_VERSION in the header, the shared library, Python and Rust."""
     version = (ROOT / "VERSION").read_text().strip()
-    heading = r"^## (\S+) \((\d{4}-\d{2}-\d{2})\)$"
+    heading = r"^## (\S+) \((\d{4}-\d{2}-\d{2}|unreleased)\)$"
     changelog = re.search(heading, (ROOT / "CHANGELOG.md").read_text(), re.M)
     if changelog is None:
-        raise SystemExit("CHANGELOG.md: no '## <version> (YYYY-MM-DD)' heading")
-    date.fromisoformat(changelog.group(2))
+        raise SystemExit("CHANGELOG.md: no '## <version> (YYYY-MM-DD or unreleased)' heading")
+    released = changelog.group(2) != "unreleased"
+    if released:
+        date.fromisoformat(changelog.group(2))
     found = {
         "CHANGELOG.md": changelog.group(1),
         "rust/Cargo.toml": _version(r'^version = "([^"]+)"', "rust/Cargo.toml"),
@@ -131,12 +132,12 @@ def check_versions() -> None:
         "CMakeLists.txt": _version(
             r"OUTPUT_NAME sdca_c VERSION (\d+) SOVERSION \1\b", "CMakeLists.txt"
         ),
-        "python/libsdca/_core.py": _version(r"^ABI_VERSION = (\d+)", "python/libsdca/_core.py"),
+        "python/libsdca/_native.py": _version(r"^ABI_VERSION = (\d+)", "python/libsdca/_native.py"),
         "rust/src/ffi.rs": _version(r"^pub const ABI_VERSION: c_int = (\d+);", "rust/src/ffi.rs"),
     }
     if len(set(abi.values())) != 1:
         raise SystemExit(f"SDCA_ABI_VERSION differs: {abi}")
-    if _version(r"^date-released: (\S+)$", "CITATION.cff") != changelog.group(2):
+    if released and _version(r"^date-released: (\S+)$", "CITATION.cff") != changelog.group(2):
         raise SystemExit("CITATION.cff: date-released differs from the CHANGELOG.md date")
     # PyPI and crates.io render these pages once per release, so their links pin its tag.
     for path in ("pyproject.toml", "docs/PYTHON.md", "docs/RUST.md"):

@@ -14,7 +14,7 @@ int main(void) {
   const double x[N * D] = {1.0, 0.1, 0.9, -0.1, -0.5, 0.9, -0.4, 0.8, -0.5, -0.9, -0.6, -0.8};
   const int64_t y[N] = {0, 0, 1, 1, 2, 2};
   double w[D * K], a[N * K], values[1], gradient[K];
-  struct sdca_loss loss = SDCA_LOSS_INIT; /* cross_entropy */
+  struct sdca_loss loss = SDCA_LOSS_INIT(SDCA_LOSS_CROSS_ENTROPY);
   struct sdca_fit_options options = SDCA_FIT_OPTIONS_INIT;
   struct sdca_execution execution = SDCA_EXECUTION_INIT;
   struct sdca_input input = SDCA_INPUT_INIT;
@@ -48,8 +48,7 @@ int main(void) {
   /* The top-2 hinge (topk_hinge_beta, k = 2) and its gradient at one row of scores. */
   const double z[K] = {0.3, -0.8, 1.2};
   const int64_t label[1] = {0};
-  struct sdca_loss hinge = SDCA_LOSS_INIT;
-  hinge.kind = SDCA_LOSS_TOPK_HINGE_BETA;
+  struct sdca_loss hinge = SDCA_LOSS_INIT(SDCA_LOSS_TOPK_HINGE_BETA);
   hinge.k = 2;
   targets.labels = label;
   if (sdca_loss_evaluate(&hinge, &execution, SDCA_DTYPE_FLOAT64, 1, K, z, &targets, values,

@@ -1,0 +1,30 @@
+# The build settings of the C ABI library, read by every build: setup.py and python/build.py
+# (through sdca_build.py), rust/build.rs and CMake (cmake/SelectBLAS.cmake, CMakeLists.txt).
+#
+# flags: its compile flags. IEEE arithmetic (no fast math, no contraction) keeps the
+# finiteness checks and the bits of the built-in products.
+flags -std=c++11
+flags -O3
+flags -DNDEBUG
+flags -pthread
+flags -fno-fast-math
+flags -ffp-contract=off
+flags -fvisibility=hidden
+flags -fvisibility-inlines-hidden
+#
+# blas: the linker flags that SDCA_BLAS_BACKEND=AUTO (the default) and EXTERNAL try in this
+# order; the first with which src/blas_probe.cpp links is the external BLAS. SDCA_BLAS replaces
+# the list with its own flags. AUTO without a match uses the built-in products and warns.
+blas -framework Accelerate
+blas -lopenblas
+blas -lcblas
+blas -lblas
+blas -l:libopenblas.so.0
+blas -l:libcblas.so.3
+blas -l:libblas.so.3
+#
+# package: the BLAS of the Linux wheels (SDCA_BLAS_BACKEND=PACKAGE, Python builds only): a
+# Python package with an OpenBLAS, the prefix of its CBLAS symbols and the name of its library.
+# The build links the library of the installed package; the wheel requires the package, and
+# python/libsdca/_native.py loads its library before libsdca's.
+package scipy-openblas32 scipy_ OpenBLAS

@@ -1,7 +1,7 @@
 //! Native rows on several threads: bitwise the results of one thread.
 use std::num::NonZeroUsize;
 
-use libsdca::{Loss, Matrix, Precision, Real, Settings, Solver, Threads};
+use libsdca::{Loss, Matrix, Precision, Real, Settings, Solver, Threads, TopKVariant};
 
 // 2600 x 101 scores take milliseconds per call: the default (automatic) and
 // the explicit counts add threads.
@@ -17,16 +17,24 @@ fn serial() -> Threads {
     Threads::Count(NonZeroUsize::MIN)
 }
 
-/// Every loss but distillation, with k = 3, gamma = 0.5 and alpha = 0.7.
+/// Every loss but distillation, with k = 3, gamma = 0.5 (0.7 for the proximal losses).
 const LOSSES: [Loss; 8] = [
     Loss::CrossEntropy,
     Loss::TopKCrossEntropy { k: 3 },
     Loss::MulticlassHinge { gamma: 0.5 },
-    Loss::TopKHingeAlpha { k: 3, gamma: 0.5 },
-    Loss::TopKHingeBeta { k: 3, gamma: 0.5 },
+    Loss::TopKHinge {
+        k: 3,
+        variant: TopKVariant::Alpha,
+        gamma: 0.5,
+    },
+    Loss::TopKHinge {
+        k: 3,
+        variant: TopKVariant::Beta,
+        gamma: 0.5,
+    },
     Loss::MultilabelHinge { gamma: 0.5 },
     Loss::MultilabelCrossEntropy,
-    Loss::ProximalCrossEntropy { alpha: 0.7 },
+    Loss::ProximalCrossEntropy { gamma: 0.7 },
 ];
 
 /// Scores in about [-3, 3] (every 97th row shifted by 1e6), labels and
@@ -74,7 +82,7 @@ fn losses_match<T: Real + From<f32>>(precision: Precision) {
         Loss::Distillation { temperature: 2.0 },
         Loss::ProximalDistillation {
             temperature: 2.0,
-            alpha: 0.7,
+            gamma: 0.7,
         },
     ];
     for loss in LOSSES.into_iter().chain(distillation) {

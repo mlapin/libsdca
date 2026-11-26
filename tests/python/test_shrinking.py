@@ -136,8 +136,8 @@ def test_shrinking_saves_steps_on_hinges():
 
 
 def test_float32_digits_reach_float64_tolerances():
-    # Float storage of W and the duals stalled at a gap of 4.5e-6 here (lost small updates);
-    # precision="float64" keeps them in double and certifies the returned float32 arrays.
+    # Float storage of W and the duals would stall at a gap of about 4.5e-6 here (small
+    # updates are lost); precision="float64" keeps them in double and certifies the returned float32 arrays.
     datasets = pytest.importorskip("sklearn.datasets")
     preprocessing = pytest.importorskip("sklearn.preprocessing")
     x, y = datasets.load_digits(return_X_y=True)
