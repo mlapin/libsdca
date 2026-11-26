@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Link this crate against one apt BLAS package in one SDCA_BLAS form and run it:
 # ci.sh builtin, or ci.sh reference|openblas|blis l|l-file|abs-so|static|L-l ...
-# Several forms build at once, each in its own target directory.
+# Forms build SDCA_CI_PARALLEL (default 2) at a time, each in its own target directory: each
+# compiles the C ABI (about 3 GB of compiler memory), and five at once starve a 16 GB runner.
 set -euo pipefail
 here=$(dirname "$0")
 if [[ $1 == builtin ]]; then
@@ -11,17 +12,21 @@ fi
 if (($# > 2)); then
   provider=$1
   forms=("${@:2}")
+  parallel=${SDCA_CI_PARALLEL:-2}
   logs=$(mktemp -d)
   (cd "$here" && cargo generate-lockfile --quiet)
-  pids=()
-  for form in "${forms[@]}"; do
-    CARGO_TARGET_DIR=target/$form bash "$0" "$provider" "$form" >"$logs/$form" 2>&1 &
-    pids+=($!)
-  done
   status=0
-  for i in "${!forms[@]}"; do
-    wait "${pids[$i]}" || status=1
-    cat "$logs/${forms[$i]}"
+  for ((start = 0; start < ${#forms[@]}; start += parallel)); do
+    batch=("${forms[@]:start:parallel}")
+    pids=()
+    for form in "${batch[@]}"; do
+      CARGO_TARGET_DIR=target/$form bash "$0" "$provider" "$form" >"$logs/$form" 2>&1 &
+      pids+=($!)
+    done
+    for i in "${!batch[@]}"; do
+      wait "${pids[$i]}" || status=1
+      cat "$logs/${batch[$i]}"
+    done
   done
   exit $status
 fi
