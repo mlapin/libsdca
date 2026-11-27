@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 (2026-11-26)
+## 0.4.0 (2026-11-27)
 
 Changes since 0.3.0. Every interface has a new API with one set of loss names, options and
 defaults ([API.md](docs/API.md)). The [technical report](https://mlapin.github.io/libsdca/report/)

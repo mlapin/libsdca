@@ -11,7 +11,7 @@ authors:
   - family-names: Lapin
     given-names: Maksim
 version: 0.4.0
-date-released: 2026-11-26
+date-released: 2026-11-27
 license: MIT
 url: https://mlapin.github.io/libsdca/
 repository-code: https://github.com/mlapin/libsdca
